@@ -9,9 +9,11 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 	"unicode/utf8"
 
 	"github.com/creack/pty"
+	"github.com/vito/midterm"
 	"golang.org/x/term"
 )
 
@@ -36,16 +38,17 @@ func main() {
 }
 
 type wrapper struct {
-	ptm     *os.File     // PTY master (connected to child process)
-	cmd     *exec.Cmd    // child process
-	mu      sync.Mutex   // guards all terminal writes
-	restore *term.State  // original terminal state for cleanup
-	input   []byte       // current command line buffer
-	rows    int          // terminal rows
-	cols    int          // terminal cols
-	history []string     // command history
-	histIdx int          // current position in history (-1 = typing new)
-	saved   []byte       // saved input when browsing history
+	ptm     *os.File           // PTY master (connected to child process)
+	cmd     *exec.Cmd          // child process
+	mu      sync.Mutex         // guards all terminal writes
+	restore *term.State        // original terminal state for cleanup
+	vt      *midterm.Terminal   // virtual terminal for child output
+	input   []byte             // current command line buffer
+	rows    int                // terminal rows
+	cols    int                // terminal cols
+	history []string           // command history
+	histIdx int                // current position in history (-1 = typing new)
+	saved   []byte             // saved input when browsing history
 }
 
 func (w *wrapper) run(command string, args ...string) error {
@@ -61,6 +64,7 @@ func (w *wrapper) run(command string, args ...string) error {
 	w.rows = rows
 	w.cols = cols
 	w.histIdx = -1
+	w.vt = midterm.NewTerminal(rows-2, cols)
 
 	// Start child in a PTY, reserving 2 rows for separator + input bar.
 	w.cmd = exec.Command(command, args...)
@@ -97,6 +101,7 @@ func (w *wrapper) run(command string, args ...string) error {
 	// Draw initial UI.
 	w.mu.Lock()
 	os.Stdout.WriteString("\033[2J\033[H")
+	w.renderScreen()
 	w.renderBar()
 	w.mu.Unlock()
 
@@ -109,20 +114,16 @@ func (w *wrapper) run(command string, args ...string) error {
 	return w.cmd.Wait()
 }
 
-// pipeOutput forwards the child's terminal output to our terminal, then
-// redraws the status bar so it isn't overwritten by the child.
+// pipeOutput reads the child's terminal output into the virtual terminal,
+// then re-renders the screen from midterm's buffer state.
 func (w *wrapper) pipeOutput() {
 	buf := make([]byte, 4096)
 	for {
 		n, err := w.ptm.Read(buf)
 		if n > 0 {
 			w.mu.Lock()
-			// Move cursor into the child area before writing output.
-			// Without this, the cursor sits at the input bar (bottom row)
-			// and any child output written there causes the terminal to
-			// scroll, duplicating the status bar.
-			os.Stdout.WriteString("\033[H")
-			os.Stdout.Write(buf[:n])
+			w.vt.Write(buf[:n])
+			w.renderScreen()
 			w.renderBar()
 			w.mu.Unlock()
 		}
@@ -172,6 +173,15 @@ func (w *wrapper) readInput() {
 
 			case 0x0C: // Ctrl+L: force full redraw
 				os.Stdout.WriteString("\033[2J\033[H")
+				w.renderScreen()
+				w.renderBar()
+
+			case 0x0E: // Ctrl+N: next command in history
+				w.historyDown()
+				w.renderBar()
+
+			case 0x10: // Ctrl+P: previous command in history
+				w.historyUp()
 				w.renderBar()
 
 			case 0x15: // Ctrl+U: clear input line
@@ -188,14 +198,17 @@ func (w *wrapper) readInput() {
 			case 0x0D, 0x0A: // Enter: send buffered text to child
 				if len(w.input) > 0 {
 					cmd := string(w.input)
-					// Send input + carriage return in a single write so the
-					// child receives them atomically.
-					msg := make([]byte, len(w.input)+1)
-					copy(msg, w.input)
-					msg[len(msg)-1] = '\r'
-					w.ptm.Write(msg)
+					// Send text first, then \r after a short delay. The
+					// child's UI framework (React/Ink) batches state updates,
+					// so the submit handler won't see the typed text unless
+					// we let a render cycle complete before sending Enter.
+					w.ptm.Write(w.input)
 					w.history = append(w.history, cmd)
 					w.input = w.input[:0]
+					go func() {
+						time.Sleep(50 * time.Millisecond)
+						w.ptm.Write([]byte{'\r'})
+					}()
 				} else {
 					// Bare enter still forwarded (for confirmation prompts, etc.)
 					w.ptm.Write([]byte{'\r'})
@@ -268,12 +281,8 @@ func (w *wrapper) handleCSI(remaining []byte) (consumed int, handled bool) {
 	totalConsumed := 1 + i + 1 // '[' + params/intermediates + final byte
 
 	switch final {
-	case 'A': // Up arrow: previous command in history
-		w.historyUp()
-		w.renderBar()
-	case 'B': // Down arrow: next command in history
-		w.historyDown()
-		w.renderBar()
+	case 'A', 'B': // Up/Down arrows: forward to child PTY
+		w.ptm.Write(append([]byte{0x1B, '['}, remaining[:i+1]...))
 	}
 	// All other CSI sequences (left, right, etc.) are ignored for now.
 
@@ -326,19 +335,28 @@ func (w *wrapper) deleteWord() {
 	}
 }
 
+// renderScreen renders the virtual terminal's screen buffer to stdout using
+// absolute cursor positioning. Must be called with w.mu held.
+func (w *wrapper) renderScreen() {
+	var buf bytes.Buffer
+	buf.WriteString("\033[?25l") // hide cursor during render
+	childRows := w.rows - 2
+	for row := 0; row < childRows; row++ {
+		fmt.Fprintf(&buf, "\033[%d;1H\033[2K", row+1) // position + clear line
+		w.vt.RenderLine(&buf, row)
+	}
+	os.Stdout.Write(buf.Bytes())
+}
+
 // renderBar draws the separator line and input bar at the bottom of the
-// terminal. Must be called with w.mu held.
+// terminal, leaving the cursor at the input bar. Must be called with w.mu held.
 func (w *wrapper) renderBar() {
 	var buf bytes.Buffer
-
-	// Ensure the scroll region covers only the child area so that
-	// scrolling never pushes the status bar off-screen.
-	fmt.Fprintf(&buf, "\033[1;%dr", w.rows-2)
 
 	// --- Separator line (second-to-last row) ---
 	fmt.Fprintf(&buf, "\033[%d;1H\033[2K", w.rows-1)
 	buf.WriteString("\033[7m") // reverse video
-	label := " Ctrl+Q quit | Ctrl+U clear | Up/Down history | Enter send "
+	label := " Ctrl+Q quit | Ctrl+U clear | Ctrl+P/N history | Enter send "
 	if len(label) > w.cols {
 		label = label[:w.cols]
 	}
@@ -389,10 +407,13 @@ func (w *wrapper) watchResize(sigCh <-chan os.Signal) {
 		w.mu.Lock()
 		w.rows = rows
 		w.cols = cols
+		w.vt.Resize(rows-2, cols)
 		pty.Setsize(w.ptm, &pty.Winsize{
 			Rows: uint16(rows - 2),
 			Cols: uint16(cols),
 		})
+		os.Stdout.WriteString("\033[2J")
+		w.renderScreen()
 		w.renderBar()
 		w.mu.Unlock()
 	}
