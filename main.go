@@ -77,12 +77,6 @@ func (w *wrapper) run(command string, args ...string) error {
 	}
 	defer w.ptm.Close()
 
-	// Set PTY line discipline to raw mode so characters pass through
-	// without echo or translation (e.g., ICRNL converting \r to \n).
-	if _, err := term.MakeRaw(int(w.ptm.Fd())); err != nil {
-		return fmt.Errorf("set pty raw mode: %w", err)
-	}
-
 	// Put our terminal into raw mode so we get every keystroke.
 	w.restore, err = term.MakeRaw(fd)
 	if err != nil {
