@@ -777,11 +777,7 @@ func (w *Wrapper) RenderBar() {
 	buf.WriteString(w.ModeBarStyle())
 	help := w.HelpLabel()
 	status := w.StatusLabel()
-	label := " " + w.ModeLabel()
-	if w.AgentName != "" {
-		label += " [" + w.AgentName + "]"
-	}
-	label += " | " + status
+	label := " " + w.ModeLabel() + " | " + status
 
 	// Queue indicator
 	if w.QueueStatus != nil {
@@ -798,16 +794,27 @@ func (w *Wrapper) RenderBar() {
 	if help != "" {
 		label += " | " + help
 	}
-	if len(label) > w.Cols {
-		label = " " + status
-		if len(label) > w.Cols {
+
+	right := ""
+	if w.AgentName != "" {
+		right = w.AgentName + " "
+	}
+
+	if len(label)+len(right) > w.Cols {
+		// Tight on space — drop help first, then right-align.
+		label = " " + w.ModeLabel() + " | " + status
+		if len(label)+len(right) > w.Cols {
 			label = label[:w.Cols]
+			right = ""
 		}
 	}
+
 	buf.WriteString(label)
-	if pad := w.Cols - len(label); pad > 0 {
-		buf.WriteString(strings.Repeat(" ", pad))
+	gap := w.Cols - len(label) - len(right)
+	if gap > 0 {
+		buf.WriteString(strings.Repeat(" ", gap))
 	}
+	buf.WriteString(right)
 	buf.WriteString("\033[0m")
 
 	// --- Input line ---
