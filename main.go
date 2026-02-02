@@ -54,11 +54,26 @@ type wrapper struct {
 	history []string           // command history
 	histIdx int                // current position in history (-1 = typing new)
 	saved   []byte             // saved input when browsing history
-	quit    bool               // true when user pressed Ctrl+Q
+	quit    bool               // true when user selected Quit
 	oscFg   string             // cached OSC 10 response (foreground color)
 	oscBg   string             // cached OSC 11 response (background color)
 	lastOut time.Time          // last time child output updated the screen
+	mode    inputMode          // current input mode
+	menuIdx int                // selected menu item
+
+	pendingSlash bool          // awaiting second slash for menu
+	slashTimer   *time.Timer   // timer to promote single slash to passthrough
 }
+
+type inputMode int
+
+const (
+	modeMessage inputMode = iota
+	modePassthrough
+	modeMenu
+)
+
+var menuItems = []string{"Clear input", "Redraw", "Quit"}
 
 func (w *wrapper) run(command string, args ...string) error {
 	fd := int(os.Stdin.Fd())
@@ -75,6 +90,7 @@ func (w *wrapper) run(command string, args ...string) error {
 	w.histIdx = -1
 	w.vt = midterm.NewTerminal(rows-2, cols)
 	w.lastOut = time.Now()
+	w.mode = modeMessage
 
 	// Detect the real terminal's colors before entering raw mode.
 	// midterm swallows OSC 10/11 color queries from the child, so we
@@ -194,9 +210,96 @@ func (w *wrapper) readInput() {
 		}
 
 		w.mu.Lock()
+		if w.mode == modePassthrough {
+			// Passthrough mode: send all input to the child until Enter or Escape.
+			for i := 0; i < n; i++ {
+				b := buf[i]
+				switch b {
+				case 0x0D, 0x0A: // Enter ends passthrough
+					w.ptm.Write([]byte{'\r'})
+					w.mode = modeMessage
+					w.renderBar()
+				case 0x1B: // Escape ends passthrough if standalone
+					if i == n-1 {
+						w.mode = modeMessage
+						w.renderBar()
+					} else {
+						w.ptm.Write([]byte{0x1B})
+					}
+				case 0x7F, 0x08: // Backspace
+					w.ptm.Write([]byte{b})
+				default:
+					w.ptm.Write([]byte{b})
+				}
+			}
+			w.mu.Unlock()
+			continue
+		}
+		if w.mode == modeMenu {
+			for i := 0; i < n; {
+				b := buf[i]
+				i++
+				if b == 0x1B {
+					consumed, handled := w.handleEscape(buf[i:n])
+					i += consumed
+					if handled {
+						continue
+					}
+					if i == n {
+						w.mode = modeMessage
+						w.renderBar()
+					}
+					continue
+				}
+				switch b {
+				case 0x0D, 0x0A: // Enter selects
+					w.menuSelect()
+					w.mode = modeMessage
+					w.renderBar()
+				}
+			}
+			w.mu.Unlock()
+			continue
+		}
 		for i := 0; i < n; {
 			b := buf[i]
 			i++
+
+			if w.pendingSlash {
+				w.cancelPendingSlash()
+				if b == '/' {
+					w.mode = modeMenu
+					w.menuIdx = 0
+					w.renderBar()
+					continue
+				}
+				w.mode = modePassthrough
+				w.ptm.Write([]byte{'/'})
+				w.renderBar()
+				// Continue handling this byte in passthrough mode.
+				switch b {
+				case 0x0D, 0x0A:
+					w.ptm.Write([]byte{'\r'})
+					w.mode = modeMessage
+					w.renderBar()
+				case 0x1B:
+					if i == n {
+						w.mode = modeMessage
+						w.renderBar()
+					} else {
+						w.ptm.Write([]byte{0x1B})
+					}
+				default:
+					w.ptm.Write([]byte{b})
+				}
+				continue
+			}
+
+			if b == '/' && len(w.input) == 0 {
+				w.startPendingSlash()
+				w.renderBar()
+				continue
+			}
 
 			// Detect and handle escape sequences.
 			if b == 0x1B {
@@ -210,39 +313,6 @@ func (w *wrapper) readInput() {
 			}
 
 			switch b {
-			case 0x11: // Ctrl+Q: quit wrapper
-				w.quit = true
-				w.mu.Unlock()
-				w.cmd.Process.Signal(syscall.SIGTERM)
-				return
-
-			case 0x03: // Ctrl+C: send interrupt to child
-				w.ptm.Write([]byte{0x03})
-
-			case 0x04: // Ctrl+D: send EOF to child
-				w.ptm.Write([]byte{0x04})
-
-			case 0x0C: // Ctrl+L: force full redraw
-				os.Stdout.WriteString("\033[2J\033[H")
-				w.renderScreen()
-				w.renderBar()
-
-			case 0x0E: // Ctrl+N: next command in history
-				w.historyDown()
-				w.renderBar()
-
-			case 0x10: // Ctrl+P: previous command in history
-				w.historyUp()
-				w.renderBar()
-
-			case 0x15: // Ctrl+U: clear input line
-				w.input = w.input[:0]
-				w.renderBar()
-
-			case 0x17: // Ctrl+W: delete last word
-				w.deleteWord()
-				w.renderBar()
-
 			case 0x09: // Tab: send to child (for completion)
 				w.ptm.Write([]byte{'\t'})
 
@@ -276,7 +346,9 @@ func (w *wrapper) readInput() {
 				}
 
 			default:
-				if b >= 0x20 { // Printable
+				if b < 0x20 { // Control: forward to child
+					w.ptm.Write([]byte{b})
+				} else { // Printable
 					w.input = append(w.input, b)
 					w.renderBar()
 				}
@@ -333,7 +405,38 @@ func (w *wrapper) handleCSI(remaining []byte) (consumed int, handled bool) {
 
 	switch final {
 	case 'A', 'B': // Up/Down arrows: forward to child PTY
-		w.ptm.Write(append([]byte{0x1B, '['}, remaining[:i+1]...))
+		if w.mode == modePassthrough {
+			w.ptm.Write(append([]byte{0x1B, '['}, remaining[:i+1]...))
+			break
+		}
+		if w.mode == modeMenu {
+			if final == 'A' {
+				w.menuPrev()
+			} else {
+				w.menuNext()
+			}
+			w.renderBar()
+			break
+		}
+		if final == 'A' {
+			w.historyUp()
+		} else {
+			w.historyDown()
+		}
+		w.renderBar()
+	case 'C', 'D': // Left/Right arrows
+		if w.mode == modePassthrough {
+			w.ptm.Write(append([]byte{0x1B, '['}, remaining[:i+1]...))
+			break
+		}
+		if w.mode == modeMenu {
+			if final == 'D' {
+				w.menuPrev()
+			} else {
+				w.menuNext()
+			}
+			w.renderBar()
+		}
 	}
 	// All other CSI sequences (left, right, etc.) are ignored for now.
 
@@ -474,10 +577,10 @@ func (w *wrapper) renderBar() {
 
 	// --- Separator line (second-to-last row) ---
 	fmt.Fprintf(&buf, "\033[%d;1H\033[2K", w.rows-1)
-	buf.WriteString("\033[7m") // reverse video
-	help := "Ctrl+Q quit | Ctrl+U clear | Ctrl+P/N history | Enter send"
+	buf.WriteString(w.modeBarStyle())
+	help := w.helpLabel()
 	status := w.statusLabel()
-	label := " " + status
+	label := " " + w.modeLabel() + " | " + status
 	if help != "" {
 		label += " | " + help
 	}
@@ -536,6 +639,111 @@ func (w *wrapper) tickStatus(stop <-chan struct{}) {
 		case <-stop:
 			return
 		}
+	}
+}
+
+func (w *wrapper) startPendingSlash() {
+	w.pendingSlash = true
+	if w.slashTimer != nil {
+		w.slashTimer.Stop()
+	}
+	w.slashTimer = time.AfterFunc(250*time.Millisecond, func() {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		if !w.pendingSlash || w.mode != modeMessage {
+			return
+		}
+		w.pendingSlash = false
+		w.mode = modePassthrough
+		w.ptm.Write([]byte{'/'})
+		w.renderBar()
+	})
+}
+
+func (w *wrapper) cancelPendingSlash() {
+	w.pendingSlash = false
+	if w.slashTimer != nil {
+		w.slashTimer.Stop()
+	}
+}
+
+func (w *wrapper) modeLabel() string {
+	switch w.mode {
+	case modePassthrough:
+		return "Passthrough"
+	case modeMenu:
+		return w.menuLabel()
+	default:
+		return "Message"
+	}
+}
+
+func (w *wrapper) modeBarStyle() string {
+	switch w.mode {
+	case modePassthrough:
+		return "\033[7m\033[33m" // yellow-ish
+	case modeMenu:
+		return "\033[7m\033[34m" // blue
+	default:
+		return "\033[7m\033[36m" // cyan
+	}
+}
+
+func (w *wrapper) helpLabel() string {
+	switch w.mode {
+	case modePassthrough:
+		return "Enter/Esc exit"
+	case modeMenu:
+		return "Left/Right move | Enter select | Esc exit"
+	default:
+		return "Up/Down history | Enter send | / passthrough | // menu"
+	}
+}
+
+func (w *wrapper) menuLabel() string {
+	var parts []string
+	for i, item := range menuItems {
+		if i == w.menuIdx {
+			parts = append(parts, ">"+item)
+		} else {
+			parts = append(parts, item)
+		}
+	}
+	return "Menu: " + strings.Join(parts, " | ")
+}
+
+func (w *wrapper) menuPrev() {
+	if len(menuItems) == 0 {
+		return
+	}
+	if w.menuIdx == 0 {
+		w.menuIdx = len(menuItems) - 1
+	} else {
+		w.menuIdx--
+	}
+}
+
+func (w *wrapper) menuNext() {
+	if len(menuItems) == 0 {
+		return
+	}
+	if w.menuIdx == len(menuItems)-1 {
+		w.menuIdx = 0
+	} else {
+		w.menuIdx++
+	}
+}
+
+func (w *wrapper) menuSelect() {
+	switch w.menuIdx {
+	case 0: // Clear input
+		w.input = w.input[:0]
+	case 1: // Redraw
+		os.Stdout.WriteString("\033[2J\033[H")
+		w.renderScreen()
+	case 2: // Quit
+		w.quit = true
+		w.cmd.Process.Signal(syscall.SIGTERM)
 	}
 }
 
