@@ -57,6 +57,7 @@ type wrapper struct {
 	quit    bool               // true when user pressed Ctrl+Q
 	oscFg   string             // cached OSC 10 response (foreground color)
 	oscBg   string             // cached OSC 11 response (background color)
+	lastOut time.Time          // last time child output updated the screen
 }
 
 func (w *wrapper) run(command string, args ...string) error {
@@ -73,6 +74,7 @@ func (w *wrapper) run(command string, args ...string) error {
 	w.cols = cols
 	w.histIdx = -1
 	w.vt = midterm.NewTerminal(rows-2, cols)
+	w.lastOut = time.Now()
 
 	// Detect the real terminal's colors before entering raw mode.
 	// midterm swallows OSC 10/11 color queries from the child, so we
@@ -124,6 +126,10 @@ func (w *wrapper) run(command string, args ...string) error {
 	signal.Notify(sigCh, syscall.SIGWINCH)
 	go w.watchResize(sigCh)
 
+	// Update status bar every second for idle tracking.
+	stopStatus := make(chan struct{})
+	go w.tickStatus(stopStatus)
+
 	// Draw initial UI.
 	w.mu.Lock()
 	os.Stdout.WriteString("\033[2J\033[H")
@@ -137,7 +143,9 @@ func (w *wrapper) run(command string, args ...string) error {
 	// Process user keyboard input.
 	go w.readInput()
 
-	return w.cmd.Wait()
+	err = w.cmd.Wait()
+	close(stopStatus)
+	return err
 }
 
 // pipeOutput reads the child's terminal output into the virtual terminal,
@@ -151,6 +159,7 @@ func (w *wrapper) pipeOutput() {
 			w.respondOSCColors(buf[:n])
 
 			w.mu.Lock()
+			w.lastOut = time.Now()
 			w.vt.Write(buf[:n])
 			w.renderScreen()
 			w.renderBar()
@@ -466,9 +475,18 @@ func (w *wrapper) renderBar() {
 	// --- Separator line (second-to-last row) ---
 	fmt.Fprintf(&buf, "\033[%d;1H\033[2K", w.rows-1)
 	buf.WriteString("\033[7m") // reverse video
-	label := " Ctrl+Q quit | Ctrl+U clear | Ctrl+P/N history | Enter send "
+	help := "Ctrl+Q quit | Ctrl+U clear | Ctrl+P/N history | Enter send"
+	status := w.statusLabel()
+	label := " " + status
+	if help != "" {
+		label += " | " + help
+	}
 	if len(label) > w.cols {
-		label = label[:w.cols]
+		// Prefer keeping status visible if space is tight.
+		label = " " + status
+		if len(label) > w.cols {
+			label = label[:w.cols]
+		}
 	}
 	buf.WriteString(label)
 	if pad := w.cols - len(label); pad > 0 {
@@ -503,6 +521,56 @@ func (w *wrapper) renderBar() {
 	buf.WriteString("\033[?25h")
 
 	os.Stdout.Write(buf.Bytes())
+}
+
+// tickStatus triggers periodic status bar renders for idle tracking.
+func (w *wrapper) tickStatus(stop <-chan struct{}) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			w.mu.Lock()
+			w.renderBar()
+			w.mu.Unlock()
+		case <-stop:
+			return
+		}
+	}
+}
+
+// statusLabel returns the current activity status string.
+func (w *wrapper) statusLabel() string {
+	const idleThreshold = 2 * time.Second
+	if w.lastOut.IsZero() {
+		return "Active"
+	}
+	idleFor := time.Since(w.lastOut)
+	if idleFor <= idleThreshold {
+		return "Active"
+	}
+	return "Idle for: " + formatIdleDuration(idleFor)
+}
+
+// formatIdleDuration renders a compact human-friendly duration.
+func formatIdleDuration(d time.Duration) string {
+	if d < time.Minute {
+		secs := int(d.Seconds())
+		if secs < 1 {
+			secs = 1
+		}
+		return fmt.Sprintf("%ds", secs)
+	}
+	if d < time.Hour {
+		mins := int(d.Minutes())
+		return fmt.Sprintf("%dm", mins)
+	}
+	if d < 24*time.Hour {
+		hrs := int(d.Hours())
+		return fmt.Sprintf("%dh", hrs)
+	}
+	days := int(d.Hours() / 24)
+	return fmt.Sprintf("%dd", days)
 }
 
 // watchResize handles SIGWINCH by updating the child PTY size and redrawing.
