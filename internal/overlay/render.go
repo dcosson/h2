@@ -2,8 +2,11 @@ package overlay
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -76,25 +79,32 @@ func (o *Overlay) RenderBar() {
 
 	// --- Separator line ---
 	fmt.Fprintf(&buf, "\033[%d;1H\033[2K", sepRow)
-	buf.WriteString(o.ModeBarStyle())
-	help := o.HelpLabel()
-	status := o.StatusLabel()
-	label := " " + o.ModeLabel() + " | " + status
 
-	// Queue indicator
-	if o.QueueStatus != nil {
-		count, paused := o.QueueStatus()
-		if count > 0 {
-			if paused {
-				label += fmt.Sprintf(" | [%d paused]", count)
-			} else {
-				label += fmt.Sprintf(" | [%d queued]", count)
+	var style, label string
+	if o.ChildExited {
+		style = "\033[7m\033[31m" // red inverse
+		label = " " + o.exitMessage() + " | [Enter] relaunch \u00b7 [q] quit"
+	} else {
+		style = o.ModeBarStyle()
+		help := o.HelpLabel()
+		status := o.StatusLabel()
+		label = " " + o.ModeLabel() + " | " + status
+
+		// Queue indicator
+		if o.QueueStatus != nil {
+			count, paused := o.QueueStatus()
+			if count > 0 {
+				if paused {
+					label += fmt.Sprintf(" | [%d paused]", count)
+				} else {
+					label += fmt.Sprintf(" | [%d queued]", count)
+				}
 			}
 		}
-	}
 
-	if help != "" {
-		label += " | " + help
+		if help != "" {
+			label += " | " + help
+		}
 	}
 
 	right := ""
@@ -103,14 +113,20 @@ func (o *Overlay) RenderBar() {
 	}
 
 	if len(label)+len(right) > o.VT.Cols {
-		// Tight on space - drop help first, then right-align.
-		label = " " + o.ModeLabel() + " | " + status
+		if !o.ChildExited {
+			// Tight on space - drop help first, then right-align.
+			status := o.StatusLabel()
+			label = " " + o.ModeLabel() + " | " + status
+		}
 		if len(label)+len(right) > o.VT.Cols {
-			label = label[:o.VT.Cols]
+			if len(label) > o.VT.Cols {
+				label = label[:o.VT.Cols]
+			}
 			right = ""
 		}
 	}
 
+	buf.WriteString(style)
 	buf.WriteString(label)
 	gap := o.VT.Cols - len(label) - len(right)
 	if gap > 0 {
@@ -246,4 +262,22 @@ func (o *Overlay) AppendDebugBytes(data []byte) {
 			o.DebugKeyBuf = o.DebugKeyBuf[len(o.DebugKeyBuf)-10:]
 		}
 	}
+}
+
+// exitMessage returns a human-readable description of why the child exited.
+func (o *Overlay) exitMessage() string {
+	if o.ChildHung {
+		return "process not responding (killed)"
+	}
+	if o.ExitError != nil {
+		var exitErr *exec.ExitError
+		if errors.As(o.ExitError, &exitErr) {
+			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+				return fmt.Sprintf("process killed (%s)", status.Signal())
+			}
+			return fmt.Sprintf("process exited (code %d)", exitErr.ExitCode())
+		}
+		return fmt.Sprintf("process error: %s", o.ExitError)
+	}
+	return "process exited"
 }

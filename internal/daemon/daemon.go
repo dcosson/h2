@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -93,6 +94,14 @@ func (d *Daemon) Run() error {
 		return d.Queue.PendingCount(), d.Queue.IsPaused()
 	}
 
+	// Wire up child lifecycle callbacks.
+	d.Overlay.OnChildExit = func() {
+		d.Queue.Pause()
+	}
+	d.Overlay.OnChildRelaunch = func() {
+		d.Queue.Unpause()
+	}
+
 	// Start socket listener.
 	go d.acceptLoop()
 
@@ -110,7 +119,7 @@ func (d *Daemon) Run() error {
 		Stop: d.stopDelivery,
 	})
 
-	// Run the overlay in daemon mode (blocks until child exits).
+	// Run the overlay in daemon mode (blocks until user quits).
 	err = d.Overlay.RunDaemon(d.Command, d.Args...)
 
 	// Clean up.
@@ -123,6 +132,8 @@ func (d *Daemon) Run() error {
 }
 
 // daemonPtyWriter writes to the child PTY while holding the VT mutex.
+// Uses WritePTY with a timeout to avoid blocking forever if the child
+// stops reading.
 type daemonPtyWriter struct {
 	d *Daemon
 }
@@ -130,7 +141,17 @@ type daemonPtyWriter struct {
 func (pw *daemonPtyWriter) Write(p []byte) (int, error) {
 	pw.d.VT.Mu.Lock()
 	defer pw.d.VT.Mu.Unlock()
-	return pw.d.VT.Ptm.Write(p)
+	if pw.d.Overlay.ChildExited || pw.d.Overlay.ChildHung {
+		return 0, io.ErrClosedPipe
+	}
+	n, err := pw.d.VT.WritePTY(p, 3*time.Second)
+	if err == virtualterminal.ErrPTYWriteTimeout {
+		pw.d.Overlay.ChildHung = true
+		pw.d.Overlay.KillChild()
+		pw.d.Overlay.RenderBar()
+		return 0, io.ErrClosedPipe
+	}
+	return n, err
 }
 
 // AgentInfo returns status information about this daemon.

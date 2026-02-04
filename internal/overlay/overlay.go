@@ -47,6 +47,15 @@ type Overlay struct {
 	AgentName    string
 	OnModeChange func(mode InputMode)
 	QueueStatus  func() (int, bool)
+
+	// Child process lifecycle.
+	ChildExited     bool
+	ChildHung       bool
+	ExitError       error
+	relaunchCh      chan struct{}
+	quitCh          chan struct{}
+	OnChildExit     func()
+	OnChildRelaunch func()
 }
 
 // Run starts the overlay in interactive mode: enters raw mode, starts the PTY,
@@ -101,7 +110,6 @@ func (o *Overlay) Run(command string, args ...string) error {
 	if err := o.VT.StartPTY(command, args, o.VT.ChildRows, cols); err != nil {
 		return err
 	}
-	defer o.VT.Ptm.Close()
 
 	o.VT.Vt.ForwardRequests = os.Stdout
 	o.VT.Vt.ForwardResponses = o.VT.Ptm
@@ -109,6 +117,7 @@ func (o *Overlay) Run(command string, args ...string) error {
 	// Put our terminal into raw mode.
 	o.VT.Restore, err = term.MakeRaw(fd)
 	if err != nil {
+		o.VT.Ptm.Close()
 		return fmt.Errorf("set raw mode: %w", err)
 	}
 	defer func() {
@@ -138,9 +147,64 @@ func (o *Overlay) Run(command string, args ...string) error {
 	// Process user keyboard input.
 	go o.ReadInput()
 
-	err = o.VT.Cmd.Wait()
-	close(stopStatus)
-	return err
+	o.relaunchCh = make(chan struct{}, 1)
+	o.quitCh = make(chan struct{}, 1)
+
+	for {
+		err = o.VT.Cmd.Wait()
+
+		// If the user explicitly chose Quit from the menu, exit immediately.
+		if o.Quit {
+			o.VT.Ptm.Close()
+			close(stopStatus)
+			return err
+		}
+
+		o.VT.Mu.Lock()
+		o.ChildExited = true
+		o.ExitError = err
+		o.RenderScreen()
+		o.RenderBar()
+		o.VT.Mu.Unlock()
+
+		if o.OnChildExit != nil {
+			o.OnChildExit()
+		}
+
+		select {
+		case <-o.relaunchCh:
+			o.VT.Ptm.Close()
+			if err := o.VT.StartPTY(command, args, o.VT.ChildRows, o.VT.Cols); err != nil {
+				close(stopStatus)
+				return err
+			}
+			o.VT.Vt = midterm.NewTerminal(o.VT.ChildRows, o.VT.Cols)
+			o.VT.Vt.ForwardRequests = os.Stdout
+			o.VT.Vt.ForwardResponses = o.VT.Ptm
+
+			o.VT.Mu.Lock()
+			o.ChildExited = false
+			o.ChildHung = false
+			o.ExitError = nil
+			o.VT.LastOut = time.Now()
+			o.VT.Output.Write([]byte("\033[2J\033[H"))
+			o.RenderScreen()
+			o.RenderBar()
+			o.VT.Mu.Unlock()
+
+			go o.VT.PipeOutput(func() { o.RenderScreen(); o.RenderBar() })
+
+			if o.OnChildRelaunch != nil {
+				o.OnChildRelaunch()
+			}
+			continue
+
+		case <-o.quitCh:
+			o.VT.Ptm.Close()
+			close(stopStatus)
+			return err
+		}
+	}
 }
 
 // RunDaemon starts the overlay in daemon mode: creates a PTY and child process
@@ -165,7 +229,6 @@ func (o *Overlay) RunDaemon(command string, args ...string) error {
 	if err := o.VT.StartPTY(command, args, o.VT.ChildRows, o.VT.Cols); err != nil {
 		return err
 	}
-	defer o.VT.Ptm.Close()
 
 	// Don't forward requests to stdout in daemon mode - there's no terminal.
 	o.VT.Vt.ForwardResponses = o.VT.Ptm
@@ -177,9 +240,62 @@ func (o *Overlay) RunDaemon(command string, args ...string) error {
 	// Pipe child output to virtual terminal.
 	go o.VT.PipeOutput(func() { o.RenderScreen(); o.RenderBar() })
 
-	err := o.VT.Cmd.Wait()
-	close(stopStatus)
-	return err
+	o.relaunchCh = make(chan struct{}, 1)
+	o.quitCh = make(chan struct{}, 1)
+
+	for {
+		err := o.VT.Cmd.Wait()
+
+		if o.Quit {
+			o.VT.Ptm.Close()
+			close(stopStatus)
+			return err
+		}
+
+		o.VT.Mu.Lock()
+		o.ChildExited = true
+		o.ExitError = err
+		o.RenderScreen()
+		o.RenderBar()
+		o.VT.Mu.Unlock()
+
+		if o.OnChildExit != nil {
+			o.OnChildExit()
+		}
+
+		select {
+		case <-o.relaunchCh:
+			o.VT.Ptm.Close()
+			if err := o.VT.StartPTY(command, args, o.VT.ChildRows, o.VT.Cols); err != nil {
+				close(stopStatus)
+				return err
+			}
+			o.VT.Vt = midterm.NewTerminal(o.VT.ChildRows, o.VT.Cols)
+			o.VT.Vt.ForwardResponses = o.VT.Ptm
+
+			o.VT.Mu.Lock()
+			o.ChildExited = false
+			o.ChildHung = false
+			o.ExitError = nil
+			o.VT.LastOut = time.Now()
+			o.VT.Output.Write([]byte("\033[2J\033[H"))
+			o.RenderScreen()
+			o.RenderBar()
+			o.VT.Mu.Unlock()
+
+			go o.VT.PipeOutput(func() { o.RenderScreen(); o.RenderBar() })
+
+			if o.OnChildRelaunch != nil {
+				o.OnChildRelaunch()
+			}
+			continue
+
+		case <-o.quitCh:
+			o.VT.Ptm.Close()
+			close(stopStatus)
+			return err
+		}
+	}
 }
 
 // ReadInput reads keyboard input and dispatches to the current mode handler.
@@ -254,4 +370,12 @@ func (o *Overlay) ReservedRows() int {
 		return 3
 	}
 	return 2
+}
+
+// KillChild sends SIGKILL to the child process. Used when the child is hung
+// and not responding to normal signals.
+func (o *Overlay) KillChild() {
+	if o.VT.Cmd != nil && o.VT.Cmd.Process != nil {
+		o.VT.Cmd.Process.Kill()
+	}
 }

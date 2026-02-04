@@ -7,11 +7,50 @@ import (
 	"h2/internal/virtualterminal"
 )
 
+const ptyWriteTimeout = 3 * time.Second
+
 func (o *Overlay) setMode(mode InputMode) {
 	o.Mode = mode
 	if o.OnModeChange != nil {
 		o.OnModeChange(mode)
 	}
+}
+
+// writePTYOrHang writes to the child PTY with a timeout. If the write times
+// out (child not reading), it marks the child as hung, kills it, and returns
+// false. The caller should stop processing input when this returns false.
+func (o *Overlay) writePTYOrHang(p []byte) bool {
+	_, err := o.VT.WritePTY(p, ptyWriteTimeout)
+	if err != nil {
+		o.ChildHung = true
+		o.KillChild()
+		o.RenderBar()
+		return false
+	}
+	return true
+}
+
+// HandleExitedBytes processes input when the child has exited or is hung.
+// Enter relaunches, q quits.
+func (o *Overlay) HandleExitedBytes(buf []byte, i, n int) int {
+	for ; i < n; i++ {
+		switch buf[i] {
+		case '\r', '\n':
+			select {
+			case o.relaunchCh <- struct{}{}:
+			default:
+			}
+			return n
+		case 'q', 'Q':
+			select {
+			case o.quitCh <- struct{}{}:
+			default:
+			}
+			o.Quit = true
+			return n
+		}
+	}
+	return n
 }
 
 func (o *Overlay) StartPendingEsc() {
@@ -40,6 +79,9 @@ func (o *Overlay) CancelPendingEsc() {
 
 func (o *Overlay) HandlePassthroughBytes(buf []byte, start, n int) int {
 	for i := start; i < n; {
+		if o.ChildExited || o.ChildHung {
+			return n
+		}
 		b := buf[i]
 		if o.PendingEsc {
 			if b != '[' && b != 'O' {
@@ -51,18 +93,18 @@ func (o *Overlay) HandlePassthroughBytes(buf []byte, start, n int) int {
 			}
 			o.CancelPendingEsc()
 			o.PassthroughEsc = append(o.PassthroughEsc[:0], 0x1B, b)
-			if o.FlushPassthroughEscIfComplete() {
-				i++
-				continue
+			o.FlushPassthroughEscIfComplete()
+			if o.ChildHung {
+				return n
 			}
 			i++
 			continue
 		}
 		if len(o.PassthroughEsc) > 0 {
 			o.PassthroughEsc = append(o.PassthroughEsc, b)
-			if o.FlushPassthroughEscIfComplete() {
-				i++
-				continue
+			o.FlushPassthroughEscIfComplete()
+			if o.ChildHung {
+				return n
 			}
 			i++
 			continue
@@ -71,7 +113,9 @@ func (o *Overlay) HandlePassthroughBytes(buf []byte, start, n int) int {
 		case 0x0D, 0x0A:
 			o.CancelPendingEsc()
 			o.PassthroughEsc = o.PassthroughEsc[:0]
-			o.VT.Ptm.Write([]byte{'\r'})
+			if !o.writePTYOrHang([]byte{'\r'}) {
+				return n
+			}
 			o.setMode(ModeDefault)
 			o.RenderBar()
 			i++
@@ -79,10 +123,14 @@ func (o *Overlay) HandlePassthroughBytes(buf []byte, start, n int) int {
 			o.StartPendingEsc()
 			i++
 		case 0x7F, 0x08:
-			o.VT.Ptm.Write([]byte{b})
+			if !o.writePTYOrHang([]byte{b}) {
+				return n
+			}
 			i++
 		default:
-			o.VT.Ptm.Write([]byte{b})
+			if !o.writePTYOrHang([]byte{b}) {
+				return n
+			}
 			i++
 		}
 	}
@@ -117,6 +165,10 @@ func (o *Overlay) HandleMenuBytes(buf []byte, start, n int) int {
 
 func (o *Overlay) HandleDefaultBytes(buf []byte, start, n int) int {
 	for i := start; i < n; {
+		if o.ChildExited || o.ChildHung {
+			return o.HandleExitedBytes(buf, i, n)
+		}
+
 		b := buf[i]
 		i++
 
@@ -129,11 +181,15 @@ func (o *Overlay) HandleDefaultBytes(buf []byte, start, n int) int {
 				continue
 			}
 			o.setMode(ModePassthrough)
-			o.VT.Ptm.Write([]byte{'/'})
+			if !o.writePTYOrHang([]byte{'/'}) {
+				return n
+			}
 			o.RenderBar()
 			switch b {
 			case 0x0D, 0x0A:
-				o.VT.Ptm.Write([]byte{'\r'})
+				if !o.writePTYOrHang([]byte{'\r'}) {
+					return n
+				}
 				o.setMode(ModeDefault)
 				o.RenderBar()
 			case 0x1B:
@@ -141,10 +197,14 @@ func (o *Overlay) HandleDefaultBytes(buf []byte, start, n int) int {
 					o.setMode(ModeDefault)
 					o.RenderBar()
 				} else {
-					o.VT.Ptm.Write([]byte{0x1B})
+					if !o.writePTYOrHang([]byte{0x1B}) {
+						return n
+					}
 				}
 			default:
-				o.VT.Ptm.Write([]byte{b})
+				if !o.writePTYOrHang([]byte{b}) {
+					return n
+				}
 			}
 			continue
 		}
@@ -166,12 +226,16 @@ func (o *Overlay) HandleDefaultBytes(buf []byte, start, n int) int {
 
 		switch b {
 		case 0x09:
-			o.VT.Ptm.Write([]byte{'\t'})
+			if !o.writePTYOrHang([]byte{'\t'}) {
+				return n
+			}
 
 		case 0x0D, 0x0A:
 			if len(o.Input) > 0 {
 				cmd := string(o.Input)
-				o.VT.Ptm.Write(o.Input)
+				if !o.writePTYOrHang(o.Input) {
+					return n
+				}
 				o.History = append(o.History, cmd)
 				o.Input = o.Input[:0]
 				ptm := o.VT.Ptm
@@ -180,7 +244,9 @@ func (o *Overlay) HandleDefaultBytes(buf []byte, start, n int) int {
 					ptm.Write([]byte{'\r'})
 				}()
 			} else {
-				o.VT.Ptm.Write([]byte{'\r'})
+				if !o.writePTYOrHang([]byte{'\r'}) {
+					return n
+				}
 			}
 			o.HistIdx = -1
 			o.Saved = nil
@@ -195,7 +261,9 @@ func (o *Overlay) HandleDefaultBytes(buf []byte, start, n int) int {
 
 		default:
 			if b < 0x20 {
-				o.VT.Ptm.Write([]byte{b})
+				if !o.writePTYOrHang([]byte{b}) {
+					return n
+				}
 			} else {
 				o.Input = append(o.Input, b)
 				o.RenderBar()
@@ -213,9 +281,9 @@ func (o *Overlay) FlushPassthroughEscIfComplete() bool {
 		return false
 	}
 	if virtualterminal.IsShiftEnterSequence(o.PassthroughEsc) {
-		o.VT.Ptm.Write([]byte{'\n'})
+		o.writePTYOrHang([]byte{'\n'})
 	} else {
-		o.VT.Ptm.Write(o.PassthroughEsc)
+		o.writePTYOrHang(o.PassthroughEsc)
 	}
 	o.PassthroughEsc = o.PassthroughEsc[:0]
 	return true
@@ -262,7 +330,7 @@ func (o *Overlay) HandleCSI(remaining []byte) (consumed int, handled bool) {
 	switch final {
 	case 'A', 'B':
 		if o.Mode == ModePassthrough {
-			o.VT.Ptm.Write(append([]byte{0x1B, '['}, remaining[:i+1]...))
+			o.writePTYOrHang(append([]byte{0x1B, '['}, remaining[:i+1]...))
 			break
 		}
 		if o.Mode == ModeMenu {
@@ -282,7 +350,7 @@ func (o *Overlay) HandleCSI(remaining []byte) (consumed int, handled bool) {
 		o.RenderBar()
 	case 'C', 'D':
 		if o.Mode == ModePassthrough {
-			o.VT.Ptm.Write(append([]byte{0x1B, '['}, remaining[:i+1]...))
+			o.writePTYOrHang(append([]byte{0x1B, '['}, remaining[:i+1]...))
 			break
 		}
 		if o.Mode == ModeMenu {
@@ -311,7 +379,9 @@ func (o *Overlay) StartPendingSlash() {
 		}
 		o.PendingSlash = false
 		o.setMode(ModePassthrough)
-		o.VT.Ptm.Write([]byte{'/'})
+		if !o.writePTYOrHang([]byte{'/'}) {
+			return
+		}
 		o.RenderBar()
 	})
 }

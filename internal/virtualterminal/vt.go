@@ -95,3 +95,31 @@ func (vt *VT) IsIdle() bool {
 	defer vt.Mu.Unlock()
 	return !vt.LastOut.IsZero() && time.Since(vt.LastOut) > idleThreshold
 }
+
+// ErrPTYWriteTimeout is returned by WritePTY when the write does not complete
+// within the given deadline. The child process is likely hung (not reading stdin).
+var ErrPTYWriteTimeout = fmt.Errorf("pty write timed out")
+
+// WritePTY writes to the child PTY with a timeout. If the child is not reading
+// its stdin, the kernel PTY buffer fills up and Write blocks indefinitely.
+// This method runs the write in a goroutine so the caller can give up after a
+// deadline and release the VT mutex.
+func (vt *VT) WritePTY(p []byte, timeout time.Duration) (int, error) {
+	type result struct {
+		n   int
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		n, err := vt.Ptm.Write(p)
+		ch <- result{n, err}
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case r := <-ch:
+		return r.n, r.err
+	case <-timer.C:
+		return 0, ErrPTYWriteTimeout
+	}
+}
