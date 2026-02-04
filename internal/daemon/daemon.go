@@ -9,7 +9,8 @@ import (
 	"time"
 
 	"h2/internal/message"
-	"h2/internal/terminal"
+	"h2/internal/overlay"
+	"h2/internal/virtualterminal"
 )
 
 // Daemon manages the lifecycle of a wrapped child process, its Unix socket
@@ -18,7 +19,8 @@ type Daemon struct {
 	Name      string
 	Command   string
 	Args      []string
-	Wrapper   *terminal.Wrapper
+	VT        *virtualterminal.VT
+	Overlay   *overlay.Overlay
 	Queue     *message.MessageQueue
 	Listener  net.Listener
 	StartTime time.Time
@@ -37,7 +39,7 @@ func SocketPath(name string) string {
 	return filepath.Join(SocketDir(), name+".sock")
 }
 
-// Run starts the daemon: creates the wrapper, socket, delivery loop, and
+// Run starts the daemon: creates the VT, overlay, socket, delivery loop, and
 // waits for the child to exit.
 func (d *Daemon) Run() error {
 	d.StartTime = time.Now()
@@ -74,16 +76,20 @@ func (d *Daemon) Run() error {
 		os.Remove(sockPath)
 	}()
 
-	// Set up the wrapper.
-	d.Wrapper = &terminal.Wrapper{AgentName: d.Name}
-	d.Wrapper.OnModeChange = func(mode terminal.InputMode) {
-		if mode == terminal.ModePassthrough {
+	// Set up VT and overlay.
+	d.VT = &virtualterminal.VT{}
+	d.Overlay = &overlay.Overlay{
+		VT:        d.VT,
+		AgentName: d.Name,
+	}
+	d.Overlay.OnModeChange = func(mode overlay.InputMode) {
+		if mode == overlay.ModePassthrough {
 			d.Queue.Pause()
 		} else {
 			d.Queue.Unpause()
 		}
 	}
-	d.Wrapper.QueueStatus = func() (int, bool) {
+	d.Overlay.QueueStatus = func() (int, bool) {
 		return d.Queue.PendingCount(), d.Queue.IsPaused()
 	}
 
@@ -95,17 +101,17 @@ func (d *Daemon) Run() error {
 		Queue:     d.Queue,
 		AgentName: d.Name,
 		PtyWriter: &daemonPtyWriter{d: d},
-		IsIdle:    d.Wrapper.IsIdle,
+		IsIdle:    d.VT.IsIdle,
 		OnDeliver: func() {
-			d.Wrapper.Mu.Lock()
-			d.Wrapper.RenderBar()
-			d.Wrapper.Mu.Unlock()
+			d.VT.Mu.Lock()
+			d.Overlay.RenderBar()
+			d.VT.Mu.Unlock()
 		},
 		Stop: d.stopDelivery,
 	})
 
-	// Run the wrapper in daemon mode (blocks until child exits).
-	err = d.Wrapper.RunDaemon(d.Command, d.Args...)
+	// Run the overlay in daemon mode (blocks until child exits).
+	err = d.Overlay.RunDaemon(d.Command, d.Args...)
 
 	// Clean up.
 	close(d.stopDelivery)
@@ -116,15 +122,15 @@ func (d *Daemon) Run() error {
 	return err
 }
 
-// daemonPtyWriter writes to the child PTY while holding the wrapper mutex.
+// daemonPtyWriter writes to the child PTY while holding the VT mutex.
 type daemonPtyWriter struct {
 	d *Daemon
 }
 
 func (pw *daemonPtyWriter) Write(p []byte) (int, error) {
-	pw.d.Wrapper.Mu.Lock()
-	defer pw.d.Wrapper.Mu.Unlock()
-	return pw.d.Wrapper.Ptm.Write(p)
+	pw.d.VT.Mu.Lock()
+	defer pw.d.VT.Mu.Unlock()
+	return pw.d.VT.Ptm.Write(p)
 }
 
 // AgentInfo returns status information about this daemon.
@@ -133,7 +139,7 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 	return &message.AgentInfo{
 		Name:        d.Name,
 		Command:     d.Command,
-		Uptime:      terminal.FormatIdleDuration(uptime),
+		Uptime:      virtualterminal.FormatIdleDuration(uptime),
 		QueuedCount: d.Queue.PendingCount(),
 	}
 }

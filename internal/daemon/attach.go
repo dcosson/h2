@@ -5,10 +5,8 @@ import (
 	"io"
 	"net"
 
-	"github.com/creack/pty"
-
 	"h2/internal/message"
-	"h2/internal/terminal"
+	"h2/internal/overlay"
 )
 
 // AttachSession represents an active attach client connection.
@@ -43,44 +41,40 @@ func (d *Daemon) handleAttach(conn net.Conn, req *message.Request) {
 	session := &AttachSession{conn: conn}
 	d.attachClient = session
 
-	// Swap wrapper I/O to use the attach connection.
-	w := d.Wrapper
-	w.Mu.Lock()
-	w.Output = &frameWriter{conn: conn}
-	w.InputSrc = &frameInputReader{conn: conn}
+	vt := d.VT
+	ov := d.Overlay
+
+	// Swap VT I/O to use the attach connection.
+	vt.Mu.Lock()
+	vt.Output = &frameWriter{conn: conn}
+	vt.InputSrc = &frameInputReader{conn: conn}
 
 	// Resize PTY to client's terminal size.
 	if req.Cols > 0 && req.Rows > 0 {
-		w.Rows = req.Rows
-		w.Cols = req.Cols
-		w.ChildRows = req.Rows - w.ReservedRows()
-		w.Vt.Resize(w.ChildRows, req.Cols)
-		pty.Setsize(w.Ptm, &pty.Winsize{
-			Rows: uint16(w.ChildRows),
-			Cols: uint16(req.Cols),
-		})
+		childRows := req.Rows - ov.ReservedRows()
+		vt.Resize(req.Rows, req.Cols, childRows)
 	}
 
 	// Send full screen redraw.
-	w.Output.Write([]byte("\033[2J\033[H"))
-	w.RenderScreen()
-	w.RenderBar()
-	w.Mu.Unlock()
+	vt.Output.Write([]byte("\033[2J\033[H"))
+	ov.RenderScreen()
+	ov.RenderBar()
+	vt.Mu.Unlock()
 
 	// Read input frames from client until disconnect.
 	d.readClientInput(conn)
 
 	// Client disconnected — detach.
-	w.Mu.Lock()
-	w.Output = io.Discard
-	w.InputSrc = &blockingReader{}
-	w.Mu.Unlock()
+	vt.Mu.Lock()
+	vt.Output = io.Discard
+	vt.InputSrc = &blockingReader{}
+	vt.Mu.Unlock()
 
 	d.attachClient = nil
 }
 
 // readClientInput reads framed input from the attach client and dispatches
-// it to the wrapper.
+// it to the overlay.
 func (d *Daemon) readClientInput(conn net.Conn) {
 	for {
 		frameType, payload, err := message.ReadFrame(conn)
@@ -90,24 +84,24 @@ func (d *Daemon) readClientInput(conn net.Conn) {
 
 		switch frameType {
 		case message.FrameTypeData:
-			// Simulate keyboard input by feeding into the wrapper.
-			w := d.Wrapper
-			w.Mu.Lock()
-			if w.DebugKeys && len(payload) > 0 {
-				w.AppendDebugBytes(payload)
-				w.RenderBar()
+			vt := d.VT
+			ov := d.Overlay
+			vt.Mu.Lock()
+			if ov.DebugKeys && len(payload) > 0 {
+				ov.AppendDebugBytes(payload)
+				ov.RenderBar()
 			}
 			for i := 0; i < len(payload); {
-				switch w.Mode {
-				case terminal.ModePassthrough:
-					i = w.HandlePassthroughBytes(payload, i, len(payload))
-				case terminal.ModeMenu:
-					i = w.HandleMenuBytes(payload, i, len(payload))
+				switch ov.Mode {
+				case overlay.ModePassthrough:
+					i = ov.HandlePassthroughBytes(payload, i, len(payload))
+				case overlay.ModeMenu:
+					i = ov.HandleMenuBytes(payload, i, len(payload))
 				default:
-					i = w.HandleDefaultBytes(payload, i, len(payload))
+					i = ov.HandleDefaultBytes(payload, i, len(payload))
 				}
 			}
-			w.Mu.Unlock()
+			vt.Mu.Unlock()
 
 		case message.FrameTypeControl:
 			var ctrl message.ResizeControl
@@ -115,20 +109,15 @@ func (d *Daemon) readClientInput(conn net.Conn) {
 				continue
 			}
 			if ctrl.Type == "resize" {
-				w := d.Wrapper
-				w.Mu.Lock()
-				w.Rows = ctrl.Rows
-				w.Cols = ctrl.Cols
-				w.ChildRows = ctrl.Rows - w.ReservedRows()
-				w.Vt.Resize(w.ChildRows, ctrl.Cols)
-				pty.Setsize(w.Ptm, &pty.Winsize{
-					Rows: uint16(w.ChildRows),
-					Cols: uint16(ctrl.Cols),
-				})
-				w.Output.Write([]byte("\033[2J"))
-				w.RenderScreen()
-				w.RenderBar()
-				w.Mu.Unlock()
+				vt := d.VT
+				ov := d.Overlay
+				vt.Mu.Lock()
+				childRows := ctrl.Rows - ov.ReservedRows()
+				vt.Resize(ctrl.Rows, ctrl.Cols, childRows)
+				vt.Output.Write([]byte("\033[2J"))
+				ov.RenderScreen()
+				ov.RenderBar()
+				vt.Mu.Unlock()
 			}
 		}
 	}
@@ -147,8 +136,8 @@ func (fw *frameWriter) Write(p []byte) (int, error) {
 }
 
 // frameInputReader reads data frames from the attach client. It is used
-// by the wrapper's ReadInput goroutine when in direct (non-daemon) mode
-// where the wrapper reads from InputSrc directly. In attach mode, we
+// by the overlay's ReadInput goroutine when in direct (non-daemon) mode
+// where the VT reads from InputSrc directly. In attach mode, we
 // instead read frames in readClientInput, so this reader blocks forever
 // until the connection is closed.
 type frameInputReader struct {

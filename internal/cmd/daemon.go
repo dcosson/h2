@@ -31,7 +31,7 @@ func newDaemonCmd() *cobra.Command {
 
 			err := d.Run()
 			if err != nil {
-				if d.Wrapper != nil && d.Wrapper.Quit {
+				if d.Overlay != nil && d.Overlay.Quit {
 					return nil
 				}
 				if _, ok := err.(*exec.ExitError); ok {
