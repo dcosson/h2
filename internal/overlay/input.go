@@ -434,9 +434,9 @@ func (o *Overlay) HandleScrollBytes(buf []byte, start, n int) int {
 				i += consumed
 				continue
 			}
-			// ESC followed by non-sequence byte — exit scroll mode.
-			o.ExitScrollMode()
-			return i
+			// ESC followed by non-sequence byte — ignore, stay in scroll mode.
+			i++
+			continue
 		}
 
 		i++
@@ -449,16 +449,18 @@ func (o *Overlay) HandleScrollBytes(buf []byte, start, n int) int {
 				if handled {
 					continue
 				}
-				// ESC followed by unrecognized byte — exit scroll mode.
-				o.ExitScrollMode()
+				// ESC followed by unrecognized byte — ignore.
 			} else {
-				// ESC at end of buffer — wait to see if more bytes follow.
+				// ESC at end of buffer — wait to see if it's bare Esc.
 				o.StartPendingEsc()
 			}
-		case 'q', 'Q':
-			o.ExitScrollMode()
 		default:
-			// Ignore all other input in scroll mode.
+			// Pass control characters through to the PTY.
+			if b < 0x20 && !o.ChildExited && !o.ChildHung {
+				if !o.writePTYOrHang([]byte{b}) {
+					return n
+				}
+			}
 		}
 	}
 	return n

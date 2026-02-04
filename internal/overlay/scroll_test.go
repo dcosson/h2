@@ -237,14 +237,15 @@ func TestHandleScrollBytes_EscAtEndStartsPending(t *testing.T) {
 	}
 }
 
-func TestHandleScrollBytes_EscFollowedByNonSeqExits(t *testing.T) {
+func TestHandleScrollBytes_EscFollowedByNonSeqStays(t *testing.T) {
 	o := newTestOverlay(10, 80)
 	o.EnterScrollMode()
-	// Esc followed by a non-sequence byte exits scroll mode.
+	o.ScrollOffset = 3
+	// Esc followed by a non-sequence byte stays in scroll mode.
 	buf := []byte{0x1B, 'x'}
 	o.HandleScrollBytes(buf, 0, len(buf))
-	if o.Mode != ModeDefault {
-		t.Fatalf("expected ModeDefault, got %d", o.Mode)
+	if o.Mode != ModeScroll {
+		t.Fatalf("expected ModeScroll, got %d", o.Mode)
 	}
 }
 
@@ -276,21 +277,11 @@ func TestHandleScrollBytes_PendingEscContinuation(t *testing.T) {
 	}
 }
 
-func TestHandleScrollBytes_QExits(t *testing.T) {
-	o := newTestOverlay(10, 80)
-	o.EnterScrollMode()
-	buf := []byte{'q'}
-	o.HandleScrollBytes(buf, 0, len(buf))
-	if o.Mode != ModeDefault {
-		t.Fatalf("expected ModeDefault after q, got %d", o.Mode)
-	}
-}
-
-func TestHandleScrollBytes_OtherKeysIgnored(t *testing.T) {
+func TestHandleScrollBytes_RegularKeysIgnored(t *testing.T) {
 	o := newTestOverlay(10, 80)
 	o.EnterScrollMode()
 	o.ScrollOffset = 5
-	buf := []byte{'a', 'b', 'c', ' ', '1'}
+	buf := []byte{'a', 'b', 'c', 'q', ' ', '1'}
 	o.HandleScrollBytes(buf, 0, len(buf))
 	if o.Mode != ModeScroll {
 		t.Fatalf("expected ModeScroll, got %d", o.Mode)
@@ -415,7 +406,7 @@ func TestHelpLabel_Scroll(t *testing.T) {
 	o := newTestOverlay(10, 80)
 	o.Mode = ModeScroll
 	got := o.HelpLabel()
-	if got != "Scroll/Up/Down navigate | Esc exit" {
+	if got != "Scroll/Up/Down navigate | Esc exit scroll" {
 		t.Fatalf("unexpected help label: %q", got)
 	}
 }
@@ -490,7 +481,7 @@ func TestExitedScrollMode_BarStaysRed(t *testing.T) {
 	}
 }
 
-func TestExitedScrollMode_ExitReturnsToExitedState(t *testing.T) {
+func TestExitedScrollMode_ScrollDownToBottomExits(t *testing.T) {
 	o := newTestOverlay(10, 80)
 	o.ChildExited = true
 	o.relaunchCh = make(chan struct{}, 1)
@@ -500,25 +491,35 @@ func TestExitedScrollMode_ExitReturnsToExitedState(t *testing.T) {
 	}
 
 	o.EnterScrollMode()
-	o.ScrollUp(5)
+	o.ScrollUp(3)
 	if o.Mode != ModeScroll {
 		t.Fatalf("expected ModeScroll, got %d", o.Mode)
 	}
 
-	// q exits scroll mode back to default.
-	buf := []byte{'q'}
-	o.HandleScrollBytes(buf, 0, len(buf))
+	// Scroll down past zero exits scroll mode.
+	o.ScrollDown(10)
 	if o.Mode != ModeDefault {
-		t.Fatalf("expected ModeDefault after q in scroll, got %d", o.Mode)
+		t.Fatalf("expected ModeDefault after scrolling to bottom, got %d", o.Mode)
 	}
-	// Child is still exited.
 	if !o.ChildExited {
 		t.Fatal("expected ChildExited to still be true")
 	}
+}
 
-	// Now q in exited state quits.
-	o.HandleExitedBytes(buf, 0, len(buf))
-	if !o.Quit {
-		t.Fatal("expected Quit after q in exited state")
+func TestHandleScrollBytes_CtrlPassthrough(t *testing.T) {
+	// We can't easily test PTY writes without a real PTY, but we can
+	// verify that ctrl chars don't exit scroll mode and don't panic.
+	o := newTestOverlay(10, 80)
+	o.EnterScrollMode()
+	o.ScrollOffset = 5
+	// Ctrl+C (0x03), Ctrl+D (0x04) — child is not running so writes
+	// are skipped, but mode should remain ModeScroll.
+	buf := []byte{0x03, 0x04}
+	o.HandleScrollBytes(buf, 0, len(buf))
+	if o.Mode != ModeScroll {
+		t.Fatalf("expected ModeScroll after ctrl chars, got %d", o.Mode)
+	}
+	if o.ScrollOffset != 5 {
+		t.Fatalf("expected offset 5, got %d", o.ScrollOffset)
 	}
 }

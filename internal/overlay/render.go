@@ -129,7 +129,7 @@ func (o *Overlay) RenderBar() {
 	if o.ChildExited {
 		style = "\033[7m\033[31m" // red inverse
 		if o.Mode == ModeScroll {
-			label = " Scroll | " + o.exitMessage() + " | Esc exit scroll"
+			label = " Scroll | " + o.exitMessage() + " | Esc exit"
 		} else {
 			label = " " + o.exitMessage() + " | [Enter] relaunch \u00b7 [q] quit"
 		}
@@ -257,7 +257,7 @@ func (o *Overlay) HelpLabel() string {
 	case ModeMenu:
 		return "Left/Right move | Enter select | Esc exit"
 	case ModeScroll:
-		return "Scroll/Up/Down navigate | Esc exit"
+		return "Scroll/Up/Down navigate | Esc exit scroll"
 	default:
 		return "Up/Down history | Enter send | / passthrough | // menu"
 	}
