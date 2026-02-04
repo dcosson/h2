@@ -160,10 +160,12 @@ func (pw *daemonPtyWriter) Write(p []byte) (int, error) {
 func (d *Daemon) AgentInfo() *message.AgentInfo {
 	uptime := time.Since(d.StartTime)
 	return &message.AgentInfo{
-		Name:        d.Name,
-		Command:     d.Command,
-		Uptime:      virtualterminal.FormatIdleDuration(uptime),
-		QueuedCount: d.Session.Queue.PendingCount(),
+		Name:          d.Name,
+		Command:       d.Command,
+		Uptime:        virtualterminal.FormatIdleDuration(uptime),
+		State:         d.Session.State().String(),
+		StateDuration: virtualterminal.FormatIdleDuration(d.Session.StateDuration()),
+		QueuedCount:   d.Session.Queue.PendingCount(),
 	}
 }
 

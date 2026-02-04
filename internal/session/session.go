@@ -45,9 +45,10 @@ type Session struct {
 	AgentName string
 	PtyWriter io.Writer // writes to PTY under VT.Mu
 
-	mu      sync.Mutex
-	state   State
-	stateCh chan struct{}
+	mu             sync.Mutex
+	state          State
+	stateChangedAt time.Time
+	stateCh        chan struct{}
 
 	outputNotify chan struct{} // buffered(1), signaled on child output
 	exitNotify   chan struct{} // buffered(1), signaled on child exit
@@ -61,12 +62,13 @@ type Session struct {
 // New creates a new Session with the given name and PTY writer.
 func New(name string, ptyWriter io.Writer) *Session {
 	return &Session{
-		Name:         name,
-		AgentName:    name,
-		Queue:        message.NewMessageQueue(),
-		PtyWriter:    ptyWriter,
-		state:        StateActive,
-		stateCh:      make(chan struct{}),
+		Name:           name,
+		AgentName:      name,
+		Queue:          message.NewMessageQueue(),
+		PtyWriter:      ptyWriter,
+		state:          StateActive,
+		stateChangedAt: time.Now(),
+		stateCh:        make(chan struct{}),
 		outputNotify: make(chan struct{}, 1),
 		exitNotify:   make(chan struct{}, 1),
 		stopCh:       make(chan struct{}),
@@ -117,8 +119,16 @@ func (s *Session) setState(newState State) {
 		return
 	}
 	s.state = newState
+	s.stateChangedAt = time.Now()
 	close(s.stateCh)
 	s.stateCh = make(chan struct{})
+}
+
+// StateDuration returns how long the session has been in its current state.
+func (s *Session) StateDuration() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return time.Since(s.stateChangedAt)
 }
 
 // NoteOutput signals that the child process has produced output.

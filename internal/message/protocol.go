@@ -47,10 +47,12 @@ type MessageInfo struct {
 
 // AgentInfo is the public representation of agent status.
 type AgentInfo struct {
-	Name        string `json:"name"`
-	Command     string `json:"command"`
-	Uptime      string `json:"uptime"`
-	QueuedCount int    `json:"queued_count"`
+	Name          string `json:"name"`
+	Command       string `json:"command"`
+	Uptime        string `json:"uptime"`
+	State         string `json:"state"`
+	StateDuration string `json:"state_duration"`
+	QueuedCount   int    `json:"queued_count"`
 }
 
 // Attach frame types.
