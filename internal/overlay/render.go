@@ -12,6 +12,7 @@ import (
 
 	"github.com/vito/midterm"
 
+	"h2/internal/message"
 	"h2/internal/virtualterminal"
 )
 
@@ -197,7 +198,11 @@ func (o *Overlay) RenderBar() {
 		runeCount = maxInput
 	}
 	fmt.Fprintf(&buf, "\033[%d;1H\033[2K", inputRow)
-	fmt.Fprintf(&buf, "\033[36m%s\033[0m%s", prompt, displayInput)
+	promptColor := "\033[36m" // cyan
+	if o.InputPriority == message.PriorityInterrupt {
+		promptColor = "\033[31m" // red
+	}
+	fmt.Fprintf(&buf, "%s%s\033[0m%s", promptColor, prompt, displayInput)
 
 	cursorCol := len(prompt) + runeCount + 1
 	if cursorCol > o.VT.Cols {

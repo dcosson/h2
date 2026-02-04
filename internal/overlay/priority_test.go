@@ -15,13 +15,13 @@ func TestCyclePriority(t *testing.T) {
 	}
 
 	o.CyclePriority()
-	if o.InputPriority != message.PriorityIdleFirst {
-		t.Fatalf("expected idle-first, got %s", o.InputPriority)
+	if o.InputPriority != message.PriorityIdle {
+		t.Fatalf("expected idle, got %s", o.InputPriority)
 	}
 
 	o.CyclePriority()
-	if o.InputPriority != message.PriorityIdle {
-		t.Fatalf("expected idle, got %s", o.InputPriority)
+	if o.InputPriority != message.PriorityIdleFirst {
+		t.Fatalf("expected idle-first, got %s", o.InputPriority)
 	}
 
 	o.CyclePriority()

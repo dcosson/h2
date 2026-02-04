@@ -51,6 +51,8 @@ type Overlay struct {
 	AgentName    string
 	OnModeChange func(mode InputMode)
 	QueueStatus  func() (int, bool)
+	OnSubmit     func(text string, priority message.Priority) // called for non-normal input
+	OnOutput     func()                                        // called after each child output
 
 	// Child process lifecycle.
 	ChildExited     bool
@@ -155,6 +157,9 @@ func (o *Overlay) Run(command string, args ...string) error {
 
 	// Pipe child output.
 	go o.VT.PipeOutput(func() {
+			if o.OnOutput != nil {
+				o.OnOutput()
+			}
 			if o.Mode != ModeScroll {
 				o.RenderScreen()
 				o.RenderBar()
@@ -214,6 +219,9 @@ func (o *Overlay) Run(command string, args ...string) error {
 			o.VT.Mu.Unlock()
 
 			go o.VT.PipeOutput(func() {
+			if o.OnOutput != nil {
+				o.OnOutput()
+			}
 			if o.Mode != ModeScroll {
 				o.RenderScreen()
 				o.RenderBar()
@@ -270,6 +278,9 @@ func (o *Overlay) RunDaemon(command string, args ...string) error {
 
 	// Pipe child output to virtual terminal.
 	go o.VT.PipeOutput(func() {
+			if o.OnOutput != nil {
+				o.OnOutput()
+			}
 			if o.Mode != ModeScroll {
 				o.RenderScreen()
 				o.RenderBar()
@@ -324,6 +335,9 @@ func (o *Overlay) RunDaemon(command string, args ...string) error {
 			o.VT.Mu.Unlock()
 
 			go o.VT.PipeOutput(func() {
+			if o.OnOutput != nil {
+				o.OnOutput()
+			}
 			if o.Mode != ModeScroll {
 				o.RenderScreen()
 				o.RenderBar()

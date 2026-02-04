@@ -11,6 +11,7 @@ import (
 
 	"h2/internal/message"
 	"h2/internal/overlay"
+	"h2/internal/session"
 	"h2/internal/virtualterminal"
 )
 
@@ -22,11 +23,10 @@ type Daemon struct {
 	Args      []string
 	VT        *virtualterminal.VT
 	Overlay   *overlay.Overlay
-	Queue     *message.MessageQueue
+	Session   *session.Session
 	Listener  net.Listener
 	StartTime time.Time
 
-	stopDelivery chan struct{}
 	attachClient *AttachSession
 }
 
@@ -40,12 +40,10 @@ func SocketPath(name string) string {
 	return filepath.Join(SocketDir(), name+".sock")
 }
 
-// Run starts the daemon: creates the VT, overlay, socket, delivery loop, and
+// Run starts the daemon: creates the VT, overlay, session, socket, and
 // waits for the child to exit.
 func (d *Daemon) Run() error {
 	d.StartTime = time.Now()
-	d.Queue = message.NewMessageQueue()
-	d.stopDelivery = make(chan struct{})
 
 	// Create socket directory.
 	if err := os.MkdirAll(SocketDir(), 0o700); err != nil {
@@ -83,47 +81,51 @@ func (d *Daemon) Run() error {
 		VT:        d.VT,
 		AgentName: d.Name,
 	}
+
+	// Create session (owns queue, delivery, state management).
+	d.Session = session.New(d.Name, &daemonPtyWriter{d: d})
+	d.Session.OnDeliver = func() {
+		d.VT.Mu.Lock()
+		d.Overlay.RenderBar()
+		d.VT.Mu.Unlock()
+	}
+
+	// Wire overlay callbacks.
 	d.Overlay.OnModeChange = func(mode overlay.InputMode) {
 		if mode == overlay.ModePassthrough {
-			d.Queue.Pause()
+			d.Session.Queue.Pause()
 		} else {
-			d.Queue.Unpause()
+			d.Session.Queue.Unpause()
 		}
 	}
 	d.Overlay.QueueStatus = func() (int, bool) {
-		return d.Queue.PendingCount(), d.Queue.IsPaused()
+		return d.Session.Queue.PendingCount(), d.Session.Queue.IsPaused()
 	}
-
-	// Wire up child lifecycle callbacks.
+	d.Overlay.OnSubmit = func(text string, pri message.Priority) {
+		d.Session.SubmitInput(text, pri)
+	}
+	d.Overlay.OnOutput = func() {
+		d.Session.NoteOutput()
+	}
 	d.Overlay.OnChildExit = func() {
-		d.Queue.Pause()
+		d.Session.NoteExit()
+		d.Session.Queue.Pause()
 	}
 	d.Overlay.OnChildRelaunch = func() {
-		d.Queue.Unpause()
+		d.Session.Queue.Unpause()
 	}
 
 	// Start socket listener.
 	go d.acceptLoop()
 
-	// Start message delivery.
-	go message.RunDelivery(message.DeliveryConfig{
-		Queue:     d.Queue,
-		AgentName: d.Name,
-		PtyWriter: &daemonPtyWriter{d: d},
-		IsIdle:    d.VT.IsIdle,
-		OnDeliver: func() {
-			d.VT.Mu.Lock()
-			d.Overlay.RenderBar()
-			d.VT.Mu.Unlock()
-		},
-		Stop: d.stopDelivery,
-	})
+	// Start session (delivery loop + state watcher).
+	go d.Session.Start()
 
 	// Run the overlay in daemon mode (blocks until user quits).
 	err = d.Overlay.RunDaemon(d.Command, d.Args...)
 
 	// Clean up.
-	close(d.stopDelivery)
+	d.Session.Stop()
 	if d.attachClient != nil {
 		d.attachClient.Close()
 	}
@@ -161,7 +163,7 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 		Name:        d.Name,
 		Command:     d.Command,
 		Uptime:      virtualterminal.FormatIdleDuration(uptime),
-		QueuedCount: d.Queue.PendingCount(),
+		QueuedCount: d.Session.Queue.PendingCount(),
 	}
 }
 

@@ -250,16 +250,23 @@ func (o *Overlay) HandleDefaultBytes(buf []byte, start, n int) int {
 		case 0x0D, 0x0A:
 			if len(o.Input) > 0 {
 				cmd := string(o.Input)
-				if !o.writePTYOrHang(o.Input) {
-					return n
+				if o.InputPriority == message.PriorityNormal {
+					// Normal: direct PTY write.
+					if !o.writePTYOrHang(o.Input) {
+						return n
+					}
+					ptm := o.VT.Ptm
+					go func() {
+						time.Sleep(50 * time.Millisecond)
+						ptm.Write([]byte{'\r'})
+					}()
+				} else if o.OnSubmit != nil {
+					// Non-normal: route through session for priority-aware delivery.
+					o.OnSubmit(cmd, o.InputPriority)
 				}
 				o.History = append(o.History, cmd)
 				o.Input = o.Input[:0]
-				ptm := o.VT.Ptm
-				go func() {
-					time.Sleep(50 * time.Millisecond)
-					ptm.Write([]byte{'\r'})
-				}()
+				o.InputPriority = message.PriorityNormal
 			} else {
 				if !o.writePTYOrHang([]byte{'\r'}) {
 					return n
@@ -424,8 +431,8 @@ func (o *Overlay) CancelPendingSlash() {
 var priorityOrder = []message.Priority{
 	message.PriorityNormal,
 	message.PriorityInterrupt,
-	message.PriorityIdleFirst,
 	message.PriorityIdle,
+	message.PriorityIdleFirst,
 }
 
 // CyclePriority advances InputPriority to the next value in the cycle.

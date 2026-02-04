@@ -1,6 +1,7 @@
 package message
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -13,14 +14,19 @@ import (
 // IdleFunc returns true if the child process is considered idle.
 type IdleFunc func() bool
 
+// WaitForIdleFunc blocks until the child process is idle or ctx is cancelled.
+// Returns true if idle was reached.
+type WaitForIdleFunc func(ctx context.Context) bool
+
 // DeliveryConfig holds configuration for the delivery goroutine.
 type DeliveryConfig struct {
-	Queue     *MessageQueue
-	AgentName string
-	PtyWriter io.Writer  // writes to the child PTY
-	IsIdle    IdleFunc   // checks if child is idle
-	OnDeliver func()     // called after each delivery (e.g. to render)
-	Stop      <-chan struct{}
+	Queue       *MessageQueue
+	AgentName   string
+	PtyWriter   io.Writer        // writes to the child PTY
+	IsIdle      IdleFunc         // checks if child is idle
+	WaitForIdle WaitForIdleFunc  // blocks until idle (for interrupt retry)
+	OnDeliver   func()           // called after each delivery (e.g. to render)
+	Stop        <-chan struct{}
 }
 
 // PrepareMessage creates a Message, writes its body to disk, and enqueues it.
@@ -78,16 +84,40 @@ func RunDelivery(cfg DeliveryConfig) {
 	}
 }
 
+const (
+	interruptRetries       = 3
+	interruptWaitTimeout   = 5 * time.Second
+)
+
 func deliver(cfg DeliveryConfig, msg *Message) {
 	if msg.Priority == PriorityInterrupt {
-		// Send ctrl+c to interrupt the child.
-		cfg.PtyWriter.Write([]byte{0x03})
-		time.Sleep(200 * time.Millisecond)
+		// Send Ctrl+C, wait for idle, retry up to 3 times.
+		// If still not idle after retries, send anyway (like normal).
+		for attempt := 0; attempt < interruptRetries; attempt++ {
+			cfg.PtyWriter.Write([]byte{0x03})
+			if cfg.WaitForIdle != nil {
+				ctx, cancel := context.WithTimeout(context.Background(), interruptWaitTimeout)
+				idle := cfg.WaitForIdle(ctx)
+				cancel()
+				if idle {
+					break
+				}
+			} else {
+				time.Sleep(200 * time.Millisecond)
+				break
+			}
+		}
 	}
 
-	line := fmt.Sprintf("[h2-message from=%s id=%s priority=%s] Read %s",
-		msg.From, msg.ID, msg.Priority, msg.FilePath)
-	cfg.PtyWriter.Write([]byte(line))
+	if msg.FilePath == "" {
+		// Raw user input — send body directly.
+		cfg.PtyWriter.Write([]byte(msg.Body))
+	} else {
+		// Inter-agent message — send reference.
+		line := fmt.Sprintf("[h2-message from=%s id=%s priority=%s] Read %s",
+			msg.From, msg.ID, msg.Priority, msg.FilePath)
+		cfg.PtyWriter.Write([]byte(line))
+	}
 	// Delay before sending Enter so the child's UI framework can process
 	// the typed text before the submit (same pattern as user Enter).
 	time.Sleep(50 * time.Millisecond)
