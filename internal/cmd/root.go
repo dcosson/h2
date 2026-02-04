@@ -12,11 +12,13 @@ func NewRootCmd() *cobra.Command {
 		Long:  "h2 wraps a TUI application with a persistent input bar and supports inter-agent messaging via Unix domain sockets.",
 	}
 
+	listCmd := newLsCmd()
 	rootCmd.AddCommand(
 		newRunCmd(),
 		newAttachCmd(),
 		newSendCmd(),
-		newLsCmd(),
+		listCmd,
+		newLsAlias(listCmd),
 		newShowCmd(),
 		newDaemonCmd(),
 	)

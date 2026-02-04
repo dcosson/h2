@@ -38,6 +38,17 @@ func newLsCmd() *cobra.Command {
 	}
 }
 
+// newLsAlias returns a hidden "ls" command that delegates to "list".
+func newLsAlias(listCmd *cobra.Command) *cobra.Command {
+	return &cobra.Command{
+		Use:    "ls",
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return listCmd.RunE(listCmd, args)
+		},
+	}
+}
+
 func queryAgent(name string) *message.AgentInfo {
 	sockPath := daemon.SocketPath(name)
 	conn, err := net.DialTimeout("unix", sockPath, 2*time.Second)
