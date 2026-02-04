@@ -27,16 +27,13 @@ func (o *Overlay) RenderScreen() {
 	o.VT.Output.Write(buf.Bytes())
 }
 
-// renderLiveView renders the live terminal, anchored to the bottom of Content
-// so that the most recent output is always visible.
+// renderLiveView renders the live terminal content.
+// The primary terminal has a fixed height and handles its own scrolling
+// internally, so we always render rows 0 through ChildRows-1.
 func (o *Overlay) renderLiveView(buf *bytes.Buffer) {
-	startRow := len(o.VT.Vt.Content) - o.VT.ChildRows
-	if startRow < 0 {
-		startRow = 0
-	}
-	for i := 0; i < o.VT.ChildRows; i++ {
-		fmt.Fprintf(buf, "\033[%d;1H\033[2K", i+1)
-		o.RenderLineFrom(buf, o.VT.Vt, startRow+i)
+	for row := 0; row < o.VT.ChildRows; row++ {
+		fmt.Fprintf(buf, "\033[%d;1H\033[2K", row+1)
+		o.RenderLineFrom(buf, o.VT.Vt, row)
 	}
 }
 

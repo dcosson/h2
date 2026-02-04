@@ -64,11 +64,17 @@ func (o *Overlay) StartPendingEsc() {
 	o.EscTimer = time.AfterFunc(50*time.Millisecond, func() {
 		o.VT.Mu.Lock()
 		defer o.VT.Mu.Unlock()
-		if o.PendingEsc && o.Mode == ModePassthrough {
-			o.PendingEsc = false
+		if !o.PendingEsc {
+			return
+		}
+		o.PendingEsc = false
+		switch o.Mode {
+		case ModePassthrough:
 			o.PassthroughEsc = o.PassthroughEsc[:0]
 			o.setMode(ModeDefault)
 			o.RenderBar()
+		case ModeScroll:
+			o.ExitScrollMode()
 		}
 	})
 }
@@ -411,16 +417,36 @@ func (o *Overlay) CancelPendingSlash() {
 func (o *Overlay) HandleScrollBytes(buf []byte, start, n int) int {
 	for i := start; i < n; {
 		b := buf[i]
+
+		// Handle continuation of a pending ESC from a previous read.
+		if o.PendingEsc {
+			o.CancelPendingEsc()
+			consumed, handled := o.HandleEscape(buf[i:n])
+			if handled {
+				i += consumed
+				continue
+			}
+			// ESC followed by non-sequence byte — exit scroll mode.
+			o.ExitScrollMode()
+			return i
+		}
+
 		i++
 		switch b {
 		case 0x1B:
-			consumed, handled := o.HandleEscape(buf[i:n])
-			i += consumed
-			if handled {
-				continue
+			if i < n {
+				// More data in buffer — try to parse escape sequence.
+				consumed, handled := o.HandleEscape(buf[i:n])
+				i += consumed
+				if handled {
+					continue
+				}
+				// ESC followed by unrecognized byte — exit scroll mode.
+				o.ExitScrollMode()
+			} else {
+				// ESC at end of buffer — wait to see if more bytes follow.
+				o.StartPendingEsc()
 			}
-			// Bare Esc exits scroll mode.
-			o.ExitScrollMode()
 		case 'q', 'Q':
 			o.ExitScrollMode()
 		default:

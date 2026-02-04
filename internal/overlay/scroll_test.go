@@ -223,14 +223,56 @@ func TestHandleSGRMouse_MalformedParams(t *testing.T) {
 
 // --- HandleScrollBytes ---
 
-func TestHandleScrollBytes_EscExits(t *testing.T) {
+func TestHandleScrollBytes_EscAtEndStartsPending(t *testing.T) {
 	o := newTestOverlay(10, 80)
 	o.EnterScrollMode()
-	// Bare Esc (0x1B) at end of buffer -> exits scroll mode.
+	// Bare Esc (0x1B) at end of buffer starts pending timer, doesn't exit immediately.
 	buf := []byte{0x1B}
 	o.HandleScrollBytes(buf, 0, len(buf))
+	if !o.PendingEsc {
+		t.Fatal("expected PendingEsc to be true")
+	}
+	if o.Mode != ModeScroll {
+		t.Fatalf("expected ModeScroll (pending), got %d", o.Mode)
+	}
+}
+
+func TestHandleScrollBytes_EscFollowedByNonSeqExits(t *testing.T) {
+	o := newTestOverlay(10, 80)
+	o.EnterScrollMode()
+	// Esc followed by a non-sequence byte exits scroll mode.
+	buf := []byte{0x1B, 'x'}
+	o.HandleScrollBytes(buf, 0, len(buf))
 	if o.Mode != ModeDefault {
-		t.Fatalf("expected ModeDefault after Esc, got %d", o.Mode)
+		t.Fatalf("expected ModeDefault, got %d", o.Mode)
+	}
+}
+
+func TestHandleScrollBytes_PendingEscContinuation(t *testing.T) {
+	o := newTestOverlay(10, 80)
+	for i := 0; i < 30; i++ {
+		o.VT.Scrollback.Write([]byte("line\n"))
+	}
+	o.EnterScrollMode()
+
+	// ESC at end of first read.
+	buf1 := []byte{0x1B}
+	o.HandleScrollBytes(buf1, 0, len(buf1))
+	if !o.PendingEsc {
+		t.Fatal("expected PendingEsc")
+	}
+
+	// Continuation in next read: [ A (arrow up).
+	buf2 := []byte{'[', 'A'}
+	o.HandleScrollBytes(buf2, 0, len(buf2))
+	if o.PendingEsc {
+		t.Fatal("expected PendingEsc to be cleared")
+	}
+	if o.Mode != ModeScroll {
+		t.Fatalf("expected ModeScroll after arrow key, got %d", o.Mode)
+	}
+	if o.ScrollOffset != 1 {
+		t.Fatalf("expected offset 1, got %d", o.ScrollOffset)
 	}
 }
 
@@ -289,22 +331,21 @@ func TestHandleScrollBytes_ArrowDownScrolls(t *testing.T) {
 	}
 }
 
-// --- RenderLiveView anchors to bottom ---
+// --- RenderLiveView renders from row 0 ---
 
-func TestRenderLiveView_AnchorsToBottom(t *testing.T) {
+func TestRenderLiveView_RendersVisibleRows(t *testing.T) {
 	o := newTestOverlay(5, 40)
-	// Write more lines than ChildRows.
+	// Write more lines than ChildRows. The primary terminal scrolls
+	// internally, keeping visible content in rows 0 through ChildRows-1.
 	for i := 0; i < 20; i++ {
 		o.VT.Vt.Write([]byte("line\n"))
 	}
 
 	var buf bytes.Buffer
-	buf.WriteString("\033[?25l")
 	o.renderLiveView(&buf)
 	output := buf.String()
 
-	// The live view should contain content. It should NOT be empty.
-	// With 20 lines and 5 child rows, it should render the last 5 lines.
+	// The live view should contain rendered content from the visible area.
 	if len(output) == 0 {
 		t.Fatal("expected non-empty render output")
 	}
