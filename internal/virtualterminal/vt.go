@@ -33,8 +33,15 @@ type VT struct {
 }
 
 // StartPTY creates and starts the child process in a PTY with the given size.
-func (vt *VT) StartPTY(command string, args []string, childRows, cols int) error {
+// If extraEnv is non-nil, those environment variables are added to the child's environment.
+func (vt *VT) StartPTY(command string, args []string, childRows, cols int, extraEnv map[string]string) error {
 	vt.Cmd = exec.Command(command, args...)
+	if len(extraEnv) > 0 {
+		vt.Cmd.Env = os.Environ()
+		for k, v := range extraEnv {
+			vt.Cmd.Env = append(vt.Cmd.Env, k+"="+v)
+		}
+	}
 	var err error
 	vt.Ptm, err = pty.StartWithSize(vt.Cmd, &pty.Winsize{
 		Rows: uint16(childRows),

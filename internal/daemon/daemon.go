@@ -90,6 +90,12 @@ func (d *Daemon) Run() error {
 		d.VT.Mu.Unlock()
 	}
 
+	// Start OTEL collector and pass env vars to child process.
+	if err := d.Session.StartOtelCollector(); err != nil {
+		return fmt.Errorf("start otel collector: %w", err)
+	}
+	d.Overlay.ExtraEnv = d.Session.OtelEnv()
+
 	// Wire overlay callbacks.
 	d.Overlay.OnModeChange = func(mode overlay.InputMode) {
 		if mode == overlay.ModePassthrough {

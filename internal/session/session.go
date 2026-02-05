@@ -3,6 +3,8 @@ package session
 import (
 	"context"
 	"io"
+	"net"
+	"net/http"
 	"sync"
 	"time"
 
@@ -51,7 +53,13 @@ type Session struct {
 	stateCh        chan struct{}
 
 	outputNotify chan struct{} // buffered(1), signaled on child output
+	otelNotify   chan struct{} // buffered(1), signaled on OTEL event
 	exitNotify   chan struct{} // buffered(1), signaled on child exit
+
+	// OTEL collector
+	otelListener net.Listener
+	otelServer   *http.Server
+	otelPort     int
 
 	stopCh chan struct{}
 
@@ -69,9 +77,10 @@ func New(name string, ptyWriter io.Writer) *Session {
 		state:          StateActive,
 		stateChangedAt: time.Now(),
 		stateCh:        make(chan struct{}),
-		outputNotify: make(chan struct{}, 1),
-		exitNotify:   make(chan struct{}, 1),
-		stopCh:       make(chan struct{}),
+		outputNotify:   make(chan struct{}, 1),
+		otelNotify:     make(chan struct{}, 1),
+		exitNotify:     make(chan struct{}, 1),
+		stopCh:         make(chan struct{}),
 	}
 }
 
@@ -193,7 +202,7 @@ func (s *Session) Start() {
 	wg.Wait()
 }
 
-// Stop signals all goroutines to stop.
+// Stop signals all goroutines to stop and cleans up resources.
 func (s *Session) Stop() {
 	select {
 	case <-s.stopCh:
@@ -201,9 +210,22 @@ func (s *Session) Stop() {
 	default:
 		close(s.stopCh)
 	}
+	s.StopOtelCollector()
 }
 
-// watchState manages state transitions based on output and exit notifications.
+// noteActivity resets the idle timer and sets state to Active.
+func (s *Session) noteActivity(idleTimer *time.Timer) {
+	s.setState(StateActive)
+	if !idleTimer.Stop() {
+		select {
+		case <-idleTimer.C:
+		default:
+		}
+	}
+	idleTimer.Reset(idleThreshold)
+}
+
+// watchState manages state transitions based on output, OTEL, and exit notifications.
 func (s *Session) watchState(stop <-chan struct{}) {
 	idleTimer := time.NewTimer(idleThreshold)
 	defer idleTimer.Stop()
@@ -211,14 +233,10 @@ func (s *Session) watchState(stop <-chan struct{}) {
 	for {
 		select {
 		case <-s.outputNotify:
-			s.setState(StateActive)
-			if !idleTimer.Stop() {
-				select {
-				case <-idleTimer.C:
-				default:
-				}
-			}
-			idleTimer.Reset(idleThreshold)
+			s.noteActivity(idleTimer)
+
+		case <-s.otelNotify:
+			s.noteActivity(idleTimer)
 
 		case <-idleTimer.C:
 			s.mu.Lock()

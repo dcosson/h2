@@ -62,6 +62,9 @@ type Overlay struct {
 	quitCh          chan struct{}
 	OnChildExit     func()
 	OnChildRelaunch func()
+
+	// ExtraEnv holds additional environment variables to pass to the child process.
+	ExtraEnv map[string]string
 }
 
 // Run starts the overlay in interactive mode: enters raw mode, starts the PTY,
@@ -118,7 +121,7 @@ func (o *Overlay) Run(command string, args ...string) error {
 	}
 
 	// Start child in a PTY.
-	if err := o.VT.StartPTY(command, args, o.VT.ChildRows, cols); err != nil {
+	if err := o.VT.StartPTY(command, args, o.VT.ChildRows, cols, o.ExtraEnv); err != nil {
 		return err
 	}
 
@@ -196,7 +199,7 @@ func (o *Overlay) Run(command string, args ...string) error {
 		select {
 		case <-o.relaunchCh:
 			o.VT.Ptm.Close()
-			if err := o.VT.StartPTY(command, args, o.VT.ChildRows, o.VT.Cols); err != nil {
+			if err := o.VT.StartPTY(command, args, o.VT.ChildRows, o.VT.Cols, o.ExtraEnv); err != nil {
 				close(stopStatus)
 				return err
 			}
@@ -265,7 +268,7 @@ func (o *Overlay) RunDaemon(command string, args ...string) error {
 	}
 
 	// Start child in a PTY.
-	if err := o.VT.StartPTY(command, args, o.VT.ChildRows, o.VT.Cols); err != nil {
+	if err := o.VT.StartPTY(command, args, o.VT.ChildRows, o.VT.Cols, o.ExtraEnv); err != nil {
 		return err
 	}
 
@@ -313,7 +316,7 @@ func (o *Overlay) RunDaemon(command string, args ...string) error {
 		select {
 		case <-o.relaunchCh:
 			o.VT.Ptm.Close()
-			if err := o.VT.StartPTY(command, args, o.VT.ChildRows, o.VT.Cols); err != nil {
+			if err := o.VT.StartPTY(command, args, o.VT.ChildRows, o.VT.Cols, o.ExtraEnv); err != nil {
 				close(stopStatus)
 				return err
 			}
