@@ -24,6 +24,7 @@ func newLsCmd() *cobra.Command {
 				fmt.Println("No running agents.")
 				return nil
 			}
+			fmt.Printf("\033[1mOpen Sessions:\033[0m\n")
 			for _, name := range names {
 				info := queryAgent(name)
 				if info != nil {
