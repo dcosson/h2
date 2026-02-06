@@ -45,7 +45,7 @@ func newSendCmd() *cobra.Command {
 			sockPath := daemon.SocketPath(name)
 			conn, err := net.Dial("unix", sockPath)
 			if err != nil {
-				return fmt.Errorf("cannot connect to agent %q: %w", name, err)
+				return agentConnError(name, err)
 			}
 			defer conn.Close()
 

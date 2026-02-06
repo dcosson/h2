@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -89,6 +90,16 @@ func newLsAlias(listCmd *cobra.Command) *cobra.Command {
 			return listCmd.RunE(listCmd, args)
 		},
 	}
+}
+
+// agentConnError returns an error for a failed agent connection that includes
+// the list of available agents.
+func agentConnError(name string, err error) error {
+	agents, listErr := daemon.ListAgents()
+	if listErr != nil || len(agents) == 0 {
+		return fmt.Errorf("cannot connect to agent %q (no running agents)\n\nStart one with: h2 run --name <name> <command>", name)
+	}
+	return fmt.Errorf("cannot connect to agent %q\n\nAvailable agents: %s", name, strings.Join(agents, ", "))
 }
 
 func queryAgent(name string) *message.AgentInfo {
