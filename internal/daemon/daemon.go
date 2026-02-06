@@ -95,6 +95,10 @@ func (d *Daemon) Run() error {
 		return fmt.Errorf("start otel collector: %w", err)
 	}
 	d.Overlay.ExtraEnv = d.Session.OtelEnv()
+	if d.Overlay.ExtraEnv == nil {
+		d.Overlay.ExtraEnv = make(map[string]string)
+	}
+	d.Overlay.ExtraEnv["H2_ACTOR"] = d.Name
 
 	// Wire overlay callbacks.
 	d.Overlay.OnModeChange = func(mode overlay.InputMode) {

@@ -87,6 +87,7 @@ func RunDelivery(cfg DeliveryConfig) {
 const (
 	interruptRetries       = 3
 	interruptWaitTimeout   = 5 * time.Second
+	maxInlineBodyLen       = 300
 )
 
 func deliver(cfg DeliveryConfig, msg *Message) {
@@ -113,9 +114,19 @@ func deliver(cfg DeliveryConfig, msg *Message) {
 		// Raw user input — send body directly.
 		cfg.PtyWriter.Write([]byte(msg.Body))
 	} else {
-		// Inter-agent message — send reference.
-		line := fmt.Sprintf("[h2-message from=%s id=%s priority=%s] Read %s",
-			msg.From, msg.ID, msg.Priority, msg.FilePath)
+		// Inter-agent message — inline short messages, reference long ones.
+		prefix := "h2 message"
+		if msg.Priority == PriorityInterrupt {
+			prefix = "URGENT h2 message"
+		}
+		var line string
+		if len(msg.Body) <= maxInlineBodyLen {
+			line = fmt.Sprintf("[%s from: %s] %s",
+				prefix, msg.From, msg.Body)
+		} else {
+			line = fmt.Sprintf("[%s from: %s] Read %s",
+				prefix, msg.From, msg.FilePath)
+		}
 		cfg.PtyWriter.Write([]byte(line))
 	}
 	// Delay before sending Enter so the child's UI framework can process

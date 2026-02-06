@@ -15,10 +15,9 @@ import (
 func newSendCmd() *cobra.Command {
 	var priority string
 	var file string
-	var from string
 
 	cmd := &cobra.Command{
-		Use:   "send <name> [--priority=normal] [--file=path] [message body...]",
+		Use:   "send <name> [--priority=normal] [--file=path] [message...]",
 		Short: "Send a message to an agent",
 		Long:  "Send a message to a running agent. The message body can be provided as arguments or read from a file.",
 		Args:  cobra.MinimumNArgs(1),
@@ -40,6 +39,12 @@ func newSendCmd() *cobra.Command {
 
 			if priority == "" {
 				priority = "normal"
+			}
+
+			from := resolveActor()
+
+			if actor := os.Getenv("H2_ACTOR"); actor != "" && actor == name {
+				return fmt.Errorf("cannot send a message to yourself (%s)", name)
 			}
 
 			sockPath := daemon.SocketPath(name)
@@ -73,7 +78,6 @@ func newSendCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&priority, "priority", "normal", "Message priority (interrupt|normal|idle-first|idle)")
 	cmd.Flags().StringVar(&file, "file", "", "Read message body from file")
-	cmd.Flags().StringVar(&from, "from", "", "Sender name")
 
 	return cmd
 }

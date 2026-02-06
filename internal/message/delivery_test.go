@@ -113,8 +113,101 @@ func TestDeliver_InterAgentMessage(t *testing.T) {
 	close(stop)
 
 	out := buf.String()
-	if !strings.Contains(out, "[h2-message from=agent-a id=msg-1 priority=normal] Read /tmp/test-msg.md") {
+	if !strings.Contains(out, "[h2 message from: agent-a] do something") {
 		t.Fatalf("expected h2-message header in output, got %q", out)
+	}
+}
+
+func TestDeliver_InterAgentMessage_LongBody(t *testing.T) {
+	var buf threadSafeBuffer
+	q := NewMessageQueue()
+	stop := make(chan struct{})
+
+	longBody := strings.Repeat("x", 301)
+	msg := &Message{
+		ID:        "msg-long",
+		From:      "agent-a",
+		Priority:  PriorityNormal,
+		Body:      longBody,
+		FilePath:  "/tmp/test-long.md",
+		Status:    StatusQueued,
+		CreatedAt: time.Now(),
+	}
+	q.Enqueue(msg)
+
+	delivered := make(chan struct{}, 1)
+	go RunDelivery(DeliveryConfig{
+		Queue:     q,
+		PtyWriter: &buf,
+		IsIdle:    func() bool { return true },
+		OnDeliver: func() {
+			select {
+			case delivered <- struct{}{}:
+			default:
+			}
+		},
+		Stop: stop,
+	})
+
+	select {
+	case <-delivered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("delivery timed out")
+	}
+	close(stop)
+
+	out := buf.String()
+	if !strings.Contains(out, "[h2 message from: agent-a] Read /tmp/test-long.md") {
+		t.Fatalf("expected file path reference for long body, got %q", out)
+	}
+	if strings.Contains(out, longBody) {
+		t.Fatal("long body should not be inlined")
+	}
+}
+
+func TestDeliver_InterAgentMessage_Interrupt(t *testing.T) {
+	var buf threadSafeBuffer
+	q := NewMessageQueue()
+	stop := make(chan struct{})
+
+	msg := &Message{
+		ID:        "msg-2",
+		From:      "agent-a",
+		Priority:  PriorityInterrupt,
+		Body:      "urgent task",
+		FilePath:  "/tmp/test-urgent.md",
+		Status:    StatusQueued,
+		CreatedAt: time.Now(),
+	}
+	q.Enqueue(msg)
+
+	delivered := make(chan struct{}, 1)
+	go RunDelivery(DeliveryConfig{
+		Queue:     q,
+		PtyWriter: &buf,
+		IsIdle:    func() bool { return true },
+		WaitForIdle: func(ctx context.Context) bool {
+			return true
+		},
+		OnDeliver: func() {
+			select {
+			case delivered <- struct{}{}:
+			default:
+			}
+		},
+		Stop: stop,
+	})
+
+	select {
+	case <-delivered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("delivery timed out")
+	}
+	close(stop)
+
+	out := buf.String()
+	if !strings.Contains(out, "[URGENT h2 message from: agent-a] urgent task") {
+		t.Fatalf("expected URGENT h2 message header in output, got %q", out)
 	}
 }
 
