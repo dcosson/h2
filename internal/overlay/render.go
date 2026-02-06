@@ -338,7 +338,7 @@ func (o *Overlay) StatusLabel() string {
 
 // MenuLabel returns the formatted menu display.
 func (o *Overlay) MenuLabel() string {
-	return "Menu  Enter:passthrough  c:clear  r:redraw  q:quit"
+	return "Menu | Enter:passthrough | c:clear | r:redraw | q:quit"
 }
 
 // DebugLabel returns the debug keystroke display.
