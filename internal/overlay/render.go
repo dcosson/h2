@@ -155,27 +155,31 @@ func (o *Overlay) RenderBar() {
 	} else {
 		style = o.ModeBarStyle()
 		help := o.HelpLabel()
-		status := o.StatusLabel()
-		label = " " + o.ModeLabel() + " | " + status
+		label = " " + o.ModeLabel()
 
-		// OTEL metrics (tokens and cost)
-		if o.OtelMetrics != nil {
-			tokens, cost, connected, port := o.OtelMetrics()
-			if connected {
-				label += " | " + formatTokens(tokens) + " " + formatCost(cost)
-			} else {
-				label += fmt.Sprintf(" | [otel:%d]", port)
-			}
-		}
+		if o.Mode != ModeMenu {
+			status := o.StatusLabel()
+			label += " | " + status
 
-		// Queue indicator
-		if o.QueueStatus != nil {
-			count, paused := o.QueueStatus()
-			if count > 0 {
-				if paused {
-					label += fmt.Sprintf(" | [%d paused]", count)
+			// OTEL metrics (tokens and cost)
+			if o.OtelMetrics != nil {
+				tokens, cost, connected, port := o.OtelMetrics()
+				if connected {
+					label += " | " + formatTokens(tokens) + " " + formatCost(cost)
 				} else {
-					label += fmt.Sprintf(" | [%d queued]", count)
+					label += fmt.Sprintf(" | [otel:%d]", port)
+				}
+			}
+
+			// Queue indicator
+			if o.QueueStatus != nil {
+				count, paused := o.QueueStatus()
+				if count > 0 {
+					if paused {
+						label += fmt.Sprintf(" | [%d paused]", count)
+					} else {
+						label += fmt.Sprintf(" | [%d queued]", count)
+					}
 				}
 			}
 		}
@@ -193,8 +197,10 @@ func (o *Overlay) RenderBar() {
 	if len(label)+len(right) > o.VT.Cols {
 		if !o.ChildExited {
 			// Tight on space - drop help first, then right-align.
-			status := o.StatusLabel()
-			label = " " + o.ModeLabel() + " | " + status
+			label = " " + o.ModeLabel()
+			if o.Mode != ModeMenu {
+				label += " | " + o.StatusLabel()
+			}
 		}
 		if len(label)+len(right) > o.VT.Cols {
 			if len(label) > o.VT.Cols {
@@ -328,7 +334,7 @@ func (o *Overlay) StatusLabel() string {
 
 // MenuLabel returns the formatted menu display.
 func (o *Overlay) MenuLabel() string {
-	return "enter:passthrough  c:clear  r:redraw  q:quit"
+	return "Menu  Enter:passthrough  c:clear  r:redraw  q:quit"
 }
 
 // DebugLabel returns the debug keystroke display.

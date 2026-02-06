@@ -719,7 +719,7 @@ func TestHelpLabel_Default(t *testing.T) {
 func TestMenuLabel(t *testing.T) {
 	o := newTestOverlay(10, 80)
 	got := o.MenuLabel()
-	if got != "enter:passthrough  c:clear  r:redraw  q:quit" {
+	if got != "Menu  Enter:passthrough  c:clear  r:redraw  q:quit" {
 		t.Fatalf("unexpected menu label: %q", got)
 	}
 }
