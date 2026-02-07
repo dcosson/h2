@@ -1,4 +1,4 @@
-package bridge
+package telegram
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func TestTelegramSend(t *testing.T) {
+func TestSend(t *testing.T) {
 	var gotChatID, gotText string
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -20,14 +20,14 @@ func TestTelegramSend(t *testing.T) {
 		r.ParseForm()
 		gotChatID = r.FormValue("chat_id")
 		gotText = r.FormValue("text")
-		json.NewEncoder(w).Encode(telegramResponse{OK: true})
+		json.NewEncoder(w).Encode(apiResponse{OK: true})
 	}))
 	defer srv.Close()
 
 	tg := &Telegram{
 		Token:   "TOKEN",
 		ChatID:  42,
-		baseURL: srv.URL,
+		BaseURL: srv.URL,
 	}
 
 	err := tg.Send(context.Background(), "hello from h2")
@@ -42,16 +42,16 @@ func TestTelegramSend(t *testing.T) {
 	}
 }
 
-func TestTelegramSend_APIError(t *testing.T) {
+func TestSend_APIError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(telegramResponse{OK: false, Description: "bad request"})
+		json.NewEncoder(w).Encode(apiResponse{OK: false, Description: "bad request"})
 	}))
 	defer srv.Close()
 
 	tg := &Telegram{
 		Token:   "TOKEN",
 		ChatID:  42,
-		baseURL: srv.URL,
+		BaseURL: srv.URL,
 	}
 
 	err := tg.Send(context.Background(), "test")
@@ -63,7 +63,7 @@ func TestTelegramSend_APIError(t *testing.T) {
 	}
 }
 
-func TestTelegramStartStop(t *testing.T) {
+func TestStartStop(t *testing.T) {
 	callCount := 0
 	var mu sync.Mutex
 	var received []struct{ agent, body string }
@@ -82,21 +82,21 @@ func TestTelegramStartStop(t *testing.T) {
 
 		if n == 0 {
 			// First call: return two messages
-			json.NewEncoder(w).Encode(telegramGetUpdatesResponse{
+			json.NewEncoder(w).Encode(getUpdatesResponse{
 				OK: true,
-				Result: []telegramUpdate{
+				Result: []update{
 					{
 						UpdateID: 100,
-						Message: &telegramMessage{
+						Message: &message{
 							Text: "running-deer: check build",
-							Chat: telegramChat{ID: 42},
+							Chat: chat{ID: 42},
 						},
 					},
 					{
 						UpdateID: 101,
-						Message: &telegramMessage{
+						Message: &message{
 							Text: "plain message",
-							Chat: telegramChat{ID: 42},
+							Chat: chat{ID: 42},
 						},
 					},
 				},
@@ -111,7 +111,7 @@ func TestTelegramStartStop(t *testing.T) {
 	tg := &Telegram{
 		Token:   "TOKEN",
 		ChatID:  42,
-		baseURL: srv.URL,
+		BaseURL: srv.URL,
 	}
 
 	handler := func(agent, body string) {
@@ -153,7 +153,7 @@ func TestTelegramStartStop(t *testing.T) {
 	}
 }
 
-func TestTelegramStartStop_FiltersChatID(t *testing.T) {
+func TestStartStop_FiltersChatID(t *testing.T) {
 	var mu sync.Mutex
 	var received []string
 
@@ -168,21 +168,21 @@ func TestTelegramStartStop_FiltersChatID(t *testing.T) {
 		mu.Unlock()
 
 		if first {
-			json.NewEncoder(w).Encode(telegramGetUpdatesResponse{
+			json.NewEncoder(w).Encode(getUpdatesResponse{
 				OK: true,
-				Result: []telegramUpdate{
+				Result: []update{
 					{
 						UpdateID: 200,
-						Message: &telegramMessage{
+						Message: &message{
 							Text: "wrong chat",
-							Chat: telegramChat{ID: 999},
+							Chat: chat{ID: 999},
 						},
 					},
 					{
 						UpdateID: 201,
-						Message: &telegramMessage{
+						Message: &message{
 							Text: "right chat",
-							Chat: telegramChat{ID: 42},
+							Chat: chat{ID: 42},
 						},
 					},
 				},
@@ -196,7 +196,7 @@ func TestTelegramStartStop_FiltersChatID(t *testing.T) {
 	tg := &Telegram{
 		Token:   "TOKEN",
 		ChatID:  42,
-		baseURL: srv.URL,
+		BaseURL: srv.URL,
 	}
 
 	handler := func(agent, body string) {

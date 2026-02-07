@@ -1,19 +1,21 @@
-package bridge
+package macos_notify
 
 import (
 	"context"
 	"os/exec"
 	"sync"
 	"testing"
+
+	"h2/internal/bridge"
 )
 
-func TestMacOSNotifySend(t *testing.T) {
+func TestSend(t *testing.T) {
 	var mu sync.Mutex
 	var gotName string
 	var gotArgs []string
 
 	m := &MacOSNotify{
-		execCommand: func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		ExecCommand: func(ctx context.Context, name string, args ...string) *exec.Cmd {
 			mu.Lock()
 			gotName = name
 			gotArgs = args
@@ -47,12 +49,12 @@ func TestMacOSNotifySend(t *testing.T) {
 	}
 }
 
-func TestMacOSNotifySend_Quotes(t *testing.T) {
+func TestSend_Quotes(t *testing.T) {
 	var mu sync.Mutex
 	var gotArgs []string
 
 	m := &MacOSNotify{
-		execCommand: func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		ExecCommand: func(ctx context.Context, name string, args ...string) *exec.Cmd {
 			mu.Lock()
 			gotArgs = args
 			mu.Unlock()
@@ -75,12 +77,12 @@ func TestMacOSNotifySend_Quotes(t *testing.T) {
 	}
 }
 
-func TestMacOSNotifySend_Newlines(t *testing.T) {
+func TestSend_Newlines(t *testing.T) {
 	var mu sync.Mutex
 	var gotArgs []string
 
 	m := &MacOSNotify{
-		execCommand: func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		ExecCommand: func(ctx context.Context, name string, args ...string) *exec.Cmd {
 			mu.Lock()
 			gotArgs = args
 			mu.Unlock()
@@ -103,9 +105,9 @@ func TestMacOSNotifySend_Newlines(t *testing.T) {
 	}
 }
 
-func TestMacOSNotifySend_Error(t *testing.T) {
+func TestSend_Error(t *testing.T) {
 	m := &MacOSNotify{
-		execCommand: func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		ExecCommand: func(ctx context.Context, name string, args ...string) *exec.Cmd {
 			return exec.CommandContext(ctx, "false")
 		},
 	}
@@ -116,18 +118,15 @@ func TestMacOSNotifySend_Error(t *testing.T) {
 	}
 }
 
-func TestMacOSNotify_Interfaces(t *testing.T) {
+func TestInterfaces(t *testing.T) {
 	m := &MacOSNotify{}
 
 	// Bridge interface
-	var _ Bridge = m
+	var _ bridge.Bridge = m
 	if m.Name() != "macos_notify" {
 		t.Errorf("Name() = %q, want %q", m.Name(), "macos_notify")
 	}
 
 	// Sender interface
-	var _ Sender = m
-
-	// Should NOT implement Receiver — just verify at compile time
-	// (no assertion needed, the type simply doesn't have Start/Stop methods)
+	var _ bridge.Sender = m
 }

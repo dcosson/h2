@@ -1,4 +1,4 @@
-package bridge
+package macos_notify
 
 import (
 	"context"
@@ -7,12 +7,12 @@ import (
 	"strings"
 )
 
-// MacOSNotify implements Bridge and Sender using macOS native notifications
-// via osascript. It does not implement Receiver (send-only).
+// MacOSNotify implements bridge.Bridge and bridge.Sender using macOS native
+// notifications via osascript. It does not implement bridge.Receiver (send-only).
 type MacOSNotify struct {
-	// execCommand is used to create the exec.Cmd. If nil, defaults to
+	// ExecCommand is used to create the exec.Cmd. If nil, defaults to
 	// exec.CommandContext. Injected for testing.
-	execCommand func(ctx context.Context, name string, args ...string) *exec.Cmd
+	ExecCommand func(ctx context.Context, name string, args ...string) *exec.Cmd
 }
 
 func (m *MacOSNotify) Name() string { return "macos_notify" }
@@ -24,7 +24,7 @@ func (m *MacOSNotify) Send(ctx context.Context, text string) error {
 	escaped := escapeAppleScript(text)
 	script := fmt.Sprintf(`display notification %q with title "h2"`, escaped)
 
-	cmdFn := m.execCommand
+	cmdFn := m.ExecCommand
 	if cmdFn == nil {
 		cmdFn = exec.CommandContext
 	}

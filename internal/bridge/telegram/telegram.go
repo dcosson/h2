@@ -1,4 +1,4 @@
-package bridge
+package telegram
 
 import (
 	"context"
@@ -8,17 +8,19 @@ import (
 	"net/url"
 	"strconv"
 	"sync"
+
+	"h2/internal/bridge"
 )
 
-// Telegram implements Bridge, Sender, and Receiver using the Telegram Bot API.
-// Standard library only — no external Telegram SDK.
+// Telegram implements bridge.Bridge, bridge.Sender, and bridge.Receiver
+// using the Telegram Bot API. Standard library only — no external Telegram SDK.
 type Telegram struct {
 	Token  string
 	ChatID int64
 
-	// baseURL overrides the Telegram API base for testing.
+	// BaseURL overrides the Telegram API base for testing.
 	// If empty, defaults to "https://api.telegram.org".
-	baseURL string
+	BaseURL string
 
 	client http.Client
 	cancel context.CancelFunc
@@ -35,7 +37,7 @@ func (t *Telegram) Close() error {
 }
 
 func (t *Telegram) apiURL(method string) string {
-	base := t.baseURL
+	base := t.BaseURL
 	if base == "" {
 		base = "https://api.telegram.org"
 	}
@@ -53,7 +55,7 @@ func (t *Telegram) Send(ctx context.Context, text string) error {
 	}
 	defer resp.Body.Close()
 
-	var result telegramResponse
+	var result apiResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return fmt.Errorf("telegram send: decode response: %w", err)
 	}
@@ -66,7 +68,7 @@ func (t *Telegram) Send(ctx context.Context, text string) error {
 // Start begins long-polling for incoming messages. It spawns a goroutine
 // that polls getUpdates and calls handler for each message from the
 // configured ChatID.
-func (t *Telegram) Start(ctx context.Context, handler InboundHandler) error {
+func (t *Telegram) Start(ctx context.Context, handler bridge.InboundHandler) error {
 	ctx, cancel := context.WithCancel(ctx)
 	t.mu.Lock()
 	t.cancel = cancel
@@ -89,7 +91,7 @@ func (t *Telegram) Stop() {
 	t.wg.Wait()
 }
 
-func (t *Telegram) poll(ctx context.Context, handler InboundHandler) {
+func (t *Telegram) poll(ctx context.Context, handler bridge.InboundHandler) {
 	defer t.wg.Done()
 
 	for {
@@ -112,13 +114,13 @@ func (t *Telegram) poll(ctx context.Context, handler InboundHandler) {
 			if u.Message == nil || u.Message.Chat.ID != t.ChatID {
 				continue
 			}
-			agent, body := ParseAgentPrefix(u.Message.Text)
+			agent, body := bridge.ParseAgentPrefix(u.Message.Text)
 			handler(agent, body)
 		}
 	}
 }
 
-func (t *Telegram) getUpdates(ctx context.Context) ([]telegramUpdate, error) {
+func (t *Telegram) getUpdates(ctx context.Context) ([]update, error) {
 	params := url.Values{
 		"offset":  {strconv.FormatInt(t.offset, 10)},
 		"timeout": {"30"},
@@ -135,7 +137,7 @@ func (t *Telegram) getUpdates(ctx context.Context) ([]telegramUpdate, error) {
 	}
 	defer resp.Body.Close()
 
-	var result telegramGetUpdatesResponse
+	var result getUpdatesResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, err
 	}
@@ -147,27 +149,27 @@ func (t *Telegram) getUpdates(ctx context.Context) ([]telegramUpdate, error) {
 
 // Unexported types for JSON parsing.
 
-type telegramResponse struct {
+type apiResponse struct {
 	OK          bool   `json:"ok"`
 	Description string `json:"description,omitempty"`
 }
 
-type telegramGetUpdatesResponse struct {
-	OK          bool             `json:"ok"`
-	Description string           `json:"description,omitempty"`
-	Result      []telegramUpdate `json:"result"`
+type getUpdatesResponse struct {
+	OK          bool     `json:"ok"`
+	Description string   `json:"description,omitempty"`
+	Result      []update `json:"result"`
 }
 
-type telegramUpdate struct {
-	UpdateID int64            `json:"update_id"`
-	Message  *telegramMessage `json:"message,omitempty"`
+type update struct {
+	UpdateID int64    `json:"update_id"`
+	Message  *message `json:"message,omitempty"`
 }
 
-type telegramMessage struct {
-	Text string       `json:"text"`
-	Chat telegramChat `json:"chat"`
+type message struct {
+	Text string `json:"text"`
+	Chat chat   `json:"chat"`
 }
 
-type telegramChat struct {
+type chat struct {
 	ID int64 `json:"id"`
 }
