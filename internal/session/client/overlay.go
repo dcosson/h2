@@ -51,15 +51,12 @@ type Client struct {
 	OnModeChange func(mode InputMode)
 	QueueStatus  func() (int, bool)
 	OtelMetrics  func() (totalTokens int64, totalCostUSD float64, connected bool, port int) // returns OTEL metrics for status bar
-	OnSubmit     func(text string, priority message.Priority)     // called for non-normal input
-	OnOutput     func()                                           // called after each child output
-	OnDetach     func()                                           // called when user selects detach from menu
+	OnSubmit func(text string, priority message.Priority) // called for non-normal input
+	OnDetach func()                                       // called when user selects detach from menu
 
 	// Child process lifecycle callbacks (set by Session).
-	OnRelaunch      func() // called when user presses Enter after child exits
-	OnQuit          func() // called when user presses q after child exits or selects Quit from menu
-	OnChildExit     func()
-	OnChildRelaunch func()
+	OnRelaunch func() // called when user presses Enter after child exits
+	OnQuit     func() // called when user presses q after child exits or selects Quit from menu
 }
 
 // InitClient initializes per-client state. Called by Session after creating

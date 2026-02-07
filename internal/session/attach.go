@@ -11,41 +11,38 @@ import (
 
 // AttachSession represents an active attach client connection.
 type AttachSession struct {
-	conn net.Conn
+	conn   net.Conn
+	client *client.Client
 }
 
 // Close terminates the attach session.
-func (s *AttachSession) Close() {
-	if s.conn != nil {
-		s.conn.Close()
+func (a *AttachSession) Close() {
+	if a.conn != nil {
+		a.conn.Close()
 	}
 }
 
 // handleAttach handles an incoming attach request from a client.
 func (d *Daemon) handleAttach(conn net.Conn, req *message.Request) {
-	// Only one client at a time (v1).
-	if d.attachClient != nil {
-		message.SendResponse(conn, &message.Response{
-			Error: "another client is already attached",
-		})
-		conn.Close()
-		return
-	}
-
 	// Send OK response before switching to framed protocol.
 	if err := message.SendResponse(conn, &message.Response{OK: true}); err != nil {
 		conn.Close()
 		return
 	}
 
-	session := &AttachSession{conn: conn}
-	d.attachClient = session
-
 	s := d.Session
-	vt := s.VT
-	cl := s.Client
 
-	// Swap VT I/O to use the attach connection.
+	// Create a new client for this connection.
+	cl := s.NewClient()
+	s.AddClient(cl)
+
+	attach := &AttachSession{conn: conn, client: cl}
+
+	vt := s.VT
+
+	// Swap VT I/O to use this attach connection's client.
+	// For now, the last-attached client controls VT.Output (single-writer).
+	// Phase 5 will add proper passthrough locking.
 	vt.Mu.Lock()
 	vt.Output = &frameWriter{conn: conn}
 	vt.InputSrc = &frameInputReader{conn: conn}
@@ -67,22 +64,32 @@ func (d *Daemon) handleAttach(conn net.Conn, req *message.Request) {
 	vt.Mu.Unlock()
 
 	// Read input frames from client until disconnect.
-	d.readClientInput(conn)
+	d.readClientInput(conn, cl)
 
 	// Client disconnected — detach. Disable mouse before swapping output.
 	vt.Mu.Lock()
 	cl.OnDetach = nil
 	vt.Output.Write([]byte("\033[?1000l\033[?1006l"))
-	vt.Output = io.Discard
-	vt.InputSrc = &blockingReader{}
+
+	// Remove this client from the session.
+	s.RemoveClient(cl)
+
+	// If no more clients, output goes to discard.
+	s.clientsMu.Lock()
+	hasClients := len(s.Clients) > 0
+	s.clientsMu.Unlock()
+	if !hasClients {
+		vt.Output = io.Discard
+		vt.InputSrc = &blockingReader{}
+	}
 	vt.Mu.Unlock()
 
-	d.attachClient = nil
+	_ = attach // keep reference alive for the duration
 }
 
 // readClientInput reads framed input from the attach client and dispatches
-// it to the client.
-func (d *Daemon) readClientInput(conn net.Conn) {
+// it to the given client.
+func (d *Daemon) readClientInput(conn net.Conn, cl *client.Client) {
 	for {
 		frameType, payload, err := message.ReadFrame(conn)
 		if err != nil {
@@ -93,7 +100,6 @@ func (d *Daemon) readClientInput(conn net.Conn) {
 		switch frameType {
 		case message.FrameTypeData:
 			vt := s.VT
-			cl := s.Client
 			vt.Mu.Lock()
 			if cl.DebugKeys && len(payload) > 0 {
 				cl.AppendDebugBytes(payload)
@@ -120,7 +126,6 @@ func (d *Daemon) readClientInput(conn net.Conn) {
 			}
 			if ctrl.Type == "resize" {
 				vt := s.VT
-				cl := s.Client
 				vt.Mu.Lock()
 				childRows := ctrl.Rows - cl.ReservedRows()
 				vt.Resize(ctrl.Rows, ctrl.Cols, childRows)

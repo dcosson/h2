@@ -17,8 +17,6 @@ type Daemon struct {
 	Session   *Session
 	Listener  net.Listener
 	StartTime time.Time
-
-	attachClient *AttachSession
 }
 
 // SocketDir returns the directory for Unix domain sockets.
@@ -75,14 +73,7 @@ func RunDaemon(name, command string, args []string) error {
 	go d.acceptLoop()
 
 	// Run session in daemon mode (blocks until exit).
-	err = s.RunDaemon()
-
-	// Clean up.
-	if d.attachClient != nil {
-		d.attachClient.Close()
-	}
-
-	return err
+	return s.RunDaemon()
 }
 
 // AgentInfo returns status information about this daemon.

@@ -53,7 +53,9 @@ type Session struct {
 	AgentName string
 	Agent     *agent.Agent
 	VT        *virtualterminal.VT
-	Client    *client.Client // primary client (single-client for now)
+	Client    *client.Client // primary/interactive client (nil in daemon-only)
+	Clients   []*client.Client
+	clientsMu sync.Mutex
 
 	// ExtraEnv holds additional environment variables to pass to the child process.
 	ExtraEnv map[string]string
@@ -121,7 +123,9 @@ func (pw *sessionPtyWriter) Write(p []byte) (int, error) {
 	if err == virtualterminal.ErrPTYWriteTimeout {
 		pw.s.VT.ChildHung = true
 		pw.s.VT.KillChild()
-		pw.s.Client.RenderBar()
+		pw.s.ForEachClient(func(cl *client.Client) {
+			cl.RenderBar()
+		})
 		return 0, io.ErrClosedPipe
 	}
 	return n, err
@@ -134,72 +138,91 @@ func (s *Session) initVT(rows, cols int) {
 	s.VT.Cols = cols
 }
 
-// initClient creates and initializes the Client, wiring all callbacks.
-func (s *Session) initClient() {
-	s.Client = &client.Client{
+// NewClient creates a new Client with all session callbacks wired.
+func (s *Session) NewClient() *client.Client {
+	cl := &client.Client{
 		VT:        s.VT,
 		AgentName: s.Name,
 	}
-	s.Client.InitClient()
+	cl.InitClient()
 
 	// Wire lifecycle callbacks.
-	s.Client.OnRelaunch = func() {
+	cl.OnRelaunch = func() {
 		select {
 		case s.relaunchCh <- struct{}{}:
 		default:
 		}
 	}
-	s.Client.OnQuit = func() {
+	cl.OnQuit = func() {
 		s.Quit = true
 		select {
 		case s.quitCh <- struct{}{}:
 		default:
 		}
 	}
-	s.Client.OnModeChange = func(mode client.InputMode) {
+	cl.OnModeChange = func(mode client.InputMode) {
 		if mode == client.ModePassthrough {
 			s.Queue.Pause()
 		} else {
 			s.Queue.Unpause()
 		}
 	}
-	s.Client.QueueStatus = func() (int, bool) {
+	cl.QueueStatus = func() (int, bool) {
 		return s.Queue.PendingCount(), s.Queue.IsPaused()
 	}
-	s.Client.OtelMetrics = func() (int64, float64, bool, int) {
+	cl.OtelMetrics = func() (int64, float64, bool, int) {
 		m := s.Agent.Metrics()
 		return m.TotalTokens, m.TotalCostUSD, m.EventsReceived, s.Agent.OtelPort()
 	}
-	s.Client.OnSubmit = func(text string, pri message.Priority) {
+	cl.OnSubmit = func(text string, pri message.Priority) {
 		s.SubmitInput(text, pri)
 	}
-	s.Client.OnOutput = func() {
-		s.NoteOutput()
+	return cl
+}
+
+// AddClient adds a client to the session's client list.
+func (s *Session) AddClient(cl *client.Client) {
+	s.clientsMu.Lock()
+	s.Clients = append(s.Clients, cl)
+	s.clientsMu.Unlock()
+}
+
+// RemoveClient removes a client from the session's client list.
+func (s *Session) RemoveClient(cl *client.Client) {
+	s.clientsMu.Lock()
+	for i, c := range s.Clients {
+		if c == cl {
+			s.Clients = append(s.Clients[:i], s.Clients[i+1:]...)
+			break
+		}
 	}
-	s.Client.OnChildExit = func() {
-		s.NoteExit()
-		s.Queue.Pause()
-	}
-	s.Client.OnChildRelaunch = func() {
-		s.Queue.Unpause()
+	s.clientsMu.Unlock()
+}
+
+// ForEachClient calls fn for each connected client while holding the clients lock.
+// fn is called with VT.Mu already held by the caller.
+func (s *Session) ForEachClient(fn func(cl *client.Client)) {
+	s.clientsMu.Lock()
+	clients := make([]*client.Client, len(s.Clients))
+	copy(clients, s.Clients)
+	s.clientsMu.Unlock()
+	for _, cl := range clients {
+		fn(cl)
 	}
 }
 
 // pipeOutputCallback returns the callback for VT.PipeOutput that renders
-// all connected clients.
+// all connected clients. Called with VT.Mu held.
 func (s *Session) pipeOutputCallback() func() {
 	return func() {
-		cl := s.Client
-		if cl == nil {
-			return
-		}
-		if cl.OnOutput != nil {
-			cl.OnOutput()
-		}
-		if cl.Mode != client.ModeScroll {
-			cl.RenderScreen()
-			cl.RenderBar()
-		}
+		// NoteOutput for the session (only need to call once).
+		s.NoteOutput()
+		s.ForEachClient(func(cl *client.Client) {
+			if cl.Mode != client.ModeScroll {
+				cl.RenderScreen()
+				cl.RenderBar()
+			}
+		})
 	}
 }
 
@@ -218,12 +241,15 @@ func (s *Session) RunDaemon() error {
 	s.VT.Output = io.Discard
 
 	// Initialize client and wire callbacks.
-	s.initClient()
+	s.Client = s.NewClient()
+	s.AddClient(s.Client)
 
 	// Set up delivery callback.
 	s.OnDeliver = func() {
 		s.VT.Mu.Lock()
-		s.Client.RenderBar()
+		s.ForEachClient(func(cl *client.Client) {
+			cl.RenderBar()
+		})
 		s.VT.Mu.Unlock()
 	}
 
@@ -249,7 +275,7 @@ func (s *Session) RunDaemon() error {
 
 	// Update status bar every second.
 	stopStatus := make(chan struct{})
-	go s.Client.TickStatus(stopStatus)
+	go s.TickStatus(stopStatus)
 
 	// Pipe child output to virtual terminal.
 	go s.VT.PipeOutput(s.pipeOutputCallback())
@@ -273,7 +299,8 @@ func (s *Session) RunInteractive() error {
 	s.initVT(rows, cols)
 
 	// Initialize client.
-	s.initClient()
+	s.Client = s.NewClient()
+	s.AddClient(s.Client)
 
 	minRows := 3
 	if s.Client.DebugKeys {
@@ -295,7 +322,9 @@ func (s *Session) RunInteractive() error {
 	// Set up delivery callback.
 	s.OnDeliver = func() {
 		s.VT.Mu.Lock()
-		s.Client.RenderBar()
+		s.ForEachClient(func(cl *client.Client) {
+			cl.RenderBar()
+		})
 		s.VT.Mu.Unlock()
 	}
 
@@ -351,13 +380,14 @@ func (s *Session) lifecycleLoop(stopStatus chan struct{}, interactive bool) erro
 		s.VT.Mu.Lock()
 		s.VT.ChildExited = true
 		s.VT.ExitError = err
-		s.Client.RenderScreen()
-		s.Client.RenderBar()
+		s.ForEachClient(func(cl *client.Client) {
+			cl.RenderScreen()
+			cl.RenderBar()
+		})
 		s.VT.Mu.Unlock()
 
-		if s.Client.OnChildExit != nil {
-			s.Client.OnChildExit()
-		}
+		s.NoteExit()
+		s.Queue.Pause()
 
 		select {
 		case <-s.relaunchCh:
@@ -380,18 +410,18 @@ func (s *Session) lifecycleLoop(stopStatus chan struct{}, interactive bool) erro
 			s.VT.ChildExited = false
 			s.VT.ChildHung = false
 			s.VT.ExitError = nil
-			s.Client.ScrollOffset = 0
 			s.VT.LastOut = time.Now()
-			s.VT.Output.Write([]byte("\033[2J\033[H"))
-			s.Client.RenderScreen()
-			s.Client.RenderBar()
+			s.ForEachClient(func(cl *client.Client) {
+				cl.ScrollOffset = 0
+				s.VT.Output.Write([]byte("\033[2J\033[H"))
+				cl.RenderScreen()
+				cl.RenderBar()
+			})
 			s.VT.Mu.Unlock()
 
 			go s.VT.PipeOutput(s.pipeOutputCallback())
 
-			if s.Client.OnChildRelaunch != nil {
-				s.Client.OnChildRelaunch()
-			}
+			s.Queue.Unpause()
 			continue
 
 		case <-s.quitCh:
@@ -399,6 +429,24 @@ func (s *Session) lifecycleLoop(stopStatus chan struct{}, interactive bool) erro
 			close(stopStatus)
 			s.Stop()
 			return err
+		}
+	}
+}
+
+// TickStatus triggers periodic status bar renders for all connected clients.
+func (s *Session) TickStatus(stop <-chan struct{}) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.VT.Mu.Lock()
+			s.ForEachClient(func(cl *client.Client) {
+				cl.RenderBar()
+			})
+			s.VT.Mu.Unlock()
+		case <-stop:
+			return
 		}
 	}
 }
