@@ -15,6 +15,7 @@ import (
 func newSendCmd() *cobra.Command {
 	var priority string
 	var file string
+	var allowSelf bool
 
 	cmd := &cobra.Command{
 		Use:   "send <name> [--priority=normal] [--file=path] [message...]",
@@ -43,8 +44,10 @@ func newSendCmd() *cobra.Command {
 
 			from := resolveActor()
 
-			if actor := os.Getenv("H2_ACTOR"); actor != "" && actor == name {
-				return fmt.Errorf("cannot send a message to yourself (%s)", name)
+			if !allowSelf {
+				if actor := os.Getenv("H2_ACTOR"); actor != "" && actor == name {
+					return fmt.Errorf("cannot send a message to yourself (%s); use --allow-self to override", name)
+				}
 			}
 
 			sockPath, findErr := socketdir.Find(name)
@@ -81,6 +84,7 @@ func newSendCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&priority, "priority", "normal", "Message priority (interrupt|normal|idle-first|idle)")
 	cmd.Flags().StringVar(&file, "file", "", "Read message body from file")
+	cmd.Flags().BoolVar(&allowSelf, "allow-self", false, "Allow sending a message to yourself")
 
 	return cmd
 }
