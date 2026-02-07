@@ -12,8 +12,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"h2/internal/session"
 	"h2/internal/session/message"
+	"h2/internal/socketdir"
 )
 
 func newAttachCmd() *cobra.Command {
@@ -29,7 +29,10 @@ func newAttachCmd() *cobra.Command {
 
 // doAttach connects to a running daemon and proxies terminal I/O.
 func doAttach(name string) error {
-	sockPath := session.SocketPath(name)
+	sockPath, findErr := socketdir.Find(name)
+	if findErr != nil {
+		return agentConnError(name, findErr)
+	}
 	conn, err := net.Dial("unix", sockPath)
 	if err != nil {
 		return agentConnError(name, err)

@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"h2/internal/session"
 	"h2/internal/session/message"
+	"h2/internal/socketdir"
 )
 
 func newShowCmd() *cobra.Command {
@@ -20,13 +20,13 @@ func newShowCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			messageID := args[0]
 
-			names, err := session.ListAgents()
+			agents, err := socketdir.ListByType(socketdir.TypeAgent)
 			if err != nil {
 				return err
 			}
 
-			for _, name := range names {
-				info := queryMessage(name, messageID)
+			for _, agent := range agents {
+				info := queryMessage(agent.Path, messageID)
 				if info != nil {
 					fmt.Printf("ID:          %s\n", info.ID)
 					fmt.Printf("From:        %s\n", info.From)
@@ -46,8 +46,7 @@ func newShowCmd() *cobra.Command {
 	}
 }
 
-func queryMessage(agentName, messageID string) *message.MessageInfo {
-	sockPath := session.SocketPath(agentName)
+func queryMessage(sockPath, messageID string) *message.MessageInfo {
 	conn, err := net.DialTimeout("unix", sockPath, 2*time.Second)
 	if err != nil {
 		return nil

@@ -11,6 +11,7 @@ import (
 
 	"h2/internal/bridge"
 	"h2/internal/session/message"
+	"h2/internal/socketdir"
 )
 
 // --- Mock bridges ---
@@ -65,7 +66,7 @@ type mockAgent struct {
 
 func newMockAgent(t *testing.T, socketDir, name string) *mockAgent {
 	t.Helper()
-	sockPath := filepath.Join(socketDir, name+".sock")
+	sockPath := filepath.Join(socketDir, socketdir.Format(socketdir.TypeAgent, name))
 	ln, err := net.Listen("unix", sockPath)
 	if err != nil {
 		t.Fatal(err)
@@ -257,7 +258,7 @@ func TestSocketListener(t *testing.T) {
 	errCh := make(chan error, 1)
 	go func() { errCh <- svc.Run(ctx) }()
 
-	sockPath := filepath.Join(tmpDir, BridgeSocketName+".sock")
+	sockPath := filepath.Join(tmpDir, socketdir.Format(socketdir.TypeBridge, "alice"))
 	waitForSocket(t, sockPath)
 
 	// Connect to the bridge socket and send a message.
@@ -313,7 +314,7 @@ func TestRunStartsAndStopsReceivers(t *testing.T) {
 	errCh := make(chan error, 1)
 	go func() { errCh <- svc.Run(ctx) }()
 
-	sockPath := filepath.Join(tmpDir, BridgeSocketName+".sock")
+	sockPath := filepath.Join(tmpDir, socketdir.Format(socketdir.TypeBridge, "alice"))
 	waitForSocket(t, sockPath)
 
 	if !recv.started {
@@ -350,9 +351,9 @@ func TestResolveDefaultTarget_LastSender(t *testing.T) {
 func TestResolveDefaultTarget_FirstAgent(t *testing.T) {
 	tmpDir := t.TempDir()
 	// Create fake socket files (don't need real listeners for this test).
-	os.WriteFile(filepath.Join(tmpDir, "alpha.sock"), nil, 0o600)
-	os.WriteFile(filepath.Join(tmpDir, "beta.sock"), nil, 0o600)
-	os.WriteFile(filepath.Join(tmpDir, BridgeSocketName+".sock"), nil, 0o600)
+	os.WriteFile(filepath.Join(tmpDir, socketdir.Format(socketdir.TypeAgent, "alpha")), nil, 0o600)
+	os.WriteFile(filepath.Join(tmpDir, socketdir.Format(socketdir.TypeAgent, "beta")), nil, 0o600)
+	os.WriteFile(filepath.Join(tmpDir, socketdir.Format(socketdir.TypeBridge, "alice")), nil, 0o600)
 
 	svc := New(nil, "", tmpDir, "alice")
 	if got := svc.resolveDefaultTarget(); got != "alpha" {

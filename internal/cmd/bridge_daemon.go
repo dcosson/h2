@@ -10,7 +10,7 @@ import (
 
 	"h2/internal/bridgeservice"
 	"h2/internal/config"
-	"h2/internal/session"
+	"h2/internal/socketdir"
 )
 
 func newBridgeDaemonCmd() *cobra.Command {
@@ -37,7 +37,7 @@ func newBridgeDaemonCmd() *cobra.Command {
 				return fmt.Errorf("no bridges configured for user %q", user)
 			}
 
-			svc := bridgeservice.New(bridges, concierge, session.SocketDir(), user)
+			svc := bridgeservice.New(bridges, concierge, socketdir.Dir(), user)
 
 			ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer cancel()

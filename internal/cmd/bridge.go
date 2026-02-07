@@ -58,7 +58,7 @@ only the bridge service.`,
 
 			// Fork the bridge service as a background daemon.
 			fmt.Fprintf(os.Stderr, "Starting bridge service for user %q...\n", user)
-			if err := bridgeservice.ForkBridge(session.SocketDir(), user, concierge); err != nil {
+			if err := bridgeservice.ForkBridge(user, concierge); err != nil {
 				return err
 			}
 			fmt.Fprintf(os.Stderr, "Bridge service started.\n")

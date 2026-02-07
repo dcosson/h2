@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"h2/internal/session"
 	"h2/internal/session/message"
+	"h2/internal/socketdir"
 )
 
 func newLsCmd() *cobra.Command {
@@ -17,22 +17,42 @@ func newLsCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List running agents",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			names, err := session.ListAgents()
+			entries, err := socketdir.List()
 			if err != nil {
 				return err
 			}
-			if len(names) == 0 {
+			if len(entries) == 0 {
 				fmt.Println("No running agents.")
 				return nil
 			}
-			fmt.Printf("\033[1mOpen Sessions:\033[0m\n")
-			for _, name := range names {
-				info := queryAgent(name)
-				if info != nil {
-					printAgentLine(info)
-				} else {
-					// Red X for unresponsive agents.
-					fmt.Printf("  \033[31m✗\033[0m %s \033[2m(not responding)\033[0m\n", name)
+
+			// Group by type.
+			var agents, bridges []socketdir.Entry
+			for _, e := range entries {
+				switch e.Type {
+				case socketdir.TypeAgent:
+					agents = append(agents, e)
+				case socketdir.TypeBridge:
+					bridges = append(bridges, e)
+				}
+			}
+
+			if len(bridges) > 0 {
+				fmt.Printf("\033[1mBridges:\033[0m\n")
+				for _, e := range bridges {
+					fmt.Printf("  \033[32m●\033[0m %s\n", e.Name)
+				}
+			}
+
+			if len(agents) > 0 {
+				fmt.Printf("\033[1mAgents:\033[0m\n")
+				for _, e := range agents {
+					info := queryAgent(e.Path)
+					if info != nil {
+						printAgentLine(info)
+					} else {
+						fmt.Printf("  \033[31m✗\033[0m %s \033[2m(not responding)\033[0m\n", e.Name)
+					}
 				}
 			}
 			return nil
@@ -95,15 +115,19 @@ func newLsAlias(listCmd *cobra.Command) *cobra.Command {
 // agentConnError returns an error for a failed agent connection that includes
 // the list of available agents.
 func agentConnError(name string, err error) error {
-	agents, listErr := session.ListAgents()
+	agents, listErr := socketdir.ListByType(socketdir.TypeAgent)
 	if listErr != nil || len(agents) == 0 {
 		return fmt.Errorf("cannot connect to agent %q (no running agents)\n\nStart one with: h2 run --name <name> <command>", name)
 	}
-	return fmt.Errorf("cannot connect to agent %q\n\nAvailable agents: %s", name, strings.Join(agents, ", "))
+	names := make([]string, len(agents))
+	for i, a := range agents {
+		names[i] = a.Name
+	}
+	return fmt.Errorf("cannot connect to agent %q\n\nAvailable agents: %s", name, strings.Join(names, ", "))
 }
 
-func queryAgent(name string) *message.AgentInfo {
-	sockPath := session.SocketPath(name)
+// queryAgent connects to a socket path and queries agent status.
+func queryAgent(sockPath string) *message.AgentInfo {
 	conn, err := net.DialTimeout("unix", sockPath, 2*time.Second)
 	if err != nil {
 		return nil

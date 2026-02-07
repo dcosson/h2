@@ -5,11 +5,11 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"time"
 
 	"h2/internal/session/message"
 	"h2/internal/session/virtualterminal"
+	"h2/internal/socketdir"
 )
 
 // Daemon manages the Unix socket listener and attach protocol for a Session.
@@ -19,16 +19,6 @@ type Daemon struct {
 	StartTime time.Time
 }
 
-// SocketDir returns the directory for Unix domain sockets.
-func SocketDir() string {
-	return filepath.Join(os.Getenv("HOME"), ".h2", "sockets")
-}
-
-// SocketPath returns the socket path for a given agent name.
-func SocketPath(name string) string {
-	return filepath.Join(SocketDir(), name+".sock")
-}
-
 // RunDaemon creates a Session and Daemon, sets up the socket, and runs
 // the session in daemon mode. This is the main entry point for the _daemon command.
 func RunDaemon(name, command string, args []string) error {
@@ -36,11 +26,11 @@ func RunDaemon(name, command string, args []string) error {
 	s.StartTime = time.Now()
 
 	// Create socket directory.
-	if err := os.MkdirAll(SocketDir(), 0o700); err != nil {
+	if err := os.MkdirAll(socketdir.Dir(), 0o700); err != nil {
 		return fmt.Errorf("create socket dir: %w", err)
 	}
 
-	sockPath := SocketPath(name)
+	sockPath := socketdir.Path(socketdir.TypeAgent, name)
 
 	// Check if socket already exists.
 	if _, err := os.Stat(sockPath); err == nil {
@@ -90,32 +80,6 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 	}
 }
 
-// ListAgents scans the socket directory for running agents.
-// Sockets with a "_" prefix (e.g. _bridge) are internal services and excluded.
-func ListAgents() ([]string, error) {
-	dir := SocketDir()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var names []string
-	for _, e := range entries {
-		name := e.Name()
-		if filepath.Ext(name) != ".sock" {
-			continue
-		}
-		base := name[:len(name)-5]
-		if len(base) > 0 && base[0] == '_' {
-			continue
-		}
-		names = append(names, base)
-	}
-	return names, nil
-}
-
 // ForkDaemon starts a daemon in a background process by re-execing with
 // the hidden _daemon subcommand.
 func ForkDaemon(name string, command string, args []string) error {
@@ -155,7 +119,7 @@ func ForkDaemon(name string, command string, args []string) error {
 	}()
 
 	// Wait for socket to appear.
-	sockPath := SocketPath(name)
+	sockPath := socketdir.Path(socketdir.TypeAgent, name)
 	for i := 0; i < 50; i++ {
 		time.Sleep(100 * time.Millisecond)
 		if _, err := os.Stat(sockPath); err == nil {

@@ -7,12 +7,14 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"h2/internal/socketdir"
 )
 
 // ForkBridge starts the bridge service as a background daemon process.
 // It re-execs with the hidden _bridge-service subcommand and waits for
 // the bridge socket to appear.
-func ForkBridge(socketDir, user, concierge string) error {
+func ForkBridge(user, concierge string) error {
 	exePath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("find executable: %w", err)
@@ -32,7 +34,7 @@ func ForkBridge(socketDir, user, concierge string) error {
 	}
 	cmd.Stdin = devNull
 
-	logDir := filepath.Join(filepath.Dir(socketDir), "logs")
+	logDir := filepath.Join(filepath.Dir(socketdir.Dir()), "logs")
 	os.MkdirAll(logDir, 0o700)
 	logFile, err := os.OpenFile(filepath.Join(logDir, "bridge.log"),
 		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
@@ -59,7 +61,7 @@ func ForkBridge(socketDir, user, concierge string) error {
 	}()
 
 	// Wait for bridge socket to appear.
-	sockPath := filepath.Join(socketDir, BridgeSocketName+".sock")
+	sockPath := socketdir.Path(socketdir.TypeBridge, user)
 	for i := 0; i < 50; i++ {
 		time.Sleep(100 * time.Millisecond)
 		if _, err := os.Stat(sockPath); err == nil {

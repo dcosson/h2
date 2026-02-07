@@ -11,11 +11,8 @@ import (
 
 	"h2/internal/bridge"
 	"h2/internal/session/message"
+	"h2/internal/socketdir"
 )
-
-// BridgeSocketName is the socket name used by the bridge service.
-// Agents send outbound messages with: h2 send _bridge "message"
-const BridgeSocketName = "_bridge"
 
 // Service manages bridge instances and routes messages between external
 // platforms (Telegram, macOS notifications) and h2 agent sessions.
@@ -61,7 +58,7 @@ func (s *Service) Run(ctx context.Context) error {
 		}
 	}
 
-	sockPath := filepath.Join(s.socketDir, BridgeSocketName+".sock")
+	sockPath := filepath.Join(s.socketDir, socketdir.Format(socketdir.TypeBridge, s.user))
 
 	// Clean up stale socket.
 	if _, err := os.Stat(sockPath); err == nil {
@@ -161,7 +158,7 @@ func (s *Service) handleOutbound(from, body string) {
 
 // sendToAgent connects to an agent's socket and sends a message.
 func (s *Service) sendToAgent(name, from, body string) error {
-	sockPath := filepath.Join(s.socketDir, name+".sock")
+	sockPath := filepath.Join(s.socketDir, socketdir.Format(socketdir.TypeAgent, name))
 	conn, err := net.Dial("unix", sockPath)
 	if err != nil {
 		return fmt.Errorf("connect to %s: %w", name, err)
@@ -200,31 +197,10 @@ func (s *Service) resolveDefaultTarget() string {
 		return last
 	}
 
-	// Fall back to first agent socket (excluding the bridge itself).
-	agents := s.listAgents()
+	// Fall back to first agent socket.
+	agents, _ := socketdir.ListByTypeIn(s.socketDir, socketdir.TypeAgent)
 	if len(agents) > 0 {
-		return agents[0]
+		return agents[0].Name
 	}
 	return ""
-}
-
-// listAgents returns agent names from the socket directory, excluding the bridge socket.
-func (s *Service) listAgents() []string {
-	entries, err := os.ReadDir(s.socketDir)
-	if err != nil {
-		return nil
-	}
-	var names []string
-	for _, e := range entries {
-		name := e.Name()
-		if filepath.Ext(name) != ".sock" {
-			continue
-		}
-		base := name[:len(name)-5]
-		if base == BridgeSocketName {
-			continue
-		}
-		names = append(names, base)
-	}
-	return names
 }
