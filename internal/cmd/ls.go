@@ -38,7 +38,7 @@ func newLsCmd() *cobra.Command {
 			}
 
 			if len(bridges) > 0 {
-				fmt.Printf("\033[1mBridges:\033[0m\n")
+				fmt.Printf("\033[1mBridge Users:\033[0m\n")
 				for _, e := range bridges {
 					fmt.Printf("  \033[32m●\033[0m %s\n", e.Name)
 				}
