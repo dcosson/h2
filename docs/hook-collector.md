@@ -285,15 +285,35 @@ type OtelCollector struct {
 func (c *OtelCollector) Metrics() OtelMetrics { ... }
 
 // HookCollector — accumulates lifecycle data from Claude Code hooks.
-// Pure data: receives hook events, updates state, signals notify.
+// Pure data: receives hook events, updates state, signals event channel.
 type HookCollector struct {
     mu            sync.RWMutex
     lastEvent     string       // "PreToolUse", "PostToolUse", etc.
     lastEventTime time.Time
     lastToolName  string       // from PreToolUse/PostToolUse tool_name
     toolUseCount  int64        // total tool invocations seen
-    subagentCount int          // increment on SubagentStart, decrement on SubagentStop
-    notify        chan struct{}
+    eventCh       chan string   // sends event name (not just signal) so Agent can interpret
+}
+
+// ProcessEvent records a hook event and sends the event name to the Agent.
+func (c *HookCollector) ProcessEvent(eventName string, payload json.RawMessage) {
+    c.mu.Lock()
+    c.lastEvent = eventName
+    c.lastEventTime = time.Now()
+    // Extract tool_name from PreToolUse/PostToolUse payloads
+    if eventName == "PreToolUse" || eventName == "PostToolUse" {
+        c.lastToolName = extractToolName(payload)
+    }
+    if eventName == "PreToolUse" {
+        c.toolUseCount++
+    }
+    c.mu.Unlock()
+
+    // Send event name to Agent's state watcher (non-blocking)
+    select {
+    case c.eventCh <- eventName:
+    default:
+    }
 }
 
 // State returns a point-in-time copy of accumulated data.
@@ -382,8 +402,8 @@ func (a *Agent) watchState() {
         select {
         case <-a.otelNotify():
             a.handleCollectorActivity(AuthorityOtel)
-        case <-a.hooksNotify():
-            a.handleCollectorActivity(AuthorityHooks)
+        case event := <-a.hooksEventCh():
+            a.handleHookEvent(event)
         case <-a.outputNotify:
             a.handleCollectorActivity(AuthorityOutputTimer)
         case <-a.idleTimer.C:
@@ -408,6 +428,33 @@ func (a *Agent) handleCollectorActivity(source IdleAuthority) {
     }
 }
 
+// handleHookEvent is called when the hook collector receives an event.
+// It updates derived state based on the hook event type.
+func (a *Agent) handleHookEvent(eventName string) {
+    a.mu.Lock()
+    defer a.mu.Unlock()
+
+    // Promote to hook authority on first hook event
+    if a.idleAuthority < AuthorityHooks {
+        a.idleAuthority = AuthorityHooks
+    }
+
+    switch eventName {
+    case "SessionStart":
+        // Session started — just commit authority, no state change yet
+    case "UserPromptSubmit":
+        a.setStateLocked(AgentActive)
+    case "PreToolUse", "PostToolUse":
+        a.setStateLocked(AgentActive)
+    case "PermissionRequest":
+        a.setStateLocked(AgentActive) // blocked on permission, but still "active"
+    case "Stop":
+        a.setStateLocked(AgentIdle)
+    case "SessionEnd":
+        a.setStateLocked(AgentExited)
+    }
+}
+
 // otelNotify returns the OTEL collector's notify channel, or a nil channel
 // (blocks forever) if OTEL is not active.
 func (a *Agent) otelNotify() <-chan struct{} {
@@ -415,9 +462,10 @@ func (a *Agent) otelNotify() <-chan struct{} {
     return nil
 }
 
-// hooksNotify returns the hook collector's notify channel, or nil.
-func (a *Agent) hooksNotify() <-chan struct{} {
-    if a.hooks != nil { return a.hooks.notify }
+// hooksEventCh returns the hook collector's event channel, or nil.
+// Sends event names (e.g. "PreToolUse") so watchState can interpret them.
+func (a *Agent) hooksEventCh() <-chan string {
+    if a.hooks != nil { return a.hooks.eventCh }
     return nil
 }
 ```
@@ -595,20 +643,45 @@ Claude Code fires hook
 
 ### Hook Configuration
 
-Users configure Claude Code to call `h2 hook` for desired events:
+Users manually configure Claude Code to call `h2 hook` for the events we use.
+No auto-install — if we add a setup command later it would be a separate `h2 setup-hooks`.
+
+The `h2 hook` command is fast (reads stdin, sends to local Unix socket, exits) —
+well under 100ms. No need for async hooks.
 
 ```json
 {
   "hooks": {
+    "SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": "h2 hook", "timeout": 5}]}],
+    "SessionEnd": [{"matcher": "", "hooks": [{"type": "command", "command": "h2 hook", "timeout": 5}]}],
+    "UserPromptSubmit": [{"matcher": "", "hooks": [{"type": "command", "command": "h2 hook", "timeout": 5}]}],
     "PreToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": "h2 hook", "timeout": 5}]}],
     "PostToolUse": [{"matcher": "", "hooks": [{"type": "command", "command": "h2 hook", "timeout": 5}]}],
-    "Notification": [{"matcher": "", "hooks": [{"type": "command", "command": "h2 hook", "timeout": 5}]}],
-    "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "h2 hook", "timeout": 5}]}],
-    "SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": "h2 hook", "timeout": 5}]}],
-    "SessionEnd": [{"matcher": "", "hooks": [{"type": "command", "command": "h2 hook", "timeout": 5}]}]
+    "PermissionRequest": [{"matcher": "", "hooks": [{"type": "command", "command": "h2 hook", "timeout": 5}]}],
+    "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "h2 hook", "timeout": 5}]}]
   }
 }
 ```
+
+### Hook-driven state machine
+
+The hook events map to agent state transitions:
+
+```
+SessionStart       → commit hook authority (earliest signal hooks are working)
+UserPromptSubmit   → active (agent starts working on a turn)
+PreToolUse         → active (detail: which tool, update tool count)
+PostToolUse        → active (tool done, might do more)
+PermissionRequest  → active (blocked on permission, but still working)
+Stop               → idle (turn finished, waiting for input)
+SessionEnd         → exited
+```
+
+Note: `Stop` is preferred over `Notification(idle_prompt)` for idle detection.
+Stop fires at the exact moment the turn ends. idle_prompt is a UI-level nudge
+that may have delays. PermissionRequest is preferred over
+`Notification(permission_prompt)` for the same reason — it has richer data
+(tool_name, tool_input) and fires at the precise moment.
 
 ## Implementation Order
 
@@ -651,10 +724,16 @@ Users configure Claude Code to call `h2 hook` for desired events:
 - `internal/cmd/ls.go` — display collector-derived info with graceful degradation
 - `internal/cmd/root.go` — register hook command
 
-## Open Questions
+## Decisions
 
-1. **Auto-configure hooks?** Should `h2 run` automatically write Claude Code hook config, or require manual setup? Auto-config is more convenient but modifying the user's settings is invasive.
+1. **No auto-configure.** Users manually add hook config to their Claude Code settings.
+   A future `h2 setup-hooks` command could automate this, but it's not in scope.
 
-2. **Async hooks?** Claude Code supports `"async": true` on hooks, which means they run in the background without blocking. This would be ideal for our use case (we never want to block Claude), but we need to verify async hooks still get stdin.
+2. **Sync hooks.** `h2 hook` is fast enough (<100ms) that async is unnecessary.
+   It reads stdin JSON, sends to a local Unix socket, and exits.
 
-3. **Event filtering.** Do we want all 14 hook events, or start with a subset? Suggested minimal set: PreToolUse, PostToolUse, Notification, Stop, SessionStart, SessionEnd.
+3. **7 hook events.** SessionStart, SessionEnd, UserPromptSubmit, PreToolUse,
+   PostToolUse, PermissionRequest, Stop. This gives complete turn lifecycle
+   coverage with no blind spots. Stop is preferred over Notification(idle_prompt)
+   for idle detection; PermissionRequest over Notification(permission_prompt) for
+   richer data.
