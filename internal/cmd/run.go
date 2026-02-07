@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"h2/internal/daemon"
+	"h2/internal/session"
 )
 
 func newRunCmd() *cobra.Command {
@@ -20,11 +20,11 @@ func newRunCmd() *cobra.Command {
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if name == "" {
-				name = daemon.GenerateName()
+				name = session.GenerateName()
 			}
 
 			// Fork a daemon process.
-			if err := daemon.ForkDaemon(name, args[0], args[1:]); err != nil {
+			if err := session.ForkDaemon(name, args[0], args[1:]); err != nil {
 				return err
 			}
 

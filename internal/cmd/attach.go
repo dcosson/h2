@@ -12,8 +12,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"h2/internal/daemon"
-	"h2/internal/message"
+	"h2/internal/session"
+	"h2/internal/session/message"
 )
 
 func newAttachCmd() *cobra.Command {
@@ -29,7 +29,7 @@ func newAttachCmd() *cobra.Command {
 
 // doAttach connects to a running daemon and proxies terminal I/O.
 func doAttach(name string) error {
-	sockPath := daemon.SocketPath(name)
+	sockPath := session.SocketPath(name)
 	conn, err := net.Dial("unix", sockPath)
 	if err != nil {
 		return agentConnError(name, err)
@@ -92,7 +92,7 @@ func doAttach(name string) error {
 	var closeOnce sync.Once
 	closeDone := func() { closeOnce.Do(func() { close(done) }) }
 
-	// Goroutine: stdin → data frames to daemon.
+	// Goroutine: stdin → data frames to session.
 	go func() {
 		defer closeDone()
 		buf := make([]byte, 4096)

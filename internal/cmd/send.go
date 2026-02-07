@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"h2/internal/daemon"
-	"h2/internal/message"
+	"h2/internal/session"
+	"h2/internal/session/message"
 )
 
 func newSendCmd() *cobra.Command {
@@ -47,7 +47,7 @@ func newSendCmd() *cobra.Command {
 				return fmt.Errorf("cannot send a message to yourself (%s)", name)
 			}
 
-			sockPath := daemon.SocketPath(name)
+			sockPath := session.SocketPath(name)
 			conn, err := net.Dial("unix", sockPath)
 			if err != nil {
 				return agentConnError(name, err)

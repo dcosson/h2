@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"h2/internal/message"
+	"h2/internal/session/message"
 )
 
 func TestStateTransitions_ActiveToIdle(t *testing.T) {

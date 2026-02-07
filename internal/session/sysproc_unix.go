@@ -1,4 +1,4 @@
-package daemon
+package session
 
 import "syscall"
 

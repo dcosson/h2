@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"h2/internal/daemon"
-	"h2/internal/message"
+	"h2/internal/session"
+	"h2/internal/session/message"
 )
 
 func newShowCmd() *cobra.Command {
@@ -20,7 +20,7 @@ func newShowCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			messageID := args[0]
 
-			names, err := daemon.ListAgents()
+			names, err := session.ListAgents()
 			if err != nil {
 				return err
 			}
@@ -47,7 +47,7 @@ func newShowCmd() *cobra.Command {
 }
 
 func queryMessage(agentName, messageID string) *message.MessageInfo {
-	sockPath := daemon.SocketPath(agentName)
+	sockPath := session.SocketPath(agentName)
 	conn, err := net.DialTimeout("unix", sockPath, 2*time.Second)
 	if err != nil {
 		return nil

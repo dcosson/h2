@@ -1,4 +1,4 @@
-package overlay
+package client
 
 import (
 	"bytes"
@@ -12,8 +12,8 @@ import (
 
 	"github.com/vito/midterm"
 
-	"h2/internal/message"
-	"h2/internal/virtualterminal"
+	"h2/internal/session/message"
+	"h2/internal/session/virtualterminal"
 )
 
 // RenderScreen renders the virtual terminal buffer to the output.

@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"h2/internal/session/agent"
 )
 
 func TestOtelCollector_StartsOnRandomPort(t *testing.T) {
@@ -107,7 +109,7 @@ func TestOtelCollector_AcceptsLogsAndSignalsActivity(t *testing.T) {
 
 	// Check that otelNotify was signaled.
 	select {
-	case <-s.otelNotify:
+	case <-s.Agent.OtelNotify():
 		// Good — event was signaled.
 	default:
 		t.Fatal("expected otelNotify to be signaled")
@@ -284,7 +286,7 @@ func TestFormatTokens(t *testing.T) {
 		{10000000, "10M"},
 	}
 	for _, tt := range tests {
-		got := FormatTokens(tt.n)
+		got := agent.FormatTokens(tt.n)
 		if got != tt.want {
 			t.Errorf("FormatTokens(%d) = %q, want %q", tt.n, got, tt.want)
 		}
@@ -306,7 +308,7 @@ func TestFormatCost(t *testing.T) {
 		{10.50, "$10.50"},
 	}
 	for _, tt := range tests {
-		got := FormatCost(tt.usd)
+		got := agent.FormatCost(tt.usd)
 		if got != tt.want {
 			t.Errorf("FormatCost(%f) = %q, want %q", tt.usd, got, tt.want)
 		}

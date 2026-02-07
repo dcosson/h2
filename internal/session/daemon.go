@@ -1,4 +1,4 @@
-package daemon
+package session
 
 import (
 	"fmt"
@@ -9,10 +9,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"h2/internal/message"
-	"h2/internal/overlay"
-	"h2/internal/session"
-	"h2/internal/virtualterminal"
+	"h2/internal/session/client"
+	"h2/internal/session/message"
+	"h2/internal/session/virtualterminal"
 )
 
 // Daemon manages the lifecycle of a wrapped child process, its Unix socket
@@ -22,8 +21,8 @@ type Daemon struct {
 	Command   string
 	Args      []string
 	VT        *virtualterminal.VT
-	Overlay   *overlay.Overlay
-	Session   *session.Session
+	Overlay   *client.Overlay
+	Session   *Session
 	Listener  net.Listener
 	StartTime time.Time
 
@@ -77,13 +76,13 @@ func (d *Daemon) Run() error {
 
 	// Set up VT and overlay.
 	d.VT = &virtualterminal.VT{}
-	d.Overlay = &overlay.Overlay{
+	d.Overlay = &client.Overlay{
 		VT:        d.VT,
 		AgentName: d.Name,
 	}
 
 	// Create session (owns queue, delivery, state management).
-	d.Session = session.New(d.Name, &daemonPtyWriter{d: d})
+	d.Session = New(d.Name, &daemonPtyWriter{d: d})
 	d.Session.OnDeliver = func() {
 		d.VT.Mu.Lock()
 		d.Overlay.RenderBar()
@@ -101,8 +100,8 @@ func (d *Daemon) Run() error {
 	d.Overlay.ExtraEnv["H2_ACTOR"] = d.Name
 
 	// Wire overlay callbacks.
-	d.Overlay.OnModeChange = func(mode overlay.InputMode) {
-		if mode == overlay.ModePassthrough {
+	d.Overlay.OnModeChange = func(mode client.InputMode) {
+		if mode == client.ModePassthrough {
 			d.Session.Queue.Pause()
 		} else {
 			d.Session.Queue.Unpause()

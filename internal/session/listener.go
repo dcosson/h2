@@ -1,9 +1,9 @@
-package daemon
+package session
 
 import (
 	"net"
 
-	"h2/internal/message"
+	"h2/internal/session/message"
 )
 
 // acceptLoop accepts connections on the Unix socket and routes requests.

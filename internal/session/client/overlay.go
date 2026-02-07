@@ -1,4 +1,4 @@
-package overlay
+package client
 
 import (
 	"fmt"
@@ -12,8 +12,8 @@ import (
 	"github.com/vito/midterm"
 	"golang.org/x/term"
 
-	"h2/internal/message"
-	"h2/internal/virtualterminal"
+	"h2/internal/session/message"
+	"h2/internal/session/virtualterminal"
 )
 
 // InputMode represents the current input mode of the overlay.

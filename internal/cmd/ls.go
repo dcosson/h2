@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"h2/internal/daemon"
-	"h2/internal/message"
+	"h2/internal/session"
+	"h2/internal/session/message"
 )
 
 func newLsCmd() *cobra.Command {
@@ -17,7 +17,7 @@ func newLsCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List running agents",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			names, err := daemon.ListAgents()
+			names, err := session.ListAgents()
 			if err != nil {
 				return err
 			}
@@ -95,7 +95,7 @@ func newLsAlias(listCmd *cobra.Command) *cobra.Command {
 // agentConnError returns an error for a failed agent connection that includes
 // the list of available agents.
 func agentConnError(name string, err error) error {
-	agents, listErr := daemon.ListAgents()
+	agents, listErr := session.ListAgents()
 	if listErr != nil || len(agents) == 0 {
 		return fmt.Errorf("cannot connect to agent %q (no running agents)\n\nStart one with: h2 run --name <name> <command>", name)
 	}
@@ -103,7 +103,7 @@ func agentConnError(name string, err error) error {
 }
 
 func queryAgent(name string) *message.AgentInfo {
-	sockPath := daemon.SocketPath(name)
+	sockPath := session.SocketPath(name)
 	conn, err := net.DialTimeout("unix", sockPath, 2*time.Second)
 	if err != nil {
 		return nil

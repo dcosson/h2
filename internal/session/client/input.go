@@ -1,4 +1,4 @@
-package overlay
+package client
 
 import (
 	"strconv"
@@ -6,8 +6,8 @@ import (
 	"syscall"
 	"time"
 
-	"h2/internal/message"
-	"h2/internal/virtualterminal"
+	"h2/internal/session/message"
+	"h2/internal/session/virtualterminal"
 )
 
 const ptyWriteTimeout = 3 * time.Second

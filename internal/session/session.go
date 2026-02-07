@@ -3,14 +3,13 @@ package session
 import (
 	"context"
 	"io"
-	"net"
-	"net/http"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
-	"h2/internal/message"
+	"h2/internal/session/agent"
+	"h2/internal/session/message"
 )
 
 const idleThreshold = 2 * time.Second
@@ -46,6 +45,7 @@ type Session struct {
 	Queue     *message.MessageQueue
 	AgentName string
 	PtyWriter io.Writer // writes to PTY under VT.Mu
+	Agent     *agent.Agent
 
 	mu             sync.Mutex
 	state          State
@@ -53,15 +53,7 @@ type Session struct {
 	stateCh        chan struct{}
 
 	outputNotify chan struct{} // buffered(1), signaled on child output
-	otelNotify   chan struct{} // buffered(1), signaled on OTEL event
 	exitNotify   chan struct{} // buffered(1), signaled on child exit
-
-	// OTEL collector
-	otelListener net.Listener
-	otelServer   *http.Server
-	otelPort     int
-	agentHelper  AgentHelper
-	otelMetrics  *OtelMetrics
 
 	stopCh chan struct{}
 
@@ -70,28 +62,46 @@ type Session struct {
 }
 
 // New creates a new Session with the given name and PTY writer.
-// Uses Claude Code helper by default — call SetAgentHelper to change.
+// Uses Claude Code helper by default — call Agent.SetHelper to change.
 func New(name string, ptyWriter io.Writer) *Session {
 	return &Session{
 		Name:           name,
 		AgentName:      name,
 		Queue:          message.NewMessageQueue(),
 		PtyWriter:      ptyWriter,
+		Agent:          agent.New(agent.NewClaudeCodeHelper()),
 		state:          StateActive,
 		stateChangedAt: time.Now(),
 		stateCh:        make(chan struct{}),
 		outputNotify:   make(chan struct{}, 1),
-		otelNotify:     make(chan struct{}, 1),
 		exitNotify:     make(chan struct{}, 1),
 		stopCh:         make(chan struct{}),
-		agentHelper:    NewClaudeCodeHelper(),
-		otelMetrics:    &OtelMetrics{},
 	}
 }
 
-// SetAgentHelper sets the agent-specific helper for this session.
-func (s *Session) SetAgentHelper(helper AgentHelper) {
-	s.agentHelper = helper
+// StartOtelCollector delegates to the Agent.
+func (s *Session) StartOtelCollector() error {
+	return s.Agent.StartOtelCollector()
+}
+
+// StopOtelCollector delegates to the Agent.
+func (s *Session) StopOtelCollector() {
+	s.Agent.StopOtelCollector()
+}
+
+// OtelPort delegates to the Agent.
+func (s *Session) OtelPort() int {
+	return s.Agent.OtelPort()
+}
+
+// OtelEnv delegates to the Agent.
+func (s *Session) OtelEnv() map[string]string {
+	return s.Agent.OtelEnv()
+}
+
+// Metrics delegates to the Agent.
+func (s *Session) Metrics() agent.OtelMetricsSnapshot {
+	return s.Agent.Metrics()
 }
 
 // State returns the current session state.
@@ -148,14 +158,6 @@ func (s *Session) StateDuration() time.Duration {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return time.Since(s.stateChangedAt)
-}
-
-// Metrics returns a snapshot of the current OTEL metrics.
-func (s *Session) Metrics() OtelMetricsSnapshot {
-	if s.otelMetrics == nil {
-		return OtelMetricsSnapshot{}
-	}
-	return s.otelMetrics.Snapshot()
 }
 
 // NoteOutput signals that the child process has produced output.
@@ -228,7 +230,7 @@ func (s *Session) Stop() {
 	default:
 		close(s.stopCh)
 	}
-	s.StopOtelCollector()
+	s.Agent.Stop()
 }
 
 // noteActivity resets the idle timer and sets state to Active.
@@ -253,7 +255,7 @@ func (s *Session) watchState(stop <-chan struct{}) {
 		case <-s.outputNotify:
 			s.noteActivity(idleTimer)
 
-		case <-s.otelNotify:
+		case <-s.Agent.OtelNotify():
 			s.noteActivity(idleTimer)
 
 		case <-idleTimer.C:

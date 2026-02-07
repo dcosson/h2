@@ -1,9 +1,9 @@
-package overlay
+package client
 
 import (
 	"testing"
 
-	"h2/internal/message"
+	"h2/internal/session/message"
 )
 
 func TestCyclePriority(t *testing.T) {

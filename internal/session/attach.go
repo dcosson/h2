@@ -1,12 +1,12 @@
-package daemon
+package session
 
 import (
 	"encoding/json"
 	"io"
 	"net"
 
-	"h2/internal/message"
-	"h2/internal/overlay"
+	"h2/internal/session/client"
+	"h2/internal/session/message"
 )
 
 // AttachSession represents an active attach client connection.
@@ -99,11 +99,11 @@ func (d *Daemon) readClientInput(conn net.Conn) {
 			}
 			for i := 0; i < len(payload); {
 				switch ov.Mode {
-				case overlay.ModePassthrough:
+				case client.ModePassthrough:
 					i = ov.HandlePassthroughBytes(payload, i, len(payload))
-				case overlay.ModeMenu:
+				case client.ModeMenu:
 					i = ov.HandleMenuBytes(payload, i, len(payload))
-				case overlay.ModeScroll:
+				case client.ModeScroll:
 					i = ov.HandleScrollBytes(payload, i, len(payload))
 				default:
 					i = ov.HandleDefaultBytes(payload, i, len(payload))
@@ -122,7 +122,7 @@ func (d *Daemon) readClientInput(conn net.Conn) {
 				vt.Mu.Lock()
 				childRows := ctrl.Rows - ov.ReservedRows()
 				vt.Resize(ctrl.Rows, ctrl.Cols, childRows)
-				if ov.Mode == overlay.ModeScroll {
+				if ov.Mode == client.ModeScroll {
 					ov.ClampScrollOffset()
 				}
 				vt.Output.Write([]byte("\033[2J"))

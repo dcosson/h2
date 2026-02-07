@@ -1,4 +1,4 @@
-package session
+package agent
 
 import (
 	"context"
@@ -13,6 +13,45 @@ import (
 	"time"
 )
 
+// Agent wraps the OTEL collector, agent helper, and metrics for a session.
+type Agent struct {
+	helper      AgentHelper
+	metrics     *OtelMetrics
+	listener    net.Listener
+	server      *http.Server
+	port        int
+	otelNotify  chan struct{} // buffered(1), signaled on OTEL event
+	stopCh      chan struct{}
+}
+
+// New creates a new Agent with the given helper.
+func New(helper AgentHelper) *Agent {
+	return &Agent{
+		helper:     helper,
+		metrics:    &OtelMetrics{},
+		otelNotify: make(chan struct{}, 1),
+		stopCh:     make(chan struct{}),
+	}
+}
+
+// OtelNotify returns the channel that is signaled on OTEL events.
+func (a *Agent) OtelNotify() <-chan struct{} {
+	return a.otelNotify
+}
+
+// SetHelper sets the agent-specific helper.
+func (a *Agent) SetHelper(helper AgentHelper) {
+	a.helper = helper
+}
+
+// Metrics returns a snapshot of the current OTEL metrics.
+func (a *Agent) Metrics() OtelMetricsSnapshot {
+	if a.metrics == nil {
+		return OtelMetricsSnapshot{}
+	}
+	return a.metrics.Snapshot()
+}
+
 // OtelLogRecord represents a single log record in OTLP format.
 type OtelLogRecord struct {
 	Attributes []OtelAttribute `json:"attributes"`
@@ -20,8 +59,8 @@ type OtelLogRecord struct {
 
 // OtelAttribute represents a key-value attribute.
 type OtelAttribute struct {
-	Key   string          `json:"key"`
-	Value OtelAttrValue   `json:"value"`
+	Key   string        `json:"key"`
+	Value OtelAttrValue `json:"value"`
 }
 
 // OtelAttrValue holds the attribute value.
@@ -46,34 +85,33 @@ type OtelScopeLogs struct {
 }
 
 // StartOtelCollector starts the OTEL HTTP server on a random port.
-// Must be called before Start() so the port is available for child env vars.
-func (s *Session) StartOtelCollector() error {
+func (a *Agent) StartOtelCollector() error {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return fmt.Errorf("listen for otel: %w", err)
 	}
-	s.otelListener = ln
-	s.otelPort = ln.Addr().(*net.TCPAddr).Port
+	a.listener = ln
+	a.port = ln.Addr().(*net.TCPAddr).Port
 
-	otelDebugLog("OTEL collector started on port %d", s.otelPort)
-	if s.agentHelper != nil {
-		env := s.agentHelper.OtelEnv(s.otelPort)
+	otelDebugLog("OTEL collector started on port %d", a.port)
+	if a.helper != nil {
+		env := a.helper.OtelEnv(a.port)
 		for k, v := range env {
 			otelDebugLog("  env: %s=%s", k, v)
 		}
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/logs", s.handleOtelLogs)
-	mux.HandleFunc("/v1/metrics", s.handleOtelMetrics)
+	mux.HandleFunc("/v1/logs", a.handleOtelLogs)
+	mux.HandleFunc("/v1/metrics", a.handleOtelMetrics)
 
-	s.otelServer = &http.Server{Handler: mux}
+	a.server = &http.Server{Handler: mux}
 
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		wg.Done()
-		s.otelServer.Serve(ln)
+		a.server.Serve(ln)
 	}()
 	wg.Wait() // wait for goroutine to start
 
@@ -81,27 +119,32 @@ func (s *Session) StartOtelCollector() error {
 }
 
 // StopOtelCollector shuts down the OTEL HTTP server.
-func (s *Session) StopOtelCollector() {
-	if s.otelServer != nil {
-		s.otelServer.Shutdown(context.Background())
+func (a *Agent) StopOtelCollector() {
+	if a.server != nil {
+		a.server.Shutdown(context.Background())
 	}
-	if s.otelListener != nil {
-		s.otelListener.Close()
+	if a.listener != nil {
+		a.listener.Close()
 	}
 }
 
 // OtelPort returns the port the OTEL collector is listening on.
-func (s *Session) OtelPort() int {
-	return s.otelPort
+func (a *Agent) OtelPort() int {
+	return a.port
 }
 
 // OtelEnv returns environment variables to inject into the child process
 // for OTEL telemetry export. Delegates to the agent helper.
-func (s *Session) OtelEnv() map[string]string {
-	if s.agentHelper == nil {
+func (a *Agent) OtelEnv() map[string]string {
+	if a.helper == nil {
 		return nil
 	}
-	return s.agentHelper.OtelEnv(s.otelPort)
+	return a.helper.OtelEnv(a.port)
+}
+
+// Stop cleans up the agent resources.
+func (a *Agent) Stop() {
+	a.StopOtelCollector()
 }
 
 // otelDebugLog writes a debug message to ~/.h2/otel-debug.log
@@ -117,7 +160,7 @@ func otelDebugLog(format string, args ...interface{}) {
 }
 
 // processLogs extracts events from an OTLP logs payload.
-func (s *Session) processLogs(payload OtelLogsPayload) {
+func (a *Agent) processLogs(payload OtelLogsPayload) {
 	for _, rl := range payload.ResourceLogs {
 		otelDebugLog("  resourceLog has %d scopeLogs", len(rl.ScopeLogs))
 		for _, sl := range rl.ScopeLogs {
@@ -127,19 +170,19 @@ func (s *Session) processLogs(payload OtelLogsPayload) {
 				eventName := getAttr(lr.Attributes, "event.name")
 				if eventName != "" {
 					otelDebugLog("event: %s", eventName)
-					s.NoteOtelEvent()
+					a.noteOtelEvent()
 
 					// Mark that we received an event (for connection status)
-					if s.otelMetrics != nil {
-						s.otelMetrics.NoteEvent()
+					if a.metrics != nil {
+						a.metrics.NoteEvent()
 					}
 
 					// Parse metrics if we have an agent helper with a parser
-					if s.agentHelper != nil && s.otelMetrics != nil {
-						if parser := s.agentHelper.OtelParser(); parser != nil {
+					if a.helper != nil && a.metrics != nil {
+						if parser := a.helper.OtelParser(); parser != nil {
 							if delta := parser.ParseLogRecord(lr); delta != nil {
 								otelDebugLog("  -> tokens: in=%d out=%d cost=%.4f", delta.InputTokens, delta.OutputTokens, delta.CostUSD)
-								s.otelMetrics.Update(*delta)
+								a.metrics.Update(*delta)
 							}
 						}
 					}
@@ -150,7 +193,7 @@ func (s *Session) processLogs(payload OtelLogsPayload) {
 }
 
 // handleOtelLogs handles POST /v1/logs from OTLP exporters.
-func (s *Session) handleOtelLogs(w http.ResponseWriter, r *http.Request) {
+func (a *Agent) handleOtelLogs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -166,20 +209,20 @@ func (s *Session) handleOtelLogs(w http.ResponseWriter, r *http.Request) {
 	var payload OtelLogsPayload
 	if err := json.Unmarshal(body, &payload); err != nil {
 		// Could be protobuf — just signal activity anyway
-		s.NoteOtelEvent()
+		a.noteOtelEvent()
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("{}"))
 		return
 	}
 
-	s.processLogs(payload)
+	a.processLogs(payload)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("{}"))
 }
 
 // handleOtelMetrics handles POST /v1/metrics from OTLP exporters.
-func (s *Session) handleOtelMetrics(w http.ResponseWriter, r *http.Request) {
+func (a *Agent) handleOtelMetrics(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -193,11 +236,11 @@ func (s *Session) handleOtelMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("{}"))
 }
 
-// NoteOtelEvent signals that an OTEL event was received.
+// noteOtelEvent signals that an OTEL event was received.
 // Safe to call from HTTP handlers — does only a non-blocking channel send.
-func (s *Session) NoteOtelEvent() {
+func (a *Agent) noteOtelEvent() {
 	select {
-	case s.otelNotify <- struct{}{}:
+	case a.otelNotify <- struct{}{}:
 	default:
 	}
 }

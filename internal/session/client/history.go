@@ -1,4 +1,4 @@
-package overlay
+package client
 
 // HistoryUp moves to the previous history entry.
 func (o *Overlay) HistoryUp() {

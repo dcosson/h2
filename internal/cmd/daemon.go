@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"h2/internal/daemon"
+	"h2/internal/session"
 )
 
 func newDaemonCmd() *cobra.Command {
@@ -23,7 +23,7 @@ func newDaemonCmd() *cobra.Command {
 				return fmt.Errorf("--name is required")
 			}
 
-			d := &daemon.Daemon{
+			d := &session.Daemon{
 				Name:    name,
 				Command: args[0],
 				Args:    args[1:],
