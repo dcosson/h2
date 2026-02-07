@@ -31,6 +31,19 @@ type VT struct {
 	OscBg      string           // cached OSC 11 response (background color)
 	LastOut    time.Time        // last time child output updated the screen
 	Restore    *term.State      // original terminal state for cleanup
+
+	// Child process lifecycle state.
+	ChildExited bool
+	ChildHung   bool
+	ExitError   error
+}
+
+// KillChild sends SIGKILL to the child process. Used when the child is hung
+// and not responding to normal signals.
+func (vt *VT) KillChild() {
+	if vt.Cmd != nil && vt.Cmd.Process != nil {
+		vt.Cmd.Process.Kill()
+	}
 }
 
 // StartPTY creates and starts the child process in a PTY with the given size.

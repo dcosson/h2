@@ -1,35 +1,35 @@
 package client
 
 // HistoryUp moves to the previous history entry.
-func (o *Overlay) HistoryUp() {
-	if len(o.History) == 0 {
+func (c *Client) HistoryUp() {
+	if len(c.History) == 0 {
 		return
 	}
-	if o.HistIdx == -1 {
-		o.Saved = make([]byte, len(o.Input))
-		copy(o.Saved, o.Input)
-		o.HistIdx = len(o.History) - 1
-	} else if o.HistIdx > 0 {
-		o.HistIdx--
+	if c.HistIdx == -1 {
+		c.Saved = make([]byte, len(c.Input))
+		copy(c.Saved, c.Input)
+		c.HistIdx = len(c.History) - 1
+	} else if c.HistIdx > 0 {
+		c.HistIdx--
 	} else {
 		return
 	}
-	o.Input = []byte(o.History[o.HistIdx])
-	o.CursorPos = len(o.Input)
+	c.Input = []byte(c.History[c.HistIdx])
+	c.CursorPos = len(c.Input)
 }
 
 // HistoryDown moves to the next history entry.
-func (o *Overlay) HistoryDown() {
-	if o.HistIdx == -1 {
+func (c *Client) HistoryDown() {
+	if c.HistIdx == -1 {
 		return
 	}
-	if o.HistIdx < len(o.History)-1 {
-		o.HistIdx++
-		o.Input = []byte(o.History[o.HistIdx])
+	if c.HistIdx < len(c.History)-1 {
+		c.HistIdx++
+		c.Input = []byte(c.History[c.HistIdx])
 	} else {
-		o.HistIdx = -1
-		o.Input = o.Saved
-		o.Saved = nil
+		c.HistIdx = -1
+		c.Input = c.Saved
+		c.Saved = nil
 	}
-	o.CursorPos = len(o.Input)
+	c.CursorPos = len(c.Input)
 }

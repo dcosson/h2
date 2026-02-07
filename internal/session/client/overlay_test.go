@@ -4,12 +4,14 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"h2/internal/session/virtualterminal"
 )
 
 // --- HandleExitedBytes ---
 
 func TestHandleExitedBytes_EnterRelaunches(t *testing.T) {
-	o := &Overlay{
+	o := &Client{
 		relaunchCh: make(chan struct{}, 1),
 		quitCh:     make(chan struct{}, 1),
 	}
@@ -28,7 +30,7 @@ func TestHandleExitedBytes_EnterRelaunches(t *testing.T) {
 }
 
 func TestHandleExitedBytes_NewlineRelaunches(t *testing.T) {
-	o := &Overlay{
+	o := &Client{
 		relaunchCh: make(chan struct{}, 1),
 		quitCh:     make(chan struct{}, 1),
 	}
@@ -44,7 +46,7 @@ func TestHandleExitedBytes_NewlineRelaunches(t *testing.T) {
 }
 
 func TestHandleExitedBytes_QuitLowercase(t *testing.T) {
-	o := &Overlay{
+	o := &Client{
 		relaunchCh: make(chan struct{}, 1),
 		quitCh:     make(chan struct{}, 1),
 	}
@@ -63,7 +65,7 @@ func TestHandleExitedBytes_QuitLowercase(t *testing.T) {
 }
 
 func TestHandleExitedBytes_QuitUppercase(t *testing.T) {
-	o := &Overlay{
+	o := &Client{
 		relaunchCh: make(chan struct{}, 1),
 		quitCh:     make(chan struct{}, 1),
 	}
@@ -79,7 +81,7 @@ func TestHandleExitedBytes_QuitUppercase(t *testing.T) {
 }
 
 func TestHandleExitedBytes_IgnoresOtherKeys(t *testing.T) {
-	o := &Overlay{
+	o := &Client{
 		relaunchCh: make(chan struct{}, 1),
 		quitCh:     make(chan struct{}, 1),
 	}
@@ -100,7 +102,7 @@ func TestHandleExitedBytes_IgnoresOtherKeys(t *testing.T) {
 }
 
 func TestHandleExitedBytes_StartOffset(t *testing.T) {
-	o := &Overlay{
+	o := &Client{
 		relaunchCh: make(chan struct{}, 1),
 		quitCh:     make(chan struct{}, 1),
 	}
@@ -120,7 +122,7 @@ func TestHandleExitedBytes_StartOffset(t *testing.T) {
 }
 
 func TestHandleExitedBytes_ChannelFull(t *testing.T) {
-	o := &Overlay{
+	o := &Client{
 		relaunchCh: make(chan struct{}, 1),
 		quitCh:     make(chan struct{}, 1),
 	}
@@ -137,7 +139,7 @@ func TestHandleExitedBytes_ChannelFull(t *testing.T) {
 // --- exitMessage ---
 
 func TestExitMessage_CleanExit(t *testing.T) {
-	o := &Overlay{}
+	o := &Client{VT: &virtualterminal.VT{}}
 	msg := o.exitMessage()
 	if msg != "process exited" {
 		t.Fatalf("expected %q, got %q", "process exited", msg)
@@ -145,7 +147,8 @@ func TestExitMessage_CleanExit(t *testing.T) {
 }
 
 func TestExitMessage_Hung(t *testing.T) {
-	o := &Overlay{ChildHung: true}
+	vt := &virtualterminal.VT{ChildHung: true}
+	o := &Client{VT: vt}
 	msg := o.exitMessage()
 	expected := "process not responding (killed)"
 	if msg != expected {
@@ -160,7 +163,8 @@ func TestExitMessage_ExitCode(t *testing.T) {
 		t.Fatal("expected command to fail")
 	}
 
-	o := &Overlay{ExitError: err}
+	vt := &virtualterminal.VT{ExitError: err}
+	o := &Client{VT: vt}
 	msg := o.exitMessage()
 	expected := "process exited (code 42)"
 	if msg != expected {
@@ -177,7 +181,8 @@ func TestExitMessage_Signal(t *testing.T) {
 	cmd.Process.Kill()
 	err := cmd.Wait()
 
-	o := &Overlay{ExitError: err}
+	vt := &virtualterminal.VT{ExitError: err}
+	o := &Client{VT: vt}
 	msg := o.exitMessage()
 	if !strings.Contains(msg, "process killed") {
 		t.Fatalf("expected message containing 'process killed', got %q", msg)

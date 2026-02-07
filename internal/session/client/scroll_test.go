@@ -10,7 +10,7 @@ import (
 	"h2/internal/session/virtualterminal"
 )
 
-func newTestOverlay(childRows, cols int) *Overlay {
+func newTestClient(childRows, cols int) *Client {
 	vt := &virtualterminal.VT{
 		Rows:      childRows + 2,
 		Cols:      cols,
@@ -22,7 +22,7 @@ func newTestOverlay(childRows, cols int) *Overlay {
 	sb.AutoResizeY = true
 	sb.AppendOnly = true
 	vt.Scrollback = sb
-	return &Overlay{
+	return &Client{
 		VT:   vt,
 		Mode: ModeDefault,
 	}
@@ -31,7 +31,7 @@ func newTestOverlay(childRows, cols int) *Overlay {
 // --- ClampScrollOffset ---
 
 func TestClampScrollOffset_NilScrollback(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.VT.Scrollback = nil
 	o.ScrollOffset = 5
 	o.ClampScrollOffset()
@@ -41,7 +41,7 @@ func TestClampScrollOffset_NilScrollback(t *testing.T) {
 }
 
 func TestClampScrollOffset_NoHistory(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	// Scrollback cursor at Y=0, no history beyond one screen.
 	o.ScrollOffset = 5
 	o.ClampScrollOffset()
@@ -51,7 +51,7 @@ func TestClampScrollOffset_NoHistory(t *testing.T) {
 }
 
 func TestClampScrollOffset_WithHistory(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	// Simulate 30 lines of content: cursor at row 29.
 	for i := 0; i < 30; i++ {
 		o.VT.Scrollback.Write([]byte("line\n"))
@@ -65,7 +65,7 @@ func TestClampScrollOffset_WithHistory(t *testing.T) {
 }
 
 func TestClampScrollOffset_OverMax(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	for i := 0; i < 15; i++ {
 		o.VT.Scrollback.Write([]byte("line\n"))
 	}
@@ -82,7 +82,7 @@ func TestClampScrollOffset_OverMax(t *testing.T) {
 }
 
 func TestClampScrollOffset_Negative(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.ScrollOffset = -5
 	o.ClampScrollOffset()
 	if o.ScrollOffset != 0 {
@@ -93,7 +93,7 @@ func TestClampScrollOffset_Negative(t *testing.T) {
 // --- EnterScrollMode / ExitScrollMode ---
 
 func TestEnterExitScrollMode(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	if o.Mode != ModeDefault {
 		t.Fatalf("expected ModeDefault, got %d", o.Mode)
 	}
@@ -119,7 +119,7 @@ func TestEnterExitScrollMode(t *testing.T) {
 // --- ScrollUp / ScrollDown ---
 
 func TestScrollUpDown(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	// Write enough lines to have history.
 	for i := 0; i < 30; i++ {
 		o.VT.Scrollback.Write([]byte("line\n"))
@@ -138,7 +138,7 @@ func TestScrollUpDown(t *testing.T) {
 }
 
 func TestScrollUp_NoOpAtMax(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	for i := 0; i < 15; i++ {
 		o.VT.Scrollback.Write([]byte("line\n"))
 	}
@@ -156,7 +156,7 @@ func TestScrollUp_NoOpAtMax(t *testing.T) {
 }
 
 func TestScrollDown_ExitsAtZero(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	for i := 0; i < 30; i++ {
 		o.VT.Scrollback.Write([]byte("line\n"))
 	}
@@ -180,7 +180,7 @@ func TestScrollDown_ExitsAtZero(t *testing.T) {
 // --- HandleSGRMouse ---
 
 func TestHandleSGRMouse_ScrollUpEntersMode(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	for i := 0; i < 20; i++ {
 		o.VT.Scrollback.Write([]byte("line\n"))
 	}
@@ -196,7 +196,7 @@ func TestHandleSGRMouse_ScrollUpEntersMode(t *testing.T) {
 }
 
 func TestHandleSGRMouse_ScrollDownInMode(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	for i := 0; i < 20; i++ {
 		o.VT.Scrollback.Write([]byte("line\n"))
 	}
@@ -212,7 +212,7 @@ func TestHandleSGRMouse_ScrollDownInMode(t *testing.T) {
 }
 
 func TestHandleSGRMouse_IgnoredInPassthrough(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.Mode = ModePassthrough
 	o.HandleSGRMouse([]byte("<64;1;1"), true)
 	if o.Mode != ModePassthrough {
@@ -221,7 +221,7 @@ func TestHandleSGRMouse_IgnoredInPassthrough(t *testing.T) {
 }
 
 func TestHandleSGRMouse_MalformedParams(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	// No '<' prefix
 	o.HandleSGRMouse([]byte("64;1;1"), true)
 	if o.Mode != ModeDefault {
@@ -240,7 +240,7 @@ func TestHandleSGRMouse_MalformedParams(t *testing.T) {
 }
 
 func TestHandleSGRMouse_LeftClickShowsSelectHint(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.HandleSGRMouse([]byte("<0;5;5"), true)
 	if !o.SelectHint {
 		t.Fatal("expected SelectHint to be true after left click")
@@ -252,7 +252,7 @@ func TestHandleSGRMouse_LeftClickShowsSelectHint(t *testing.T) {
 }
 
 func TestHandleSGRMouse_LeftClickReleaseNoHint(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.HandleSGRMouse([]byte("<0;5;5"), false) // release, not press
 	if o.SelectHint {
 		t.Fatal("expected SelectHint to be false on release")
@@ -260,7 +260,7 @@ func TestHandleSGRMouse_LeftClickReleaseNoHint(t *testing.T) {
 }
 
 func TestRenderSelectHint_DefaultMode(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.SelectHint = true
 	var buf bytes.Buffer
 	o.renderSelectHint(&buf)
@@ -275,7 +275,7 @@ func TestRenderSelectHint_DefaultMode(t *testing.T) {
 }
 
 func TestRenderSelectHint_ScrollMode(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.Mode = ModeScroll
 	o.SelectHint = true
 	var buf bytes.Buffer
@@ -288,7 +288,7 @@ func TestRenderSelectHint_ScrollMode(t *testing.T) {
 }
 
 func TestRenderSelectHint_NotShownWhenFalse(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.SelectHint = false
 	var buf bytes.Buffer
 	o.renderSelectHint(&buf)
@@ -300,7 +300,7 @@ func TestRenderSelectHint_NotShownWhenFalse(t *testing.T) {
 // --- HandleScrollBytes ---
 
 func TestHandleScrollBytes_EscAtEndStartsPending(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.EnterScrollMode()
 	// Bare Esc (0x1B) at end of buffer starts pending timer, doesn't exit immediately.
 	buf := []byte{0x1B}
@@ -314,7 +314,7 @@ func TestHandleScrollBytes_EscAtEndStartsPending(t *testing.T) {
 }
 
 func TestHandleScrollBytes_EscFollowedByNonSeqStays(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.EnterScrollMode()
 	o.ScrollOffset = 3
 	// Esc followed by a non-sequence byte stays in scroll mode.
@@ -326,7 +326,7 @@ func TestHandleScrollBytes_EscFollowedByNonSeqStays(t *testing.T) {
 }
 
 func TestHandleScrollBytes_PendingEscContinuation(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	for i := 0; i < 30; i++ {
 		o.VT.Scrollback.Write([]byte("line\n"))
 	}
@@ -354,7 +354,7 @@ func TestHandleScrollBytes_PendingEscContinuation(t *testing.T) {
 }
 
 func TestHandleScrollBytes_RegularKeysIgnored(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.EnterScrollMode()
 	o.ScrollOffset = 5
 	buf := []byte{'a', 'b', 'c', 'q', ' ', '1'}
@@ -368,7 +368,7 @@ func TestHandleScrollBytes_RegularKeysIgnored(t *testing.T) {
 }
 
 func TestHandleScrollBytes_ArrowUpScrolls(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	for i := 0; i < 30; i++ {
 		o.VT.Scrollback.Write([]byte("line\n"))
 	}
@@ -383,7 +383,7 @@ func TestHandleScrollBytes_ArrowUpScrolls(t *testing.T) {
 }
 
 func TestHandleScrollBytes_ArrowDownScrolls(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	for i := 0; i < 30; i++ {
 		o.VT.Scrollback.Write([]byte("line\n"))
 	}
@@ -401,7 +401,7 @@ func TestHandleScrollBytes_ArrowDownScrolls(t *testing.T) {
 // --- RenderLiveView anchors to cursor ---
 
 func TestRenderLiveView_AnchorsToCursor(t *testing.T) {
-	o := newTestOverlay(5, 40)
+	o := newTestClient(5, 40)
 	// Write enough lines to move the cursor well past ChildRows.
 	for i := 0; i < 20; i++ {
 		o.VT.Vt.Write([]byte("line\n"))
@@ -427,7 +427,7 @@ func TestRenderLiveView_AnchorsToCursor(t *testing.T) {
 }
 
 func TestRenderLiveView_SmallContent(t *testing.T) {
-	o := newTestOverlay(10, 40)
+	o := newTestClient(10, 40)
 	// Write fewer lines than ChildRows — startRow should be 0.
 	o.VT.Vt.Write([]byte("hello\n"))
 
@@ -447,7 +447,7 @@ func TestRenderLiveView_SmallContent(t *testing.T) {
 // --- Mode labels ---
 
 func TestModeLabel_Scroll(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.Mode = ModeScroll
 	if got := o.ModeLabel(); got != "Scroll" {
 		t.Fatalf("expected 'Scroll', got %q", got)
@@ -455,7 +455,7 @@ func TestModeLabel_Scroll(t *testing.T) {
 }
 
 func TestHelpLabel_Scroll(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.Mode = ModeScroll
 	got := o.HelpLabel()
 	if got != "Scroll/Up/Down navigate | Esc exit scroll" {
@@ -466,8 +466,8 @@ func TestHelpLabel_Scroll(t *testing.T) {
 // --- Exited + scroll mode ---
 
 func TestHandleExitedBytes_MouseScrollEntersScrollMode(t *testing.T) {
-	o := newTestOverlay(10, 80)
-	o.ChildExited = true
+	o := newTestClient(10, 80)
+	o.VT.ChildExited = true
 	o.relaunchCh = make(chan struct{}, 1)
 	o.quitCh = make(chan struct{}, 1)
 	for i := 0; i < 20; i++ {
@@ -483,8 +483,8 @@ func TestHandleExitedBytes_MouseScrollEntersScrollMode(t *testing.T) {
 }
 
 func TestHandleExitedBytes_EnterStillRelaunches(t *testing.T) {
-	o := newTestOverlay(10, 80)
-	o.ChildExited = true
+	o := newTestClient(10, 80)
+	o.VT.ChildExited = true
 	o.relaunchCh = make(chan struct{}, 1)
 	o.quitCh = make(chan struct{}, 1)
 
@@ -499,8 +499,8 @@ func TestHandleExitedBytes_EnterStillRelaunches(t *testing.T) {
 }
 
 func TestHandleExitedBytes_QStillQuits(t *testing.T) {
-	o := newTestOverlay(10, 80)
-	o.ChildExited = true
+	o := newTestClient(10, 80)
+	o.VT.ChildExited = true
 	o.relaunchCh = make(chan struct{}, 1)
 	o.quitCh = make(chan struct{}, 1)
 
@@ -518,8 +518,8 @@ func TestHandleExitedBytes_QStillQuits(t *testing.T) {
 }
 
 func TestExitedScrollMode_BarStaysRed(t *testing.T) {
-	o := newTestOverlay(10, 80)
-	o.ChildExited = true
+	o := newTestClient(10, 80)
+	o.VT.ChildExited = true
 	o.Mode = ModeScroll
 
 	// ModeBarStyle returns cyan for scroll, but ChildExited overrides to red.
@@ -534,8 +534,8 @@ func TestExitedScrollMode_BarStaysRed(t *testing.T) {
 }
 
 func TestExitedScrollMode_ScrollDownToBottomExits(t *testing.T) {
-	o := newTestOverlay(10, 80)
-	o.ChildExited = true
+	o := newTestClient(10, 80)
+	o.VT.ChildExited = true
 	o.relaunchCh = make(chan struct{}, 1)
 	o.quitCh = make(chan struct{}, 1)
 	for i := 0; i < 20; i++ {
@@ -553,7 +553,7 @@ func TestExitedScrollMode_ScrollDownToBottomExits(t *testing.T) {
 	if o.Mode != ModeDefault {
 		t.Fatalf("expected ModeDefault after scrolling to bottom, got %d", o.Mode)
 	}
-	if !o.ChildExited {
+	if !o.VT.ChildExited {
 		t.Fatal("expected ChildExited to still be true")
 	}
 }
@@ -561,7 +561,7 @@ func TestExitedScrollMode_ScrollDownToBottomExits(t *testing.T) {
 func TestHandleScrollBytes_CtrlPassthrough(t *testing.T) {
 	// We can't easily test PTY writes without a real PTY, but we can
 	// verify that ctrl chars don't exit scroll mode and don't panic.
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.EnterScrollMode()
 	o.ScrollOffset = 5
 	// Ctrl+C (0x03), Ctrl+D (0x04) — child is not running so writes
@@ -579,7 +579,7 @@ func TestHandleScrollBytes_CtrlPassthrough(t *testing.T) {
 // --- ctrl+b / ctrl+p / ctrl+n ---
 
 func TestCtrlB_EntersMenuMode(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	buf := []byte{0x02} // ctrl+b
 	o.HandleDefaultBytes(buf, 0, len(buf))
 	if o.Mode != ModeMenu {
@@ -588,7 +588,7 @@ func TestCtrlB_EntersMenuMode(t *testing.T) {
 }
 
 func TestCtrlB_EntersMenuWithInput(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.Input = []byte("hello")
 	o.CursorPos = 5
 	buf := []byte{0x02} // ctrl+b
@@ -599,7 +599,7 @@ func TestCtrlB_EntersMenuWithInput(t *testing.T) {
 }
 
 func TestCtrlP_HistoryUp(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.History = []string{"first", "second"}
 	o.HistIdx = -1
 	buf := []byte{0x10} // ctrl+p
@@ -610,7 +610,7 @@ func TestCtrlP_HistoryUp(t *testing.T) {
 }
 
 func TestCtrlN_HistoryDown(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.History = []string{"first", "second"}
 	o.HistIdx = -1
 	// Go up twice, then down once.
@@ -623,7 +623,7 @@ func TestCtrlN_HistoryDown(t *testing.T) {
 }
 
 func TestUpDown_NoOpInDefaultMode(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.History = []string{"first", "second"}
 	o.HistIdx = -1
 	// ESC [ A = arrow up — should be a no-op in default mode
@@ -640,7 +640,7 @@ func TestUpDown_NoOpInDefaultMode(t *testing.T) {
 // --- Menu shortcut keys ---
 
 func TestMenu_EnterPassthrough(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.Mode = ModeMenu
 	buf := []byte{0x0D} // Enter
 	o.HandleMenuBytes(buf, 0, len(buf))
@@ -650,7 +650,7 @@ func TestMenu_EnterPassthrough(t *testing.T) {
 }
 
 func TestMenu_ClearInput(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.Mode = ModeMenu
 	o.Input = []byte("some text")
 	o.CursorPos = 9
@@ -668,7 +668,7 @@ func TestMenu_ClearInput(t *testing.T) {
 }
 
 func TestMenu_Redraw(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.Mode = ModeMenu
 	buf := []byte{'r'}
 	o.HandleMenuBytes(buf, 0, len(buf))
@@ -678,7 +678,7 @@ func TestMenu_Redraw(t *testing.T) {
 }
 
 func TestMenu_EscExits(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.Mode = ModeMenu
 	// Bare Esc at end of buffer
 	buf := []byte{0x1B}
@@ -689,7 +689,7 @@ func TestMenu_EscExits(t *testing.T) {
 }
 
 func TestMenu_OtherKeysIgnored(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.Mode = ModeMenu
 	buf := []byte{'x', 'z', '1'}
 	o.HandleMenuBytes(buf, 0, len(buf))
@@ -699,7 +699,7 @@ func TestMenu_OtherKeysIgnored(t *testing.T) {
 }
 
 func TestMenu_HelpLabel(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.Mode = ModeMenu
 	got := o.HelpLabel()
 	if got != "esc exit" {
@@ -708,7 +708,7 @@ func TestMenu_HelpLabel(t *testing.T) {
 }
 
 func TestHelpLabel_Default(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.Mode = ModeDefault
 	got := o.HelpLabel()
 	if got != "ctrl+p/n history | Enter send | ctrl+b menu" {
@@ -717,7 +717,7 @@ func TestHelpLabel_Default(t *testing.T) {
 }
 
 func TestMenu_DetachCallsCallback(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.Mode = ModeMenu
 	called := false
 	o.OnDetach = func() { called = true }
@@ -732,7 +732,7 @@ func TestMenu_DetachCallsCallback(t *testing.T) {
 }
 
 func TestMenu_DetachUppercase(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.Mode = ModeMenu
 	called := false
 	o.OnDetach = func() { called = true }
@@ -744,7 +744,7 @@ func TestMenu_DetachUppercase(t *testing.T) {
 }
 
 func TestMenu_DetachIgnoredWithoutCallback(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.Mode = ModeMenu
 	buf := []byte{'d'}
 	o.HandleMenuBytes(buf, 0, len(buf))
@@ -754,7 +754,7 @@ func TestMenu_DetachIgnoredWithoutCallback(t *testing.T) {
 }
 
 func TestMenuLabel(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	got := o.MenuLabel()
 	if got != "Menu | Enter:passthrough | c:clear | r:redraw | q:quit" {
 		t.Fatalf("unexpected menu label: %q", got)
@@ -762,7 +762,7 @@ func TestMenuLabel(t *testing.T) {
 }
 
 func TestMenuLabel_WithDetach(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.OnDetach = func() {}
 	got := o.MenuLabel()
 	if got != "Menu | Enter:passthrough | c:clear | r:redraw | d:detach | q:quit" {

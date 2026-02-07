@@ -21,7 +21,7 @@ type Daemon struct {
 	Command   string
 	Args      []string
 	VT        *virtualterminal.VT
-	Overlay   *client.Overlay
+	Client    *client.Client
 	Session   *Session
 	Listener  net.Listener
 	StartTime time.Time
@@ -74,9 +74,9 @@ func (d *Daemon) Run() error {
 		os.Remove(sockPath)
 	}()
 
-	// Set up VT and overlay.
+	// Set up VT and client.
 	d.VT = &virtualterminal.VT{}
-	d.Overlay = &client.Overlay{
+	d.Client = &client.Client{
 		VT:        d.VT,
 		AgentName: d.Name,
 	}
@@ -85,7 +85,7 @@ func (d *Daemon) Run() error {
 	d.Session = New(d.Name, &daemonPtyWriter{d: d})
 	d.Session.OnDeliver = func() {
 		d.VT.Mu.Lock()
-		d.Overlay.RenderBar()
+		d.Client.RenderBar()
 		d.VT.Mu.Unlock()
 	}
 
@@ -93,38 +93,38 @@ func (d *Daemon) Run() error {
 	if err := d.Session.StartOtelCollector(); err != nil {
 		return fmt.Errorf("start otel collector: %w", err)
 	}
-	d.Overlay.ExtraEnv = d.Session.OtelEnv()
-	if d.Overlay.ExtraEnv == nil {
-		d.Overlay.ExtraEnv = make(map[string]string)
+	d.Client.ExtraEnv = d.Session.OtelEnv()
+	if d.Client.ExtraEnv == nil {
+		d.Client.ExtraEnv = make(map[string]string)
 	}
-	d.Overlay.ExtraEnv["H2_ACTOR"] = d.Name
+	d.Client.ExtraEnv["H2_ACTOR"] = d.Name
 
-	// Wire overlay callbacks.
-	d.Overlay.OnModeChange = func(mode client.InputMode) {
+	// Wire client callbacks.
+	d.Client.OnModeChange = func(mode client.InputMode) {
 		if mode == client.ModePassthrough {
 			d.Session.Queue.Pause()
 		} else {
 			d.Session.Queue.Unpause()
 		}
 	}
-	d.Overlay.QueueStatus = func() (int, bool) {
+	d.Client.QueueStatus = func() (int, bool) {
 		return d.Session.Queue.PendingCount(), d.Session.Queue.IsPaused()
 	}
-	d.Overlay.OtelMetrics = func() (int64, float64, bool, int) {
+	d.Client.OtelMetrics = func() (int64, float64, bool, int) {
 		m := d.Session.Metrics()
 		return m.TotalTokens, m.TotalCostUSD, m.EventsReceived, d.Session.OtelPort()
 	}
-	d.Overlay.OnSubmit = func(text string, pri message.Priority) {
+	d.Client.OnSubmit = func(text string, pri message.Priority) {
 		d.Session.SubmitInput(text, pri)
 	}
-	d.Overlay.OnOutput = func() {
+	d.Client.OnOutput = func() {
 		d.Session.NoteOutput()
 	}
-	d.Overlay.OnChildExit = func() {
+	d.Client.OnChildExit = func() {
 		d.Session.NoteExit()
 		d.Session.Queue.Pause()
 	}
-	d.Overlay.OnChildRelaunch = func() {
+	d.Client.OnChildRelaunch = func() {
 		d.Session.Queue.Unpause()
 	}
 
@@ -134,8 +134,8 @@ func (d *Daemon) Run() error {
 	// Start session (delivery loop + state watcher).
 	go d.Session.Start()
 
-	// Run the overlay in daemon mode (blocks until user quits).
-	err = d.Overlay.RunDaemon(d.Command, d.Args...)
+	// Run the client in daemon mode (blocks until user quits).
+	err = d.Client.RunDaemon(d.Command, d.Args...)
 
 	// Clean up.
 	d.Session.Stop()
@@ -156,14 +156,14 @@ type daemonPtyWriter struct {
 func (pw *daemonPtyWriter) Write(p []byte) (int, error) {
 	pw.d.VT.Mu.Lock()
 	defer pw.d.VT.Mu.Unlock()
-	if pw.d.Overlay.ChildExited || pw.d.Overlay.ChildHung {
+	if pw.d.VT.ChildExited || pw.d.VT.ChildHung {
 		return 0, io.ErrClosedPipe
 	}
 	n, err := pw.d.VT.WritePTY(p, 3*time.Second)
 	if err == virtualterminal.ErrPTYWriteTimeout {
-		pw.d.Overlay.ChildHung = true
-		pw.d.Overlay.KillChild()
-		pw.d.Overlay.RenderBar()
+		pw.d.VT.ChildHung = true
+		pw.d.VT.KillChild()
+		pw.d.Client.RenderBar()
 		return 0, io.ErrClosedPipe
 	}
 	return n, err

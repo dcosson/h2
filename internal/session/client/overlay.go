@@ -26,8 +26,8 @@ const (
 	ModeScroll
 )
 
-// Overlay owns all UI state and holds a pointer to the underlying VT.
-type Overlay struct {
+// Client owns all UI state and holds a pointer to the underlying VT.
+type Client struct {
 	VT          *virtualterminal.VT
 	Input       []byte
 	CursorPos   int // byte offset within Input
@@ -54,9 +54,6 @@ type Overlay struct {
 	OnDetach     func()                                           // called when user selects detach from menu
 
 	// Child process lifecycle.
-	ChildExited     bool
-	ChildHung       bool
-	ExitError       error
 	relaunchCh      chan struct{}
 	quitCh          chan struct{}
 	OnChildExit     func()
@@ -68,48 +65,48 @@ type Overlay struct {
 
 // Run starts the overlay in interactive mode: enters raw mode, starts the PTY,
 // and processes I/O. This is used for interactive (non-daemon) mode.
-func (o *Overlay) Run(command string, args ...string) error {
+func (c *Client) Run(command string, args ...string) error {
 	fd := int(os.Stdin.Fd())
 
 	cols, rows, err := term.GetSize(fd)
 	if err != nil {
 		return fmt.Errorf("get terminal size (is this a terminal?): %w", err)
 	}
-	o.DebugKeys = virtualterminal.IsTruthyEnv("H2_DEBUG_KEYS")
+	c.DebugKeys = virtualterminal.IsTruthyEnv("H2_DEBUG_KEYS")
 	minRows := 3
-	if o.DebugKeys {
+	if c.DebugKeys {
 		minRows = 4
 	}
 	if rows < minRows {
 		return fmt.Errorf("terminal too small (need at least %d rows, have %d)", minRows, rows)
 	}
-	o.VT.Rows = rows
-	o.VT.Cols = cols
-	o.HistIdx = -1
-	o.VT.ChildRows = rows - o.ReservedRows()
-	o.VT.Vt = midterm.NewTerminal(o.VT.ChildRows, cols)
-	o.VT.Scrollback = midterm.NewTerminal(o.VT.ChildRows, cols)
-	o.VT.Scrollback.AutoResizeY = true
-	o.VT.Scrollback.AppendOnly = true
-	o.VT.LastOut = time.Now()
-	o.Mode = ModeDefault
-	o.ScrollOffset = 0
-	o.InputPriority = message.PriorityNormal
+	c.VT.Rows = rows
+	c.VT.Cols = cols
+	c.HistIdx = -1
+	c.VT.ChildRows = rows - c.ReservedRows()
+	c.VT.Vt = midterm.NewTerminal(c.VT.ChildRows, cols)
+	c.VT.Scrollback = midterm.NewTerminal(c.VT.ChildRows, cols)
+	c.VT.Scrollback.AutoResizeY = true
+	c.VT.Scrollback.AppendOnly = true
+	c.VT.LastOut = time.Now()
+	c.Mode = ModeDefault
+	c.ScrollOffset = 0
+	c.InputPriority = message.PriorityNormal
 
-	if o.VT.Output == nil {
-		o.VT.Output = os.Stdout
+	if c.VT.Output == nil {
+		c.VT.Output = os.Stdout
 	}
-	if o.VT.InputSrc == nil {
-		o.VT.InputSrc = os.Stdin
+	if c.VT.InputSrc == nil {
+		c.VT.InputSrc = os.Stdin
 	}
 
 	// Detect the real terminal's colors before entering raw mode.
 	output := termenv.NewOutput(os.Stdout)
 	if fg := output.ForegroundColor(); fg != nil {
-		o.VT.OscFg = virtualterminal.ColorToX11(fg)
+		c.VT.OscFg = virtualterminal.ColorToX11(fg)
 	}
 	if bg := output.BackgroundColor(); bg != nil {
-		o.VT.OscBg = virtualterminal.ColorToX11(bg)
+		c.VT.OscBg = virtualterminal.ColorToX11(bg)
 	}
 	if os.Getenv("COLORFGBG") == "" {
 		colorfgbg := "0;15"
@@ -120,123 +117,123 @@ func (o *Overlay) Run(command string, args ...string) error {
 	}
 
 	// Start child in a PTY.
-	if err := o.VT.StartPTY(command, args, o.VT.ChildRows, cols, o.ExtraEnv); err != nil {
+	if err := c.VT.StartPTY(command, args, c.VT.ChildRows, cols, c.ExtraEnv); err != nil {
 		return err
 	}
 
-	o.VT.Vt.ForwardRequests = os.Stdout
-	o.VT.Vt.ForwardResponses = o.VT.Ptm
+	c.VT.Vt.ForwardRequests = os.Stdout
+	c.VT.Vt.ForwardResponses = c.VT.Ptm
 
 	// Put our terminal into raw mode.
-	o.VT.Restore, err = term.MakeRaw(fd)
+	c.VT.Restore, err = term.MakeRaw(fd)
 	if err != nil {
-		o.VT.Ptm.Close()
+		c.VT.Ptm.Close()
 		return fmt.Errorf("set raw mode: %w", err)
 	}
 	// Enable SGR mouse reporting for scroll wheel support.
-	o.VT.Output.(io.Writer).Write([]byte("\033[?1000h\033[?1006h"))
+	c.VT.Output.(io.Writer).Write([]byte("\033[?1000h\033[?1006h"))
 	defer func() {
-		o.VT.Output.(io.Writer).Write([]byte("\033[?1000l\033[?1006l"))
-		term.Restore(fd, o.VT.Restore)
-		o.VT.Output.(io.Writer).Write([]byte("\033[?25h\033[0m\r\n"))
+		c.VT.Output.(io.Writer).Write([]byte("\033[?1000l\033[?1006l"))
+		term.Restore(fd, c.VT.Restore)
+		c.VT.Output.(io.Writer).Write([]byte("\033[?25h\033[0m\r\n"))
 	}()
 
 	// Handle terminal resize.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGWINCH)
-	go o.WatchResize(sigCh)
+	go c.WatchResize(sigCh)
 
 	// Update status bar every second.
 	stopStatus := make(chan struct{})
-	go o.TickStatus(stopStatus)
+	go c.TickStatus(stopStatus)
 
 	// Draw initial UI.
-	o.VT.Mu.Lock()
-	o.VT.Output.Write([]byte("\033[2J\033[H"))
-	o.RenderScreen()
-	o.RenderBar()
-	o.VT.Mu.Unlock()
+	c.VT.Mu.Lock()
+	c.VT.Output.Write([]byte("\033[2J\033[H"))
+	c.RenderScreen()
+	c.RenderBar()
+	c.VT.Mu.Unlock()
 
 	// Pipe child output.
-	go o.VT.PipeOutput(func() {
-			if o.OnOutput != nil {
-				o.OnOutput()
+	go c.VT.PipeOutput(func() {
+			if c.OnOutput != nil {
+				c.OnOutput()
 			}
-			if o.Mode != ModeScroll {
-				o.RenderScreen()
-				o.RenderBar()
+			if c.Mode != ModeScroll {
+				c.RenderScreen()
+				c.RenderBar()
 			}
 		})
 
 	// Process user keyboard input.
-	go o.ReadInput()
+	go c.ReadInput()
 
-	o.relaunchCh = make(chan struct{}, 1)
-	o.quitCh = make(chan struct{}, 1)
+	c.relaunchCh = make(chan struct{}, 1)
+	c.quitCh = make(chan struct{}, 1)
 
 	for {
-		err = o.VT.Cmd.Wait()
+		err = c.VT.Cmd.Wait()
 
 		// If the user explicitly chose Quit from the menu, exit immediately.
-		if o.Quit {
-			o.VT.Ptm.Close()
+		if c.Quit {
+			c.VT.Ptm.Close()
 			close(stopStatus)
 			return err
 		}
 
-		o.VT.Mu.Lock()
-		o.ChildExited = true
-		o.ExitError = err
-		o.RenderScreen()
-		o.RenderBar()
-		o.VT.Mu.Unlock()
+		c.VT.Mu.Lock()
+		c.VT.ChildExited = true
+		c.VT.ExitError = err
+		c.RenderScreen()
+		c.RenderBar()
+		c.VT.Mu.Unlock()
 
-		if o.OnChildExit != nil {
-			o.OnChildExit()
+		if c.OnChildExit != nil {
+			c.OnChildExit()
 		}
 
 		select {
-		case <-o.relaunchCh:
-			o.VT.Ptm.Close()
-			if err := o.VT.StartPTY(command, args, o.VT.ChildRows, o.VT.Cols, o.ExtraEnv); err != nil {
+		case <-c.relaunchCh:
+			c.VT.Ptm.Close()
+			if err := c.VT.StartPTY(command, args, c.VT.ChildRows, c.VT.Cols, c.ExtraEnv); err != nil {
 				close(stopStatus)
 				return err
 			}
-			o.VT.Vt = midterm.NewTerminal(o.VT.ChildRows, o.VT.Cols)
-			o.VT.Vt.ForwardRequests = os.Stdout
-			o.VT.Vt.ForwardResponses = o.VT.Ptm
-			o.VT.Scrollback = midterm.NewTerminal(o.VT.ChildRows, o.VT.Cols)
-			o.VT.Scrollback.AutoResizeY = true
-			o.VT.Scrollback.AppendOnly = true
+			c.VT.Vt = midterm.NewTerminal(c.VT.ChildRows, c.VT.Cols)
+			c.VT.Vt.ForwardRequests = os.Stdout
+			c.VT.Vt.ForwardResponses = c.VT.Ptm
+			c.VT.Scrollback = midterm.NewTerminal(c.VT.ChildRows, c.VT.Cols)
+			c.VT.Scrollback.AutoResizeY = true
+			c.VT.Scrollback.AppendOnly = true
 
-			o.VT.Mu.Lock()
-			o.ChildExited = false
-			o.ChildHung = false
-			o.ExitError = nil
-			o.ScrollOffset = 0
-			o.VT.LastOut = time.Now()
-			o.VT.Output.Write([]byte("\033[2J\033[H"))
-			o.RenderScreen()
-			o.RenderBar()
-			o.VT.Mu.Unlock()
+			c.VT.Mu.Lock()
+			c.VT.ChildExited = false
+			c.VT.ChildHung = false
+			c.VT.ExitError = nil
+			c.ScrollOffset = 0
+			c.VT.LastOut = time.Now()
+			c.VT.Output.Write([]byte("\033[2J\033[H"))
+			c.RenderScreen()
+			c.RenderBar()
+			c.VT.Mu.Unlock()
 
-			go o.VT.PipeOutput(func() {
-			if o.OnOutput != nil {
-				o.OnOutput()
+			go c.VT.PipeOutput(func() {
+			if c.OnOutput != nil {
+				c.OnOutput()
 			}
-			if o.Mode != ModeScroll {
-				o.RenderScreen()
-				o.RenderBar()
+			if c.Mode != ModeScroll {
+				c.RenderScreen()
+				c.RenderBar()
 			}
 		})
 
-			if o.OnChildRelaunch != nil {
-				o.OnChildRelaunch()
+			if c.OnChildRelaunch != nil {
+				c.OnChildRelaunch()
 			}
 			continue
 
-		case <-o.quitCh:
-			o.VT.Ptm.Close()
+		case <-c.quitCh:
+			c.VT.Ptm.Close()
 			close(stopStatus)
 			return err
 		}
@@ -246,113 +243,113 @@ func (o *Overlay) Run(command string, args ...string) error {
 // RunDaemon starts the overlay in daemon mode: creates a PTY and child process
 // but does not interact with the local terminal. Output goes to io.Discard and
 // input blocks until a client attaches via the attach protocol.
-func (o *Overlay) RunDaemon(command string, args ...string) error {
+func (c *Client) RunDaemon(command string, args ...string) error {
 	// Default to 80x24 for the PTY. The first attach client will resize.
-	o.VT.Rows = 24
-	o.VT.Cols = 80
-	o.HistIdx = -1
-	o.DebugKeys = virtualterminal.IsTruthyEnv("H2_DEBUG_KEYS")
-	o.VT.ChildRows = o.VT.Rows - o.ReservedRows()
-	o.VT.Vt = midterm.NewTerminal(o.VT.ChildRows, o.VT.Cols)
-	o.VT.Scrollback = midterm.NewTerminal(o.VT.ChildRows, o.VT.Cols)
-	o.VT.Scrollback.AutoResizeY = true
-	o.VT.Scrollback.AppendOnly = true
-	o.VT.LastOut = time.Now()
-	o.Mode = ModeDefault
-	o.ScrollOffset = 0
-	o.InputPriority = message.PriorityNormal
+	c.VT.Rows = 24
+	c.VT.Cols = 80
+	c.HistIdx = -1
+	c.DebugKeys = virtualterminal.IsTruthyEnv("H2_DEBUG_KEYS")
+	c.VT.ChildRows = c.VT.Rows - c.ReservedRows()
+	c.VT.Vt = midterm.NewTerminal(c.VT.ChildRows, c.VT.Cols)
+	c.VT.Scrollback = midterm.NewTerminal(c.VT.ChildRows, c.VT.Cols)
+	c.VT.Scrollback.AutoResizeY = true
+	c.VT.Scrollback.AppendOnly = true
+	c.VT.LastOut = time.Now()
+	c.Mode = ModeDefault
+	c.ScrollOffset = 0
+	c.InputPriority = message.PriorityNormal
 
-	if o.VT.Output == nil {
-		o.VT.Output = io.Discard
+	if c.VT.Output == nil {
+		c.VT.Output = io.Discard
 	}
 
 	// Start child in a PTY.
-	if err := o.VT.StartPTY(command, args, o.VT.ChildRows, o.VT.Cols, o.ExtraEnv); err != nil {
+	if err := c.VT.StartPTY(command, args, c.VT.ChildRows, c.VT.Cols, c.ExtraEnv); err != nil {
 		return err
 	}
 
 	// Don't forward requests to stdout in daemon mode - there's no terminal.
-	o.VT.Vt.ForwardResponses = o.VT.Ptm
+	c.VT.Vt.ForwardResponses = c.VT.Ptm
 
 	// Update status bar every second.
 	stopStatus := make(chan struct{})
-	go o.TickStatus(stopStatus)
+	go c.TickStatus(stopStatus)
 
 	// Pipe child output to virtual terminal.
-	go o.VT.PipeOutput(func() {
-			if o.OnOutput != nil {
-				o.OnOutput()
+	go c.VT.PipeOutput(func() {
+			if c.OnOutput != nil {
+				c.OnOutput()
 			}
-			if o.Mode != ModeScroll {
-				o.RenderScreen()
-				o.RenderBar()
+			if c.Mode != ModeScroll {
+				c.RenderScreen()
+				c.RenderBar()
 			}
 		})
 
-	o.relaunchCh = make(chan struct{}, 1)
-	o.quitCh = make(chan struct{}, 1)
+	c.relaunchCh = make(chan struct{}, 1)
+	c.quitCh = make(chan struct{}, 1)
 
 	for {
-		err := o.VT.Cmd.Wait()
+		err := c.VT.Cmd.Wait()
 
-		if o.Quit {
-			o.VT.Ptm.Close()
+		if c.Quit {
+			c.VT.Ptm.Close()
 			close(stopStatus)
 			return err
 		}
 
-		o.VT.Mu.Lock()
-		o.ChildExited = true
-		o.ExitError = err
-		o.RenderScreen()
-		o.RenderBar()
-		o.VT.Mu.Unlock()
+		c.VT.Mu.Lock()
+		c.VT.ChildExited = true
+		c.VT.ExitError = err
+		c.RenderScreen()
+		c.RenderBar()
+		c.VT.Mu.Unlock()
 
-		if o.OnChildExit != nil {
-			o.OnChildExit()
+		if c.OnChildExit != nil {
+			c.OnChildExit()
 		}
 
 		select {
-		case <-o.relaunchCh:
-			o.VT.Ptm.Close()
-			if err := o.VT.StartPTY(command, args, o.VT.ChildRows, o.VT.Cols, o.ExtraEnv); err != nil {
+		case <-c.relaunchCh:
+			c.VT.Ptm.Close()
+			if err := c.VT.StartPTY(command, args, c.VT.ChildRows, c.VT.Cols, c.ExtraEnv); err != nil {
 				close(stopStatus)
 				return err
 			}
-			o.VT.Vt = midterm.NewTerminal(o.VT.ChildRows, o.VT.Cols)
-			o.VT.Vt.ForwardResponses = o.VT.Ptm
-			o.VT.Scrollback = midterm.NewTerminal(o.VT.ChildRows, o.VT.Cols)
-			o.VT.Scrollback.AutoResizeY = true
-			o.VT.Scrollback.AppendOnly = true
+			c.VT.Vt = midterm.NewTerminal(c.VT.ChildRows, c.VT.Cols)
+			c.VT.Vt.ForwardResponses = c.VT.Ptm
+			c.VT.Scrollback = midterm.NewTerminal(c.VT.ChildRows, c.VT.Cols)
+			c.VT.Scrollback.AutoResizeY = true
+			c.VT.Scrollback.AppendOnly = true
 
-			o.VT.Mu.Lock()
-			o.ChildExited = false
-			o.ChildHung = false
-			o.ExitError = nil
-			o.ScrollOffset = 0
-			o.VT.LastOut = time.Now()
-			o.VT.Output.Write([]byte("\033[2J\033[H"))
-			o.RenderScreen()
-			o.RenderBar()
-			o.VT.Mu.Unlock()
+			c.VT.Mu.Lock()
+			c.VT.ChildExited = false
+			c.VT.ChildHung = false
+			c.VT.ExitError = nil
+			c.ScrollOffset = 0
+			c.VT.LastOut = time.Now()
+			c.VT.Output.Write([]byte("\033[2J\033[H"))
+			c.RenderScreen()
+			c.RenderBar()
+			c.VT.Mu.Unlock()
 
-			go o.VT.PipeOutput(func() {
-			if o.OnOutput != nil {
-				o.OnOutput()
+			go c.VT.PipeOutput(func() {
+			if c.OnOutput != nil {
+				c.OnOutput()
 			}
-			if o.Mode != ModeScroll {
-				o.RenderScreen()
-				o.RenderBar()
+			if c.Mode != ModeScroll {
+				c.RenderScreen()
+				c.RenderBar()
 			}
 		})
 
-			if o.OnChildRelaunch != nil {
-				o.OnChildRelaunch()
+			if c.OnChildRelaunch != nil {
+				c.OnChildRelaunch()
 			}
 			continue
 
-		case <-o.quitCh:
-			o.VT.Ptm.Close()
+		case <-c.quitCh:
+			c.VT.Ptm.Close()
 			close(stopStatus)
 			return err
 		}
@@ -360,45 +357,45 @@ func (o *Overlay) RunDaemon(command string, args ...string) error {
 }
 
 // ReadInput reads keyboard input and dispatches to the current mode handler.
-func (o *Overlay) ReadInput() {
+func (c *Client) ReadInput() {
 	buf := make([]byte, 256)
 	for {
-		n, err := o.VT.InputSrc.Read(buf)
+		n, err := c.VT.InputSrc.Read(buf)
 		if err != nil {
 			return
 		}
 
-		o.VT.Mu.Lock()
-		if o.DebugKeys && n > 0 {
-			o.AppendDebugBytes(buf[:n])
-			o.RenderBar()
+		c.VT.Mu.Lock()
+		if c.DebugKeys && n > 0 {
+			c.AppendDebugBytes(buf[:n])
+			c.RenderBar()
 		}
 		for i := 0; i < n; {
-			switch o.Mode {
+			switch c.Mode {
 			case ModePassthrough:
-				i = o.HandlePassthroughBytes(buf, i, n)
+				i = c.HandlePassthroughBytes(buf, i, n)
 			case ModeMenu:
-				i = o.HandleMenuBytes(buf, i, n)
+				i = c.HandleMenuBytes(buf, i, n)
 			case ModeScroll:
-				i = o.HandleScrollBytes(buf, i, n)
+				i = c.HandleScrollBytes(buf, i, n)
 			default:
-				i = o.HandleDefaultBytes(buf, i, n)
+				i = c.HandleDefaultBytes(buf, i, n)
 			}
 		}
-		o.VT.Mu.Unlock()
+		c.VT.Mu.Unlock()
 	}
 }
 
 // TickStatus triggers periodic status bar renders.
-func (o *Overlay) TickStatus(stop <-chan struct{}) {
+func (c *Client) TickStatus(stop <-chan struct{}) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
-			o.VT.Mu.Lock()
-			o.RenderBar()
-			o.VT.Mu.Unlock()
+			c.VT.Mu.Lock()
+			c.RenderBar()
+			c.VT.Mu.Unlock()
 		case <-stop:
 			return
 		}
@@ -406,42 +403,34 @@ func (o *Overlay) TickStatus(stop <-chan struct{}) {
 }
 
 // WatchResize handles SIGWINCH.
-func (o *Overlay) WatchResize(sigCh <-chan os.Signal) {
+func (c *Client) WatchResize(sigCh <-chan os.Signal) {
 	for range sigCh {
 		fd := int(os.Stdin.Fd())
 		cols, rows, err := term.GetSize(fd)
 		minRows := 3
-		if o.DebugKeys {
+		if c.DebugKeys {
 			minRows = 4
 		}
 		if err != nil || rows < minRows {
 			continue
 		}
 
-		o.VT.Mu.Lock()
-		o.VT.Resize(rows, cols, rows-o.ReservedRows())
-		if o.Mode == ModeScroll {
-			o.ClampScrollOffset()
+		c.VT.Mu.Lock()
+		c.VT.Resize(rows, cols, rows-c.ReservedRows())
+		if c.Mode == ModeScroll {
+			c.ClampScrollOffset()
 		}
-		o.VT.Output.Write([]byte("\033[2J"))
-		o.RenderScreen()
-		o.RenderBar()
-		o.VT.Mu.Unlock()
+		c.VT.Output.Write([]byte("\033[2J"))
+		c.RenderScreen()
+		c.RenderBar()
+		c.VT.Mu.Unlock()
 	}
 }
 
 // ReservedRows returns the number of rows reserved for the overlay UI.
-func (o *Overlay) ReservedRows() int {
-	if o.DebugKeys {
+func (c *Client) ReservedRows() int {
+	if c.DebugKeys {
 		return 3
 	}
 	return 2
-}
-
-// KillChild sends SIGKILL to the child process. Used when the child is hung
-// and not responding to normal signals.
-func (o *Overlay) KillChild() {
-	if o.VT.Cmd != nil && o.VT.Cmd.Process != nil {
-		o.VT.Cmd.Process.Kill()
-	}
 }

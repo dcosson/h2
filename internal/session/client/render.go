@@ -17,29 +17,29 @@ import (
 )
 
 // RenderScreen renders the virtual terminal buffer to the output.
-func (o *Overlay) RenderScreen() {
+func (c *Client) RenderScreen() {
 	var buf bytes.Buffer
 	buf.WriteString("\033[?25l")
-	if o.Mode == ModeScroll {
-		o.renderScrollView(&buf)
+	if c.Mode == ModeScroll {
+		c.renderScrollView(&buf)
 	} else {
-		o.renderLiveView(&buf)
+		c.renderLiveView(&buf)
 	}
-	o.renderSelectHint(&buf)
-	o.VT.Output.Write(buf.Bytes())
+	c.renderSelectHint(&buf)
+	c.VT.Output.Write(buf.Bytes())
 }
 
 // renderSelectHint draws the "hold shift to select" hint when active.
-func (o *Overlay) renderSelectHint(buf *bytes.Buffer) {
-	if !o.SelectHint {
+func (c *Client) renderSelectHint(buf *bytes.Buffer) {
+	if !c.SelectHint {
 		return
 	}
 	hint := "(hold shift to select)"
 	row := 1
-	if o.Mode == ModeScroll {
+	if c.Mode == ModeScroll {
 		row = 2
 	}
-	col := o.VT.Cols - len(hint) + 1
+	col := c.VT.Cols - len(hint) + 1
 	if col < 1 {
 		col = 1
 	}
@@ -49,36 +49,36 @@ func (o *Overlay) renderSelectHint(buf *bytes.Buffer) {
 // renderLiveView renders the live terminal content, anchored to the cursor.
 // midterm can grow Content/Height beyond ChildRows (via ensureHeight), so
 // the cursor position—not row 0 or len(Content)—determines the visible window.
-func (o *Overlay) renderLiveView(buf *bytes.Buffer) {
-	startRow := o.VT.Vt.Cursor.Y - o.VT.ChildRows + 1
+func (c *Client) renderLiveView(buf *bytes.Buffer) {
+	startRow := c.VT.Vt.Cursor.Y - c.VT.ChildRows + 1
 	if startRow < 0 {
 		startRow = 0
 	}
-	for i := 0; i < o.VT.ChildRows; i++ {
+	for i := 0; i < c.VT.ChildRows; i++ {
 		fmt.Fprintf(buf, "\033[%d;1H\033[2K", i+1)
-		o.RenderLineFrom(buf, o.VT.Vt, startRow+i)
+		c.RenderLineFrom(buf, c.VT.Vt, startRow+i)
 	}
 }
 
 // renderScrollView renders the scrollback buffer at the current ScrollOffset.
-func (o *Overlay) renderScrollView(buf *bytes.Buffer) {
-	sb := o.VT.Scrollback
+func (c *Client) renderScrollView(buf *bytes.Buffer) {
+	sb := c.VT.Scrollback
 	if sb == nil {
-		o.renderLiveView(buf)
+		c.renderLiveView(buf)
 		return
 	}
 	bottom := sb.Cursor.Y
-	startRow := bottom - o.VT.ChildRows + 1 - o.ScrollOffset
+	startRow := bottom - c.VT.ChildRows + 1 - c.ScrollOffset
 	if startRow < 0 {
 		startRow = 0
 	}
-	for i := 0; i < o.VT.ChildRows; i++ {
+	for i := 0; i < c.VT.ChildRows; i++ {
 		fmt.Fprintf(buf, "\033[%d;1H\033[2K", i+1)
-		o.RenderLineFrom(buf, sb, startRow+i)
+		c.RenderLineFrom(buf, sb, startRow+i)
 	}
 	// Draw "(scrolling)" indicator at row 1, right-aligned, in inverse video.
 	indicator := "(scrolling)"
-	col := o.VT.Cols - len(indicator) + 1
+	col := c.VT.Cols - len(indicator) + 1
 	if col < 1 {
 		col = 1
 	}
@@ -86,7 +86,7 @@ func (o *Overlay) renderScrollView(buf *bytes.Buffer) {
 }
 
 // RenderLineFrom writes one row of the given terminal to buf.
-func (o *Overlay) RenderLineFrom(buf *bytes.Buffer, vt *midterm.Terminal, row int) {
+func (c *Client) RenderLineFrom(buf *bytes.Buffer, vt *midterm.Terminal, row int) {
 	if row >= len(vt.Content) {
 		return
 	}
@@ -124,46 +124,46 @@ func (o *Overlay) RenderLineFrom(buf *bytes.Buffer, vt *midterm.Terminal, row in
 }
 
 // RenderLine writes one row of the primary virtual terminal to buf.
-func (o *Overlay) RenderLine(buf *bytes.Buffer, row int) {
-	o.RenderLineFrom(buf, o.VT.Vt, row)
+func (c *Client) RenderLine(buf *bytes.Buffer, row int) {
+	c.RenderLineFrom(buf, c.VT.Vt, row)
 }
 
 // RenderBar draws the separator line and input bar.
-func (o *Overlay) RenderBar() {
+func (c *Client) RenderBar() {
 	var buf bytes.Buffer
 
-	sepRow := o.VT.Rows - 1
-	inputRow := o.VT.Rows
+	sepRow := c.VT.Rows - 1
+	inputRow := c.VT.Rows
 	debugRow := 0
-	if o.DebugKeys {
-		sepRow = o.VT.Rows - 2
-		inputRow = o.VT.Rows - 1
-		debugRow = o.VT.Rows
+	if c.DebugKeys {
+		sepRow = c.VT.Rows - 2
+		inputRow = c.VT.Rows - 1
+		debugRow = c.VT.Rows
 	}
 
 	// --- Separator line ---
 	fmt.Fprintf(&buf, "\033[%d;1H\033[2K", sepRow)
 
 	var style, label string
-	if o.ChildExited {
+	if c.VT.ChildExited {
 		style = "\033[7m\033[31m" // red inverse
-		if o.Mode == ModeScroll {
-			label = " Scroll | " + o.exitMessage() + " | Esc exit"
+		if c.Mode == ModeScroll {
+			label = " Scroll | " + c.exitMessage() + " | Esc exit"
 		} else {
-			label = " " + o.exitMessage() + " | [Enter] relaunch \u00b7 [q] quit"
+			label = " " + c.exitMessage() + " | [Enter] relaunch \u00b7 [q] quit"
 		}
 	} else {
-		style = o.ModeBarStyle()
-		help := o.HelpLabel()
-		label = " " + o.ModeLabel()
+		style = c.ModeBarStyle()
+		help := c.HelpLabel()
+		label = " " + c.ModeLabel()
 
-		if o.Mode != ModeMenu {
-			status := o.StatusLabel()
+		if c.Mode != ModeMenu {
+			status := c.StatusLabel()
 			label += " | " + status
 
 			// OTEL metrics (tokens and cost)
-			if o.OtelMetrics != nil {
-				tokens, cost, connected, port := o.OtelMetrics()
+			if c.OtelMetrics != nil {
+				tokens, cost, connected, port := c.OtelMetrics()
 				if connected {
 					label += " | " + formatTokens(tokens) + " " + formatCost(cost)
 				} else {
@@ -172,8 +172,8 @@ func (o *Overlay) RenderBar() {
 			}
 
 			// Queue indicator
-			if o.QueueStatus != nil {
-				count, paused := o.QueueStatus()
+			if c.QueueStatus != nil {
+				count, paused := c.QueueStatus()
 				if count > 0 {
 					if paused {
 						label += fmt.Sprintf(" | [%d paused]", count)
@@ -190,21 +190,21 @@ func (o *Overlay) RenderBar() {
 	}
 
 	right := ""
-	if o.AgentName != "" {
-		right = o.AgentName + " "
+	if c.AgentName != "" {
+		right = c.AgentName + " "
 	}
 
-	if len(label)+len(right) > o.VT.Cols {
-		if !o.ChildExited {
+	if len(label)+len(right) > c.VT.Cols {
+		if !c.VT.ChildExited {
 			// Tight on space - drop help first, then right-align.
-			label = " " + o.ModeLabel()
-			if o.Mode != ModeMenu {
-				label += " | " + o.StatusLabel()
+			label = " " + c.ModeLabel()
+			if c.Mode != ModeMenu {
+				label += " | " + c.StatusLabel()
 			}
 		}
-		if len(label)+len(right) > o.VT.Cols {
-			if len(label) > o.VT.Cols {
-				label = label[:o.VT.Cols]
+		if len(label)+len(right) > c.VT.Cols {
+			if len(label) > c.VT.Cols {
+				label = label[:c.VT.Cols]
 			}
 			right = ""
 		}
@@ -212,7 +212,7 @@ func (o *Overlay) RenderBar() {
 
 	buf.WriteString(style)
 	buf.WriteString(label)
-	gap := o.VT.Cols - len(label) - len(right)
+	gap := c.VT.Cols - len(label) - len(right)
 	if gap > 0 {
 		buf.WriteString(strings.Repeat(" ", gap))
 	}
@@ -220,12 +220,12 @@ func (o *Overlay) RenderBar() {
 	buf.WriteString("\033[0m")
 
 	// --- Input line ---
-	prompt := o.InputPriority.String() + " > "
-	maxInput := o.VT.Cols - len(prompt)
+	prompt := c.InputPriority.String() + " > "
+	maxInput := c.VT.Cols - len(prompt)
 
-	inputRunes := []rune(string(o.Input))
+	inputRunes := []rune(string(c.Input))
 	totalRunes := len(inputRunes)
-	cursorRunePos := utf8.RuneCount(o.Input[:o.CursorPos])
+	cursorRunePos := utf8.RuneCount(c.Input[:c.CursorPos])
 
 	// Determine the visible window of runes, keeping the cursor in view.
 	displayStart := 0
@@ -250,44 +250,44 @@ func (o *Overlay) RenderBar() {
 
 	fmt.Fprintf(&buf, "\033[%d;1H\033[2K", inputRow)
 	promptColor := "\033[36m" // cyan
-	if o.InputPriority == message.PriorityInterrupt {
+	if c.InputPriority == message.PriorityInterrupt {
 		promptColor = "\033[31m" // red
 	}
 	fmt.Fprintf(&buf, "%s%s\033[0m%s", promptColor, prompt, displayInput)
 
 	cursorCol := len(prompt) + (cursorRunePos - displayStart) + 1
-	if cursorCol > o.VT.Cols {
-		cursorCol = o.VT.Cols
+	if cursorCol > c.VT.Cols {
+		cursorCol = c.VT.Cols
 	}
 	fmt.Fprintf(&buf, "\033[%d;%dH", inputRow, cursorCol)
 
-	if o.DebugKeys {
+	if c.DebugKeys {
 		fmt.Fprintf(&buf, "\033[%d;1H\033[2K", debugRow)
-		debugLabel := o.DebugLabel()
-		if len(debugLabel) > o.VT.Cols {
-			debugLabel = virtualterminal.TrimLeftToWidth(debugLabel, o.VT.Cols)
+		debugLabel := c.DebugLabel()
+		if len(debugLabel) > c.VT.Cols {
+			debugLabel = virtualterminal.TrimLeftToWidth(debugLabel, c.VT.Cols)
 		}
 		buf.WriteString(debugLabel)
-		if pad := o.VT.Cols - len(debugLabel); pad > 0 {
+		if pad := c.VT.Cols - len(debugLabel); pad > 0 {
 			buf.WriteString(strings.Repeat(" ", pad))
 		}
 	}
 
-	if o.Mode == ModePassthrough {
+	if c.Mode == ModePassthrough {
 		buf.WriteString("\033[?25l")
 	} else {
 		buf.WriteString("\033[?25h")
 	}
-	o.VT.Output.Write(buf.Bytes())
+	c.VT.Output.Write(buf.Bytes())
 }
 
 // ModeLabel returns the display name for the current mode.
-func (o *Overlay) ModeLabel() string {
-	switch o.Mode {
+func (c *Client) ModeLabel() string {
+	switch c.Mode {
 	case ModePassthrough:
 		return "Passthrough"
 	case ModeMenu:
-		return o.MenuLabel()
+		return c.MenuLabel()
 	case ModeScroll:
 		return "Scroll"
 	default:
@@ -296,8 +296,8 @@ func (o *Overlay) ModeLabel() string {
 }
 
 // ModeBarStyle returns the ANSI style for the current mode.
-func (o *Overlay) ModeBarStyle() string {
-	switch o.Mode {
+func (c *Client) ModeBarStyle() string {
+	switch c.Mode {
 	case ModePassthrough:
 		return "\033[7m\033[33m"
 	case ModeMenu:
@@ -310,8 +310,8 @@ func (o *Overlay) ModeBarStyle() string {
 }
 
 // HelpLabel returns context-sensitive help text.
-func (o *Overlay) HelpLabel() string {
-	switch o.Mode {
+func (c *Client) HelpLabel() string {
+	switch c.Mode {
 	case ModePassthrough:
 		return "Enter/Esc exit"
 	case ModeMenu:
@@ -324,12 +324,12 @@ func (o *Overlay) HelpLabel() string {
 }
 
 // StatusLabel returns the current activity status.
-func (o *Overlay) StatusLabel() string {
+func (c *Client) StatusLabel() string {
 	const idleThreshold = 2 * time.Second
-	if o.VT.LastOut.IsZero() {
+	if c.VT.LastOut.IsZero() {
 		return "Active"
 	}
-	idleFor := time.Since(o.VT.LastOut)
+	idleFor := time.Since(c.VT.LastOut)
 	if idleFor <= idleThreshold {
 		return "Active"
 	}
@@ -337,9 +337,9 @@ func (o *Overlay) StatusLabel() string {
 }
 
 // MenuLabel returns the formatted menu display.
-func (o *Overlay) MenuLabel() string {
+func (c *Client) MenuLabel() string {
 	items := "Menu | Enter:passthrough | c:clear | r:redraw"
-	if o.OnDetach != nil {
+	if c.OnDetach != nil {
 		items += " | d:detach"
 	}
 	items += " | q:quit"
@@ -347,16 +347,16 @@ func (o *Overlay) MenuLabel() string {
 }
 
 // DebugLabel returns the debug keystroke display.
-func (o *Overlay) DebugLabel() string {
+func (c *Client) DebugLabel() string {
 	prefix := " debug keystrokes: "
-	if len(o.DebugKeyBuf) == 0 {
+	if len(c.DebugKeyBuf) == 0 {
 		return prefix
 	}
-	keys := strings.Join(o.DebugKeyBuf, " ")
-	available := o.VT.Cols - len(prefix)
+	keys := strings.Join(c.DebugKeyBuf, " ")
+	available := c.VT.Cols - len(prefix)
 	if available <= 0 {
-		if o.VT.Cols > 0 {
-			return prefix[:o.VT.Cols]
+		if c.VT.Cols > 0 {
+			return prefix[:c.VT.Cols]
 		}
 		return ""
 	}
@@ -367,11 +367,11 @@ func (o *Overlay) DebugLabel() string {
 }
 
 // AppendDebugBytes records keystrokes for the debug display.
-func (o *Overlay) AppendDebugBytes(data []byte) {
+func (c *Client) AppendDebugBytes(data []byte) {
 	for _, b := range data {
-		o.DebugKeyBuf = append(o.DebugKeyBuf, virtualterminal.FormatDebugKey(b))
-		if len(o.DebugKeyBuf) > 10 {
-			o.DebugKeyBuf = o.DebugKeyBuf[len(o.DebugKeyBuf)-10:]
+		c.DebugKeyBuf = append(c.DebugKeyBuf, virtualterminal.FormatDebugKey(b))
+		if len(c.DebugKeyBuf) > 10 {
+			c.DebugKeyBuf = c.DebugKeyBuf[len(c.DebugKeyBuf)-10:]
 		}
 	}
 }
@@ -402,19 +402,19 @@ func formatCost(usd float64) string {
 }
 
 // exitMessage returns a human-readable description of why the child exited.
-func (o *Overlay) exitMessage() string {
-	if o.ChildHung {
+func (c *Client) exitMessage() string {
+	if c.VT.ChildHung {
 		return "process not responding (killed)"
 	}
-	if o.ExitError != nil {
+	if c.VT.ExitError != nil {
 		var exitErr *exec.ExitError
-		if errors.As(o.ExitError, &exitErr) {
+		if errors.As(c.VT.ExitError, &exitErr) {
 			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
 				return fmt.Sprintf("process killed (%s)", status.Signal())
 			}
 			return fmt.Sprintf("process exited (code %d)", exitErr.ExitCode())
 		}
-		return fmt.Sprintf("process error: %s", o.ExitError)
+		return fmt.Sprintf("process error: %s", c.VT.ExitError)
 	}
 	return "process exited"
 }

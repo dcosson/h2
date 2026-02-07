@@ -42,7 +42,7 @@ func (d *Daemon) handleAttach(conn net.Conn, req *message.Request) {
 	d.attachClient = session
 
 	vt := d.VT
-	ov := d.Overlay
+	cl := d.Client
 
 	// Swap VT I/O to use the attach connection.
 	vt.Mu.Lock()
@@ -51,18 +51,18 @@ func (d *Daemon) handleAttach(conn net.Conn, req *message.Request) {
 
 	// Resize PTY to client's terminal size.
 	if req.Cols > 0 && req.Rows > 0 {
-		childRows := req.Rows - ov.ReservedRows()
+		childRows := req.Rows - cl.ReservedRows()
 		vt.Resize(req.Rows, req.Cols, childRows)
 	}
 
 	// Set detach callback to close the client connection.
-	ov.OnDetach = func() { conn.Close() }
+	cl.OnDetach = func() { conn.Close() }
 
 	// Send full screen redraw and enable mouse reporting.
 	vt.Output.Write([]byte("\033[2J\033[H"))
 	vt.Output.Write([]byte("\033[?1000h\033[?1006h"))
-	ov.RenderScreen()
-	ov.RenderBar()
+	cl.RenderScreen()
+	cl.RenderBar()
 	vt.Mu.Unlock()
 
 	// Read input frames from client until disconnect.
@@ -70,7 +70,7 @@ func (d *Daemon) handleAttach(conn net.Conn, req *message.Request) {
 
 	// Client disconnected — detach. Disable mouse before swapping output.
 	vt.Mu.Lock()
-	ov.OnDetach = nil
+	cl.OnDetach = nil
 	vt.Output.Write([]byte("\033[?1000l\033[?1006l"))
 	vt.Output = io.Discard
 	vt.InputSrc = &blockingReader{}
@@ -80,7 +80,7 @@ func (d *Daemon) handleAttach(conn net.Conn, req *message.Request) {
 }
 
 // readClientInput reads framed input from the attach client and dispatches
-// it to the overlay.
+// it to the client.
 func (d *Daemon) readClientInput(conn net.Conn) {
 	for {
 		frameType, payload, err := message.ReadFrame(conn)
@@ -91,22 +91,22 @@ func (d *Daemon) readClientInput(conn net.Conn) {
 		switch frameType {
 		case message.FrameTypeData:
 			vt := d.VT
-			ov := d.Overlay
+			cl := d.Client
 			vt.Mu.Lock()
-			if ov.DebugKeys && len(payload) > 0 {
-				ov.AppendDebugBytes(payload)
-				ov.RenderBar()
+			if cl.DebugKeys && len(payload) > 0 {
+				cl.AppendDebugBytes(payload)
+				cl.RenderBar()
 			}
 			for i := 0; i < len(payload); {
-				switch ov.Mode {
+				switch cl.Mode {
 				case client.ModePassthrough:
-					i = ov.HandlePassthroughBytes(payload, i, len(payload))
+					i = cl.HandlePassthroughBytes(payload, i, len(payload))
 				case client.ModeMenu:
-					i = ov.HandleMenuBytes(payload, i, len(payload))
+					i = cl.HandleMenuBytes(payload, i, len(payload))
 				case client.ModeScroll:
-					i = ov.HandleScrollBytes(payload, i, len(payload))
+					i = cl.HandleScrollBytes(payload, i, len(payload))
 				default:
-					i = ov.HandleDefaultBytes(payload, i, len(payload))
+					i = cl.HandleDefaultBytes(payload, i, len(payload))
 				}
 			}
 			vt.Mu.Unlock()
@@ -118,16 +118,16 @@ func (d *Daemon) readClientInput(conn net.Conn) {
 			}
 			if ctrl.Type == "resize" {
 				vt := d.VT
-				ov := d.Overlay
+				cl := d.Client
 				vt.Mu.Lock()
-				childRows := ctrl.Rows - ov.ReservedRows()
+				childRows := ctrl.Rows - cl.ReservedRows()
 				vt.Resize(ctrl.Rows, ctrl.Cols, childRows)
-				if ov.Mode == client.ModeScroll {
-					ov.ClampScrollOffset()
+				if cl.Mode == client.ModeScroll {
+					cl.ClampScrollOffset()
 				}
 				vt.Output.Write([]byte("\033[2J"))
-				ov.RenderScreen()
-				ov.RenderBar()
+				cl.RenderScreen()
+				cl.RenderBar()
 				vt.Mu.Unlock()
 			}
 		}
@@ -147,7 +147,7 @@ func (fw *frameWriter) Write(p []byte) (int, error) {
 }
 
 // frameInputReader reads data frames from the attach client. It is used
-// by the overlay's ReadInput goroutine when in direct (non-daemon) mode
+// by the client's ReadInput goroutine when in direct (non-daemon) mode
 // where the VT reads from InputSrc directly. In attach mode, we
 // instead read frames in readClientInput, so this reader blocks forever
 // until the connection is closed.

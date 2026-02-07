@@ -7,7 +7,7 @@ import (
 )
 
 func TestCyclePriority(t *testing.T) {
-	o := &Overlay{InputPriority: message.PriorityNormal}
+	o := &Client{InputPriority: message.PriorityNormal}
 
 	o.CyclePriority()
 	if o.InputPriority != message.PriorityInterrupt {
@@ -31,7 +31,7 @@ func TestCyclePriority(t *testing.T) {
 }
 
 func TestCyclePriority_UnknownResetsToNormal(t *testing.T) {
-	o := &Overlay{InputPriority: 99}
+	o := &Client{InputPriority: 99}
 	o.CyclePriority()
 	if o.InputPriority != message.PriorityNormal {
 		t.Fatalf("expected normal, got %s", o.InputPriority)
@@ -39,7 +39,7 @@ func TestCyclePriority_UnknownResetsToNormal(t *testing.T) {
 }
 
 func TestCyclePriority_ZeroValueResetsToNormal(t *testing.T) {
-	o := &Overlay{} // InputPriority zero value (0)
+	o := &Client{} // InputPriority zero value (0)
 	o.CyclePriority()
 	if o.InputPriority != message.PriorityNormal {
 		t.Fatalf("expected normal, got %s", o.InputPriority)
@@ -47,7 +47,7 @@ func TestCyclePriority_ZeroValueResetsToNormal(t *testing.T) {
 }
 
 func TestPromptShowsPriority(t *testing.T) {
-	o := newTestOverlay(10, 80)
+	o := newTestClient(10, 80)
 	o.InputPriority = message.PriorityNormal
 
 	// The prompt string is constructed in RenderBar. We verify indirectly

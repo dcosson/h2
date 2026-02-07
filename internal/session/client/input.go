@@ -13,22 +13,22 @@ import (
 const ptyWriteTimeout = 3 * time.Second
 const scrollStep = 3
 
-func (o *Overlay) setMode(mode InputMode) {
-	o.Mode = mode
-	if o.OnModeChange != nil {
-		o.OnModeChange(mode)
+func (c *Client) setMode(mode InputMode) {
+	c.Mode = mode
+	if c.OnModeChange != nil {
+		c.OnModeChange(mode)
 	}
 }
 
 // writePTYOrHang writes to the child PTY with a timeout. If the write times
 // out (child not reading), it marks the child as hung, kills it, and returns
 // false. The caller should stop processing input when this returns false.
-func (o *Overlay) writePTYOrHang(p []byte) bool {
-	_, err := o.VT.WritePTY(p, ptyWriteTimeout)
+func (c *Client) writePTYOrHang(p []byte) bool {
+	_, err := c.VT.WritePTY(p, ptyWriteTimeout)
 	if err != nil {
-		o.ChildHung = true
-		o.KillChild()
-		o.RenderBar()
+		c.VT.ChildHung = true
+		c.VT.KillChild()
+		c.RenderBar()
 		return false
 	}
 	return true
@@ -36,26 +36,26 @@ func (o *Overlay) writePTYOrHang(p []byte) bool {
 
 // HandleExitedBytes processes input when the child has exited or is hung.
 // Enter relaunches, q quits. ESC sequences are processed for mouse scroll.
-func (o *Overlay) HandleExitedBytes(buf []byte, start, n int) int {
+func (c *Client) HandleExitedBytes(buf []byte, start, n int) int {
 	for i := start; i < n; {
 		b := buf[i]
 		i++
 		switch b {
 		case '\r', '\n':
 			select {
-			case o.relaunchCh <- struct{}{}:
+			case c.relaunchCh <- struct{}{}:
 			default:
 			}
 			return n
 		case 'q', 'Q':
 			select {
-			case o.quitCh <- struct{}{}:
+			case c.quitCh <- struct{}{}:
 			default:
 			}
-			o.Quit = true
+			c.Quit = true
 			return n
 		case 0x1B:
-			consumed, handled := o.HandleEscape(buf[i:n])
+			consumed, handled := c.HandleEscape(buf[i:n])
 			i += consumed
 			if handled {
 				continue
@@ -65,63 +65,63 @@ func (o *Overlay) HandleExitedBytes(buf []byte, start, n int) int {
 	return n
 }
 
-func (o *Overlay) StartPendingEsc() {
-	o.PendingEsc = true
-	if o.EscTimer != nil {
-		o.EscTimer.Stop()
+func (c *Client) StartPendingEsc() {
+	c.PendingEsc = true
+	if c.EscTimer != nil {
+		c.EscTimer.Stop()
 	}
-	o.EscTimer = time.AfterFunc(50*time.Millisecond, func() {
-		o.VT.Mu.Lock()
-		defer o.VT.Mu.Unlock()
-		if !o.PendingEsc {
+	c.EscTimer = time.AfterFunc(50*time.Millisecond, func() {
+		c.VT.Mu.Lock()
+		defer c.VT.Mu.Unlock()
+		if !c.PendingEsc {
 			return
 		}
-		o.PendingEsc = false
-		switch o.Mode {
+		c.PendingEsc = false
+		switch c.Mode {
 		case ModePassthrough:
-			o.PassthroughEsc = o.PassthroughEsc[:0]
-			o.setMode(ModeDefault)
-			o.RenderBar()
+			c.PassthroughEsc = c.PassthroughEsc[:0]
+			c.setMode(ModeDefault)
+			c.RenderBar()
 		case ModeScroll:
-			o.ExitScrollMode()
+			c.ExitScrollMode()
 		}
 	})
 }
 
-func (o *Overlay) CancelPendingEsc() {
-	if o.EscTimer != nil {
-		o.EscTimer.Stop()
+func (c *Client) CancelPendingEsc() {
+	if c.EscTimer != nil {
+		c.EscTimer.Stop()
 	}
-	o.PendingEsc = false
+	c.PendingEsc = false
 }
 
-func (o *Overlay) HandlePassthroughBytes(buf []byte, start, n int) int {
+func (c *Client) HandlePassthroughBytes(buf []byte, start, n int) int {
 	for i := start; i < n; {
-		if o.ChildExited || o.ChildHung {
+		if c.VT.ChildExited || c.VT.ChildHung {
 			return n
 		}
 		b := buf[i]
-		if o.PendingEsc {
+		if c.PendingEsc {
 			if b != '[' && b != 'O' {
-				o.CancelPendingEsc()
-				o.PassthroughEsc = o.PassthroughEsc[:0]
-				o.setMode(ModeDefault)
-				o.RenderBar()
+				c.CancelPendingEsc()
+				c.PassthroughEsc = c.PassthroughEsc[:0]
+				c.setMode(ModeDefault)
+				c.RenderBar()
 				return i
 			}
-			o.CancelPendingEsc()
-			o.PassthroughEsc = append(o.PassthroughEsc[:0], 0x1B, b)
-			o.FlushPassthroughEscIfComplete()
-			if o.ChildHung {
+			c.CancelPendingEsc()
+			c.PassthroughEsc = append(c.PassthroughEsc[:0], 0x1B, b)
+			c.FlushPassthroughEscIfComplete()
+			if c.VT.ChildHung {
 				return n
 			}
 			i++
 			continue
 		}
-		if len(o.PassthroughEsc) > 0 {
-			o.PassthroughEsc = append(o.PassthroughEsc, b)
-			o.FlushPassthroughEscIfComplete()
-			if o.ChildHung {
+		if len(c.PassthroughEsc) > 0 {
+			c.PassthroughEsc = append(c.PassthroughEsc, b)
+			c.FlushPassthroughEscIfComplete()
+			if c.VT.ChildHung {
 				return n
 			}
 			i++
@@ -129,24 +129,24 @@ func (o *Overlay) HandlePassthroughBytes(buf []byte, start, n int) int {
 		}
 		switch b {
 		case 0x0D, 0x0A:
-			o.CancelPendingEsc()
-			o.PassthroughEsc = o.PassthroughEsc[:0]
-			if !o.writePTYOrHang([]byte{'\r'}) {
+			c.CancelPendingEsc()
+			c.PassthroughEsc = c.PassthroughEsc[:0]
+			if !c.writePTYOrHang([]byte{'\r'}) {
 				return n
 			}
-			o.setMode(ModeDefault)
-			o.RenderBar()
+			c.setMode(ModeDefault)
+			c.RenderBar()
 			i++
 		case 0x1B:
-			o.StartPendingEsc()
+			c.StartPendingEsc()
 			i++
 		case 0x7F, 0x08:
-			if !o.writePTYOrHang([]byte{b}) {
+			if !c.writePTYOrHang([]byte{b}) {
 				return n
 			}
 			i++
 		default:
-			if !o.writePTYOrHang([]byte{b}) {
+			if !c.writePTYOrHang([]byte{b}) {
 				return n
 			}
 			i++
@@ -155,63 +155,63 @@ func (o *Overlay) HandlePassthroughBytes(buf []byte, start, n int) int {
 	return n
 }
 
-func (o *Overlay) HandleMenuBytes(buf []byte, start, n int) int {
+func (c *Client) HandleMenuBytes(buf []byte, start, n int) int {
 	for i := start; i < n; {
 		b := buf[i]
 		i++
 		if b == 0x1B {
-			consumed, handled := o.HandleEscape(buf[i:n])
+			consumed, handled := c.HandleEscape(buf[i:n])
 			i += consumed
 			if handled {
 				continue
 			}
 			// Bare Esc — exit menu
 			if i == n {
-				o.setMode(ModeDefault)
-				o.RenderBar()
+				c.setMode(ModeDefault)
+				c.RenderBar()
 			}
 			continue
 		}
 		switch b {
 		case 0x0D, 0x0A: // Enter — passthrough mode
-			o.setMode(ModePassthrough)
-			o.RenderBar()
+			c.setMode(ModePassthrough)
+			c.RenderBar()
 		case 'c', 'C': // clear input
-			o.Input = o.Input[:0]
-			o.CursorPos = 0
-			o.setMode(ModeDefault)
-			o.RenderBar()
+			c.Input = c.Input[:0]
+			c.CursorPos = 0
+			c.setMode(ModeDefault)
+			c.RenderBar()
 		case 'r', 'R': // redraw screen
-			o.VT.Output.Write([]byte("\033[2J\033[H"))
-			o.RenderScreen()
-			o.setMode(ModeDefault)
-			o.RenderBar()
+			c.VT.Output.Write([]byte("\033[2J\033[H"))
+			c.RenderScreen()
+			c.setMode(ModeDefault)
+			c.RenderBar()
 		case 'd', 'D': // detach
-			if o.OnDetach != nil {
-				o.setMode(ModeDefault)
-				o.RenderBar()
-				o.OnDetach()
+			if c.OnDetach != nil {
+				c.setMode(ModeDefault)
+				c.RenderBar()
+				c.OnDetach()
 				return n
 			}
 		case 'q', 'Q': // quit
-			o.Quit = true
-			o.VT.Cmd.Process.Signal(syscall.SIGTERM)
+			c.Quit = true
+			c.VT.Cmd.Process.Signal(syscall.SIGTERM)
 		}
 	}
 	return n
 }
 
-func (o *Overlay) HandleDefaultBytes(buf []byte, start, n int) int {
+func (c *Client) HandleDefaultBytes(buf []byte, start, n int) int {
 	for i := start; i < n; {
-		if o.ChildExited || o.ChildHung {
-			return o.HandleExitedBytes(buf, i, n)
+		if c.VT.ChildExited || c.VT.ChildHung {
+			return c.HandleExitedBytes(buf, i, n)
 		}
 
 		b := buf[i]
 		i++
 
 		if b == 0x1B {
-			consumed, handled := o.HandleEscape(buf[i:n])
+			consumed, handled := c.HandleEscape(buf[i:n])
 			i += consumed
 			if handled {
 				continue
@@ -221,152 +221,152 @@ func (o *Overlay) HandleDefaultBytes(buf []byte, start, n int) int {
 
 		switch b {
 		case 0x02: // ctrl+b — open menu
-			o.setMode(ModeMenu)
-			o.RenderBar()
+			c.setMode(ModeMenu)
+			c.RenderBar()
 
 		case 0x10: // ctrl+p — history up
-			o.HistoryUp()
-			o.RenderBar()
+			c.HistoryUp()
+			c.RenderBar()
 
 		case 0x0E: // ctrl+n — history down
-			o.HistoryDown()
-			o.RenderBar()
+			c.HistoryDown()
+			c.RenderBar()
 
 		case 0x09:
-			o.CyclePriority()
-			o.RenderBar()
+			c.CyclePriority()
+			c.RenderBar()
 
 		case 0x0D, 0x0A:
-			if len(o.Input) > 0 {
-				cmd := string(o.Input)
-				if o.InputPriority == message.PriorityNormal {
+			if len(c.Input) > 0 {
+				cmd := string(c.Input)
+				if c.InputPriority == message.PriorityNormal {
 					// Normal: direct PTY write.
-					if !o.writePTYOrHang(o.Input) {
+					if !c.writePTYOrHang(c.Input) {
 						return n
 					}
-					ptm := o.VT.Ptm
+					ptm := c.VT.Ptm
 					go func() {
 						time.Sleep(50 * time.Millisecond)
 						ptm.Write([]byte{'\r'})
 					}()
-				} else if o.OnSubmit != nil {
+				} else if c.OnSubmit != nil {
 					// Non-normal: route through session for priority-aware delivery.
-					o.OnSubmit(cmd, o.InputPriority)
+					c.OnSubmit(cmd, c.InputPriority)
 				}
-				o.History = append(o.History, cmd)
-				o.Input = o.Input[:0]
-				o.CursorPos = 0
-				o.InputPriority = message.PriorityNormal
+				c.History = append(c.History, cmd)
+				c.Input = c.Input[:0]
+				c.CursorPos = 0
+				c.InputPriority = message.PriorityNormal
 			} else {
-				if !o.writePTYOrHang([]byte{'\r'}) {
+				if !c.writePTYOrHang([]byte{'\r'}) {
 					return n
 				}
 			}
-			o.HistIdx = -1
-			o.Saved = nil
-			o.RenderBar()
+			c.HistIdx = -1
+			c.Saved = nil
+			c.RenderBar()
 
 		case 0x7F, 0x08:
-			if o.CursorPos > 0 {
-				o.DeleteBackward()
-				o.RenderBar()
+			if c.CursorPos > 0 {
+				c.DeleteBackward()
+				c.RenderBar()
 			}
 
 		case 0x01: // ctrl+a — move to start (pass through if input empty)
-			if len(o.Input) > 0 {
-				o.CursorToStart()
-				o.RenderBar()
+			if len(c.Input) > 0 {
+				c.CursorToStart()
+				c.RenderBar()
 			} else {
-				if !o.writePTYOrHang([]byte{b}) {
+				if !c.writePTYOrHang([]byte{b}) {
 					return n
 				}
 			}
 
 		case 0x05: // ctrl+e — move to end (pass through if input empty)
-			if len(o.Input) > 0 {
-				o.CursorToEnd()
-				o.RenderBar()
+			if len(c.Input) > 0 {
+				c.CursorToEnd()
+				c.RenderBar()
 			} else {
-				if !o.writePTYOrHang([]byte{b}) {
+				if !c.writePTYOrHang([]byte{b}) {
 					return n
 				}
 			}
 
 		case 0x0B: // ctrl+k — kill to end of line (pass through if input empty)
-			if len(o.Input) > 0 {
-				o.KillToEnd()
-				o.RenderBar()
+			if len(c.Input) > 0 {
+				c.KillToEnd()
+				c.RenderBar()
 			} else {
-				if !o.writePTYOrHang([]byte{b}) {
+				if !c.writePTYOrHang([]byte{b}) {
 					return n
 				}
 			}
 
 		case 0x15: // ctrl+u — kill to start of line (pass through if input empty)
-			if len(o.Input) > 0 {
-				o.KillToStart()
-				o.RenderBar()
+			if len(c.Input) > 0 {
+				c.KillToStart()
+				c.RenderBar()
 			} else {
-				if !o.writePTYOrHang([]byte{b}) {
+				if !c.writePTYOrHang([]byte{b}) {
 					return n
 				}
 			}
 
 		default:
 			if b < 0x20 {
-				if !o.writePTYOrHang([]byte{b}) {
+				if !c.writePTYOrHang([]byte{b}) {
 					return n
 				}
 			} else {
-				o.InsertByte(b)
-				o.RenderBar()
+				c.InsertByte(b)
+				c.RenderBar()
 			}
 		}
 	}
 	return n
 }
 
-func (o *Overlay) FlushPassthroughEscIfComplete() bool {
-	if len(o.PassthroughEsc) == 0 {
+func (c *Client) FlushPassthroughEscIfComplete() bool {
+	if len(c.PassthroughEsc) == 0 {
 		return false
 	}
-	if !virtualterminal.IsEscSequenceComplete(o.PassthroughEsc) {
+	if !virtualterminal.IsEscSequenceComplete(c.PassthroughEsc) {
 		return false
 	}
-	if virtualterminal.IsShiftEnterSequence(o.PassthroughEsc) {
-		o.writePTYOrHang([]byte{'\n'})
+	if virtualterminal.IsShiftEnterSequence(c.PassthroughEsc) {
+		c.writePTYOrHang([]byte{'\n'})
 	} else {
-		o.writePTYOrHang(o.PassthroughEsc)
+		c.writePTYOrHang(c.PassthroughEsc)
 	}
-	o.PassthroughEsc = o.PassthroughEsc[:0]
+	c.PassthroughEsc = c.PassthroughEsc[:0]
 	return true
 }
 
 // HandleEscape processes bytes following an ESC (0x1B).
-func (o *Overlay) HandleEscape(remaining []byte) (consumed int, handled bool) {
+func (c *Client) HandleEscape(remaining []byte) (consumed int, handled bool) {
 	if len(remaining) == 0 {
 		return 0, false
 	}
 
 	switch remaining[0] {
 	case '[':
-		return o.HandleCSI(remaining[1:])
+		return c.HandleCSI(remaining[1:])
 	case 'O':
 		if len(remaining) >= 2 {
 			return 2, true
 		}
 		return 1, true
 	case 'f': // meta+f — forward word
-		if o.Mode == ModeDefault && len(o.Input) > 0 {
-			o.CursorForwardWord()
-			o.RenderBar()
+		if c.Mode == ModeDefault && len(c.Input) > 0 {
+			c.CursorForwardWord()
+			c.RenderBar()
 			return 1, true
 		}
 		return 0, false
 	case 'b': // meta+b — backward word
-		if o.Mode == ModeDefault && len(o.Input) > 0 {
-			o.CursorBackwardWord()
-			o.RenderBar()
+		if c.Mode == ModeDefault && len(c.Input) > 0 {
+			c.CursorBackwardWord()
+			c.RenderBar()
 			return 1, true
 		}
 		return 0, false
@@ -375,7 +375,7 @@ func (o *Overlay) HandleEscape(remaining []byte) (consumed int, handled bool) {
 }
 
 // HandleCSI processes a CSI sequence (after ESC [).
-func (o *Overlay) HandleCSI(remaining []byte) (consumed int, handled bool) {
+func (c *Client) HandleCSI(remaining []byte) (consumed int, handled bool) {
 	if len(remaining) == 0 {
 		return 1, true
 	}
@@ -396,34 +396,34 @@ func (o *Overlay) HandleCSI(remaining []byte) (consumed int, handled bool) {
 
 	switch final {
 	case 'A', 'B':
-		if o.Mode == ModePassthrough {
-			o.writePTYOrHang(append([]byte{0x1B, '['}, remaining[:i+1]...))
+		if c.Mode == ModePassthrough {
+			c.writePTYOrHang(append([]byte{0x1B, '['}, remaining[:i+1]...))
 			break
 		}
-		if o.Mode == ModeScroll {
+		if c.Mode == ModeScroll {
 			if final == 'A' {
-				o.ScrollUp(1)
+				c.ScrollUp(1)
 			} else {
-				o.ScrollDown(1)
+				c.ScrollDown(1)
 			}
 			break
 		}
 		// Up/Down in default or menu mode: no-op
 	case 'C', 'D':
-		if o.Mode == ModePassthrough {
-			o.writePTYOrHang(append([]byte{0x1B, '['}, remaining[:i+1]...))
+		if c.Mode == ModePassthrough {
+			c.writePTYOrHang(append([]byte{0x1B, '['}, remaining[:i+1]...))
 			break
 		}
-		if o.Mode == ModeDefault && len(o.Input) > 0 {
+		if c.Mode == ModeDefault && len(c.Input) > 0 {
 			if final == 'D' {
-				o.CursorLeft()
+				c.CursorLeft()
 			} else {
-				o.CursorRight()
+				c.CursorRight()
 			}
-			o.RenderBar()
+			c.RenderBar()
 		}
 	case 'M', 'm':
-		o.HandleSGRMouse(remaining[:i], final == 'M')
+		c.HandleSGRMouse(remaining[:i], final == 'M')
 	}
 
 	return totalConsumed, true
@@ -438,26 +438,26 @@ var priorityOrder = []message.Priority{
 }
 
 // CyclePriority advances InputPriority to the next value in the cycle.
-func (o *Overlay) CyclePriority() {
+func (c *Client) CyclePriority() {
 	for i, p := range priorityOrder {
-		if p == o.InputPriority {
-			o.InputPriority = priorityOrder[(i+1)%len(priorityOrder)]
+		if p == c.InputPriority {
+			c.InputPriority = priorityOrder[(i+1)%len(priorityOrder)]
 			return
 		}
 	}
-	o.InputPriority = message.PriorityNormal
+	c.InputPriority = message.PriorityNormal
 }
 
 // HandleScrollBytes processes input when in scroll mode.
 // Esc or q exits scroll mode. Arrow keys scroll. All other input is ignored.
-func (o *Overlay) HandleScrollBytes(buf []byte, start, n int) int {
+func (c *Client) HandleScrollBytes(buf []byte, start, n int) int {
 	for i := start; i < n; {
 		b := buf[i]
 
 		// Handle continuation of a pending ESC from a previous read.
-		if o.PendingEsc {
-			o.CancelPendingEsc()
-			consumed, handled := o.HandleEscape(buf[i:n])
+		if c.PendingEsc {
+			c.CancelPendingEsc()
+			consumed, handled := c.HandleEscape(buf[i:n])
 			if handled {
 				i += consumed
 				continue
@@ -472,7 +472,7 @@ func (o *Overlay) HandleScrollBytes(buf []byte, start, n int) int {
 		case 0x1B:
 			if i < n {
 				// More data in buffer — try to parse escape sequence.
-				consumed, handled := o.HandleEscape(buf[i:n])
+				consumed, handled := c.HandleEscape(buf[i:n])
 				i += consumed
 				if handled {
 					continue
@@ -480,12 +480,12 @@ func (o *Overlay) HandleScrollBytes(buf []byte, start, n int) int {
 				// ESC followed by unrecognized byte — ignore.
 			} else {
 				// ESC at end of buffer — wait to see if it's bare Esc.
-				o.StartPendingEsc()
+				c.StartPendingEsc()
 			}
 		default:
 			// Pass control characters through to the PTY.
-			if b < 0x20 && !o.ChildExited && !o.ChildHung {
-				if !o.writePTYOrHang([]byte{b}) {
+			if b < 0x20 && !c.VT.ChildExited && !c.VT.ChildHung {
+				if !c.writePTYOrHang([]byte{b}) {
 					return n
 				}
 			}
@@ -495,62 +495,62 @@ func (o *Overlay) HandleScrollBytes(buf []byte, start, n int) int {
 }
 
 // EnterScrollMode switches to scroll mode, freezing the display.
-func (o *Overlay) EnterScrollMode() {
-	o.setMode(ModeScroll)
-	o.ScrollOffset = 0
-	o.RenderScreen()
-	o.RenderBar()
+func (c *Client) EnterScrollMode() {
+	c.setMode(ModeScroll)
+	c.ScrollOffset = 0
+	c.RenderScreen()
+	c.RenderBar()
 }
 
 // ExitScrollMode returns to default mode and re-renders the live view.
-func (o *Overlay) ExitScrollMode() {
-	o.ScrollOffset = 0
-	o.setMode(ModeDefault)
-	o.RenderScreen()
-	o.RenderBar()
+func (c *Client) ExitScrollMode() {
+	c.ScrollOffset = 0
+	c.setMode(ModeDefault)
+	c.RenderScreen()
+	c.RenderBar()
 }
 
 // ScrollUp moves the scroll view up by the given number of lines.
 // If the offset is already at the maximum, this is a no-op to avoid re-rendering.
-func (o *Overlay) ScrollUp(lines int) {
-	prev := o.ScrollOffset
-	o.ScrollOffset += lines
-	o.ClampScrollOffset()
-	if o.ScrollOffset == prev {
+func (c *Client) ScrollUp(lines int) {
+	prev := c.ScrollOffset
+	c.ScrollOffset += lines
+	c.ClampScrollOffset()
+	if c.ScrollOffset == prev {
 		return
 	}
-	o.RenderScreen()
-	o.RenderBar()
+	c.RenderScreen()
+	c.RenderBar()
 }
 
 // ScrollDown moves the scroll view down by the given number of lines.
 // If we reach the bottom (offset 0), exits scroll mode.
-func (o *Overlay) ScrollDown(lines int) {
-	o.ScrollOffset -= lines
-	if o.ScrollOffset <= 0 {
-		o.ExitScrollMode()
+func (c *Client) ScrollDown(lines int) {
+	c.ScrollOffset -= lines
+	if c.ScrollOffset <= 0 {
+		c.ExitScrollMode()
 		return
 	}
-	o.ClampScrollOffset()
-	o.RenderScreen()
-	o.RenderBar()
+	c.ClampScrollOffset()
+	c.RenderScreen()
+	c.RenderBar()
 }
 
 // ClampScrollOffset ensures ScrollOffset is within valid bounds.
-func (o *Overlay) ClampScrollOffset() {
-	if o.VT.Scrollback == nil {
-		o.ScrollOffset = 0
+func (c *Client) ClampScrollOffset() {
+	if c.VT.Scrollback == nil {
+		c.ScrollOffset = 0
 		return
 	}
-	maxOffset := o.VT.Scrollback.Cursor.Y - o.VT.ChildRows + 1
+	maxOffset := c.VT.Scrollback.Cursor.Y - c.VT.ChildRows + 1
 	if maxOffset < 0 {
 		maxOffset = 0
 	}
-	if o.ScrollOffset > maxOffset {
-		o.ScrollOffset = maxOffset
+	if c.ScrollOffset > maxOffset {
+		c.ScrollOffset = maxOffset
 	}
-	if o.ScrollOffset < 0 {
-		o.ScrollOffset = 0
+	if c.ScrollOffset < 0 {
+		c.ScrollOffset = 0
 	}
 }
 
@@ -558,7 +558,7 @@ func (o *Overlay) ClampScrollOffset() {
 // the "<Cb;Cx;Cy" portion (everything between ESC[ and the final M/m).
 // press is true for button press (M), false for release (m).
 // Button 0 = left click, 64 = scroll up, 65 = scroll down.
-func (o *Overlay) HandleSGRMouse(params []byte, press bool) {
+func (c *Client) HandleSGRMouse(params []byte, press bool) {
 	// SGR mouse format: ESC [ < Cb ; Cx ; Cy M/m
 	// params should start with '<' followed by Cb;Cx;Cy
 	s := string(params)
@@ -578,36 +578,36 @@ func (o *Overlay) HandleSGRMouse(params []byte, press bool) {
 	switch button {
 	case 0: // left click
 		if press {
-			o.ShowSelectHint()
+			c.ShowSelectHint()
 		}
 	case 64: // scroll up
-		if o.Mode == ModePassthrough {
+		if c.Mode == ModePassthrough {
 			return
 		}
-		if o.Mode != ModeScroll {
-			o.EnterScrollMode()
+		if c.Mode != ModeScroll {
+			c.EnterScrollMode()
 		}
-		o.ScrollUp(scrollStep)
+		c.ScrollUp(scrollStep)
 	case 65: // scroll down
-		if o.Mode == ModeScroll {
-			o.ScrollDown(scrollStep)
+		if c.Mode == ModeScroll {
+			c.ScrollDown(scrollStep)
 		}
 	}
 }
 
 // ShowSelectHint displays a transient hint about using shift for text selection.
-func (o *Overlay) ShowSelectHint() {
-	o.SelectHint = true
-	if o.SelectHintTimer != nil {
-		o.SelectHintTimer.Stop()
+func (c *Client) ShowSelectHint() {
+	c.SelectHint = true
+	if c.SelectHintTimer != nil {
+		c.SelectHintTimer.Stop()
 	}
-	o.RenderScreen()
-	o.RenderBar()
-	o.SelectHintTimer = time.AfterFunc(3*time.Second, func() {
-		o.VT.Mu.Lock()
-		defer o.VT.Mu.Unlock()
-		o.SelectHint = false
-		o.RenderScreen()
-		o.RenderBar()
+	c.RenderScreen()
+	c.RenderBar()
+	c.SelectHintTimer = time.AfterFunc(3*time.Second, func() {
+		c.VT.Mu.Lock()
+		defer c.VT.Mu.Unlock()
+		c.SelectHint = false
+		c.RenderScreen()
+		c.RenderBar()
 	})
 }
