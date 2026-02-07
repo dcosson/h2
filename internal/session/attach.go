@@ -41,8 +41,9 @@ func (d *Daemon) handleAttach(conn net.Conn, req *message.Request) {
 	session := &AttachSession{conn: conn}
 	d.attachClient = session
 
-	vt := d.VT
-	cl := d.Client
+	s := d.Session
+	vt := s.VT
+	cl := s.Client
 
 	// Swap VT I/O to use the attach connection.
 	vt.Mu.Lock()
@@ -88,10 +89,11 @@ func (d *Daemon) readClientInput(conn net.Conn) {
 			return // client disconnected
 		}
 
+		s := d.Session
 		switch frameType {
 		case message.FrameTypeData:
-			vt := d.VT
-			cl := d.Client
+			vt := s.VT
+			cl := s.Client
 			vt.Mu.Lock()
 			if cl.DebugKeys && len(payload) > 0 {
 				cl.AppendDebugBytes(payload)
@@ -117,8 +119,8 @@ func (d *Daemon) readClientInput(conn net.Conn) {
 				continue
 			}
 			if ctrl.Type == "resize" {
-				vt := d.VT
-				cl := d.Client
+				vt := s.VT
+				cl := s.Client
 				vt.Mu.Lock()
 				childRows := ctrl.Rows - cl.ReservedRows()
 				vt.Resize(ctrl.Rows, ctrl.Cols, childRows)

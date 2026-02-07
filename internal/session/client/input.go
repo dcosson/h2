@@ -42,17 +42,15 @@ func (c *Client) HandleExitedBytes(buf []byte, start, n int) int {
 		i++
 		switch b {
 		case '\r', '\n':
-			select {
-			case c.relaunchCh <- struct{}{}:
-			default:
+			if c.OnRelaunch != nil {
+				c.OnRelaunch()
 			}
 			return n
 		case 'q', 'Q':
-			select {
-			case c.quitCh <- struct{}{}:
-			default:
-			}
 			c.Quit = true
+			if c.OnQuit != nil {
+				c.OnQuit()
+			}
 			return n
 		case 0x1B:
 			consumed, handled := c.HandleEscape(buf[i:n])
@@ -196,6 +194,9 @@ func (c *Client) HandleMenuBytes(buf []byte, start, n int) int {
 		case 'q', 'Q': // quit
 			c.Quit = true
 			c.VT.Cmd.Process.Signal(syscall.SIGTERM)
+			if c.OnQuit != nil {
+				c.OnQuit()
+			}
 		}
 	}
 	return n

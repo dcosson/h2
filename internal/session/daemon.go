@@ -2,26 +2,18 @@ package session
 
 import (
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
 
-	"h2/internal/session/client"
 	"h2/internal/session/message"
 	"h2/internal/session/virtualterminal"
 )
 
-// Daemon manages the lifecycle of a wrapped child process, its Unix socket
-// listener, and message delivery.
+// Daemon manages the Unix socket listener and attach protocol for a Session.
 type Daemon struct {
-	Name      string
-	Command   string
-	Args      []string
-	VT        *virtualterminal.VT
-	Client    *client.Client
 	Session   *Session
 	Listener  net.Listener
 	StartTime time.Time
@@ -39,27 +31,26 @@ func SocketPath(name string) string {
 	return filepath.Join(SocketDir(), name+".sock")
 }
 
-// Run starts the daemon: creates the VT, overlay, session, socket, and
-// waits for the child to exit.
-func (d *Daemon) Run() error {
-	d.StartTime = time.Now()
+// RunDaemon creates a Session and Daemon, sets up the socket, and runs
+// the session in daemon mode. This is the main entry point for the _daemon command.
+func RunDaemon(name, command string, args []string) error {
+	s := New(name, command, args)
+	s.StartTime = time.Now()
 
 	// Create socket directory.
 	if err := os.MkdirAll(SocketDir(), 0o700); err != nil {
 		return fmt.Errorf("create socket dir: %w", err)
 	}
 
-	sockPath := SocketPath(d.Name)
+	sockPath := SocketPath(name)
 
 	// Check if socket already exists.
 	if _, err := os.Stat(sockPath); err == nil {
-		// Try to connect to see if it's a live daemon.
 		conn, err := net.DialTimeout("unix", sockPath, 500*time.Millisecond)
 		if err == nil {
 			conn.Close()
-			return fmt.Errorf("agent %q is already running", d.Name)
+			return fmt.Errorf("agent %q is already running", name)
 		}
-		// Stale socket, remove it.
 		os.Remove(sockPath)
 	}
 
@@ -68,77 +59,25 @@ func (d *Daemon) Run() error {
 	if err != nil {
 		return fmt.Errorf("listen on socket: %w", err)
 	}
-	d.Listener = ln
 	defer func() {
 		ln.Close()
 		os.Remove(sockPath)
 	}()
 
-	// Set up VT and client.
-	d.VT = &virtualterminal.VT{}
-	d.Client = &client.Client{
-		VT:        d.VT,
-		AgentName: d.Name,
+	d := &Daemon{
+		Session:   s,
+		Listener:  ln,
+		StartTime: s.StartTime,
 	}
-
-	// Create session (owns queue, delivery, state management).
-	d.Session = New(d.Name, &daemonPtyWriter{d: d})
-	d.Session.OnDeliver = func() {
-		d.VT.Mu.Lock()
-		d.Client.RenderBar()
-		d.VT.Mu.Unlock()
-	}
-
-	// Start OTEL collector and pass env vars to child process.
-	if err := d.Session.StartOtelCollector(); err != nil {
-		return fmt.Errorf("start otel collector: %w", err)
-	}
-	d.Client.ExtraEnv = d.Session.OtelEnv()
-	if d.Client.ExtraEnv == nil {
-		d.Client.ExtraEnv = make(map[string]string)
-	}
-	d.Client.ExtraEnv["H2_ACTOR"] = d.Name
-
-	// Wire client callbacks.
-	d.Client.OnModeChange = func(mode client.InputMode) {
-		if mode == client.ModePassthrough {
-			d.Session.Queue.Pause()
-		} else {
-			d.Session.Queue.Unpause()
-		}
-	}
-	d.Client.QueueStatus = func() (int, bool) {
-		return d.Session.Queue.PendingCount(), d.Session.Queue.IsPaused()
-	}
-	d.Client.OtelMetrics = func() (int64, float64, bool, int) {
-		m := d.Session.Metrics()
-		return m.TotalTokens, m.TotalCostUSD, m.EventsReceived, d.Session.OtelPort()
-	}
-	d.Client.OnSubmit = func(text string, pri message.Priority) {
-		d.Session.SubmitInput(text, pri)
-	}
-	d.Client.OnOutput = func() {
-		d.Session.NoteOutput()
-	}
-	d.Client.OnChildExit = func() {
-		d.Session.NoteExit()
-		d.Session.Queue.Pause()
-	}
-	d.Client.OnChildRelaunch = func() {
-		d.Session.Queue.Unpause()
-	}
+	s.Daemon = d
 
 	// Start socket listener.
 	go d.acceptLoop()
 
-	// Start session (delivery loop + state watcher).
-	go d.Session.Start()
-
-	// Run the client in daemon mode (blocks until user quits).
-	err = d.Client.RunDaemon(d.Command, d.Args...)
+	// Run session in daemon mode (blocks until exit).
+	err = s.RunDaemon()
 
 	// Clean up.
-	d.Session.Stop()
 	if d.attachClient != nil {
 		d.attachClient.Close()
 	}
@@ -146,39 +85,17 @@ func (d *Daemon) Run() error {
 	return err
 }
 
-// daemonPtyWriter writes to the child PTY while holding the VT mutex.
-// Uses WritePTY with a timeout to avoid blocking forever if the child
-// stops reading.
-type daemonPtyWriter struct {
-	d *Daemon
-}
-
-func (pw *daemonPtyWriter) Write(p []byte) (int, error) {
-	pw.d.VT.Mu.Lock()
-	defer pw.d.VT.Mu.Unlock()
-	if pw.d.VT.ChildExited || pw.d.VT.ChildHung {
-		return 0, io.ErrClosedPipe
-	}
-	n, err := pw.d.VT.WritePTY(p, 3*time.Second)
-	if err == virtualterminal.ErrPTYWriteTimeout {
-		pw.d.VT.ChildHung = true
-		pw.d.VT.KillChild()
-		pw.d.Client.RenderBar()
-		return 0, io.ErrClosedPipe
-	}
-	return n, err
-}
-
 // AgentInfo returns status information about this daemon.
 func (d *Daemon) AgentInfo() *message.AgentInfo {
+	s := d.Session
 	uptime := time.Since(d.StartTime)
 	return &message.AgentInfo{
-		Name:          d.Name,
-		Command:       d.Command,
+		Name:          s.Name,
+		Command:       s.Command,
 		Uptime:        virtualterminal.FormatIdleDuration(uptime),
-		State:         d.Session.State().String(),
-		StateDuration: virtualterminal.FormatIdleDuration(d.Session.StateDuration()),
-		QueuedCount:   d.Session.Queue.PendingCount(),
+		State:         s.State().String(),
+		StateDuration: virtualterminal.FormatIdleDuration(s.StateDuration()),
+		QueuedCount:   s.Queue.PendingCount(),
 	}
 }
 

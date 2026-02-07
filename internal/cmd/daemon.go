@@ -23,17 +23,8 @@ func newDaemonCmd() *cobra.Command {
 				return fmt.Errorf("--name is required")
 			}
 
-			d := &session.Daemon{
-				Name:    name,
-				Command: args[0],
-				Args:    args[1:],
-			}
-
-			err := d.Run()
+			err := session.RunDaemon(name, args[0], args[1:])
 			if err != nil {
-				if d.Client != nil && d.Client.Quit {
-					return nil
-				}
 				if _, ok := err.(*exec.ExitError); ok {
 					os.Exit(1)
 				}

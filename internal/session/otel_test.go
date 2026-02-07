@@ -10,7 +10,7 @@ import (
 )
 
 func TestOtelCollector_StartsOnRandomPort(t *testing.T) {
-	s := New("test", nil)
+	s := New("test", "true", nil)
 	defer s.Stop()
 
 	err := s.StartOtelCollector()
@@ -28,7 +28,7 @@ func TestOtelCollector_StartsOnRandomPort(t *testing.T) {
 }
 
 func TestOtelEnv_ReturnsCorrectVars(t *testing.T) {
-	s := New("test", nil)
+	s := New("test", "true", nil)
 	defer s.Stop()
 
 	// Before starting collector, should return nil.
@@ -72,7 +72,7 @@ func TestOtelEnv_ReturnsCorrectVars(t *testing.T) {
 }
 
 func TestOtelCollector_AcceptsLogsAndSignalsActivity(t *testing.T) {
-	s := New("test", nil)
+	s := New("test", "true", nil)
 	defer s.Stop()
 
 	err := s.StartOtelCollector()
@@ -117,7 +117,7 @@ func TestOtelCollector_AcceptsLogsAndSignalsActivity(t *testing.T) {
 }
 
 func TestOtelCollector_AcceptsMetrics(t *testing.T) {
-	s := New("test", nil)
+	s := New("test", "true", nil)
 	defer s.Stop()
 
 	err := s.StartOtelCollector()
@@ -144,7 +144,7 @@ func TestOtelCollector_AcceptsMetrics(t *testing.T) {
 }
 
 func TestOtelCollector_StateTransitionOnEvent(t *testing.T) {
-	s := New("test", nil)
+	s := New("test", "true", nil)
 	defer s.Stop()
 
 	err := s.StartOtelCollector()
@@ -190,7 +190,7 @@ func TestOtelCollector_StateTransitionOnEvent(t *testing.T) {
 }
 
 func TestOtelMetrics_AccumulatesTokensAndCost(t *testing.T) {
-	s := New("test", nil)
+	s := New("test", "true", nil)
 	defer s.Stop()
 
 	err := s.StartOtelCollector()

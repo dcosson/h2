@@ -44,6 +44,7 @@ func (d *Daemon) handleConn(conn net.Conn) {
 func (d *Daemon) handleSend(conn net.Conn, req *message.Request) {
 	defer conn.Close()
 
+	s := d.Session
 	priority, ok := message.ParsePriority(req.Priority)
 	if !ok {
 		message.SendResponse(conn, &message.Response{
@@ -57,7 +58,7 @@ func (d *Daemon) handleSend(conn net.Conn, req *message.Request) {
 		from = "unknown"
 	}
 
-	id, err := message.PrepareMessage(d.Session.Queue, d.Name, from, req.Body, priority)
+	id, err := message.PrepareMessage(s.Queue, s.Name, from, req.Body, priority)
 	if err != nil {
 		message.SendResponse(conn, &message.Response{
 			Error: err.Error(),
@@ -74,7 +75,8 @@ func (d *Daemon) handleSend(conn net.Conn, req *message.Request) {
 func (d *Daemon) handleShow(conn net.Conn, req *message.Request) {
 	defer conn.Close()
 
-	msg := d.Session.Queue.Lookup(req.MessageID)
+	s := d.Session
+	msg := s.Queue.Lookup(req.MessageID)
 	if msg == nil {
 		message.SendResponse(conn, &message.Response{
 			Error: "message not found: " + req.MessageID,

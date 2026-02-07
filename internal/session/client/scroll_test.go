@@ -468,8 +468,6 @@ func TestHelpLabel_Scroll(t *testing.T) {
 func TestHandleExitedBytes_MouseScrollEntersScrollMode(t *testing.T) {
 	o := newTestClient(10, 80)
 	o.VT.ChildExited = true
-	o.relaunchCh = make(chan struct{}, 1)
-	o.quitCh = make(chan struct{}, 1)
 	for i := 0; i < 20; i++ {
 		o.VT.Scrollback.Write([]byte("line\n"))
 	}
@@ -485,32 +483,28 @@ func TestHandleExitedBytes_MouseScrollEntersScrollMode(t *testing.T) {
 func TestHandleExitedBytes_EnterStillRelaunches(t *testing.T) {
 	o := newTestClient(10, 80)
 	o.VT.ChildExited = true
-	o.relaunchCh = make(chan struct{}, 1)
-	o.quitCh = make(chan struct{}, 1)
+	var called bool
+	o.OnRelaunch = func() { called = true }
 
 	buf := []byte{'\r'}
 	o.HandleExitedBytes(buf, 0, len(buf))
 
-	select {
-	case <-o.relaunchCh:
-	default:
-		t.Fatal("expected relaunchCh to receive")
+	if !called {
+		t.Fatal("expected OnRelaunch to be called")
 	}
 }
 
 func TestHandleExitedBytes_QStillQuits(t *testing.T) {
 	o := newTestClient(10, 80)
 	o.VT.ChildExited = true
-	o.relaunchCh = make(chan struct{}, 1)
-	o.quitCh = make(chan struct{}, 1)
+	var called bool
+	o.OnQuit = func() { called = true }
 
 	buf := []byte{'q'}
 	o.HandleExitedBytes(buf, 0, len(buf))
 
-	select {
-	case <-o.quitCh:
-	default:
-		t.Fatal("expected quitCh to receive")
+	if !called {
+		t.Fatal("expected OnQuit to be called")
 	}
 	if !o.Quit {
 		t.Fatal("expected Quit to be true")
@@ -536,8 +530,6 @@ func TestExitedScrollMode_BarStaysRed(t *testing.T) {
 func TestExitedScrollMode_ScrollDownToBottomExits(t *testing.T) {
 	o := newTestClient(10, 80)
 	o.VT.ChildExited = true
-	o.relaunchCh = make(chan struct{}, 1)
-	o.quitCh = make(chan struct{}, 1)
 	for i := 0; i < 20; i++ {
 		o.VT.Scrollback.Write([]byte("line\n"))
 	}

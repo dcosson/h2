@@ -9,7 +9,7 @@ import (
 )
 
 func TestStateTransitions_ActiveToIdle(t *testing.T) {
-	s := New("test", nil)
+	s := New("test", "true", nil)
 	defer s.Stop()
 
 	go s.watchState(s.stopCh)
@@ -29,7 +29,7 @@ func TestStateTransitions_ActiveToIdle(t *testing.T) {
 }
 
 func TestStateTransitions_IdleToActive(t *testing.T) {
-	s := New("test", nil)
+	s := New("test", "true", nil)
 	defer s.Stop()
 
 	go s.watchState(s.stopCh)
@@ -49,7 +49,7 @@ func TestStateTransitions_IdleToActive(t *testing.T) {
 }
 
 func TestStateTransitions_Exited(t *testing.T) {
-	s := New("test", nil)
+	s := New("test", "true", nil)
 	defer s.Stop()
 
 	go s.watchState(s.stopCh)
@@ -71,7 +71,7 @@ func TestStateTransitions_Exited(t *testing.T) {
 }
 
 func TestWaitForState_ReachesTarget(t *testing.T) {
-	s := New("test", nil)
+	s := New("test", "true", nil)
 	defer s.Stop()
 
 	go s.watchState(s.stopCh)
@@ -94,7 +94,7 @@ func TestWaitForState_ReachesTarget(t *testing.T) {
 }
 
 func TestWaitForState_ContextCancelled(t *testing.T) {
-	s := New("test", nil)
+	s := New("test", "true", nil)
 	defer s.Stop()
 
 	go s.watchState(s.stopCh)
@@ -125,7 +125,7 @@ func TestWaitForState_ContextCancelled(t *testing.T) {
 }
 
 func TestStateChanged_ClosesOnTransition(t *testing.T) {
-	s := New("test", nil)
+	s := New("test", "true", nil)
 	defer s.Stop()
 
 	ch := s.StateChanged()
@@ -142,7 +142,7 @@ func TestStateChanged_ClosesOnTransition(t *testing.T) {
 }
 
 func TestSubmitInput(t *testing.T) {
-	s := New("test-agent", nil)
+	s := New("test-agent", "true", nil)
 
 	s.SubmitInput("hello world", message.PriorityIdle)
 
@@ -170,7 +170,7 @@ func TestSubmitInput(t *testing.T) {
 }
 
 func TestSubmitInput_Interrupt(t *testing.T) {
-	s := New("test-agent", nil)
+	s := New("test-agent", "true", nil)
 
 	s.SubmitInput("urgent", message.PriorityInterrupt)
 
@@ -184,7 +184,7 @@ func TestSubmitInput_Interrupt(t *testing.T) {
 }
 
 func TestNoteOutput_NonBlocking(t *testing.T) {
-	s := New("test", nil)
+	s := New("test", "true", nil)
 
 	// Fill the channel.
 	s.NoteOutput()

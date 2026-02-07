@@ -11,9 +11,9 @@ import (
 // --- HandleExitedBytes ---
 
 func TestHandleExitedBytes_EnterRelaunches(t *testing.T) {
+	var called bool
 	o := &Client{
-		relaunchCh: make(chan struct{}, 1),
-		quitCh:     make(chan struct{}, 1),
+		OnRelaunch: func() { called = true },
 	}
 
 	buf := []byte{'\r'}
@@ -22,42 +22,36 @@ func TestHandleExitedBytes_EnterRelaunches(t *testing.T) {
 		t.Fatalf("expected %d, got %d", len(buf), n)
 	}
 
-	select {
-	case <-o.relaunchCh:
-	default:
-		t.Fatal("expected relaunchCh to receive")
+	if !called {
+		t.Fatal("expected OnRelaunch to be called")
 	}
 }
 
 func TestHandleExitedBytes_NewlineRelaunches(t *testing.T) {
+	var called bool
 	o := &Client{
-		relaunchCh: make(chan struct{}, 1),
-		quitCh:     make(chan struct{}, 1),
+		OnRelaunch: func() { called = true },
 	}
 
 	buf := []byte{'\n'}
 	o.HandleExitedBytes(buf, 0, len(buf))
 
-	select {
-	case <-o.relaunchCh:
-	default:
-		t.Fatal("expected relaunchCh to receive")
+	if !called {
+		t.Fatal("expected OnRelaunch to be called")
 	}
 }
 
 func TestHandleExitedBytes_QuitLowercase(t *testing.T) {
+	var called bool
 	o := &Client{
-		relaunchCh: make(chan struct{}, 1),
-		quitCh:     make(chan struct{}, 1),
+		OnQuit: func() { called = true },
 	}
 
 	buf := []byte{'q'}
 	o.HandleExitedBytes(buf, 0, len(buf))
 
-	select {
-	case <-o.quitCh:
-	default:
-		t.Fatal("expected quitCh to receive")
+	if !called {
+		t.Fatal("expected OnQuit to be called")
 	}
 	if !o.Quit {
 		t.Fatal("expected Quit to be true")
@@ -65,46 +59,41 @@ func TestHandleExitedBytes_QuitLowercase(t *testing.T) {
 }
 
 func TestHandleExitedBytes_QuitUppercase(t *testing.T) {
+	var called bool
 	o := &Client{
-		relaunchCh: make(chan struct{}, 1),
-		quitCh:     make(chan struct{}, 1),
+		OnQuit: func() { called = true },
 	}
 
 	buf := []byte{'Q'}
 	o.HandleExitedBytes(buf, 0, len(buf))
 
-	select {
-	case <-o.quitCh:
-	default:
-		t.Fatal("expected quitCh to receive")
+	if !called {
+		t.Fatal("expected OnQuit to be called")
 	}
 }
 
 func TestHandleExitedBytes_IgnoresOtherKeys(t *testing.T) {
+	var relaunchCalled, quitCalled bool
 	o := &Client{
-		relaunchCh: make(chan struct{}, 1),
-		quitCh:     make(chan struct{}, 1),
+		OnRelaunch: func() { relaunchCalled = true },
+		OnQuit:     func() { quitCalled = true },
 	}
 
 	buf := []byte{'a', 'b', 'c', 0x1B, ' '}
 	o.HandleExitedBytes(buf, 0, len(buf))
 
-	select {
-	case <-o.relaunchCh:
-		t.Fatal("unexpected relaunchCh signal")
-	default:
+	if relaunchCalled {
+		t.Fatal("unexpected OnRelaunch call")
 	}
-	select {
-	case <-o.quitCh:
-		t.Fatal("unexpected quitCh signal")
-	default:
+	if quitCalled {
+		t.Fatal("unexpected OnQuit call")
 	}
 }
 
 func TestHandleExitedBytes_StartOffset(t *testing.T) {
+	var called bool
 	o := &Client{
-		relaunchCh: make(chan struct{}, 1),
-		quitCh:     make(chan struct{}, 1),
+		OnRelaunch: func() { called = true },
 	}
 
 	// Only bytes from index 2 onward should be processed.
@@ -114,26 +103,20 @@ func TestHandleExitedBytes_StartOffset(t *testing.T) {
 		t.Fatalf("expected %d, got %d", len(buf), n)
 	}
 
-	select {
-	case <-o.relaunchCh:
-	default:
-		t.Fatal("expected relaunchCh to receive")
+	if !called {
+		t.Fatal("expected OnRelaunch to be called")
 	}
 }
 
-func TestHandleExitedBytes_ChannelFull(t *testing.T) {
-	o := &Client{
-		relaunchCh: make(chan struct{}, 1),
-		quitCh:     make(chan struct{}, 1),
-	}
+func TestHandleExitedBytes_NilCallbackDoesNotPanic(t *testing.T) {
+	o := &Client{}
 
-	// Pre-fill the channel.
-	o.relaunchCh <- struct{}{}
-
-	// Second Enter should not block (non-blocking send).
+	// Should not panic even with nil callbacks.
 	buf := []byte{'\r'}
 	o.HandleExitedBytes(buf, 0, len(buf))
-	// If we got here without blocking, the test passes.
+
+	buf = []byte{'q'}
+	o.HandleExitedBytes(buf, 0, len(buf))
 }
 
 // --- exitMessage ---
