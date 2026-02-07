@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	"h2/internal/session"
@@ -23,8 +24,10 @@ func newRunCmd() *cobra.Command {
 				name = session.GenerateName()
 			}
 
+			sessionID := uuid.New().String()
+
 			// Fork a daemon process.
-			if err := session.ForkDaemon(name, args[0], args[1:]); err != nil {
+			if err := session.ForkDaemon(name, sessionID, args[0], args[1:]); err != nil {
 				return err
 			}
 

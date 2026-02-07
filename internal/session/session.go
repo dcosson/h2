@@ -49,6 +49,7 @@ type Session struct {
 	Name      string
 	Command   string
 	Args      []string
+	SessionID string // Claude Code session ID (UUID), set for claude commands
 	Queue     *message.MessageQueue
 	AgentName string
 	Agent     *agent.Agent
@@ -137,6 +138,14 @@ func (s *Session) initVT(rows, cols int) {
 	s.VT = &virtualterminal.VT{}
 	s.VT.Rows = rows
 	s.VT.Cols = cols
+}
+
+// childArgs returns the command args, prepending --session-id for claude commands.
+func (s *Session) childArgs() []string {
+	if s.Command == "claude" && s.SessionID != "" {
+		return append([]string{"--session-id", s.SessionID}, s.Args...)
+	}
+	return s.Args
 }
 
 // NewClient creates a new Client with all session callbacks wired.
@@ -295,7 +304,7 @@ func (s *Session) RunDaemon() error {
 	s.ExtraEnv["H2_ACTOR"] = s.Name
 
 	// Start child in a PTY.
-	if err := s.VT.StartPTY(s.Command, s.Args, s.VT.ChildRows, s.VT.Cols, s.ExtraEnv); err != nil {
+	if err := s.VT.StartPTY(s.Command, s.childArgs(), s.VT.ChildRows, s.VT.Cols, s.ExtraEnv); err != nil {
 		return err
 	}
 	// Don't forward requests to stdout in daemon mode - there's no terminal.
@@ -371,7 +380,7 @@ func (s *Session) RunInteractive() error {
 	s.ExtraEnv["H2_ACTOR"] = s.Name
 
 	// Start child in a PTY.
-	if err := s.VT.StartPTY(s.Command, s.Args, s.VT.ChildRows, cols, s.ExtraEnv); err != nil {
+	if err := s.VT.StartPTY(s.Command, s.childArgs(), s.VT.ChildRows, cols, s.ExtraEnv); err != nil {
 		return err
 	}
 	s.VT.Vt.ForwardRequests = os.Stdout
@@ -424,7 +433,7 @@ func (s *Session) lifecycleLoop(stopStatus chan struct{}, interactive bool) erro
 		select {
 		case <-s.relaunchCh:
 			s.VT.Ptm.Close()
-			if err := s.VT.StartPTY(s.Command, s.Args, s.VT.ChildRows, s.VT.Cols, s.ExtraEnv); err != nil {
+			if err := s.VT.StartPTY(s.Command, s.childArgs(), s.VT.ChildRows, s.VT.Cols, s.ExtraEnv); err != nil {
 				close(stopStatus)
 				s.Stop()
 				return err

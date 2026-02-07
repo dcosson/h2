@@ -92,12 +92,22 @@ func printAgentLine(info *message.AgentInfo) {
 		queued = fmt.Sprintf(", \033[36m%d queued\033[0m", info.QueuedCount)
 	}
 
+	// Session ID suffix — show truncated ID if present.
+	sid := ""
+	if info.SessionID != "" {
+		short := info.SessionID
+		if len(short) > 8 {
+			short = short[:8]
+		}
+		sid = fmt.Sprintf(" \033[2m[%s]\033[0m", short)
+	}
+
 	if info.State != "" {
-		fmt.Printf("  %s %s \033[2m%s\033[0m — %s, up %s%s\n",
-			symbol, info.Name, info.Command, stateLabel, info.Uptime, queued)
+		fmt.Printf("  %s %s \033[2m%s\033[0m — %s, up %s%s%s\n",
+			symbol, info.Name, info.Command, stateLabel, info.Uptime, queued, sid)
 	} else {
-		fmt.Printf("  %s %s \033[2m%s\033[0m — %s%s\n",
-			symbol, info.Name, info.Command, stateLabel, queued)
+		fmt.Printf("  %s %s \033[2m%s\033[0m — %s%s%s\n",
+			symbol, info.Name, info.Command, stateLabel, queued, sid)
 	}
 }
 

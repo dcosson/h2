@@ -416,3 +416,62 @@ func containsSubstring(s, sub string) bool {
 	}
 	return false
 }
+
+func TestChildArgs_ClaudeWithSessionID(t *testing.T) {
+	s := New("test", "claude", []string{"--verbose"})
+	s.SessionID = "550e8400-e29b-41d4-a716-446655440000"
+
+	args := s.childArgs()
+
+	if len(args) != 3 {
+		t.Fatalf("expected 3 args, got %d: %v", len(args), args)
+	}
+	if args[0] != "--session-id" {
+		t.Fatalf("expected first arg '--session-id', got %q", args[0])
+	}
+	if args[1] != "550e8400-e29b-41d4-a716-446655440000" {
+		t.Fatalf("expected session ID as second arg, got %q", args[1])
+	}
+	if args[2] != "--verbose" {
+		t.Fatalf("expected '--verbose' as third arg, got %q", args[2])
+	}
+}
+
+func TestChildArgs_ClaudeNoSessionID(t *testing.T) {
+	s := New("test", "claude", []string{"--verbose"})
+
+	args := s.childArgs()
+
+	if len(args) != 1 {
+		t.Fatalf("expected 1 arg, got %d: %v", len(args), args)
+	}
+	if args[0] != "--verbose" {
+		t.Fatalf("expected '--verbose', got %q", args[0])
+	}
+}
+
+func TestChildArgs_NonClaude(t *testing.T) {
+	s := New("test", "bash", []string{"-c", "echo hi"})
+	s.SessionID = "550e8400-e29b-41d4-a716-446655440000"
+
+	args := s.childArgs()
+
+	if len(args) != 2 {
+		t.Fatalf("expected 2 args, got %d: %v", len(args), args)
+	}
+	if args[0] != "-c" || args[1] != "echo hi" {
+		t.Fatalf("expected original args, got %v", args)
+	}
+}
+
+func TestChildArgs_DoesNotMutateOriginal(t *testing.T) {
+	original := []string{"--verbose"}
+	s := New("test", "claude", original)
+	s.SessionID = "some-uuid"
+
+	_ = s.childArgs()
+
+	if len(original) != 1 || original[0] != "--verbose" {
+		t.Fatalf("childArgs mutated original slice: %v", original)
+	}
+}

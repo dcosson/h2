@@ -49,6 +49,7 @@ type MessageInfo struct {
 type AgentInfo struct {
 	Name          string `json:"name"`
 	Command       string `json:"command"`
+	SessionID     string `json:"session_id,omitempty"`
 	Uptime        string `json:"uptime"`
 	State         string `json:"state"`
 	StateDuration string `json:"state_duration"`

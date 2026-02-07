@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	"h2/internal/bridgeservice"
@@ -68,7 +69,7 @@ only the bridge service.`,
 			}
 
 			// Fork the concierge session.
-			if err := session.ForkDaemon(conciergeSessionName, args[0], args[1:]); err != nil {
+			if err := session.ForkDaemon(conciergeSessionName, uuid.New().String(), args[0], args[1:]); err != nil {
 				return err
 			}
 

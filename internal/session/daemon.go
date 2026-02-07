@@ -21,8 +21,9 @@ type Daemon struct {
 
 // RunDaemon creates a Session and Daemon, sets up the socket, and runs
 // the session in daemon mode. This is the main entry point for the _daemon command.
-func RunDaemon(name, command string, args []string) error {
+func RunDaemon(name, sessionID, command string, args []string) error {
 	s := New(name, command, args)
+	s.SessionID = sessionID
 	s.StartTime = time.Now()
 
 	// Create socket directory.
@@ -73,6 +74,7 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 	return &message.AgentInfo{
 		Name:          s.Name,
 		Command:       s.Command,
+		SessionID:     s.SessionID,
 		Uptime:        virtualterminal.FormatIdleDuration(uptime),
 		State:         s.State().String(),
 		StateDuration: virtualterminal.FormatIdleDuration(s.StateDuration()),
@@ -82,13 +84,13 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 
 // ForkDaemon starts a daemon in a background process by re-execing with
 // the hidden _daemon subcommand.
-func ForkDaemon(name string, command string, args []string) error {
+func ForkDaemon(name, sessionID, command string, args []string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("find executable: %w", err)
 	}
 
-	daemonArgs := []string{"_daemon", "--name", name, "--"}
+	daemonArgs := []string{"_daemon", "--name", name, "--session-id", sessionID, "--"}
 	daemonArgs = append(daemonArgs, command)
 	daemonArgs = append(daemonArgs, args...)
 
