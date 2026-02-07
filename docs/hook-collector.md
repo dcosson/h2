@@ -249,138 +249,69 @@ idle timer. Everything else is raw data that gets formatted for display.
 `AgentInfo` is the external representation — it's what the socket protocol returns
 for `"status"` requests and what `h2 list` and the status bar consume.
 
-### Proposed: Collector-based model
+### Proposed: Three layers of agent state
 
-The `Agent` struct becomes the home for all collectors. Each collector is optional
-and provides its own snapshot type. The `Agent` unifies them into a single
-`StatusSnapshot` that the session and protocol layer consume.
+The Agent's internal state is organized into three distinct layers:
 
-```go
-// Agent wraps the agent type and all collectors for a session.
-type Agent struct {
-    agentType   AgentType            // defines launch config, collectors, parsing
-    otel        *OtelCollector       // token counts, cost (may be nil/inactive)
-    hooks       *HookCollector       // tool use, lifecycle events (may be nil/inactive)
-    // future: fileWatcher, logTailer, etc.
-
-    // Unified activity signal — any collector can trigger this.
-    activityNotify chan struct{}
-    stopCh         chan struct{}
-}
+```
+Agent
+├── 1. Collector Data    — raw accumulated metrics from each collector
+├── 2. Derived State     — active/idle/exited, computed by Agent from collector signals
+└── 3. External View     — AgentInfo, a flat serialization for the socket protocol
 ```
 
-Each collector has its own state and snapshot:
+Each layer has a clear responsibility and doesn't bleed into the others.
+
+#### Layer 1: Collector data
+
+Each collector is a pure data accumulator. It receives events, updates internal
+counters, and signals a notify channel. Collectors know nothing about idle/active
+state — they just collect.
 
 ```go
-// OtelCollector — what we have today, renamed from the current Agent OTEL fields.
+// OtelCollector — accumulates token/cost data from OTLP events.
+// Pure data: receives HTTP posts, updates metrics, signals notify.
 type OtelCollector struct {
-    metrics  *OtelMetrics
+    mu       sync.RWMutex
+    metrics  OtelMetrics     // token counts, cost, request counts
     listener net.Listener
     server   *http.Server
     port     int
-    notify   chan struct{}
+    notify   chan struct{}   // signaled on each event (for layer 2)
 }
 
-type OtelSnapshot struct {
-    TotalTokens  int64
-    TotalCostUSD float64
-    Connected    bool     // true after first event received
-    Port         int
-}
+// Metrics returns a point-in-time copy of accumulated data.
+// The copy avoids races — callers can read without holding locks.
+func (c *OtelCollector) Metrics() OtelMetrics { ... }
 
-// HookCollector — new, receives events from `h2 hook` via socket.
+// HookCollector — accumulates lifecycle data from Claude Code hooks.
+// Pure data: receives hook events, updates state, signals notify.
 type HookCollector struct {
-    mu             sync.RWMutex
-    lastEvent      string          // "PreToolUse", "PostToolUse", etc.
-    lastEventTime  time.Time
-    lastToolName   string          // from PreToolUse/PostToolUse tool_name
-    toolUseCount   int64           // total tool invocations seen
-    subagentCount  int             // increment on SubagentStart, decrement on SubagentStop
-    notify         chan struct{}
+    mu            sync.RWMutex
+    lastEvent     string       // "PreToolUse", "PostToolUse", etc.
+    lastEventTime time.Time
+    lastToolName  string       // from PreToolUse/PostToolUse tool_name
+    toolUseCount  int64        // total tool invocations seen
+    subagentCount int          // increment on SubagentStart, decrement on SubagentStop
+    notify        chan struct{}
 }
 
-type HookSnapshot struct {
-    LastEvent     string
-    LastEventTime time.Time
-    LastToolName  string
-    ToolUseCount  int64
-    SubagentCount int
-}
+// State returns a point-in-time copy of accumulated data.
+func (c *HookCollector) State() HookState { ... }
 ```
 
-The `Agent` provides a unified snapshot and activity channel:
+Note: the "snapshot" methods are just returning a copy of the collector's
+internal state to avoid holding locks across call boundaries. The copy struct
+is the same shape as the collector's fields — it's not a separate concept,
+just a concurrency safety measure.
 
-```go
-// StatusSnapshot combines all available collector data.
-// Fields are zero-valued when their collector is absent or hasn't received data.
-type StatusSnapshot struct {
-    Otel  *OtelSnapshot   // nil if OTEL collector not active
-    Hooks *HookSnapshot   // nil if hook collector not active
-}
+#### Layer 2: Derived state (idle/active/exited)
 
-// ActivityNotify returns a channel signaled when any collector sees activity.
-func (a *Agent) ActivityNotify() <-chan struct{} {
-    return a.activityNotify
-}
+The Agent owns a **state watcher** goroutine that observes collector signals
+and child process output, and derives the current activity state. This is the
+only place idle/active logic lives.
 
-// Status returns a unified snapshot from all active collectors.
-func (a *Agent) Status() StatusSnapshot {
-    snap := StatusSnapshot{}
-    if a.otel != nil {
-        s := a.otel.Snapshot()
-        snap.Otel = &s
-    }
-    if a.hooks != nil {
-        s := a.hooks.Snapshot()
-        snap.Hooks = &s
-    }
-    return snap
-}
-```
-
-### Graceful degradation
-
-The key design constraint: everything is optional. If OTEL isn't set up (e.g.
-non-Claude agent, or OTEL env vars not configured), `snap.Otel` is nil.
-If hooks aren't configured, `snap.Hooks` is nil. Consumers check for nil:
-
-```go
-// In status bar rendering:
-snap := s.Agent.Status()
-if snap.Otel != nil && snap.Otel.Connected {
-    label += " | " + formatTokens(snap.Otel.TotalTokens) + " " + formatCost(snap.Otel.TotalCostUSD)
-}
-if snap.Hooks != nil && snap.Hooks.LastToolName != "" {
-    label += " | " + snap.Hooks.LastToolName
-}
-
-// In AgentInfo for protocol:
-if snap.Otel != nil { info.TotalTokens = snap.Otel.TotalTokens; ... }
-if snap.Hooks != nil { info.LastToolUse = snap.Hooks.LastToolName; ... }
-```
-
-`h2 list` does the same — only shows fields that have data:
-
-```
-# Full data (OTEL + hooks active):
-  ● concierge claude — active 3s, up 12m, 45k $1.23 [550e8400] (Edit session.go)
-
-# OTEL only (no hooks configured):
-  ● concierge claude — active 3s, up 12m, 45k $1.23 [550e8400]
-
-# Hooks only (OTEL not connected yet):
-  ● concierge claude — active 3s, up 12m [550e8400] (Edit session.go)
-
-# Neither (generic agent):
-  ● my-shell bash — idle 5s, up 2m
-```
-
-### Idle/active status and collector authority
-
-The idle/active determination uses a **committed authority** model. Once a
-higher-fidelity collector proves it's working (by firing at least one event),
-it becomes the sole authority for idle/active status. We don't bounce between
-data sources mid-session.
+The state watcher uses a **committed authority** model:
 
 **Priority order** (highest to lowest):
 1. **Hook collector** — most granular (knows about individual tool use, subagents)
@@ -403,55 +334,106 @@ which one is right? The output timer would keep resetting idle even when the
 agent is genuinely waiting for the next turn. By committing to one authority,
 the status is consistent and predictable.
 
-The idle state lives on the Agent (not the Session), since it's derived from
-collector data. The Session asks the Agent for status rather than computing it
-independently.
-
 ```go
-// Agent tracks which collector is authoritative for idle/active.
 type IdleAuthority int
 const (
-    AuthorityOutputTimer IdleAuthority = iota  // fallback
-    AuthorityOtel                               // OTEL events drive idle
-    AuthorityHooks                              // hook events drive idle
+    AuthorityOutputTimer IdleAuthority = iota
+    AuthorityOtel
+    AuthorityHooks
+)
+
+type AgentState int
+const (
+    AgentActive AgentState = iota
+    AgentIdle
+    AgentExited
 )
 
 type Agent struct {
-    // ...collectors...
-    idleAuthority IdleAuthority
-    idleTimer     *time.Timer        // fallback timer, ticks when no collector is authoritative
-}
+    agentType  AgentType
 
-// NoteActivity is called when any collector fires. It promotes the authority
-// if a higher-priority collector just activated for the first time.
-func (a *Agent) NoteActivity(source IdleAuthority) {
-    if source > a.idleAuthority {
-        a.idleAuthority = source  // promote (e.g. timer → otel → hooks)
-    }
-    // Reset idle state based on the current authority
-    if source >= a.idleAuthority {
-        a.setState(AgentActive)
-        a.resetIdleTimer()
-    }
-    // Lower-priority sources are ignored once a higher one is committed
+    // Layer 1: Collectors (nil if not active for this agent type)
+    otel       *OtelCollector
+    hooks      *HookCollector
+
+    // Layer 2: Derived state
+    mu            sync.RWMutex
+    state         AgentState
+    stateChangedAt time.Time
+    idleAuthority IdleAuthority
+    idleTimer     *time.Timer
+    stateCh       chan struct{}   // closed on state change (same pattern as Session today)
+
+    // Signals
+    stateNotify   chan struct{}   // signaled when derived state changes (for Session)
+    stopCh        chan struct{}
 }
 ```
 
-The Session's `watchState()` simplifies — it listens on one unified channel and
-delegates to the Agent:
+The state watcher goroutine is internal to Agent. It watches collector notify
+channels, manages the idle timer, and promotes the authority. Nobody outside
+the Agent calls into this logic — the Session just observes state changes.
+
+```go
+// watchState is the Agent's internal goroutine. Collectors signal their
+// notify channels; this goroutine interprets those signals to derive state.
+func (a *Agent) watchState() {
+    for {
+        select {
+        case <-a.otelNotify():
+            a.handleCollectorActivity(AuthorityOtel)
+        case <-a.hooksNotify():
+            a.handleCollectorActivity(AuthorityHooks)
+        case <-a.outputNotify:
+            a.handleCollectorActivity(AuthorityOutputTimer)
+        case <-a.idleTimer.C:
+            a.setState(AgentIdle)
+        case <-a.stopCh:
+            return
+        }
+    }
+}
+
+// handleCollectorActivity promotes authority and resets idle if this
+// source is the current authority (or higher).
+func (a *Agent) handleCollectorActivity(source IdleAuthority) {
+    a.mu.Lock()
+    defer a.mu.Unlock()
+    if source > a.idleAuthority {
+        a.idleAuthority = source
+    }
+    if source >= a.idleAuthority {
+        a.setStateLocked(AgentActive)
+        a.resetIdleTimer()
+    }
+}
+
+// otelNotify returns the OTEL collector's notify channel, or a nil channel
+// (blocks forever) if OTEL is not active.
+func (a *Agent) otelNotify() <-chan struct{} {
+    if a.otel != nil { return a.otel.notify }
+    return nil
+}
+
+// hooksNotify returns the hook collector's notify channel, or nil.
+func (a *Agent) hooksNotify() <-chan struct{} {
+    if a.hooks != nil { return a.hooks.notify }
+    return nil
+}
+```
+
+The Session simplifies dramatically — it just watches for Agent state changes
+and child process exit:
 
 ```go
 func (s *Session) watchState(stop <-chan struct{}) {
     for {
         select {
-        case <-s.outputNotify:
-            s.Agent.NoteActivity(AuthorityOutputTimer)
-        case <-s.Agent.ActivityNotify():
-            // Agent already handled the state change internally
-        case <-s.Agent.IdleNotify():
-            // Agent's idle timer fired — transition to idle
+        case <-s.Agent.StateChanged():
+            // Agent state changed — update Session state to match.
+            // Re-render status bars, etc.
         case <-s.exitNotify:
-            s.Agent.SetState(AgentExited)
+            s.Agent.SetExited()
         case <-stop:
             return
         }
@@ -459,27 +441,93 @@ func (s *Session) watchState(stop <-chan struct{}) {
 }
 ```
 
-The Agent fans in all collector notify channels into the single `activityNotify`:
+The Session feeds child output into the Agent (since the Session owns the PTY):
 
 ```go
-func (a *Agent) startActivityFanIn() {
-    go func() {
-        for {
-            select {
-            case <-a.otel.Notify():
-                a.NoteActivity(AuthorityOtel)
-            case <-a.hooks.Notify():
-                a.NoteActivity(AuthorityHooks)
-            case <-a.stopCh:
-                return
-            }
-            select {
-            case a.activityNotify <- struct{}{}:
-            default:
-            }
-        }
-    }()
+func (s *Session) NoteOutput() {
+    s.Agent.NoteOutput()  // feeds into Agent's outputNotify
 }
+```
+
+#### Layer 3: External view (AgentInfo)
+
+`AgentInfo` is a flat JSON-friendly struct for external consumers (socket
+protocol, `h2 list`, bridge service). It pulls from both Layer 1 (collector
+data) and Layer 2 (derived state). It's the serialization boundary — internal
+callers use Agent methods directly; external callers get AgentInfo over the wire.
+
+```go
+type AgentInfo struct {
+    // Core (always present)
+    Name          string `json:"name"`
+    Command       string `json:"command"`
+    SessionID     string `json:"session_id,omitempty"`
+    Uptime        string `json:"uptime"`
+    QueuedCount   int    `json:"queued_count"`
+
+    // Derived state (layer 2)
+    State         string `json:"state"`           // "active", "idle", "exited"
+    StateDuration string `json:"state_duration"`
+
+    // OTEL collector data (layer 1, omitted if collector not active)
+    TotalTokens  int64   `json:"total_tokens,omitempty"`
+    TotalCostUSD float64 `json:"total_cost_usd,omitempty"`
+
+    // Hook collector data (layer 1, omitted if collector not active)
+    LastToolUse  string `json:"last_tool_use,omitempty"`
+    ToolUseCount int64  `json:"tool_use_count,omitempty"`
+}
+
+// AgentInfo builds the external view from all layers.
+func (d *Daemon) AgentInfo() *AgentInfo {
+    a := d.Session.Agent
+    info := &AgentInfo{
+        Name:          d.Session.Name,
+        Command:       a.agentType.DisplayCommand(),
+        SessionID:     d.Session.SessionID,
+        Uptime:        formatDuration(time.Since(d.StartTime)),
+        State:         a.State().String(),
+        StateDuration: formatDuration(a.StateDuration()),
+        QueuedCount:   d.Session.Queue.PendingCount(),
+    }
+
+    // Pull from OTEL collector if active
+    if a.otel != nil {
+        m := a.otel.Metrics()
+        info.TotalTokens = m.TotalTokens
+        info.TotalCostUSD = m.TotalCostUSD
+    }
+
+    // Pull from hook collector if active
+    if a.hooks != nil {
+        s := a.hooks.State()
+        info.LastToolUse = s.LastToolName
+        info.ToolUseCount = s.ToolUseCount
+    }
+
+    return info
+}
+```
+
+### Graceful degradation
+
+The three-layer model gives us graceful degradation for free. If a collector
+isn't active for this agent type, its pointer is nil and the corresponding
+AgentInfo fields are simply omitted. Consumers never need to check what kind
+of agent they're dealing with — they just check whether fields have data:
+
+```
+# Full data (OTEL + hooks active):
+  ● concierge claude — active 3s, up 12m, 45k $1.23 [550e8400] (Edit session.go)
+
+# OTEL only (no hooks configured):
+  ● concierge claude — active 3s, up 12m, 45k $1.23 [550e8400]
+
+# Hooks only (OTEL not connected yet):
+  ● concierge claude — active 3s, up 12m [550e8400] (Edit session.go)
+
+# Neither (generic agent):
+  ● my-shell bash — idle 5s, up 2m
 ```
 
 ### AgentType controls which collectors are active
@@ -487,8 +535,6 @@ func (a *Agent) startActivityFanIn() {
 The `AgentType` interface (see [Agent Types](#agent-types)) determines which
 collectors to start. `ClaudeCodeType` returns `{Otel: true, Hooks: true}`,
 `GenericType` returns `{}`.
-
-Agent initialization checks these flags:
 
 ```go
 func (a *Agent) Init(agentType AgentType) {
@@ -500,34 +546,11 @@ func (a *Agent) Init(agentType AgentType) {
     if cfg.Hooks {
         a.hooks = NewHookCollector()
     }
-    a.startActivityFanIn()
+    go a.watchState()
 }
 ```
 
 ### Protocol changes
-
-`AgentInfo` gains optional fields from each collector:
-
-```go
-type AgentInfo struct {
-    // Existing
-    Name          string `json:"name"`
-    Command       string `json:"command"`
-    SessionID     string `json:"session_id,omitempty"`
-    Uptime        string `json:"uptime"`
-    State         string `json:"state"`
-    StateDuration string `json:"state_duration"`
-    QueuedCount   int    `json:"queued_count"`
-
-    // From OTEL collector (omitted if not active)
-    TotalTokens  int64   `json:"total_tokens,omitempty"`
-    TotalCostUSD float64 `json:"total_cost_usd,omitempty"`
-
-    // From Hook collector (omitted if not active)
-    LastToolUse  string `json:"last_tool_use,omitempty"`
-    ToolUseCount int64  `json:"tool_use_count,omitempty"`
-}
-```
 
 New request type for receiving hook events:
 
