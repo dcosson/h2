@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -17,6 +19,8 @@ func newRoleCmd() *cobra.Command {
 
 	cmd.AddCommand(newRoleListCmd())
 	cmd.AddCommand(newRoleShowCmd())
+	cmd.AddCommand(newRoleInitCmd())
+	cmd.AddCommand(newRoleCheckCmd())
 	return cmd
 }
 
@@ -82,6 +86,87 @@ func newRoleShowCmd() *cobra.Command {
 				}
 			}
 
+			return nil
+		},
+	}
+}
+
+func newRoleInitCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "init <name>",
+		Short: "Create a new role file with defaults",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			dir := config.RolesDir()
+
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return fmt.Errorf("create roles dir: %w", err)
+			}
+
+			path := filepath.Join(dir, name+".yaml")
+			if _, err := os.Stat(path); err == nil {
+				return fmt.Errorf("role %q already exists at %s", name, path)
+			}
+
+			template := fmt.Sprintf(`name: %s
+description: ""
+
+# Model selection (opus, sonnet, haiku)
+# model: sonnet
+
+instructions: |
+  You are a %s agent.
+  # Add role-specific instructions here.
+
+permissions:
+  allow:
+    - "Read"
+    - "Glob"
+    - "Grep"
+  # deny:
+  #   - "Bash(rm -rf *)"
+
+  # AI permission reviewer (optional)
+  # agent:
+  #   instructions: |
+  #     You are reviewing permissions for a %s agent.
+  #     ALLOW: read-only tools, standard dev commands
+  #     DENY: destructive operations
+  #     ASK_USER: anything uncertain
+`, name, name, name)
+
+			if err := os.WriteFile(path, []byte(template), 0o644); err != nil {
+				return fmt.Errorf("write role file: %w", err)
+			}
+
+			fmt.Printf("Created %s\n", path)
+			return nil
+		},
+	}
+}
+
+func newRoleCheckCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "check <name>",
+		Short: "Validate a role file",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			role, err := config.LoadRole(args[0])
+			if err != nil {
+				return err
+			}
+
+			fmt.Printf("Role %q is valid.\n", role.Name)
+
+			if role.Model != "" {
+				fmt.Printf("  Model:       %s\n", role.Model)
+			}
+			fmt.Printf("  Allow rules: %d\n", len(role.Permissions.Allow))
+			fmt.Printf("  Deny rules:  %d\n", len(role.Permissions.Deny))
+			if role.Permissions.Agent != nil && role.Permissions.Agent.IsEnabled() {
+				fmt.Printf("  Agent:       enabled\n")
+			}
 			return nil
 		},
 	}
