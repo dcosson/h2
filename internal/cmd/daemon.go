@@ -13,6 +13,8 @@ import (
 func newDaemonCmd() *cobra.Command {
 	var name string
 	var sessionID string
+	var roleName string
+	var sessionDir string
 
 	cmd := &cobra.Command{
 		Use:    "_daemon --name=<name> -- <command> [args...]",
@@ -24,7 +26,7 @@ func newDaemonCmd() *cobra.Command {
 				return fmt.Errorf("--name is required")
 			}
 
-			err := session.RunDaemon(name, sessionID, args[0], args[1:])
+			err := session.RunDaemon(name, sessionID, args[0], args[1:], roleName, sessionDir)
 			if err != nil {
 				if _, ok := err.(*exec.ExitError); ok {
 					os.Exit(1)
@@ -37,6 +39,8 @@ func newDaemonCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&name, "name", "", "Agent name")
 	cmd.Flags().StringVar(&sessionID, "session-id", "", "Claude Code session ID")
+	cmd.Flags().StringVar(&roleName, "role", "", "Role name")
+	cmd.Flags().StringVar(&sessionDir, "session-dir", "", "Session directory path")
 
 	return cmd
 }

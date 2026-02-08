@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -21,15 +22,17 @@ import (
 // Session manages the message queue, delivery loop, observable state,
 // child process lifecycle, and client connections for an h2 session.
 type Session struct {
-	Name      string
-	Command   string
-	Args      []string
-	SessionID string // Claude Code session ID (UUID), set for claude commands
-	Queue     *message.MessageQueue
-	AgentName string
-	Agent     *agent.Agent
-	VT        *virtualterminal.VT
-	Client    *client.Client // primary/interactive client (nil in daemon-only)
+	Name       string
+	Command    string
+	Args       []string
+	SessionID  string // Claude Code session ID (UUID), set for claude commands
+	RoleName   string // Role name, if launched with --role
+	SessionDir string // Session directory path (~/.h2/sessions/<name>/)
+	Queue      *message.MessageQueue
+	AgentName  string
+	Agent      *agent.Agent
+	VT         *virtualterminal.VT
+	Client     *client.Client // primary/interactive client (nil in daemon-only)
 	Clients          []*client.Client
 	clientsMu        sync.Mutex
 	PassthroughOwner *client.Client // which client owns passthrough mode (nil = none)
@@ -279,6 +282,13 @@ func (s *Session) RunDaemon() error {
 		s.ExtraEnv = make(map[string]string)
 	}
 	s.ExtraEnv["H2_ACTOR"] = s.Name
+	if s.RoleName != "" {
+		s.ExtraEnv["H2_ROLE"] = s.RoleName
+	}
+	if s.SessionDir != "" {
+		s.ExtraEnv["H2_SESSION_DIR"] = s.SessionDir
+		s.ExtraEnv["CLAUDE_CONFIG_DIR"] = filepath.Join(s.SessionDir, ".claude")
+	}
 
 	// Start child in a PTY.
 	if err := s.VT.StartPTY(s.Command, s.childArgs(), s.VT.ChildRows, s.VT.Cols, s.ExtraEnv); err != nil {

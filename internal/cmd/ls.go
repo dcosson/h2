@@ -112,6 +112,12 @@ func printAgentLine(info *message.AgentInfo) {
 		tool = fmt.Sprintf(" \033[2m(%s)\033[0m", info.LastToolUse)
 	}
 
+	// Role label.
+	role := ""
+	if info.RoleName != "" {
+		role = fmt.Sprintf(" \033[35m(%s)\033[0m", info.RoleName) // magenta
+	}
+
 	// Session ID suffix — show truncated ID if present.
 	sid := ""
 	if info.SessionID != "" {
@@ -123,11 +129,11 @@ func printAgentLine(info *message.AgentInfo) {
 	}
 
 	if info.State != "" {
-		fmt.Printf("  %s %s \033[2m%s\033[0m — %s, up %s%s%s%s%s\n",
-			symbol, info.Name, info.Command, stateLabel, info.Uptime, metrics, queued, sid, tool)
+		fmt.Printf("  %s %s%s \033[2m%s\033[0m — %s, up %s%s%s%s%s\n",
+			symbol, info.Name, role, info.Command, stateLabel, info.Uptime, metrics, queued, sid, tool)
 	} else {
-		fmt.Printf("  %s %s \033[2m%s\033[0m — %s%s%s%s%s\n",
-			symbol, info.Name, info.Command, stateLabel, metrics, queued, sid, tool)
+		fmt.Printf("  %s %s%s \033[2m%s\033[0m — %s%s%s%s%s\n",
+			symbol, info.Name, role, info.Command, stateLabel, metrics, queued, sid, tool)
 	}
 }
 
