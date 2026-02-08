@@ -96,6 +96,8 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 		hs := hc.State()
 		info.LastToolUse = hs.LastToolName
 		info.ToolUseCount = hs.ToolUseCount
+		info.BlockedOnPermission = hs.BlockedOnPermission
+		info.BlockedToolName = hs.BlockedToolName
 	}
 
 	return info

@@ -131,3 +131,80 @@ func TestHookCollector_ExtractToolName_NilPayload(t *testing.T) {
 		t.Fatalf("expected empty LastToolName for nil payload, got %q", state.LastToolName)
 	}
 }
+
+func TestHookCollector_BlockedPermission(t *testing.T) {
+	hc := NewHookCollector()
+
+	// Not blocked initially.
+	state := hc.State()
+	if state.BlockedOnPermission {
+		t.Fatal("should not be blocked initially")
+	}
+
+	// Send blocked_permission event.
+	payload := json.RawMessage(`{"tool_name": "Bash", "hook_event_name": "blocked_permission"}`)
+	hc.ProcessEvent("blocked_permission", payload)
+
+	state = hc.State()
+	if !state.BlockedOnPermission {
+		t.Fatal("should be blocked after blocked_permission event")
+	}
+	if state.BlockedToolName != "Bash" {
+		t.Errorf("BlockedToolName = %q, want %q", state.BlockedToolName, "Bash")
+	}
+}
+
+func TestHookCollector_BlockedPermission_ClearedByPreToolUse(t *testing.T) {
+	hc := NewHookCollector()
+
+	// Set blocked.
+	hc.ProcessEvent("blocked_permission", json.RawMessage(`{"tool_name": "Bash"}`))
+	if !hc.State().BlockedOnPermission {
+		t.Fatal("should be blocked")
+	}
+
+	// PreToolUse clears it (tool was approved).
+	hc.ProcessEvent("PreToolUse", json.RawMessage(`{"tool_name": "Bash"}`))
+	state := hc.State()
+	if state.BlockedOnPermission {
+		t.Fatal("should be unblocked after PreToolUse")
+	}
+	if state.BlockedToolName != "" {
+		t.Errorf("BlockedToolName = %q, want empty", state.BlockedToolName)
+	}
+}
+
+func TestHookCollector_BlockedPermission_ClearedByUserPromptSubmit(t *testing.T) {
+	hc := NewHookCollector()
+
+	hc.ProcessEvent("blocked_permission", json.RawMessage(`{"tool_name": "Bash"}`))
+	hc.ProcessEvent("UserPromptSubmit", nil)
+
+	if hc.State().BlockedOnPermission {
+		t.Fatal("should be unblocked after UserPromptSubmit")
+	}
+}
+
+func TestHookCollector_BlockedPermission_ClearedByStop(t *testing.T) {
+	hc := NewHookCollector()
+
+	hc.ProcessEvent("blocked_permission", json.RawMessage(`{"tool_name": "Bash"}`))
+	hc.ProcessEvent("Stop", nil)
+
+	if hc.State().BlockedOnPermission {
+		t.Fatal("should be unblocked after Stop")
+	}
+}
+
+func TestHookCollector_BlockedPermission_NotClearedByPermissionRequest(t *testing.T) {
+	hc := NewHookCollector()
+
+	hc.ProcessEvent("blocked_permission", json.RawMessage(`{"tool_name": "Bash"}`))
+	// PermissionRequest should NOT clear the blocked state — it's the event
+	// that triggered the block in the first place.
+	hc.ProcessEvent("PermissionRequest", json.RawMessage(`{"tool_name": "Bash"}`))
+
+	if !hc.State().BlockedOnPermission {
+		t.Fatal("should still be blocked after PermissionRequest")
+	}
+}

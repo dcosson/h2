@@ -26,6 +26,7 @@ func NewRootCmd() *cobra.Command {
 		newBridgeDaemonCmd(),
 		newHookCmd(),
 		newRoleCmd(),
+		newPermissionRequestCmd(),
 	)
 
 	return rootCmd

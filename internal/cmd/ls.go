@@ -106,9 +106,15 @@ func printAgentLine(info *message.AgentInfo) {
 		metrics = fmt.Sprintf(", %s", strings.Join(parts, " "))
 	}
 
-	// Hook collector — current tool use.
+	// Hook collector — current tool use or blocked state.
 	tool := ""
-	if info.LastToolUse != "" {
+	if info.BlockedOnPermission {
+		blocked := "permission"
+		if info.BlockedToolName != "" {
+			blocked = fmt.Sprintf("permission: %s", info.BlockedToolName)
+		}
+		tool = fmt.Sprintf(" \033[31m(blocked %s)\033[0m", blocked) // red
+	} else if info.LastToolUse != "" {
 		tool = fmt.Sprintf(" \033[2m(%s)\033[0m", info.LastToolUse)
 	}
 

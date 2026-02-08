@@ -10,12 +10,14 @@ import (
 // It is a pure data collector — it receives events, updates internal state,
 // and signals an event channel. It knows nothing about idle/active state.
 type HookCollector struct {
-	mu            sync.RWMutex
-	lastEvent     string
-	lastEventTime time.Time
-	lastToolName  string
-	toolUseCount  int64
-	eventCh       chan string // sends event name so Agent can interpret
+	mu                  sync.RWMutex
+	lastEvent           string
+	lastEventTime       time.Time
+	lastToolName        string
+	toolUseCount        int64
+	blockedOnPermission bool
+	blockedToolName     string
+	eventCh             chan string // sends event name so Agent can interpret
 }
 
 // NewHookCollector creates a new HookCollector.
@@ -41,6 +43,18 @@ func (c *HookCollector) ProcessEvent(eventName string, payload json.RawMessage) 
 	if eventName == "PreToolUse" {
 		c.toolUseCount++
 	}
+
+	// Handle blocked_permission: set blocked state.
+	if eventName == "blocked_permission" {
+		c.blockedOnPermission = true
+		c.blockedToolName = extractToolName(payload)
+	}
+
+	// Clear blocked state on events that indicate the agent has resumed.
+	if c.blockedOnPermission && eventName != "blocked_permission" && eventName != "PermissionRequest" {
+		c.blockedOnPermission = false
+		c.blockedToolName = ""
+	}
 	c.mu.Unlock()
 
 	// Send event name to Agent's state watcher (non-blocking).
@@ -55,19 +69,23 @@ func (c *HookCollector) State() HookState {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return HookState{
-		LastEvent:     c.lastEvent,
-		LastEventTime: c.lastEventTime,
-		LastToolName:  c.lastToolName,
-		ToolUseCount:  c.toolUseCount,
+		LastEvent:           c.lastEvent,
+		LastEventTime:       c.lastEventTime,
+		LastToolName:        c.lastToolName,
+		ToolUseCount:        c.toolUseCount,
+		BlockedOnPermission: c.blockedOnPermission,
+		BlockedToolName:     c.blockedToolName,
 	}
 }
 
 // HookState is a point-in-time snapshot of hook collector data.
 type HookState struct {
-	LastEvent     string
-	LastEventTime time.Time
-	LastToolName  string
-	ToolUseCount  int64
+	LastEvent           string
+	LastEventTime       time.Time
+	LastToolName        string
+	ToolUseCount        int64
+	BlockedOnPermission bool
+	BlockedToolName     string
 }
 
 // hookPayload is used to extract fields from the hook JSON payload.

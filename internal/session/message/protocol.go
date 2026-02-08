@@ -65,8 +65,10 @@ type AgentInfo struct {
 	TotalCostUSD float64 `json:"total_cost_usd,omitempty"`
 
 	// Hook collector data (omitted if collector not active)
-	LastToolUse  string `json:"last_tool_use,omitempty"`
-	ToolUseCount int64  `json:"tool_use_count,omitempty"`
+	LastToolUse         string `json:"last_tool_use,omitempty"`
+	ToolUseCount        int64  `json:"tool_use_count,omitempty"`
+	BlockedOnPermission bool   `json:"blocked_on_permission,omitempty"`
+	BlockedToolName     string `json:"blocked_tool_name,omitempty"`
 }
 
 // Attach frame types.
