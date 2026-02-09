@@ -5,7 +5,10 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"h2/internal/activitylog"
 )
 
 // IdleThreshold is how long without activity before an agent is considered idle.
@@ -49,14 +52,18 @@ type Agent struct {
 	agentType AgentType
 
 	// OTEL collector fields (active if AgentType.Collectors().Otel)
-	metrics    *OtelMetrics
-	listener   net.Listener
-	server     *http.Server
-	port       int
-	otelNotify chan struct{} // buffered(1), signaled on OTEL event
+	metrics              *OtelMetrics
+	listener             net.Listener
+	server               *http.Server
+	port                 int
+	otelNotify           chan struct{}   // buffered(1), signaled on OTEL event
+	otelMetricsReceived  atomic.Bool    // true after first /v1/metrics POST
 
 	// Hook collector (nil if not active)
 	hooks *HookCollector
+
+	// Activity logger (nil-safe; Nop logger when not set)
+	activityLog *activitylog.Logger
 
 	// Layer 2: Derived state
 	mu             sync.Mutex
@@ -85,6 +92,20 @@ func New(agentType AgentType) *Agent {
 	}
 }
 
+// SetActivityLog sets the activity logger for this agent.
+// Must be called before StartCollectors.
+func (a *Agent) SetActivityLog(l *activitylog.Logger) {
+	a.activityLog = l
+}
+
+// ActivityLog returns the activity logger (never nil — returns Nop if unset).
+func (a *Agent) ActivityLog() *activitylog.Logger {
+	if a.activityLog != nil {
+		return a.activityLog
+	}
+	return activitylog.Nop()
+}
+
 // StartCollectors starts the collectors enabled by the agent type and
 // launches the internal watchState goroutine.
 func (a *Agent) StartCollectors() error {
@@ -95,7 +116,7 @@ func (a *Agent) StartCollectors() error {
 		}
 	}
 	if cfg.Hooks {
-		a.hooks = NewHookCollector()
+		a.hooks = NewHookCollector(a.activityLog)
 	}
 	go a.watchState()
 	return nil
@@ -156,10 +177,12 @@ func (a *Agent) setStateLocked(newState State) {
 	if a.state == newState {
 		return
 	}
+	prev := a.state
 	a.state = newState
 	a.stateChangedAt = time.Now()
 	close(a.stateCh)
 	a.stateCh = make(chan struct{})
+	a.ActivityLog().StateChange(prev.String(), newState.String())
 }
 
 // --- Signals from Session ---

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"sync"
 	"time"
+
+	"h2/internal/activitylog"
 )
 
 // HookCollector accumulates lifecycle data from Claude Code hooks.
@@ -18,12 +20,17 @@ type HookCollector struct {
 	blockedOnPermission bool
 	blockedToolName     string
 	eventCh             chan string // sends event name so Agent can interpret
+	activityLog         *activitylog.Logger
 }
 
 // NewHookCollector creates a new HookCollector.
-func NewHookCollector() *HookCollector {
+func NewHookCollector(log *activitylog.Logger) *HookCollector {
+	if log == nil {
+		log = activitylog.Nop()
+	}
 	return &HookCollector{
-		eventCh: make(chan string, 1),
+		eventCh:     make(chan string, 1),
+		activityLog: log,
 	}
 }
 
@@ -34,24 +41,45 @@ func (c *HookCollector) EventCh() <-chan string {
 
 // ProcessEvent records a hook event and sends the event name to the Agent.
 func (c *HookCollector) ProcessEvent(eventName string, payload json.RawMessage) {
+	toolName := extractToolName(payload)
+
 	c.mu.Lock()
 	c.lastEvent = eventName
 	c.lastEventTime = time.Now()
 	if eventName == "PreToolUse" || eventName == "PostToolUse" {
-		c.lastToolName = extractToolName(payload)
+		c.lastToolName = toolName
 	}
 	if eventName == "PreToolUse" {
 		c.toolUseCount++
 	}
 
-	// Handle blocked_permission: set blocked state.
+	// Handle permission_decision: update blocked state based on decision.
+	if eventName == "permission_decision" {
+		decision := extractDecision(payload)
+		reason := extractReason(payload)
+		c.activityLog.PermissionDecision(toolName, decision, reason)
+		if decision == "ask_user" {
+			c.blockedOnPermission = true
+			c.blockedToolName = toolName
+		} else {
+			c.blockedOnPermission = false
+			c.blockedToolName = ""
+		}
+	} else {
+		c.activityLog.HookEvent(eventName, toolName)
+	}
+
+	// Legacy: handle blocked_permission for backward compatibility.
 	if eventName == "blocked_permission" {
 		c.blockedOnPermission = true
-		c.blockedToolName = extractToolName(payload)
+		c.blockedToolName = toolName
 	}
 
 	// Clear blocked state on events that indicate the agent has resumed.
-	if c.blockedOnPermission && eventName != "blocked_permission" && eventName != "PermissionRequest" {
+	if c.blockedOnPermission &&
+		eventName != "blocked_permission" &&
+		eventName != "permission_decision" &&
+		eventName != "PermissionRequest" {
 		c.blockedOnPermission = false
 		c.blockedToolName = ""
 	}
@@ -91,6 +119,8 @@ type HookState struct {
 // hookPayload is used to extract fields from the hook JSON payload.
 type hookPayload struct {
 	ToolName string `json:"tool_name"`
+	Decision string `json:"decision"`
+	Reason   string `json:"reason"`
 }
 
 // extractToolName pulls the tool_name field from a hook payload.
@@ -103,4 +133,28 @@ func extractToolName(payload json.RawMessage) string {
 		return ""
 	}
 	return p.ToolName
+}
+
+// extractDecision pulls the decision field from a hook payload.
+func extractDecision(payload json.RawMessage) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	var p hookPayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return ""
+	}
+	return p.Decision
+}
+
+// extractReason pulls the reason field from a hook payload.
+func extractReason(payload json.RawMessage) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	var p hookPayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return ""
+	}
+	return p.Reason
 }

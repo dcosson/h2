@@ -122,6 +122,77 @@ classDiagram
     Daemon --> Session
 ```
 
+## Agent State Machine
+
+The `Agent` derives an `Active/Idle/Exited` state from three collector sources,
+using a committed-authority model — once a higher-fidelity source fires, it
+becomes the sole authority for idle/active decisions.
+
+**Authority levels** (lowest → highest): `OutputTimer` → `OTEL` → `Hooks`
+
+```mermaid
+stateDiagram-v2
+    [*] --> Active : Agent created
+
+    Active --> Idle : idle timer expires (2s no activity)
+    Idle --> Active : activity signal from authoritative source
+    Active --> Exited : SessionEnd hook / child exit
+    Idle --> Exited : SessionEnd hook / child exit
+
+    state Active {
+        direction LR
+        note right of Active
+            Reset idle timer on:
+            • Hook: UserPromptSubmit, PreToolUse, PostToolUse, PermissionRequest
+            • OTEL: any log event (if OTEL is authority)
+            • Output: child PTY output (if OutputTimer is authority)
+        end note
+    }
+```
+
+**Collector event flow:**
+
+```mermaid
+flowchart LR
+    subgraph "Claude Code (child process)"
+        CC_OTEL["OTEL Exporter"]
+        CC_HOOKS["Hook Commands"]
+    end
+
+    subgraph "Agent (daemon)"
+        OTEL_HTTP["/v1/logs HTTP handler"]
+        OTEL_METRICS["/v1/metrics HTTP handler"]
+        HC["HookCollector"]
+        SM["watchState goroutine"]
+        AL["ActivityLog"]
+    end
+
+    CC_OTEL -->|"POST /v1/logs"| OTEL_HTTP
+    CC_OTEL -->|"POST /v1/metrics"| OTEL_METRICS
+    CC_HOOKS -->|"h2 hook collect → socket"| HC
+    CC_HOOKS -->|"h2 permission-request → socket"| HC
+
+    OTEL_HTTP -->|"otelNotify chan"| SM
+    OTEL_HTTP -->|"OtelMetrics / OtelConnected"| AL
+    OTEL_METRICS -->|"OtelConnected (first call only)"| AL
+    HC -->|"eventCh chan"| SM
+    HC -->|"HookEvent / PermissionDecision"| AL
+    SM -->|"StateChange"| AL
+```
+
+**Hook events and their state effects:**
+
+| Hook Event | State Effect | Resets Idle Timer |
+|---|---|---|
+| `SessionStart` | Commits hook authority, no state change | No |
+| `UserPromptSubmit` | → Active | Yes |
+| `PreToolUse` | → Active | Yes |
+| `PostToolUse` | → Active | Yes |
+| `PermissionRequest` | → Active | Yes |
+| `Stop` | → Idle | No |
+| `SessionEnd` | → Exited | No |
+| `permission_decision` | No state change (updates blocked tracking) | No |
+
 ## Data Flow
 
 **Child output** — PTY writes to midterm buffers via `VT.PipeOutput`, which

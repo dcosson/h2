@@ -65,8 +65,8 @@ to fall through to Claude Code's built-in permission dialog.`,
 			reviewerPath := filepath.Join(sessionDir, "permission-reviewer.md")
 			reviewerInstructions, err := os.ReadFile(reviewerPath)
 			if err != nil {
-				// No reviewer instructions — report blocked and fall through.
-				reportBlocked(agentName, request.ToolName)
+				// No reviewer instructions — report decision and fall through.
+				reportDecision(agentName, request.ToolName, "ask_user", "no reviewer instructions")
 				fmt.Fprintln(cmd.OutOrStdout(), "{}")
 				return nil
 			}
@@ -76,6 +76,7 @@ to fall through to Claude Code's built-in permission dialog.`,
 
 			switch decision {
 			case "ALLOW":
+				reportDecision(agentName, request.ToolName, "allow", reason)
 				resp := hookResponse{
 					HookSpecificOutput: hookDecision{
 						HookEventName: "PermissionRequest",
@@ -91,6 +92,7 @@ to fall through to Claude Code's built-in permission dialog.`,
 				if reason == "" {
 					reason = "Denied by permission reviewer"
 				}
+				reportDecision(agentName, request.ToolName, "deny", reason)
 				resp := hookResponse{
 					HookSpecificOutput: hookDecision{
 						HookEventName: "PermissionRequest",
@@ -104,8 +106,8 @@ to fall through to Claude Code's built-in permission dialog.`,
 				fmt.Fprintln(cmd.OutOrStdout(), string(out))
 
 			default:
-				// ASK_USER or unrecognized — report blocked and fall through.
-				reportBlocked(agentName, request.ToolName)
+				// ASK_USER or unrecognized — report decision and fall through.
+				reportDecision(agentName, request.ToolName, "ask_user", reason)
 				fmt.Fprintln(cmd.OutOrStdout(), "{}")
 			}
 
@@ -230,8 +232,10 @@ func (r *stringReaderImpl) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-// reportBlocked sends a blocked_permission hook event to the agent's socket.
-func reportBlocked(agentName, toolName string) {
+// reportDecision sends a permission_decision hook event to the agent's socket.
+// This reports ALLOW, DENY, and ASK_USER decisions so they appear in the activity log
+// and the agent can track blocked state.
+func reportDecision(agentName, toolName, decision, reason string) {
 	sockPath, err := socketdir.Find(agentName)
 	if err != nil {
 		return // best-effort
@@ -243,13 +247,15 @@ func reportBlocked(agentName, toolName string) {
 	defer conn.Close()
 
 	payload, _ := json.Marshal(map[string]string{
-		"hook_event_name": "blocked_permission",
+		"hook_event_name": "permission_decision",
 		"tool_name":       toolName,
+		"decision":        decision,
+		"reason":          reason,
 	})
 
 	message.SendRequest(conn, &message.Request{
 		Type:      "hook_event",
-		EventName: "blocked_permission",
+		EventName: "permission_decision",
 		Payload:   json.RawMessage(payload),
 	})
 

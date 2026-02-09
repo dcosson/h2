@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/vito/midterm"
 	"golang.org/x/term"
 
+	"h2/internal/activitylog"
 	"h2/internal/session/agent"
 	"h2/internal/session/client"
 	"h2/internal/session/message"
@@ -278,6 +280,10 @@ func (s *Session) RunDaemon() error {
 		s.VT.Mu.Unlock()
 	}
 
+	// Set up activity logger.
+	logPath := filepath.Join(os.Getenv("HOME"), ".h2", "session-activity.log")
+	s.Agent.SetActivityLog(activitylog.New(true, logPath, s.Name, s.SessionID))
+
 	// Start collectors (OTEL, hooks) and Agent watchState goroutine.
 	if err := s.Agent.StartCollectors(); err != nil {
 		return fmt.Errorf("start collectors: %w", err)
@@ -375,6 +381,10 @@ func (s *Session) RunInteractive() error {
 		})
 		s.VT.Mu.Unlock()
 	}
+
+	// Set up activity logger.
+	logPath := filepath.Join(os.Getenv("HOME"), ".h2", "session-activity.log")
+	s.Agent.SetActivityLog(activitylog.New(true, logPath, s.Name, s.SessionID))
 
 	// Start collectors (OTEL, hooks) and Agent watchState goroutine.
 	if err := s.Agent.StartCollectors(); err != nil {

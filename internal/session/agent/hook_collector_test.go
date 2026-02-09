@@ -7,7 +7,7 @@ import (
 )
 
 func TestHookCollector_ProcessEvent_Basic(t *testing.T) {
-	hc := NewHookCollector()
+	hc := NewHookCollector(nil)
 
 	hc.ProcessEvent("UserPromptSubmit", nil)
 
@@ -24,7 +24,7 @@ func TestHookCollector_ProcessEvent_Basic(t *testing.T) {
 }
 
 func TestHookCollector_ProcessEvent_PreToolUse(t *testing.T) {
-	hc := NewHookCollector()
+	hc := NewHookCollector(nil)
 
 	payload := json.RawMessage(`{"tool_name": "Bash", "tool_input": {"command": "ls"}}`)
 	hc.ProcessEvent("PreToolUse", payload)
@@ -42,7 +42,7 @@ func TestHookCollector_ProcessEvent_PreToolUse(t *testing.T) {
 }
 
 func TestHookCollector_ProcessEvent_PostToolUse(t *testing.T) {
-	hc := NewHookCollector()
+	hc := NewHookCollector(nil)
 
 	payload := json.RawMessage(`{"tool_name": "Read"}`)
 	hc.ProcessEvent("PostToolUse", payload)
@@ -58,7 +58,7 @@ func TestHookCollector_ProcessEvent_PostToolUse(t *testing.T) {
 }
 
 func TestHookCollector_ProcessEvent_ToolCount(t *testing.T) {
-	hc := NewHookCollector()
+	hc := NewHookCollector(nil)
 
 	hc.ProcessEvent("PreToolUse", json.RawMessage(`{"tool_name": "Bash"}`))
 	hc.ProcessEvent("PostToolUse", json.RawMessage(`{"tool_name": "Bash"}`))
@@ -76,7 +76,7 @@ func TestHookCollector_ProcessEvent_ToolCount(t *testing.T) {
 }
 
 func TestHookCollector_EventCh_Signaled(t *testing.T) {
-	hc := NewHookCollector()
+	hc := NewHookCollector(nil)
 
 	hc.ProcessEvent("Stop", nil)
 
@@ -91,7 +91,7 @@ func TestHookCollector_EventCh_Signaled(t *testing.T) {
 }
 
 func TestHookCollector_EventCh_NonBlocking(t *testing.T) {
-	hc := NewHookCollector()
+	hc := NewHookCollector(nil)
 
 	// Fill the channel.
 	hc.ProcessEvent("UserPromptSubmit", nil)
@@ -111,7 +111,7 @@ func TestHookCollector_EventCh_NonBlocking(t *testing.T) {
 }
 
 func TestHookCollector_ExtractToolName_InvalidJSON(t *testing.T) {
-	hc := NewHookCollector()
+	hc := NewHookCollector(nil)
 
 	hc.ProcessEvent("PreToolUse", json.RawMessage(`not json`))
 
@@ -122,7 +122,7 @@ func TestHookCollector_ExtractToolName_InvalidJSON(t *testing.T) {
 }
 
 func TestHookCollector_ExtractToolName_NilPayload(t *testing.T) {
-	hc := NewHookCollector()
+	hc := NewHookCollector(nil)
 
 	hc.ProcessEvent("PreToolUse", nil)
 
@@ -133,7 +133,7 @@ func TestHookCollector_ExtractToolName_NilPayload(t *testing.T) {
 }
 
 func TestHookCollector_BlockedPermission(t *testing.T) {
-	hc := NewHookCollector()
+	hc := NewHookCollector(nil)
 
 	// Not blocked initially.
 	state := hc.State()
@@ -155,7 +155,7 @@ func TestHookCollector_BlockedPermission(t *testing.T) {
 }
 
 func TestHookCollector_BlockedPermission_ClearedByPreToolUse(t *testing.T) {
-	hc := NewHookCollector()
+	hc := NewHookCollector(nil)
 
 	// Set blocked.
 	hc.ProcessEvent("blocked_permission", json.RawMessage(`{"tool_name": "Bash"}`))
@@ -175,7 +175,7 @@ func TestHookCollector_BlockedPermission_ClearedByPreToolUse(t *testing.T) {
 }
 
 func TestHookCollector_BlockedPermission_ClearedByUserPromptSubmit(t *testing.T) {
-	hc := NewHookCollector()
+	hc := NewHookCollector(nil)
 
 	hc.ProcessEvent("blocked_permission", json.RawMessage(`{"tool_name": "Bash"}`))
 	hc.ProcessEvent("UserPromptSubmit", nil)
@@ -186,7 +186,7 @@ func TestHookCollector_BlockedPermission_ClearedByUserPromptSubmit(t *testing.T)
 }
 
 func TestHookCollector_BlockedPermission_ClearedByStop(t *testing.T) {
-	hc := NewHookCollector()
+	hc := NewHookCollector(nil)
 
 	hc.ProcessEvent("blocked_permission", json.RawMessage(`{"tool_name": "Bash"}`))
 	hc.ProcessEvent("Stop", nil)
@@ -197,7 +197,7 @@ func TestHookCollector_BlockedPermission_ClearedByStop(t *testing.T) {
 }
 
 func TestHookCollector_BlockedPermission_NotClearedByPermissionRequest(t *testing.T) {
-	hc := NewHookCollector()
+	hc := NewHookCollector(nil)
 
 	hc.ProcessEvent("blocked_permission", json.RawMessage(`{"tool_name": "Bash"}`))
 	// PermissionRequest should NOT clear the blocked state — it's the event
