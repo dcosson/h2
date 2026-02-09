@@ -428,6 +428,87 @@ func TestRole_GetClaudeConfigDir(t *testing.T) {
 	}
 }
 
+func TestLoadRoleFrom_WithKeepalive(t *testing.T) {
+	yaml := `
+name: scheduler
+instructions: |
+  You are a scheduler agent.
+keepalive:
+  idle_timeout: 30s
+  message: "Check bd ready for new tasks to assign."
+  condition: "bd ready -q"
+`
+	path := writeTempFile(t, "scheduler.yaml", yaml)
+
+	role, err := LoadRoleFrom(path)
+	if err != nil {
+		t.Fatalf("LoadRoleFrom: %v", err)
+	}
+
+	if role.Keepalive == nil {
+		t.Fatal("Keepalive should not be nil")
+	}
+	if role.Keepalive.IdleTimeout != "30s" {
+		t.Errorf("IdleTimeout = %q, want %q", role.Keepalive.IdleTimeout, "30s")
+	}
+	if role.Keepalive.Message != "Check bd ready for new tasks to assign." {
+		t.Errorf("Message = %q, want %q", role.Keepalive.Message, "Check bd ready for new tasks to assign.")
+	}
+	if role.Keepalive.Condition != "bd ready -q" {
+		t.Errorf("Condition = %q, want %q", role.Keepalive.Condition, "bd ready -q")
+	}
+}
+
+func TestLoadRoleFrom_KeepaliveOptional(t *testing.T) {
+	yaml := `
+name: simple
+instructions: |
+  A simple agent.
+`
+	path := writeTempFile(t, "simple.yaml", yaml)
+
+	role, err := LoadRoleFrom(path)
+	if err != nil {
+		t.Fatalf("LoadRoleFrom: %v", err)
+	}
+
+	if role.Keepalive != nil {
+		t.Error("Keepalive should be nil when not specified")
+	}
+}
+
+func TestKeepaliveConfig_ParseIdleTimeout(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"valid seconds", "30s", false},
+		{"valid minutes", "5m", false},
+		{"valid mixed", "1m30s", false},
+		{"valid milliseconds", "500ms", false},
+		{"invalid", "abc", true},
+		{"empty", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			k := &KeepaliveConfig{IdleTimeout: tt.input}
+			_, err := k.ParseIdleTimeout()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseIdleTimeout(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+
+	// Verify actual parsed value.
+	k := &KeepaliveConfig{IdleTimeout: "30s"}
+	d, _ := k.ParseIdleTimeout()
+	if d != 30*1e9 { // 30 seconds in nanoseconds
+		t.Errorf("parsed duration = %v, want 30s", d)
+	}
+}
+
 func writeTempFile(t *testing.T, name, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)

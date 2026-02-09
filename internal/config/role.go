@@ -6,21 +6,35 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
+// KeepaliveConfig defines a keepalive nudge mechanism for idle agents.
+type KeepaliveConfig struct {
+	IdleTimeout string `yaml:"idle_timeout"`
+	Message     string `yaml:"message"`
+	Condition   string `yaml:"condition,omitempty"`
+}
+
+// ParseIdleTimeout parses the IdleTimeout string as a Go duration.
+func (k *KeepaliveConfig) ParseIdleTimeout() (time.Duration, error) {
+	return time.ParseDuration(k.IdleTimeout)
+}
+
 // Role defines a named configuration bundle for an h2 agent.
 type Role struct {
-	Name            string      `yaml:"name"`
-	Description     string      `yaml:"description,omitempty"`
-	AgentType       string      `yaml:"agent_type,omitempty"` // "claude" (default), future: other agent types
-	Model           string      `yaml:"model,omitempty"`
-	ClaudeConfigDir string      `yaml:"claude_config_dir,omitempty"`
-	Instructions    string      `yaml:"instructions"`
-	Permissions     Permissions `yaml:"permissions,omitempty"`
-	Hooks           yaml.Node   `yaml:"hooks,omitempty"`   // passed through as-is to settings.json
-	Settings        yaml.Node   `yaml:"settings,omitempty"` // extra settings.json keys
+	Name            string           `yaml:"name"`
+	Description     string           `yaml:"description,omitempty"`
+	AgentType       string           `yaml:"agent_type,omitempty"` // "claude" (default), future: other agent types
+	Model           string           `yaml:"model,omitempty"`
+	ClaudeConfigDir string           `yaml:"claude_config_dir,omitempty"`
+	Instructions    string           `yaml:"instructions"`
+	Permissions     Permissions      `yaml:"permissions,omitempty"`
+	Keepalive       *KeepaliveConfig `yaml:"keepalive,omitempty"`
+	Hooks           yaml.Node        `yaml:"hooks,omitempty"`   // passed through as-is to settings.json
+	Settings        yaml.Node        `yaml:"settings,omitempty"` // extra settings.json keys
 }
 
 // GetAgentType returns the agent type for this role, defaulting to "claude".

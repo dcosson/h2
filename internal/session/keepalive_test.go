@@ -1,0 +1,218 @@
+package session
+
+import (
+	"testing"
+	"time"
+
+	"h2/internal/session/agent"
+	"h2/internal/session/message"
+)
+
+// newTestAgent creates a minimal Agent for testing keepalive.
+// It uses a generic agent type so no collectors are started.
+func newTestAgent() *agent.Agent {
+	return agent.New(agent.ResolveAgentType("generic"))
+}
+
+func TestKeepalive_NudgeAfterIdleTimeout(t *testing.T) {
+	a := newTestAgent()
+	defer a.Stop()
+	// Start the watchState goroutine so agent can transition to idle.
+	a.StartCollectors()
+	q := message.NewMessageQueue()
+	stop := make(chan struct{})
+
+	go RunKeepalive(KeepaliveConfig{
+		IdleTimeout: 100 * time.Millisecond,
+		Message:     "wake up",
+		Agent:       a,
+		Queue:       q,
+		AgentName:   "test-agent",
+		Stop:        stop,
+	})
+
+	// Wait for agent to become idle (2s IdleThreshold) + keepalive timeout (100ms) + buffer.
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for keepalive nudge")
+		default:
+		}
+		if q.PendingCount() > 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	msg := q.Dequeue(true)
+	if msg == nil {
+		t.Fatal("expected a message in the queue")
+	}
+	if msg.From != "h2-keepalive" {
+		t.Errorf("From = %q, want %q", msg.From, "h2-keepalive")
+	}
+	if msg.Priority != message.PriorityIdle {
+		t.Errorf("Priority = %v, want PriorityIdle", msg.Priority)
+	}
+	if msg.Body != "wake up" {
+		t.Errorf("Body = %q, want %q", msg.Body, "wake up")
+	}
+
+	close(stop)
+}
+
+func TestKeepalive_CancelledWhenAgentGoesActive(t *testing.T) {
+	a := newTestAgent()
+	defer a.Stop()
+	a.StartCollectors()
+	q := message.NewMessageQueue()
+	stop := make(chan struct{})
+
+	go RunKeepalive(KeepaliveConfig{
+		IdleTimeout: 500 * time.Millisecond,
+		Message:     "should not arrive",
+		Agent:       a,
+		Queue:       q,
+		AgentName:   "test-agent",
+		Stop:        stop,
+	})
+
+	// Wait for agent to go idle.
+	deadline := time.After(5 * time.Second)
+	for a.State() != agent.StateIdle {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for idle")
+		case <-a.StateChanged():
+		}
+	}
+
+	// While the 500ms timer is running, make the agent active again.
+	time.Sleep(100 * time.Millisecond)
+	a.NoteOutput() // triggers active state
+
+	// Wait a bit past the original timeout.
+	time.Sleep(600 * time.Millisecond)
+
+	if q.PendingCount() != 0 {
+		t.Error("expected no messages; agent went active before timeout")
+	}
+
+	close(stop)
+}
+
+func TestKeepalive_ConditionGates(t *testing.T) {
+	a := newTestAgent()
+	defer a.Stop()
+	a.StartCollectors()
+	q := message.NewMessageQueue()
+	stop := make(chan struct{})
+
+	// Use "false" as condition — should prevent nudge.
+	go RunKeepalive(KeepaliveConfig{
+		IdleTimeout: 100 * time.Millisecond,
+		Message:     "gated message",
+		Condition:   "false",
+		Agent:       a,
+		Queue:       q,
+		AgentName:   "test-agent",
+		Stop:        stop,
+	})
+
+	// Wait for idle + timeout + buffer.
+	deadline := time.After(5 * time.Second)
+	for a.State() != agent.StateIdle {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for idle")
+		case <-a.StateChanged():
+		}
+	}
+
+	// Wait for the idle timeout to fire and condition to be checked.
+	time.Sleep(500 * time.Millisecond)
+
+	if q.PendingCount() != 0 {
+		t.Error("expected no messages; condition 'false' should gate the nudge")
+	}
+
+	close(stop)
+}
+
+func TestKeepalive_ConditionTrue(t *testing.T) {
+	a := newTestAgent()
+	defer a.Stop()
+	a.StartCollectors()
+	q := message.NewMessageQueue()
+	stop := make(chan struct{})
+
+	// Use "true" as condition — should allow nudge.
+	go RunKeepalive(KeepaliveConfig{
+		IdleTimeout: 100 * time.Millisecond,
+		Message:     "conditional nudge",
+		Condition:   "true",
+		Agent:       a,
+		Queue:       q,
+		AgentName:   "test-agent",
+		Stop:        stop,
+	})
+
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for keepalive nudge")
+		default:
+		}
+		if q.PendingCount() > 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	msg := q.Dequeue(true)
+	if msg == nil {
+		t.Fatal("expected a message")
+	}
+	if msg.Body != "conditional nudge" {
+		t.Errorf("Body = %q, want %q", msg.Body, "conditional nudge")
+	}
+
+	close(stop)
+}
+
+func TestKeepalive_StopTerminatesLoop(t *testing.T) {
+	a := newTestAgent()
+	defer a.Stop()
+	a.StartCollectors()
+	q := message.NewMessageQueue()
+	stop := make(chan struct{})
+
+	done := make(chan struct{})
+	go func() {
+		RunKeepalive(KeepaliveConfig{
+			IdleTimeout: 10 * time.Second, // long timeout
+			Message:     "should not arrive",
+			Agent:       a,
+			Queue:       q,
+			AgentName:   "test-agent",
+			Stop:        stop,
+		})
+		close(done)
+	}()
+
+	// Close stop immediately.
+	close(stop)
+
+	select {
+	case <-done:
+		// Good — goroutine exited.
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunKeepalive did not exit after stop was closed")
+	}
+
+	if q.PendingCount() != 0 {
+		t.Error("expected no messages after stop")
+	}
+}

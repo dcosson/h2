@@ -34,6 +34,7 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 			var cmdArgs []string
 			var sessionDir string
 			var claudeConfigDir string
+			var keepalive session.DaemonKeepalive
 
 			// Check mutual exclusivity of mode flags.
 			modeFlags := 0
@@ -90,6 +91,18 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 				}
 
 				cmdCommand = role.GetAgentType()
+
+				if role.Keepalive != nil {
+					d, err := role.Keepalive.ParseIdleTimeout()
+					if err != nil {
+						return fmt.Errorf("invalid keepalive idle_timeout: %w", err)
+					}
+					keepalive = session.DaemonKeepalive{
+						IdleTimeout: d,
+						Message:     role.Keepalive.Message,
+						Condition:   role.Keepalive.Condition,
+					}
+				}
 			}
 
 			if name == "" {
@@ -99,7 +112,7 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 			sessionID := uuid.New().String()
 
 			// Fork a daemon process.
-			if err := session.ForkDaemon(name, sessionID, cmdCommand, cmdArgs, roleName, sessionDir, claudeConfigDir); err != nil {
+			if err := session.ForkDaemon(name, sessionID, cmdCommand, cmdArgs, roleName, sessionDir, claudeConfigDir, keepalive); err != nil {
 				return err
 			}
 
