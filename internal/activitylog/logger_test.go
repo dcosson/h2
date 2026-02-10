@@ -164,6 +164,7 @@ func TestDisabledLoggerIsNoop(t *testing.T) {
 	l.OtelMetrics(100, 200, 0.01)
 	l.OtelConnected("/v1/logs")
 	l.StateChange("active", "idle")
+	l.SessionSummary(100, 200, 0.01, 1, 2)
 
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Error("expected no file to be created when disabled")
@@ -178,6 +179,7 @@ func TestNopLoggerIsNoop(t *testing.T) {
 	l.OtelMetrics(100, 200, 0.01)
 	l.OtelConnected("/v1/logs")
 	l.StateChange("active", "idle")
+	l.SessionSummary(100, 200, 0.01, 1, 2)
 	l.Close()
 }
 
@@ -212,6 +214,49 @@ func TestTimestampPresent(t *testing.T) {
 	}
 	if e.Timestamp == "" {
 		t.Error("expected ts field to be present")
+	}
+}
+
+func TestSessionSummary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "activity.log")
+	l := New(true, path, "agent", "sess")
+	defer l.Close()
+
+	l.SessionSummary(5000, 3000, 0.42, 10, 25)
+
+	lines := readLines(t, path)
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 line, got %d", len(lines))
+	}
+
+	var e struct {
+		Event        string  `json:"event"`
+		InputTokens  int64   `json:"input_tokens"`
+		OutputTokens int64   `json:"output_tokens"`
+		CostUSD      float64 `json:"cost_usd"`
+		APIRequests  int64   `json:"api_requests"`
+		ToolCalls    int64   `json:"tool_calls"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &e); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if e.Event != "session_summary" {
+		t.Errorf("event = %q, want %q", e.Event, "session_summary")
+	}
+	if e.InputTokens != 5000 {
+		t.Errorf("input_tokens = %d, want 5000", e.InputTokens)
+	}
+	if e.OutputTokens != 3000 {
+		t.Errorf("output_tokens = %d, want 3000", e.OutputTokens)
+	}
+	if e.CostUSD != 0.42 {
+		t.Errorf("cost_usd = %f, want 0.42", e.CostUSD)
+	}
+	if e.APIRequests != 10 {
+		t.Errorf("api_requests = %d, want 10", e.APIRequests)
+	}
+	if e.ToolCalls != 25 {
+		t.Errorf("tool_calls = %d, want 25", e.ToolCalls)
 	}
 }
 

@@ -282,7 +282,7 @@ func (s *Session) RunDaemon() error {
 
 	// Set up activity logger and raw OTEL log files.
 	logDir := filepath.Join(os.Getenv("HOME"), ".h2", "logs")
-	logPath := filepath.Join(logDir, "session-activity.log")
+	logPath := filepath.Join(logDir, "session-activity.jsonl")
 	s.Agent.SetActivityLog(activitylog.New(true, logPath, s.Name, s.SessionID))
 	s.Agent.SetOtelLogFiles(logDir)
 
@@ -386,7 +386,7 @@ func (s *Session) RunInteractive() error {
 
 	// Set up activity logger and raw OTEL log files.
 	logDir := filepath.Join(os.Getenv("HOME"), ".h2", "logs")
-	logPath := filepath.Join(logDir, "session-activity.log")
+	logPath := filepath.Join(logDir, "session-activity.jsonl")
 	s.Agent.SetActivityLog(activitylog.New(true, logPath, s.Name, s.SessionID))
 	s.Agent.SetOtelLogFiles(logDir)
 

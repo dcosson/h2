@@ -110,6 +110,25 @@ func (l *Logger) StateChange(from, to string) {
 	})
 }
 
+// SessionSummary logs cumulative session metrics at exit.
+func (l *Logger) SessionSummary(inputTokens, outputTokens int64, costUSD float64, apiRequests, toolCalls int64) {
+	l.log(struct {
+		entry
+		InputTokens  int64   `json:"input_tokens"`
+		OutputTokens int64   `json:"output_tokens"`
+		CostUSD      float64 `json:"cost_usd"`
+		APIRequests  int64   `json:"api_requests"`
+		ToolCalls    int64   `json:"tool_calls"`
+	}{
+		entry:        l.entry("session_summary"),
+		InputTokens:  inputTokens,
+		OutputTokens: outputTokens,
+		CostUSD:      costUSD,
+		APIRequests:  apiRequests,
+		ToolCalls:    toolCalls,
+	})
+}
+
 // Close closes the underlying file.
 func (l *Logger) Close() error {
 	if l.w == nil {
