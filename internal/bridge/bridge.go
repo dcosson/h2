@@ -33,6 +33,23 @@ type TypingIndicator interface {
 	SendTyping(ctx context.Context) error
 }
 
+var agentTagRe = regexp.MustCompile(`^\[([a-zA-Z0-9_-]+)\]\s*`)
+
+// ParseAgentTag extracts an "[agent-name]" tag from the start of text.
+// Returns the agent name, or empty string if no tag found.
+func ParseAgentTag(text string) string {
+	m := agentTagRe.FindStringSubmatch(text)
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
+// FormatAgentTag prepends an "[agent-name] " tag to text.
+func FormatAgentTag(agent, text string) string {
+	return "[" + agent + "] " + text
+}
+
 var agentPrefixRe = regexp.MustCompile(`^([a-zA-Z0-9_-]+):\s*(.*)$`)
 
 // ParseAgentPrefix extracts an "agent-name: body" prefix from text.

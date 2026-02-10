@@ -159,15 +159,23 @@ func (s *Service) replyError(msg string) {
 }
 
 // handleOutbound sends a message from an agent to all Sender bridges.
+// Messages from non-concierge agents are tagged with [agent-name] so that
+// replies can be routed back to the correct agent.
 func (s *Service) handleOutbound(from, body string) {
 	s.mu.Lock()
 	s.lastSender = from
 	s.mu.Unlock()
 
+	// Tag messages from non-concierge agents so reply routing works.
+	tagged := body
+	if from != "" && from != s.concierge {
+		tagged = bridge.FormatAgentTag(from, body)
+	}
+
 	ctx := context.Background()
 	for _, b := range s.bridges {
 		if sender, ok := b.(bridge.Sender); ok {
-			if err := sender.Send(ctx, body); err != nil {
+			if err := sender.Send(ctx, tagged); err != nil {
 				log.Printf("bridge: send via %s: %v", b.Name(), err)
 			}
 		}

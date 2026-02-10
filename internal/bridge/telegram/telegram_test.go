@@ -186,6 +186,87 @@ func TestStartStop(t *testing.T) {
 	}
 }
 
+func TestStartStop_ReplyRouting(t *testing.T) {
+	var mu sync.Mutex
+	var received []struct{ agent, body string }
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/botTOKEN/getUpdates" {
+			http.NotFound(w, r)
+			return
+		}
+
+		mu.Lock()
+		first := len(received) == 0
+		mu.Unlock()
+
+		if first {
+			json.NewEncoder(w).Encode(getUpdatesResponse{
+				OK: true,
+				Result: []update{
+					{
+						UpdateID: 300,
+						Message: &message{
+							Text: "what's the status?",
+							Chat: chat{ID: 42},
+							ReplyToMessage: &message{
+								Text: "[researcher] here are the results",
+								Chat: chat{ID: 42},
+							},
+						},
+					},
+				},
+			})
+		} else {
+			<-r.Context().Done()
+		}
+	}))
+	defer srv.Close()
+
+	tg := &Telegram{
+		Token:   "TOKEN",
+		ChatID:  42,
+		BaseURL: srv.URL,
+	}
+
+	handler := func(agent, body string) {
+		mu.Lock()
+		received = append(received, struct{ agent, body string }{agent, body})
+		mu.Unlock()
+	}
+
+	if err := tg.Start(context.Background(), handler); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(received)
+		mu.Unlock()
+		if n >= 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	tg.Stop()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(received) != 1 {
+		t.Fatalf("got %d messages, want 1", len(received))
+	}
+	// Reply to a [researcher] tagged message should route to researcher.
+	if received[0].agent != "researcher" {
+		t.Errorf("agent = %q, want %q", received[0].agent, "researcher")
+	}
+	if received[0].body != "what's the status?" {
+		t.Errorf("body = %q, want %q", received[0].body, "what's the status?")
+	}
+}
+
 func TestStartStop_FiltersChatID(t *testing.T) {
 	var mu sync.Mutex
 	var received []string

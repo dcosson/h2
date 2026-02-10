@@ -367,14 +367,15 @@ func TestHandleOutbound(t *testing.T) {
 
 	svc.handleOutbound("myagent", "build complete")
 
-	// Both senders should have received the message.
+	// Both senders should have received the tagged message (non-concierge agent).
+	want := "[myagent] build complete"
 	msgs1 := sender1.Messages()
-	if len(msgs1) != 1 || msgs1[0] != "build complete" {
-		t.Errorf("sender1: expected [build complete], got %v", msgs1)
+	if len(msgs1) != 1 || msgs1[0] != want {
+		t.Errorf("sender1: expected [%s], got %v", want, msgs1)
 	}
 	msgs2 := sender2.Messages()
-	if len(msgs2) != 1 || msgs2[0] != "build complete" {
-		t.Errorf("sender2: expected [build complete], got %v", msgs2)
+	if len(msgs2) != 1 || msgs2[0] != want {
+		t.Errorf("sender2: expected [%s], got %v", want, msgs2)
 	}
 
 	// lastSender should be updated.
@@ -383,6 +384,38 @@ func TestHandleOutbound(t *testing.T) {
 	svc.mu.Unlock()
 	if last != "myagent" {
 		t.Errorf("expected lastSender=myagent, got %q", last)
+	}
+}
+
+func TestHandleOutbound_TagsNonConcierge(t *testing.T) {
+	sender := &mockSender{name: "telegram"}
+	svc := New([]bridge.Bridge{sender}, "concierge", t.TempDir(), "alice")
+
+	svc.handleOutbound("researcher", "here are the results")
+
+	msgs := sender.Messages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	want := "[researcher] here are the results"
+	if msgs[0] != want {
+		t.Errorf("got %q, want %q", msgs[0], want)
+	}
+}
+
+func TestHandleOutbound_NoConciergeTag(t *testing.T) {
+	sender := &mockSender{name: "telegram"}
+	svc := New([]bridge.Bridge{sender}, "concierge", t.TempDir(), "alice")
+
+	svc.handleOutbound("concierge", "build complete")
+
+	msgs := sender.Messages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	// Concierge messages should NOT be tagged.
+	if msgs[0] != "build complete" {
+		t.Errorf("got %q, want %q", msgs[0], "build complete")
 	}
 }
 
@@ -427,9 +460,11 @@ func TestSocketListener(t *testing.T) {
 
 	// Give handleOutbound a moment to complete (it runs synchronously in handleConn,
 	// but the response is sent after handleOutbound returns, so by now it's done).
+	// Non-concierge agents get tagged with [agent-name].
 	msgs := sender.Messages()
-	if len(msgs) != 1 || msgs[0] != "hello human" {
-		t.Errorf("expected sender to receive [hello human], got %v", msgs)
+	wantMsg := "[agent1] hello human"
+	if len(msgs) != 1 || msgs[0] != wantMsg {
+		t.Errorf("expected sender to receive [%s], got %v", wantMsg, msgs)
 	}
 
 	svc.mu.Lock()

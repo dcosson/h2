@@ -30,6 +30,38 @@ func TestParseAgentPrefix(t *testing.T) {
 	}
 }
 
+func TestParseAgentTag(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"[researcher] here are the results", "researcher"},
+		{"[my-agent] hello", "my-agent"},
+		{"[agent_1] test", "agent_1"},
+		{"no tag here", ""},
+		{"", ""},
+		{"[researcher]no space", "researcher"},
+		{"[researcher]  extra spaces", "researcher"},
+		{"[] empty tag", ""},
+		{"plain [researcher] not at start", ""},
+	}
+
+	for _, tt := range tests {
+		got := ParseAgentTag(tt.input)
+		if got != tt.want {
+			t.Errorf("ParseAgentTag(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestFormatAgentTag(t *testing.T) {
+	got := FormatAgentTag("researcher", "here are the results")
+	want := "[researcher] here are the results"
+	if got != want {
+		t.Errorf("FormatAgentTag = %q, want %q", got, want)
+	}
+}
+
 func TestStripH2Envelope(t *testing.T) {
 	tests := []struct {
 		input string

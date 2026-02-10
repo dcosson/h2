@@ -134,6 +134,10 @@ func (t *Telegram) poll(ctx context.Context, handler bridge.InboundHandler) {
 				continue
 			}
 			agent, body := bridge.ParseAgentPrefix(u.Message.Text)
+			// If no explicit prefix, check reply-to message for agent tag.
+			if agent == "" && u.Message.ReplyToMessage != nil {
+				agent = bridge.ParseAgentTag(u.Message.ReplyToMessage.Text)
+			}
 			handler(agent, body)
 		}
 	}
@@ -207,8 +211,9 @@ type update struct {
 }
 
 type message struct {
-	Text string `json:"text"`
-	Chat chat   `json:"chat"`
+	Text           string   `json:"text"`
+	Chat           chat     `json:"chat"`
+	ReplyToMessage *message `json:"reply_to_message,omitempty"`
 }
 
 type chat struct {
