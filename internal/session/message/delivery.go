@@ -18,12 +18,17 @@ type IdleFunc func() bool
 // Returns true if idle was reached.
 type WaitForIdleFunc func(ctx context.Context) bool
 
+// IsBlockedFunc returns true if the agent is blocked (e.g. waiting for
+// permission approval) and normal-priority messages should not be delivered.
+type IsBlockedFunc func() bool
+
 // DeliveryConfig holds configuration for the delivery goroutine.
 type DeliveryConfig struct {
 	Queue       *MessageQueue
 	AgentName   string
 	PtyWriter   io.Writer        // writes to the child PTY
 	IsIdle      IdleFunc         // checks if child is idle
+	IsBlocked   IsBlockedFunc    // checks if agent is blocked (nil = never blocked)
 	WaitForIdle WaitForIdleFunc  // blocks until idle (for interrupt retry)
 	OnDeliver   func()           // called after each delivery (e.g. to render)
 	Stop        <-chan struct{}
@@ -75,7 +80,8 @@ func RunDelivery(cfg DeliveryConfig) {
 
 		for {
 			idle := cfg.IsIdle != nil && cfg.IsIdle()
-			msg := cfg.Queue.Dequeue(idle)
+			blocked := cfg.IsBlocked != nil && cfg.IsBlocked()
+			msg := cfg.Queue.Dequeue(idle, blocked)
 			if msg == nil {
 				break
 			}

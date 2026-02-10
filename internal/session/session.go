@@ -595,6 +595,10 @@ func (s *Session) StartServices() {
 			st, _ := s.Agent.State()
 			return st == agent.StateIdle
 		},
+		IsBlocked: func() bool {
+			st, sub := s.Agent.State()
+			return st == agent.StateActive && sub == agent.SubStateWaitingForPermission
+		},
 		WaitForIdle: func(ctx context.Context) bool {
 			return s.Agent.WaitForState(ctx, agent.StateIdle)
 		},

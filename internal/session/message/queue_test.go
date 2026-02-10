@@ -20,19 +20,19 @@ func TestDequeueOrder_InterruptFirst(t *testing.T) {
 	q.Enqueue(newMsg("idle-1", PriorityIdle))
 	q.Enqueue(newMsg("interrupt-1", PriorityInterrupt))
 
-	msg := q.Dequeue(true)
+	msg := q.Dequeue(true, false)
 	if msg == nil || msg.ID != "interrupt-1" {
 		t.Fatalf("expected interrupt-1, got %v", msg)
 	}
-	msg = q.Dequeue(true)
+	msg = q.Dequeue(true, false)
 	if msg == nil || msg.ID != "normal-1" {
 		t.Fatalf("expected normal-1, got %v", msg)
 	}
-	msg = q.Dequeue(true)
+	msg = q.Dequeue(true, false)
 	if msg == nil || msg.ID != "idle-1" {
 		t.Fatalf("expected idle-1, got %v", msg)
 	}
-	msg = q.Dequeue(true)
+	msg = q.Dequeue(true, false)
 	if msg != nil {
 		t.Fatalf("expected nil, got %v", msg)
 	}
@@ -43,11 +43,11 @@ func TestDequeueOrder_NormalBeforeIdle(t *testing.T) {
 	q.Enqueue(newMsg("idle-1", PriorityIdle))
 	q.Enqueue(newMsg("normal-1", PriorityNormal))
 
-	msg := q.Dequeue(true)
+	msg := q.Dequeue(true, false)
 	if msg == nil || msg.ID != "normal-1" {
 		t.Fatalf("expected normal-1, got %v", msg)
 	}
-	msg = q.Dequeue(true)
+	msg = q.Dequeue(true, false)
 	if msg == nil || msg.ID != "idle-1" {
 		t.Fatalf("expected idle-1, got %v", msg)
 	}
@@ -58,11 +58,11 @@ func TestDequeueOrder_IdleFirstBeforeIdle(t *testing.T) {
 	q.Enqueue(newMsg("idle-1", PriorityIdle))
 	q.Enqueue(newMsg("idle-first-1", PriorityIdleFirst))
 
-	msg := q.Dequeue(true)
+	msg := q.Dequeue(true, false)
 	if msg == nil || msg.ID != "idle-first-1" {
 		t.Fatalf("expected idle-first-1, got %v", msg)
 	}
-	msg = q.Dequeue(true)
+	msg = q.Dequeue(true, false)
 	if msg == nil || msg.ID != "idle-1" {
 		t.Fatalf("expected idle-1, got %v", msg)
 	}
@@ -75,15 +75,15 @@ func TestDequeueOrder_IdleFirstPrepends(t *testing.T) {
 	q.Enqueue(newMsg("if-3", PriorityIdleFirst))
 
 	// Most recently enqueued idle-first should come first.
-	msg := q.Dequeue(true)
+	msg := q.Dequeue(true, false)
 	if msg == nil || msg.ID != "if-3" {
 		t.Fatalf("expected if-3, got %v", msg)
 	}
-	msg = q.Dequeue(true)
+	msg = q.Dequeue(true, false)
 	if msg == nil || msg.ID != "if-2" {
 		t.Fatalf("expected if-2, got %v", msg)
 	}
-	msg = q.Dequeue(true)
+	msg = q.Dequeue(true, false)
 	if msg == nil || msg.ID != "if-1" {
 		t.Fatalf("expected if-1, got %v", msg)
 	}
@@ -96,7 +96,7 @@ func TestDequeueOrder_NormalFIFO(t *testing.T) {
 	q.Enqueue(newMsg("n-3", PriorityNormal))
 
 	for _, expected := range []string{"n-1", "n-2", "n-3"} {
-		msg := q.Dequeue(true)
+		msg := q.Dequeue(true, false)
 		if msg == nil || msg.ID != expected {
 			t.Fatalf("expected %s, got %v", expected, msg)
 		}
@@ -110,7 +110,7 @@ func TestDequeueOrder_IdleFIFO(t *testing.T) {
 	q.Enqueue(newMsg("i-3", PriorityIdle))
 
 	for _, expected := range []string{"i-1", "i-2", "i-3"} {
-		msg := q.Dequeue(true)
+		msg := q.Dequeue(true, false)
 		if msg == nil || msg.ID != expected {
 			t.Fatalf("expected %s, got %v", expected, msg)
 		}
@@ -122,14 +122,14 @@ func TestDequeue_IdleNotReturnedWhenNotIdle(t *testing.T) {
 	q.Enqueue(newMsg("idle-1", PriorityIdle))
 	q.Enqueue(newMsg("idle-first-1", PriorityIdleFirst))
 
-	msg := q.Dequeue(false) // not idle
+	msg := q.Dequeue(false, false) // not idle
 	if msg != nil {
 		t.Fatalf("expected nil when not idle, got %v", msg)
 	}
 
 	// But normal messages are still returned.
 	q.Enqueue(newMsg("normal-1", PriorityNormal))
-	msg = q.Dequeue(false)
+	msg = q.Dequeue(false, false)
 	if msg == nil || msg.ID != "normal-1" {
 		t.Fatalf("expected normal-1, got %v", msg)
 	}
@@ -141,7 +141,7 @@ func TestPause_BlocksNonInterrupt(t *testing.T) {
 	q.Enqueue(newMsg("idle-1", PriorityIdle))
 	q.Pause()
 
-	msg := q.Dequeue(true)
+	msg := q.Dequeue(true, false)
 	if msg != nil {
 		t.Fatalf("expected nil when paused, got %v", msg)
 	}
@@ -157,13 +157,13 @@ func TestPause_InterruptBypassesPause(t *testing.T) {
 	q.Enqueue(newMsg("interrupt-1", PriorityInterrupt))
 	q.Pause()
 
-	msg := q.Dequeue(true)
+	msg := q.Dequeue(true, false)
 	if msg == nil || msg.ID != "interrupt-1" {
 		t.Fatalf("expected interrupt-1 to bypass pause, got %v", msg)
 	}
 
 	// Normal still blocked.
-	msg = q.Dequeue(true)
+	msg = q.Dequeue(true, false)
 	if msg != nil {
 		t.Fatalf("expected nil for normal while paused, got %v", msg)
 	}
@@ -174,13 +174,13 @@ func TestUnpause_DeliversNormal(t *testing.T) {
 	q.Enqueue(newMsg("normal-1", PriorityNormal))
 	q.Pause()
 
-	msg := q.Dequeue(true)
+	msg := q.Dequeue(true, false)
 	if msg != nil {
 		t.Fatalf("expected nil while paused, got %v", msg)
 	}
 
 	q.Unpause()
-	msg = q.Dequeue(true)
+	msg = q.Dequeue(true, false)
 	if msg == nil || msg.ID != "normal-1" {
 		t.Fatalf("expected normal-1 after unpause, got %v", msg)
 	}
@@ -199,7 +199,7 @@ func TestPendingCount(t *testing.T) {
 		t.Fatalf("expected 3, got %d", q.PendingCount())
 	}
 
-	q.Dequeue(true) // dequeue interrupt
+	q.Dequeue(true, false) // dequeue interrupt
 	if q.PendingCount() != 2 {
 		t.Fatalf("expected 2, got %d", q.PendingCount())
 	}
@@ -241,7 +241,7 @@ func TestFullPriorityOrder(t *testing.T) {
 	}
 
 	for _, exp := range expected {
-		msg := q.Dequeue(true)
+		msg := q.Dequeue(true, false)
 		if msg == nil || msg.ID != exp {
 			var got string
 			if msg != nil {
@@ -249,5 +249,34 @@ func TestFullPriorityOrder(t *testing.T) {
 			}
 			t.Fatalf("expected %s, got %s", exp, got)
 		}
+	}
+}
+
+func TestDequeue_BlockedOnlyReturnsInterrupt(t *testing.T) {
+	q := NewMessageQueue()
+	q.Enqueue(newMsg("normal-1", PriorityNormal))
+	q.Enqueue(newMsg("idle-1", PriorityIdle))
+	q.Enqueue(newMsg("interrupt-1", PriorityInterrupt))
+
+	// When blocked, only interrupts are returned.
+	msg := q.Dequeue(true, true)
+	if msg == nil || msg.ID != "interrupt-1" {
+		t.Fatalf("expected interrupt-1 when blocked, got %v", msg)
+	}
+
+	// Normal and idle are held back.
+	msg = q.Dequeue(true, true)
+	if msg != nil {
+		t.Fatalf("expected nil when blocked (normal+idle held), got %v", msg)
+	}
+
+	// Unblock — normal and idle should be available.
+	msg = q.Dequeue(true, false)
+	if msg == nil || msg.ID != "normal-1" {
+		t.Fatalf("expected normal-1 after unblock, got %v", msg)
+	}
+	msg = q.Dequeue(true, false)
+	if msg == nil || msg.ID != "idle-1" {
+		t.Fatalf("expected idle-1 after unblock, got %v", msg)
 	}
 }

@@ -45,7 +45,7 @@ func TestHeartbeat_NudgeAfterIdleTimeout(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	msg := q.Dequeue(true)
+	msg := q.Dequeue(true, false)
 	if msg == nil {
 		t.Fatal("expected a message in the queue")
 	}
@@ -171,7 +171,7 @@ func TestHeartbeat_ConditionTrue(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	msg := q.Dequeue(true)
+	msg := q.Dequeue(true, false)
 	if msg == nil {
 		t.Fatal("expected a message")
 	}

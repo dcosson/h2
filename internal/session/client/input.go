@@ -251,15 +251,6 @@ func (c *Client) HandleDefaultBytes(buf []byte, start, n int) int {
 			if len(c.Input) > 0 {
 				cmd := string(c.Input)
 				if c.InputPriority == message.PriorityNormal {
-					// Gate: don't send normal-priority input while agent is
-					// waiting for permission approval. Input stays in buffer.
-					if c.AgentState != nil {
-						_, subState, _ := c.AgentState()
-						if subState == "waiting_for_permission" {
-							c.RenderBar()
-							continue
-						}
-					}
 					// Normal: direct PTY write.
 					if !c.writePTYOrHang(c.Input) {
 						return n

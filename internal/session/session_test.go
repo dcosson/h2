@@ -165,7 +165,7 @@ func TestSubmitInput(t *testing.T) {
 		t.Fatalf("expected 1 pending message, got %d", count)
 	}
 
-	msg := s.Queue.Dequeue(true) // idle=true to get idle messages
+	msg := s.Queue.Dequeue(true, false) // idle=true to get idle messages
 	if msg == nil {
 		t.Fatal("expected to dequeue a message")
 	}
@@ -188,7 +188,7 @@ func TestSubmitInput_Interrupt(t *testing.T) {
 
 	s.SubmitInput("urgent", message.PriorityInterrupt)
 
-	msg := s.Queue.Dequeue(false) // idle=false, but interrupt always dequeues
+	msg := s.Queue.Dequeue(false, false) // idle=false, but interrupt always dequeues
 	if msg == nil {
 		t.Fatal("expected to dequeue interrupt message")
 	}

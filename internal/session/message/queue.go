@@ -51,8 +51,10 @@ func (q *MessageQueue) Enqueue(msg *Message) {
 
 // Dequeue returns the next message to deliver based on priority ordering.
 // If idle is false, only interrupt and normal messages are returned.
+// If blocked is true, only interrupt messages are returned (normal messages
+// are held back, e.g. while the agent is waiting for permission approval).
 // Returns nil if no deliverable message is available.
-func (q *MessageQueue) Dequeue(idle bool) *Message {
+func (q *MessageQueue) Dequeue(idle, blocked bool) *Message {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -70,6 +72,9 @@ func (q *MessageQueue) Dequeue(idle bool) *Message {
 		msg := q.interrupt[0]
 		q.interrupt = q.interrupt[1:]
 		return msg
+	}
+	if blocked {
+		return nil
 	}
 	if len(q.normal) > 0 {
 		msg := q.normal[0]
