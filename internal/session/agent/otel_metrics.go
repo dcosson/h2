@@ -22,6 +22,16 @@ type OtelMetrics struct {
 	APIRequestCount int64
 	ToolResultCount int64
 
+	// Per-tool counts from OTEL logs (tool_result events)
+	ToolCounts map[string]int64
+
+	// From OTEL /v1/metrics (cumulative, overwritten on each update)
+	LinesAdded    int64
+	LinesRemoved  int64
+	ActiveTimeHrs float64
+	ModelCosts    map[string]float64          // model -> cost USD
+	ModelTokens   map[string]map[string]int64 // model -> type -> count
+
 	// Connection status
 	EventsReceived bool // true after first OTEL event
 }
@@ -40,7 +50,26 @@ func (m *OtelMetrics) Update(delta OtelMetricsDelta) {
 	}
 	if delta.IsToolResult {
 		m.ToolResultCount++
+		if delta.ToolName != "" {
+			if m.ToolCounts == nil {
+				m.ToolCounts = make(map[string]int64)
+			}
+			m.ToolCounts[delta.ToolName]++
+		}
 	}
+}
+
+// UpdateFromMetricsEndpoint applies cumulative values from /v1/metrics.
+// These are running totals, so they overwrite (not add to) the existing values.
+func (m *OtelMetrics) UpdateFromMetricsEndpoint(parsed *ParsedOtelMetrics) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.EventsReceived = true
+	m.LinesAdded = parsed.LinesAdded
+	m.LinesRemoved = parsed.LinesRemoved
+	m.ActiveTimeHrs = parsed.ActiveTimeHrs
+	m.ModelCosts = parsed.ModelCosts
+	m.ModelTokens = parsed.ModelTokens
 }
 
 // NoteEvent marks that an OTEL event was received (even if no metrics extracted).
@@ -54,6 +83,34 @@ func (m *OtelMetrics) NoteEvent() {
 func (m *OtelMetrics) Snapshot() OtelMetricsSnapshot {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
+	// Copy maps to avoid races.
+	var toolCounts map[string]int64
+	if len(m.ToolCounts) > 0 {
+		toolCounts = make(map[string]int64, len(m.ToolCounts))
+		for k, v := range m.ToolCounts {
+			toolCounts[k] = v
+		}
+	}
+	var modelCosts map[string]float64
+	if len(m.ModelCosts) > 0 {
+		modelCosts = make(map[string]float64, len(m.ModelCosts))
+		for k, v := range m.ModelCosts {
+			modelCosts[k] = v
+		}
+	}
+	var modelTokens map[string]map[string]int64
+	if len(m.ModelTokens) > 0 {
+		modelTokens = make(map[string]map[string]int64, len(m.ModelTokens))
+		for model, types := range m.ModelTokens {
+			mt := make(map[string]int64, len(types))
+			for k, v := range types {
+				mt[k] = v
+			}
+			modelTokens[model] = mt
+		}
+	}
+
 	return OtelMetricsSnapshot{
 		InputTokens:     m.InputTokens,
 		OutputTokens:    m.OutputTokens,
@@ -61,6 +118,12 @@ func (m *OtelMetrics) Snapshot() OtelMetricsSnapshot {
 		TotalCostUSD:    m.TotalCostUSD,
 		APIRequestCount: m.APIRequestCount,
 		ToolResultCount: m.ToolResultCount,
+		ToolCounts:      toolCounts,
+		LinesAdded:      m.LinesAdded,
+		LinesRemoved:    m.LinesRemoved,
+		ActiveTimeHrs:   m.ActiveTimeHrs,
+		ModelCosts:      modelCosts,
+		ModelTokens:     modelTokens,
 		EventsReceived:  m.EventsReceived,
 	}
 }
@@ -73,6 +136,12 @@ type OtelMetricsSnapshot struct {
 	TotalCostUSD    float64
 	APIRequestCount int64
 	ToolResultCount int64
+	ToolCounts      map[string]int64
+	LinesAdded      int64
+	LinesRemoved    int64
+	ActiveTimeHrs   float64
+	ModelCosts      map[string]float64
+	ModelTokens     map[string]map[string]int64
 	EventsReceived  bool
 }
 
@@ -109,6 +178,7 @@ type OtelMetricsDelta struct {
 	CostUSD      float64
 	IsAPIRequest bool
 	IsToolResult bool
+	ToolName     string // from tool_result events
 }
 
 // OtelParser extracts metrics from OTEL log records.

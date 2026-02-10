@@ -60,15 +60,38 @@ type AgentInfo struct {
 	StateDuration string `json:"state_duration"`
 	QueuedCount   int    `json:"queued_count"`
 
-	// OTEL collector data (omitted if collector not active)
-	TotalTokens  int64   `json:"total_tokens,omitempty"`
-	TotalCostUSD float64 `json:"total_cost_usd,omitempty"`
+	// Per-model cost and token breakdowns from OTEL metrics
+	ModelStats   []ModelStat `json:"model_stats,omitempty"`
+	TotalTokens  int64       `json:"total_tokens,omitempty"`
+	TotalCostUSD float64     `json:"total_cost_usd,omitempty"`
+
+	// Cumulative session LOC from OTEL metrics
+	LinesAdded   int64 `json:"lines_added,omitempty"`
+	LinesRemoved int64 `json:"lines_removed,omitempty"`
+
+	// Per-tool counts from OTEL logs
+	ToolCounts map[string]int64 `json:"tool_counts,omitempty"`
+
+	// Point-in-time git working tree stats
+	GitFilesChanged int   `json:"git_files_changed,omitempty"`
+	GitLinesAdded   int64 `json:"git_lines_added,omitempty"`
+	GitLinesRemoved int64 `json:"git_lines_removed,omitempty"`
 
 	// Hook collector data (omitted if collector not active)
 	LastToolUse         string `json:"last_tool_use,omitempty"`
 	ToolUseCount        int64  `json:"tool_use_count,omitempty"`
 	BlockedOnPermission bool   `json:"blocked_on_permission,omitempty"`
 	BlockedToolName     string `json:"blocked_tool_name,omitempty"`
+}
+
+// ModelStat holds per-model cost and token breakdown.
+type ModelStat struct {
+	Model        string  `json:"model"`
+	CostUSD      float64 `json:"cost_usd"`
+	InputTokens  int64   `json:"input_tokens"`
+	OutputTokens int64   `json:"output_tokens"`
+	CacheRead    int64   `json:"cache_read,omitempty"`
+	CacheCreate  int64   `json:"cache_create,omitempty"`
 }
 
 // Attach frame types.

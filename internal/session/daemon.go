@@ -2,11 +2,14 @@ package session
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"os/exec"
 	"time"
 
+	"h2/internal/config"
+	"h2/internal/session/agent"
 	"h2/internal/session/message"
 	"h2/internal/session/virtualterminal"
 	"h2/internal/socketdir"
@@ -66,6 +69,24 @@ func RunDaemon(name, sessionID, command string, args []string, roleName, session
 		os.Remove(sockPath)
 	}()
 
+	// Write session metadata for h2 peek and other tools.
+	if s.SessionDir != "" && s.ClaudeConfigDir != "" {
+		cwd, _ := os.Getwd()
+		meta := config.SessionMetadata{
+			AgentName:              name,
+			SessionID:              sessionID,
+			ClaudeConfigDir:        s.ClaudeConfigDir,
+			CWD:                    cwd,
+			ClaudeCodeSessionLogPath: config.ClaudeCodeSessionLogPath(s.ClaudeConfigDir, cwd, sessionID),
+			Command:                command,
+			Role:                   roleName,
+			StartedAt:              s.StartTime.UTC().Format(time.RFC3339),
+		}
+		if err := config.WriteSessionMetadata(s.SessionDir, meta); err != nil {
+			log.Printf("warning: write session metadata: %v", err)
+		}
+	}
+
 	d := &Daemon{
 		Session:   s,
 		Listener:  ln,
@@ -100,6 +121,19 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 	if m.EventsReceived {
 		info.TotalTokens = m.TotalTokens
 		info.TotalCostUSD = m.TotalCostUSD
+		info.LinesAdded = m.LinesAdded
+		info.LinesRemoved = m.LinesRemoved
+		info.ToolCounts = m.ToolCounts
+
+		// Build per-model stats from OTEL metrics endpoint data.
+		info.ModelStats = buildModelStats(m)
+	}
+
+	// Point-in-time git stats.
+	if gs := gitStats(); gs != nil {
+		info.GitFilesChanged = gs.FilesChanged
+		info.GitLinesAdded = gs.LinesAdded
+		info.GitLinesRemoved = gs.LinesRemoved
 	}
 
 	// Pull from hook collector if active.
@@ -112,6 +146,50 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 	}
 
 	return info
+}
+
+// buildModelStats converts per-model maps into a sorted slice of ModelStat.
+func buildModelStats(m agent.OtelMetricsSnapshot) []message.ModelStat {
+	if len(m.ModelCosts) == 0 && len(m.ModelTokens) == 0 {
+		return nil
+	}
+
+	// Collect all model names.
+	models := make(map[string]bool)
+	for model := range m.ModelCosts {
+		models[model] = true
+	}
+	for model := range m.ModelTokens {
+		models[model] = true
+	}
+
+	var stats []message.ModelStat
+	for model := range models {
+		stat := message.ModelStat{
+			Model:   model,
+			CostUSD: m.ModelCosts[model],
+		}
+		if tokens, ok := m.ModelTokens[model]; ok {
+			stat.InputTokens = tokens["input"]
+			stat.OutputTokens = tokens["output"]
+			stat.CacheRead = tokens["cacheRead"]
+			stat.CacheCreate = tokens["cacheCreation"]
+		}
+		stats = append(stats, stat)
+	}
+	return stats
+}
+
+// gitDiffStats holds parsed git diff --numstat output.
+type gitDiffStats struct {
+	FilesChanged int
+	LinesAdded   int64
+	LinesRemoved int64
+}
+
+// gitStats runs git diff --numstat to get current uncommitted changes.
+func gitStats() *gitDiffStats {
+	return parseGitDiffStats()
 }
 
 // ForkDaemon starts a daemon in a background process by re-execing with

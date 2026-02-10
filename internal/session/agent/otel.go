@@ -172,9 +172,16 @@ func (a *Agent) handleOtelMetrics(w http.ResponseWriter, r *http.Request) {
 
 	a.writeOtelRawLog(a.otelMetricsFile, body)
 
-	// Log first connection to /v1/metrics (observability only, no idle tracking).
+	// Log first connection to /v1/metrics.
 	if a.otelMetricsReceived.CompareAndSwap(false, true) {
 		a.ActivityLog().OtelConnected("/v1/metrics")
+	}
+
+	// Parse and apply metrics.
+	if a.metrics != nil {
+		if parsed, err := ParseOtelMetricsPayload(body); err == nil {
+			a.metrics.UpdateFromMetricsEndpoint(parsed)
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)

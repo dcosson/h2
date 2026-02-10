@@ -111,14 +111,17 @@ func (l *Logger) StateChange(from, to string) {
 }
 
 // SessionSummary logs cumulative session metrics at exit.
-func (l *Logger) SessionSummary(inputTokens, outputTokens int64, costUSD float64, apiRequests, toolCalls int64) {
+func (l *Logger) SessionSummary(inputTokens, outputTokens int64, costUSD float64, apiRequests, toolCalls, linesAdded, linesRemoved int64, toolCounts map[string]int64) {
 	l.log(struct {
 		entry
-		InputTokens  int64   `json:"input_tokens"`
-		OutputTokens int64   `json:"output_tokens"`
-		CostUSD      float64 `json:"cost_usd"`
-		APIRequests  int64   `json:"api_requests"`
-		ToolCalls    int64   `json:"tool_calls"`
+		InputTokens  int64            `json:"input_tokens"`
+		OutputTokens int64            `json:"output_tokens"`
+		CostUSD      float64          `json:"cost_usd"`
+		APIRequests  int64            `json:"api_requests"`
+		ToolCalls    int64            `json:"tool_calls"`
+		LinesAdded   int64            `json:"lines_added,omitempty"`
+		LinesRemoved int64            `json:"lines_removed,omitempty"`
+		ToolCounts   map[string]int64 `json:"tool_counts,omitempty"`
 	}{
 		entry:        l.entry("session_summary"),
 		InputTokens:  inputTokens,
@@ -126,6 +129,9 @@ func (l *Logger) SessionSummary(inputTokens, outputTokens int64, costUSD float64
 		CostUSD:      costUSD,
 		APIRequests:  apiRequests,
 		ToolCalls:    toolCalls,
+		LinesAdded:   linesAdded,
+		LinesRemoved: linesRemoved,
+		ToolCounts:   toolCounts,
 	})
 }
 

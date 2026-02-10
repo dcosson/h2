@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 )
 
 // SessionsDir returns the directory where agent session dirs are created (~/.h2/sessions/).
@@ -36,6 +38,58 @@ func SetupSessionDir(agentName string, role *Role) (string, error) {
 	}
 
 	return sessionDir, nil
+}
+
+// SessionMetadata holds metadata about a running session, written to
+// ~/.h2/sessions/<name>/session.metadata.json for use by h2 peek and other tools.
+type SessionMetadata struct {
+	AgentName              string `json:"agent_name"`
+	SessionID              string `json:"session_id"`
+	ClaudeConfigDir        string `json:"claude_config_dir"`
+	CWD                    string `json:"cwd"`
+	ClaudeCodeSessionLogPath string `json:"claude_code_session_log_path"`
+	Command                string `json:"command"`
+	Role                   string `json:"role,omitempty"`
+	StartedAt              string `json:"started_at"`
+}
+
+// ClaudeCodeSessionLogPath computes the path to Claude Code's session transcript JSONL.
+func ClaudeCodeSessionLogPath(claudeConfigDir, cwd, sessionID string) string {
+	projectDir := strings.ReplaceAll(cwd, "/", "-")
+	return filepath.Join(claudeConfigDir, "projects", projectDir, sessionID+".jsonl")
+}
+
+// WriteSessionMetadata writes session.metadata.json to the session directory.
+func WriteSessionMetadata(sessionDir string, meta SessionMetadata) error {
+	if sessionDir == "" {
+		return nil
+	}
+	if meta.StartedAt == "" {
+		meta.StartedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	data, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal session metadata: %w", err)
+	}
+	path := filepath.Join(sessionDir, "session.metadata.json")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write session metadata: %w", err)
+	}
+	return nil
+}
+
+// ReadSessionMetadata reads session.metadata.json from a session directory.
+func ReadSessionMetadata(sessionDir string) (*SessionMetadata, error) {
+	path := filepath.Join(sessionDir, "session.metadata.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var meta SessionMetadata
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return nil, fmt.Errorf("parse session metadata: %w", err)
+	}
+	return &meta, nil
 }
 
 // EnsureClaudeConfigDir creates the shared Claude config directory and writes

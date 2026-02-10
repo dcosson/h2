@@ -32,6 +32,7 @@ func (p *ClaudeCodeParser) ParseLogRecord(record OtelLogRecord) *OtelMetricsDelt
 
 	case "tool_result":
 		delta.IsToolResult = true
+		delta.ToolName = getAttr(record.Attributes, "tool_name")
 		// tool_result may have its own token counts
 		delta.InputTokens = getIntAttr(record.Attributes, "input_tokens")
 		delta.OutputTokens = getIntAttr(record.Attributes, "output_tokens")

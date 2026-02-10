@@ -292,7 +292,7 @@ func (a *Agent) Stop() {
 	// Log session summary before closing files.
 	if a.metrics != nil {
 		snap := a.metrics.Snapshot()
-		a.ActivityLog().SessionSummary(snap.InputTokens, snap.OutputTokens, snap.TotalCostUSD, snap.APIRequestCount, snap.ToolResultCount)
+		a.ActivityLog().SessionSummary(snap.InputTokens, snap.OutputTokens, snap.TotalCostUSD, snap.APIRequestCount, snap.ToolResultCount, snap.LinesAdded, snap.LinesRemoved, snap.ToolCounts)
 	}
 
 	a.otelFileMu.Lock()

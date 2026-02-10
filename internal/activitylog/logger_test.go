@@ -164,7 +164,7 @@ func TestDisabledLoggerIsNoop(t *testing.T) {
 	l.OtelMetrics(100, 200, 0.01)
 	l.OtelConnected("/v1/logs")
 	l.StateChange("active", "idle")
-	l.SessionSummary(100, 200, 0.01, 1, 2)
+	l.SessionSummary(100, 200, 0.01, 1, 2, 0, 0, nil)
 
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Error("expected no file to be created when disabled")
@@ -179,7 +179,7 @@ func TestNopLoggerIsNoop(t *testing.T) {
 	l.OtelMetrics(100, 200, 0.01)
 	l.OtelConnected("/v1/logs")
 	l.StateChange("active", "idle")
-	l.SessionSummary(100, 200, 0.01, 1, 2)
+	l.SessionSummary(100, 200, 0.01, 1, 2, 0, 0, nil)
 	l.Close()
 }
 
@@ -222,7 +222,7 @@ func TestSessionSummary(t *testing.T) {
 	l := New(true, path, "agent", "sess")
 	defer l.Close()
 
-	l.SessionSummary(5000, 3000, 0.42, 10, 25)
+	l.SessionSummary(5000, 3000, 0.42, 10, 25, 42, 7, map[string]int64{"Bash": 15, "Read": 8})
 
 	lines := readLines(t, path)
 	if len(lines) != 1 {
@@ -230,12 +230,15 @@ func TestSessionSummary(t *testing.T) {
 	}
 
 	var e struct {
-		Event        string  `json:"event"`
-		InputTokens  int64   `json:"input_tokens"`
-		OutputTokens int64   `json:"output_tokens"`
-		CostUSD      float64 `json:"cost_usd"`
-		APIRequests  int64   `json:"api_requests"`
-		ToolCalls    int64   `json:"tool_calls"`
+		Event        string           `json:"event"`
+		InputTokens  int64            `json:"input_tokens"`
+		OutputTokens int64            `json:"output_tokens"`
+		CostUSD      float64          `json:"cost_usd"`
+		APIRequests  int64            `json:"api_requests"`
+		ToolCalls    int64            `json:"tool_calls"`
+		LinesAdded   int64            `json:"lines_added"`
+		LinesRemoved int64            `json:"lines_removed"`
+		ToolCounts   map[string]int64 `json:"tool_counts"`
 	}
 	if err := json.Unmarshal([]byte(lines[0]), &e); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -257,6 +260,15 @@ func TestSessionSummary(t *testing.T) {
 	}
 	if e.ToolCalls != 25 {
 		t.Errorf("tool_calls = %d, want 25", e.ToolCalls)
+	}
+	if e.LinesAdded != 42 {
+		t.Errorf("lines_added = %d, want 42", e.LinesAdded)
+	}
+	if e.LinesRemoved != 7 {
+		t.Errorf("lines_removed = %d, want 7", e.LinesRemoved)
+	}
+	if e.ToolCounts["Bash"] != 15 {
+		t.Errorf("tool_counts[Bash] = %d, want 15", e.ToolCounts["Bash"])
 	}
 }
 
