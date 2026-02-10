@@ -1,11 +1,11 @@
-# Plan: Session Metrics, LOC Tracking, and Output Buffer
+# Plan: Session Metrics, LOC Tracking, and Session Peek
 
 ## Goals
 
 1. **LOC tracking** — track lines added/removed during a session, include in session summary and `h2 status`
 2. **Parse OTEL metrics endpoint** — we currently only write raw payloads for /v1/metrics; start parsing them for LOC, per-model costs, active time, etc.
 3. **Richer OTEL log tracking** — extract tool names from `tool_result` events for per-tool-type counts
-4. **Rolling output buffer** — keep the last ~50 lines of agent terminal output in memory, expose via `h2 status` for real-time peeking
+4. **`h2 peek`** — on-demand command to view recent agent activity by reading Claude Code's session transcript JSONL, with optional haiku summarization
 
 ## Current State
 
@@ -37,9 +37,8 @@ Claude Code sends these metrics (discovered in raw `otel-metrics.jsonl`):
 
 **Key finding**: `handleOtelMetrics()` in `otel.go` currently just writes raw JSON and returns 200. No parsing.
 
-### What the VT gives us
-- `VT.Vt` — current visible terminal (fixed-size, overwritten as output scrolls)
-- `VT.Scrollback` — append-only `midterm.Terminal` that never loses lines (full history)
+### Claude Code session transcripts
+Claude Code writes full session transcripts as JSONL to `$CLAUDE_CONFIG_DIR/projects/<mangled-cwd>/<session-id>.jsonl`. These contain every API call, tool use, tool result, and user message with full content and usage metadata. This is a much better source for "what is the agent doing" than PTY scrollback (which gets truncated and requires ANSI stripping).
 
 ## Changes
 
@@ -81,24 +80,69 @@ Currently the OTEL log parser only extracts token counts from `tool_result`. We 
 - Add `ToolName string` to `OtelMetricsDelta` so `OtelMetrics.Apply()` can increment the map
 - Expose in `OtelMetricsSnapshot` and wire through to `AgentInfo`
 
-### 3. Rolling Output Buffer
+### 3. Session Metadata + `h2 peek` Command
 
-**Approach**: Keep a ring buffer of the last N lines of terminal output, accessible via the status protocol.
+**Approach**: Instead of a ring buffer in memory, read Claude Code's own session transcript JSONL on demand. This is simpler (no daemon changes, no PTY integration, no ANSI stripping) and provides richer data (structured tool calls, not raw terminal output).
 
-**Implementation**:
+**Why not PTY scrollback?** Scrollback gets truncated unless the user uses ctrl+o, requires ANSI stripping, and loses structure. The session transcript JSONL has full fidelity — every tool call and result is recorded with timestamps, tool names, and content.
 
-- New field on `Agent`: `outputBuffer *RingBuffer` (or similar)
-- `RingBuffer` is a simple circular buffer of strings, ~50 lines capacity
-- Feed it from the PTY output stream — the same place that feeds `VT.Vt` and `VT.Scrollback`
-  - In `VT.pumpOutput()`, after writing to terminals, also write to the ring buffer
-  - Strip ANSI escape sequences before storing (we want plain text)
-- Expose via `AgentInfo`: add `RecentOutput []string` field
-- `h2 status <name>` already outputs AgentInfo as JSON, so this comes for free
-- Consider a `--output` or `--tail` flag on `h2 status` to show just the output buffer in a human-friendly format
+#### 3a. Session Metadata File
 
-**Why not use Scrollback directly?** Scrollback is a full `midterm.Terminal` with rune grids, cursor state, etc. Extracting the last 50 lines from it is possible but complex. A simple ring buffer fed from the raw PTY stream is much simpler and decoupled.
+Write `session.metadata.json` to `~/.h2/sessions/<name>/` when a session starts, so `h2 peek` can locate the session transcript without the agent socket being alive.
 
-**ANSI stripping**: Use a simple regex or state machine to strip escape sequences. We want readable text, not raw terminal codes.
+**Contents**:
+```json
+{
+  "agent_name": "concierge",
+  "session_id": "b7f8b48f-...",
+  "claude_config_dir": "/Users/dcosson/.h2/claude-config/default",
+  "cwd": "/Users/dcosson/code/h2",
+  "claude_code_session_log_path": "/Users/dcosson/.h2/claude-config/default/projects/-Users-dcosson-code-h2/b7f8b48f-....jsonl",
+  "command": "claude",
+  "role": "default",
+  "started_at": "2026-02-10T05:40:27Z"
+}
+```
+
+- `claude_code_session_log_path` is pre-computed at write time (CWD mangled with `/` → `-` per Claude Code's convention)
+- Written in `RunDaemon()` after `SessionID`, `ClaudeConfigDir`, and CWD are all known
+- Other fields (`cwd`, `claude_config_dir`) included for general utility
+
+#### 3b. `h2 peek` Command
+
+On-demand CLI to view recent agent activity from Claude Code session logs.
+
+**Usage**:
+```
+h2 peek <name>                    # resolve log path from session metadata
+h2 peek --log-path <path>         # use explicit JSONL path (no agent needed)
+h2 peek <name> --summarize        # pipe to haiku for one-sentence summary
+h2 peek <name> -n 50              # show last 50 records (default: 100)
+```
+
+- `<name>` and `--log-path` are mutually exclusive — one or the other
+- `--log-path` makes it a general-purpose Claude Code session log viewer, useful even outside h2
+
+**Default output**: Format the last N JSONL records as a concise activity log:
+```
+[2m ago] Bash: git status
+[1m ago] Read: internal/session/agent/otel.go
+[30s ago] Edit: internal/session/agent/otel.go
+[now] Bash: make test
+```
+
+Extract from `assistant` records: look for `tool_use` content blocks, show tool name. For `text` content blocks, optionally show a truncated preview of the assistant's reasoning.
+
+**`--summarize` flag**: Pipe the formatted activity log to Claude haiku (`claude --model haiku --print`) for a one-sentence summary like "Currently running tests after editing the OTEL metrics parser."
+
+#### 3c. Session Log Parser
+
+Parse Claude Code's JSONL format. Each line is a JSON record with a `type` field:
+- `assistant` — contains `message.content[]` with `tool_use` blocks (name, input) and `text` blocks
+- `user` — user messages
+- `progress` — sub-types: `hook_progress`, `bash_progress`, `agent_progress`
+
+For the peek formatter, we primarily care about `assistant` records with `tool_use` blocks. Each record has a `timestamp` field for relative time display.
 
 ### 4. Enhanced AgentInfo and Session Summary
 
@@ -111,9 +155,6 @@ LinesRemoved int64 `json:"lines_removed,omitempty"`
 
 // Per-tool counts from OTEL logs
 ToolCounts map[string]int64 `json:"tool_counts,omitempty"`
-
-// Recent terminal output (last ~50 lines)
-RecentOutput []string `json:"recent_output,omitempty"`
 ```
 
 **SessionSummary additions** (logged to activity log on exit):
@@ -124,10 +165,8 @@ LinesRemoved int64
 ToolCounts   map[string]int64
 ```
 
-### 5. h2 status Enhancements
+### 5. h2 list Enhancements
 
-- Default output stays as JSON (backward compatible)
-- Add `--tail` flag: print just the recent output buffer, one line per line (like `tail -f` output)
 - `h2 list` could optionally show LOC stats inline (e.g. `+42 -10`)
 
 ## File Changes
@@ -138,24 +177,24 @@ ToolCounts   map[string]int64
 | `internal/session/agent/otel.go` | Update `handleOtelMetrics()` to parse payload and update metrics |
 | `internal/session/agent/otel_metrics.go` | Add `LinesAdded`, `LinesRemoved`, `ToolCounts`, `ActiveTimeHrs` fields |
 | `internal/session/agent/otel_parser_claudecode.go` | Extract `tool_name` from `tool_result` events |
-| `internal/session/agent/ringbuffer.go` | **New** — simple ring buffer for output lines |
-| `internal/session/virtualterminal/vt.go` | Feed ring buffer from PTY output pump |
-| `internal/session/daemon.go` | Wire new metrics and output buffer into `AgentInfo()` |
+| `internal/config/session_dir.go` | Add `WriteSessionMetadata()` and `ReadSessionMetadata()` |
+| `internal/session/daemon.go` | Wire new metrics into `AgentInfo()`, call `WriteSessionMetadata()` |
 | `internal/session/message/protocol.go` | Add new fields to `AgentInfo` struct |
 | `internal/activitylog/logger.go` | Add LOC and tool counts to `SessionSummary` |
-| `internal/cmd/status.go` | Add `--tail` flag for output peek |
+| `internal/cmd/peek.go` | **New** — `h2 peek` command with `--log-path`, `--summarize`, `-n` flags |
+| `internal/cmd/peek_formatter.go` | **New** — parse Claude Code JSONL, format as activity log |
+| `internal/cmd/root.go` | Register `newPeekCmd()` |
 | `internal/cmd/ls.go` | Optionally show LOC in agent list |
 
 ## Implementation Order
 
-1. **Parse OTEL metrics** — highest value. Unlocks LOC, active time, per-model costs. The data is already flowing in, we just need to parse it.
-2. **OTEL log tool counts** — small change to log parser for per-tool breakdowns.
-3. **Ring buffer + output capture** — needs VT integration. Add buffer, feed from PTY, expose in AgentInfo.
-4. **Session summary** — extend existing summary with new data.
-5. **h2 status --tail** — UI polish, depends on ring buffer being in AgentInfo.
+1. **Session metadata file** — write `session.metadata.json` in `RunDaemon()`. Small change, prerequisite for `h2 peek`.
+2. **Parse OTEL metrics** — highest value. Unlocks LOC, active time, per-model costs. The data is already flowing in, we just need to parse it.
+3. **OTEL log tool counts** — small change to log parser for per-tool breakdowns.
+4. **Session log parser + `h2 peek`** — read Claude Code JSONL, format as activity log. No daemon changes needed.
+5. **`h2 peek --summarize`** — pipe formatted output to haiku for one-sentence summary.
+6. **Session summary** — extend existing summary with new data (LOC, tool counts).
 
 ## Open Questions
 
-- **Output buffer size**: 50 lines? 100? Configurable?
-- **ANSI stripping**: Should we use a library or a simple regex? The `vt100` or similar package might help, but a regex like `\x1b\[[0-9;]*[a-zA-Z]` covers most cases.
 - **Per-model breakdown in AgentInfo**: Do we want per-model cost/token breakdowns in `h2 status`, or just totals? Per-model is available from metrics but adds complexity to the display.
