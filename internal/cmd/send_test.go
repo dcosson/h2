@@ -1,10 +1,15 @@
 package cmd
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
 func TestSendCmd_SelfSendBlocked(t *testing.T) {
+	tmpDir := t.TempDir()
+	os.MkdirAll(filepath.Join(tmpDir, ".h2", "sockets"), 0o700)
+	t.Setenv("HOME", tmpDir)
 	t.Setenv("H2_ACTOR", "test-agent")
 
 	cmd := newSendCmd()
@@ -50,6 +55,9 @@ func TestCleanLLMEscapes(t *testing.T) {
 }
 
 func TestSendCmd_SelfSendAllowedWithFlag(t *testing.T) {
+	tmpDir := t.TempDir()
+	os.MkdirAll(filepath.Join(tmpDir, ".h2", "sockets"), 0o700)
+	t.Setenv("HOME", tmpDir)
 	t.Setenv("H2_ACTOR", "test-agent")
 
 	cmd := newSendCmd()
