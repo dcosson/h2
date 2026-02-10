@@ -144,17 +144,44 @@ Parse Claude Code's JSONL format. Each line is a JSON record with a `type` field
 
 For the peek formatter, we primarily care about `assistant` records with `tool_use` blocks. Each record has a `timestamp` field for relative time display.
 
-### 4. Enhanced AgentInfo and Session Summary
+### 4. Point-in-Time Git Stats
+
+Complement the cumulative session LOC (from OTEL metrics) with a live snapshot of the current git working tree state. This mirrors what Claude Code shows in its own UI (`N files +X -Y`) but is computed on demand when `h2 status` is called — no polling or tracking needed.
+
+**Implementation**:
+
+- In `Daemon.AgentInfo()`, run git commands in the agent's CWD to get current uncommitted changes
+- Run `git diff --numstat` (unstaged) and `git diff --cached --numstat` (staged) to get per-file lines added/removed
+- Count unique files across both, sum lines added/removed
+- Add to `AgentInfo`:
+  ```go
+  // Point-in-time git working tree stats (computed on demand)
+  GitFilesChanged int   `json:"git_files_changed,omitempty"`
+  GitLinesAdded   int64 `json:"git_lines_added,omitempty"`
+  GitLinesRemoved int64 `json:"git_lines_removed,omitempty"`
+  ```
+
+**Notes**:
+- This is a snapshot, not cumulative — it shows what's currently uncommitted, same as Claude Code's UI
+- Cheap to compute: `git diff --numstat` is fast even in large repos
+- Complements the cumulative OTEL LOC which tracks total lines changed across the whole session (including committed changes)
+
+### 5. Enhanced AgentInfo and Session Summary
 
 **AgentInfo additions** (exposed in `h2 status`):
 
 ```go
-// LOC from OTEL metrics
+// Cumulative session LOC from OTEL metrics
 LinesAdded   int64 `json:"lines_added,omitempty"`
 LinesRemoved int64 `json:"lines_removed,omitempty"`
 
 // Per-tool counts from OTEL logs
 ToolCounts map[string]int64 `json:"tool_counts,omitempty"`
+
+// Point-in-time git working tree stats (computed on demand)
+GitFilesChanged int   `json:"git_files_changed,omitempty"`
+GitLinesAdded   int64 `json:"git_lines_added,omitempty"`
+GitLinesRemoved int64 `json:"git_lines_removed,omitempty"`
 ```
 
 **SessionSummary additions** (logged to activity log on exit):
@@ -165,7 +192,7 @@ LinesRemoved int64
 ToolCounts   map[string]int64
 ```
 
-### 5. h2 list Enhancements
+### 6. h2 list Enhancements
 
 - `h2 list` could optionally show LOC stats inline (e.g. `+42 -10`)
 
@@ -178,7 +205,7 @@ ToolCounts   map[string]int64
 | `internal/session/agent/otel_metrics.go` | Add `LinesAdded`, `LinesRemoved`, `ToolCounts`, `ActiveTimeHrs` fields |
 | `internal/session/agent/otel_parser_claudecode.go` | Extract `tool_name` from `tool_result` events |
 | `internal/config/session_dir.go` | Add `WriteSessionMetadata()` and `ReadSessionMetadata()` |
-| `internal/session/daemon.go` | Wire new metrics into `AgentInfo()`, call `WriteSessionMetadata()` |
+| `internal/session/daemon.go` | Wire new metrics into `AgentInfo()`, call `WriteSessionMetadata()`, add git stats |
 | `internal/session/message/protocol.go` | Add new fields to `AgentInfo` struct |
 | `internal/activitylog/logger.go` | Add LOC and tool counts to `SessionSummary` |
 | `internal/cmd/peek.go` | **New** — `h2 peek` command with `--log-path`, `--summarize`, `-n` flags |
@@ -189,11 +216,12 @@ ToolCounts   map[string]int64
 ## Implementation Order
 
 1. **Session metadata file** — write `session.metadata.json` in `RunDaemon()`. Small change, prerequisite for `h2 peek`.
-2. **Parse OTEL metrics** — highest value. Unlocks LOC, active time, per-model costs. The data is already flowing in, we just need to parse it.
+2. **Parse OTEL metrics** — highest value. Unlocks cumulative LOC, active time, per-model costs. The data is already flowing in, we just need to parse it.
 3. **OTEL log tool counts** — small change to log parser for per-tool breakdowns.
-4. **Session log parser + `h2 peek`** — read Claude Code JSONL, format as activity log. No daemon changes needed.
-5. **`h2 peek --summarize`** — pipe formatted output to haiku for one-sentence summary.
-6. **Session summary** — extend existing summary with new data (LOC, tool counts).
+4. **Point-in-time git stats** — run `git diff --numstat` in `AgentInfo()` for live working tree snapshot.
+5. **Session log parser + `h2 peek`** — read Claude Code JSONL, format as activity log. No daemon changes needed.
+6. **`h2 peek --summarize`** — pipe formatted output to haiku for one-sentence summary.
+7. **Session summary** — extend existing summary with new data (LOC, tool counts).
 
 ## Open Questions
 
