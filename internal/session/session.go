@@ -280,9 +280,11 @@ func (s *Session) RunDaemon() error {
 		s.VT.Mu.Unlock()
 	}
 
-	// Set up activity logger.
-	logPath := filepath.Join(os.Getenv("HOME"), ".h2", "session-activity.log")
+	// Set up activity logger and raw OTEL log files.
+	logDir := filepath.Join(os.Getenv("HOME"), ".h2", "logs")
+	logPath := filepath.Join(logDir, "session-activity.log")
 	s.Agent.SetActivityLog(activitylog.New(true, logPath, s.Name, s.SessionID))
+	s.Agent.SetOtelLogFiles(logDir)
 
 	// Start collectors (OTEL, hooks) and Agent watchState goroutine.
 	if err := s.Agent.StartCollectors(); err != nil {
@@ -382,9 +384,11 @@ func (s *Session) RunInteractive() error {
 		s.VT.Mu.Unlock()
 	}
 
-	// Set up activity logger.
-	logPath := filepath.Join(os.Getenv("HOME"), ".h2", "session-activity.log")
+	// Set up activity logger and raw OTEL log files.
+	logDir := filepath.Join(os.Getenv("HOME"), ".h2", "logs")
+	logPath := filepath.Join(logDir, "session-activity.log")
 	s.Agent.SetActivityLog(activitylog.New(true, logPath, s.Name, s.SessionID))
+	s.Agent.SetOtelLogFiles(logDir)
 
 	// Start collectors (OTEL, hooks) and Agent watchState goroutine.
 	if err := s.Agent.StartCollectors(); err != nil {

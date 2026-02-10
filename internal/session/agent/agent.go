@@ -2,8 +2,11 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -45,6 +48,11 @@ type Agent struct {
 	// Activity logger (nil-safe; Nop logger when not set)
 	activityLog *activitylog.Logger
 
+	// Raw OTEL payload log files
+	otelLogsFile    *os.File
+	otelMetricsFile *os.File
+	otelFileMu      sync.Mutex
+
 	// Layer 2: Derived state
 	mu             sync.Mutex
 	state          State
@@ -79,6 +87,26 @@ func (a *Agent) ActivityLog() *activitylog.Logger {
 		return a.activityLog
 	}
 	return activitylog.Nop()
+}
+
+// SetOtelLogFiles opens the raw OTEL log files for appending.
+// Must be called before StartCollectors.
+func (a *Agent) SetOtelLogFiles(dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create otel log dir: %w", err)
+	}
+	logsFile, err := os.OpenFile(filepath.Join(dir, "otel-logs.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("open otel-logs.jsonl: %w", err)
+	}
+	metricsFile, err := os.OpenFile(filepath.Join(dir, "otel-metrics.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		logsFile.Close()
+		return fmt.Errorf("open otel-metrics.jsonl: %w", err)
+	}
+	a.otelLogsFile = logsFile
+	a.otelMetricsFile = metricsFile
+	return nil
 }
 
 // StartCollectors starts the collectors enabled by the agent type and
@@ -260,4 +288,14 @@ func (a *Agent) Stop() {
 		a.hooksCollector.Stop()
 	}
 	a.StopOtelCollector()
+	a.otelFileMu.Lock()
+	if a.otelLogsFile != nil {
+		a.otelLogsFile.Close()
+		a.otelLogsFile = nil
+	}
+	if a.otelMetricsFile != nil {
+		a.otelMetricsFile.Close()
+		a.otelMetricsFile = nil
+	}
+	a.otelFileMu.Unlock()
 }

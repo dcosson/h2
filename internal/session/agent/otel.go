@@ -1,12 +1,14 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 )
 
@@ -116,6 +118,18 @@ func (a *Agent) processLogs(payload OtelLogsPayload) {
 	}
 }
 
+// writeOtelRawLog writes a raw payload line to the given file under the file mutex.
+func (a *Agent) writeOtelRawLog(f *os.File, body []byte) {
+	if f == nil {
+		return
+	}
+	// Append body as a single line (strip any embedded newlines just in case).
+	line := append(bytes.TrimRight(body, "\n"), '\n')
+	a.otelFileMu.Lock()
+	f.Write(line)
+	a.otelFileMu.Unlock()
+}
+
 // handleOtelLogs handles POST /v1/logs from OTLP exporters.
 func (a *Agent) handleOtelLogs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -129,6 +143,8 @@ func (a *Agent) handleOtelLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	r.Body.Close()
+
+	a.writeOtelRawLog(a.otelLogsFile, body)
 
 	var payload OtelLogsPayload
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -151,8 +167,10 @@ func (a *Agent) handleOtelMetrics(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	io.ReadAll(r.Body)
+	body, _ := io.ReadAll(r.Body)
 	r.Body.Close()
+
+	a.writeOtelRawLog(a.otelMetricsFile, body)
 
 	// Log first connection to /v1/metrics (observability only, no idle tracking).
 	if a.otelMetricsReceived.CompareAndSwap(false, true) {
