@@ -55,6 +55,7 @@ type Client struct {
 	OtelMetrics  func() (totalTokens int64, totalCostUSD float64, connected bool, port int) // returns OTEL metrics for status bar
 	AgentState   func() (state string, subState string, duration string)                       // returns Agent's derived state + sub-state
 	HookState    func() (lastToolName string)                                                // returns hook collector state
+	OnInterrupt func()                                    // called when Ctrl+C is written to the PTY
 	OnSubmit func(text string, priority message.Priority) // called for non-normal input
 	OnDetach func()                                       // called when user selects detach from menu
 

@@ -24,6 +24,15 @@ func (c *Client) setMode(mode InputMode) {
 // out (child not reading), it marks the child as hung, kills it, and returns
 // false. The caller should stop processing input when this returns false.
 func (c *Client) writePTYOrHang(p []byte) bool {
+	// Detect Ctrl+C (0x03) before writing so the agent can track interrupts.
+	if c.OnInterrupt != nil {
+		for _, b := range p {
+			if b == 0x03 {
+				c.OnInterrupt()
+				break
+			}
+		}
+	}
 	_, err := c.VT.WritePTY(p, ptyWriteTimeout)
 	if err != nil {
 		c.VT.ChildHung = true

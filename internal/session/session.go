@@ -209,6 +209,9 @@ func (s *Session) NewClient() *client.Client {
 		}
 		return ""
 	}
+	cl.OnInterrupt = func() {
+		s.Agent.NoteInterrupt()
+	}
 	cl.OnSubmit = func(text string, pri message.Priority) {
 		s.SubmitInput(text, pri)
 	}
