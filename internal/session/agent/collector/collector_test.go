@@ -33,3 +33,23 @@ func TestFormatStateLabel(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatStateLabel_WithToolName(t *testing.T) {
+	// Tool name only appears for tool_use sub-state.
+	got := FormatStateLabel("active", "tool_use", "Bash")
+	if got != "Active (tool use: Bash)" {
+		t.Errorf("got %q, want %q", got, "Active (tool use: Bash)")
+	}
+
+	// Empty tool name — no suffix.
+	got = FormatStateLabel("active", "tool_use", "")
+	if got != "Active (tool use)" {
+		t.Errorf("got %q, want %q", got, "Active (tool use)")
+	}
+
+	// Tool name ignored for non-tool_use sub-states.
+	got = FormatStateLabel("active", "thinking", "Bash")
+	if got != "Active (thinking)" {
+		t.Errorf("got %q, want %q", got, "Active (thinking)")
+	}
+}

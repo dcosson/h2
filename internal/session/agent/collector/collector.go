@@ -66,7 +66,9 @@ type StateUpdate struct {
 // FormatStateLabel returns a display label like "Active (thinking)" or "Idle".
 // The subState string comes from SubState.String() (or the SubState field in
 // AgentInfo). If subState is empty, just the capitalized state is returned.
-func FormatStateLabel(state, subState string) string {
+// An optional toolName is appended to the "tool use" sub-state, e.g.
+// "Active (tool use: Bash)".
+func FormatStateLabel(state, subState string, toolName ...string) string {
 	var label string
 	switch state {
 	case "active":
@@ -89,6 +91,9 @@ func FormatStateLabel(state, subState string) string {
 		pretty = "thinking"
 	case "tool_use":
 		pretty = "tool use"
+		if len(toolName) > 0 && toolName[0] != "" {
+			pretty += ": " + toolName[0]
+		}
 	case "waiting_for_permission":
 		pretty = "permission"
 	default:

@@ -172,13 +172,6 @@ func (c *Client) RenderBar() {
 				}
 			}
 
-			// Hook collector — current tool
-			if c.HookState != nil {
-				if toolName := c.HookState(); toolName != "" {
-					label += " | " + toolName
-				}
-			}
-
 			// Queue indicator
 			if c.QueueStatus != nil {
 				count, paused := c.QueueStatus()
@@ -336,7 +329,11 @@ func (c *Client) StatusLabel() string {
 	// Use Agent's derived state when available (higher fidelity than PTY timing).
 	if c.AgentState != nil {
 		state, subState, dur := c.AgentState()
-		label := agent.FormatStateLabel(state, subState)
+		var toolName string
+		if c.HookState != nil && state == "active" {
+			toolName = c.HookState()
+		}
+		label := agent.FormatStateLabel(state, subState, toolName)
 		if state == "idle" && dur != "" {
 			label += " " + dur
 		}

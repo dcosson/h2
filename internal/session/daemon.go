@@ -106,16 +106,23 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 	s := d.Session
 	uptime := time.Since(d.StartTime)
 	st, sub := s.State()
+	var toolName string
+	if st == agent.StateActive {
+		if hc := s.Agent.HookCollector(); hc != nil {
+			toolName = hc.Snapshot().LastToolName
+		}
+	}
 	info := &message.AgentInfo{
-		Name:          s.Name,
-		Command:       s.Command,
-		SessionID:     s.SessionID,
-		RoleName:      s.RoleName,
-		Uptime:        virtualterminal.FormatIdleDuration(uptime),
-		State:         st.String(),
-		SubState:      sub.String(),
-		StateDuration: virtualterminal.FormatIdleDuration(s.StateDuration()),
-		QueuedCount:   s.Queue.PendingCount(),
+		Name:             s.Name,
+		Command:          s.Command,
+		SessionID:        s.SessionID,
+		RoleName:         s.RoleName,
+		Uptime:           virtualterminal.FormatIdleDuration(uptime),
+		State:            st.String(),
+		SubState:         sub.String(),
+		StateDisplayText: agent.FormatStateLabel(st.String(), sub.String(), toolName),
+		StateDuration:    virtualterminal.FormatIdleDuration(s.StateDuration()),
+		QueuedCount:      s.Queue.PendingCount(),
 	}
 
 	// Pull from OTEL collector if active.

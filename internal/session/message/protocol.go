@@ -56,9 +56,10 @@ type AgentInfo struct {
 	SessionID     string `json:"session_id,omitempty"`
 	RoleName      string `json:"role,omitempty"`
 	Uptime        string `json:"uptime"`
-	State         string `json:"state"`
-	SubState      string `json:"sub_state,omitempty"`
-	StateDuration string `json:"state_duration"`
+	State            string `json:"state"`
+	SubState         string `json:"sub_state,omitempty"`
+	StateDisplayText string `json:"state_display_text"`
+	StateDuration    string `json:"state_duration"`
 	QueuedCount   int    `json:"queued_count"`
 
 	// Per-model cost and token breakdowns from OTEL metrics
