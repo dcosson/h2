@@ -9,7 +9,7 @@ func TestFormatRecord_ToolUse(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2025-01-15T12:00:30Z")
 	line := `{"type":"assistant","timestamp":"2025-01-15T12:00:00Z","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/home/user/project/src/main.go"}}]}}`
 
-	got := formatRecord(line, now)
+	got := formatRecord(line, now, 80)
 	want := "[30s ago] Read: src/main.go"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
@@ -20,7 +20,7 @@ func TestFormatRecord_TextOnly(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2025-01-15T12:05:00Z")
 	line := `{"type":"assistant","timestamp":"2025-01-15T12:00:00Z","message":{"content":[{"type":"text","text":"Hello, I will help you with that."}]}}`
 
-	got := formatRecord(line, now)
+	got := formatRecord(line, now, 80)
 	want := "[5m ago] Hello, I will help you with that."
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
@@ -31,7 +31,7 @@ func TestFormatRecord_BashTool(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2025-01-15T12:00:10Z")
 	line := `{"type":"assistant","timestamp":"2025-01-15T12:00:00Z","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"make test"}}]}}`
 
-	got := formatRecord(line, now)
+	got := formatRecord(line, now, 80)
 	want := "[10s ago] Bash: make test"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
@@ -42,14 +42,14 @@ func TestFormatRecord_UserIgnored(t *testing.T) {
 	now := time.Now()
 	line := `{"type":"user","timestamp":"2025-01-15T12:00:00Z","message":{"content":[{"type":"text","text":"hello"}]}}`
 
-	got := formatRecord(line, now)
+	got := formatRecord(line, now, 80)
 	if got != "" {
 		t.Errorf("expected empty for user record, got %q", got)
 	}
 }
 
 func TestFormatRecord_InvalidJSON(t *testing.T) {
-	got := formatRecord("not json", time.Now())
+	got := formatRecord("not json", time.Now(), 80)
 	if got != "" {
 		t.Errorf("expected empty for invalid JSON, got %q", got)
 	}
@@ -59,7 +59,7 @@ func TestFormatRecord_MultipleBlocks(t *testing.T) {
 	now, _ := time.Parse(time.RFC3339, "2025-01-15T12:00:05Z")
 	line := `{"type":"assistant","timestamp":"2025-01-15T12:00:00Z","message":{"content":[{"type":"text","text":"Reading file"},{"type":"tool_use","name":"Read","input":{"file_path":"/a/b/c.go"}}]}}`
 
-	got := formatRecord(line, now)
+	got := formatRecord(line, now, 80)
 	want := "[5s ago] Reading file | Read: b/c.go"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
@@ -148,12 +148,24 @@ func TestFormatRecord_TextTruncation(t *testing.T) {
 	longText := "This is a very long text message that exceeds eighty characters and should be truncated to avoid cluttering the output display"
 	line := `{"type":"assistant","timestamp":"2025-01-15T12:00:00Z","message":{"content":[{"type":"text","text":"` + longText + `"}]}}`
 
-	got := formatRecord(line, now)
+	got := formatRecord(line, now, 80)
 	// The text part should be truncated to 80 chars (77 + "...")
 	if len(got) > 100 { // [1s ago] prefix + 80 char text
 		// Check it ends with ...
 		if got[len(got)-3:] != "..." {
 			t.Errorf("expected truncated text ending with ..., got %q", got)
 		}
+	}
+}
+
+func TestFormatRecord_TextNoLimit(t *testing.T) {
+	now, _ := time.Parse(time.RFC3339, "2025-01-15T12:00:01Z")
+	longText := "This is a very long text message that exceeds eighty characters and should not be truncated when message-chars is zero"
+	line := `{"type":"assistant","timestamp":"2025-01-15T12:00:00Z","message":{"content":[{"type":"text","text":"` + longText + `"}]}}`
+
+	got := formatRecord(line, now, 0)
+	want := "[1s ago] " + longText
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }

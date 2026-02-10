@@ -18,6 +18,7 @@ import (
 func newPeekCmd() *cobra.Command {
 	var logPath string
 	var numLines int
+	var messageChars int
 	var summarize bool
 
 	cmd := &cobra.Command{
@@ -30,7 +31,7 @@ one-sentence summary via Claude haiku.
   h2 peek concierge              Show recent activity for an agent
   h2 peek --log-path <path>      Use an explicit JSONL file
   h2 peek concierge --summarize  Summarize with haiku
-  h2 peek concierge -n 50        Show last 50 records`,
+  h2 peek concierge -n 50        Show last 50 records (default 500)`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Resolve the log path.
@@ -51,7 +52,7 @@ one-sentence summary via Claude haiku.
 			}
 
 			// Read and format the log.
-			lines, err := formatSessionLog(path, numLines)
+			lines, err := formatSessionLog(path, numLines, messageChars)
 			if err != nil {
 				return err
 			}
@@ -73,14 +74,15 @@ one-sentence summary via Claude haiku.
 	}
 
 	cmd.Flags().StringVar(&logPath, "log-path", "", "Explicit path to a Claude Code session JSONL file")
-	cmd.Flags().IntVarP(&numLines, "num-lines", "n", 100, "Number of JSONL records to read from the end")
+	cmd.Flags().IntVarP(&numLines, "num-lines", "n", 500, "Number of JSONL records to read from the end")
+	cmd.Flags().IntVar(&messageChars, "message-chars", 500, "Max characters for message text (0 for no limit)")
 	cmd.Flags().BoolVar(&summarize, "summarize", false, "Summarize activity with Claude haiku")
 
 	return cmd
 }
 
 // formatSessionLog reads the last N lines of a JSONL file and formats tool calls.
-func formatSessionLog(path string, numLines int) ([]string, error) {
+func formatSessionLog(path string, numLines int, messageChars int) ([]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open session log: %w", err)
@@ -108,7 +110,7 @@ func formatSessionLog(path string, numLines int) ([]string, error) {
 	now := time.Now()
 	var output []string
 	for _, line := range recent {
-		formatted := formatRecord(line, now)
+		formatted := formatRecord(line, now, messageChars)
 		if formatted != "" {
 			output = append(output, formatted)
 		}
@@ -150,7 +152,7 @@ type toolInput struct {
 
 // formatRecord formats a single JSONL record into a human-readable line.
 // Returns "" if the record isn't interesting (not a tool call or text).
-func formatRecord(line string, now time.Time) string {
+func formatRecord(line string, now time.Time, messageChars int) string {
 	var rec sessionRecord
 	if err := json.Unmarshal([]byte(line), &rec); err != nil {
 		return ""
@@ -180,10 +182,9 @@ func formatRecord(line string, now time.Time) string {
 		case "text":
 			text := strings.TrimSpace(block.Text)
 			if text != "" {
-				// Truncate long text to first line, max 80 chars.
 				firstLine := strings.SplitN(text, "\n", 2)[0]
-				if len(firstLine) > 80 {
-					firstLine = firstLine[:77] + "..."
+				if messageChars > 0 && len(firstLine) > messageChars {
+					firstLine = firstLine[:messageChars-3] + "..."
 				}
 				parts = append(parts, firstLine)
 			}
