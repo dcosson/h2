@@ -66,7 +66,7 @@ to fall through to Claude Code's built-in permission dialog.`,
 			reviewerInstructions, err := os.ReadFile(reviewerPath)
 			if err != nil {
 				// No reviewer instructions — report decision and fall through.
-				reportDecision(agentName, request.ToolName, "ask_user", "no reviewer instructions")
+				reportDecision(agentName, request.SessionID, request.ToolName, "ask_user", "no reviewer instructions")
 				fmt.Fprintln(cmd.OutOrStdout(), "{}")
 				return nil
 			}
@@ -76,7 +76,7 @@ to fall through to Claude Code's built-in permission dialog.`,
 
 			switch decision {
 			case "ALLOW":
-				reportDecision(agentName, request.ToolName, "allow", reason)
+				reportDecision(agentName, request.SessionID, request.ToolName, "allow", reason)
 				resp := hookResponse{
 					HookSpecificOutput: hookDecision{
 						HookEventName: "PermissionRequest",
@@ -92,7 +92,7 @@ to fall through to Claude Code's built-in permission dialog.`,
 				if reason == "" {
 					reason = "Denied by permission reviewer"
 				}
-				reportDecision(agentName, request.ToolName, "deny", reason)
+				reportDecision(agentName, request.SessionID, request.ToolName, "deny", reason)
 				resp := hookResponse{
 					HookSpecificOutput: hookDecision{
 						HookEventName: "PermissionRequest",
@@ -107,7 +107,7 @@ to fall through to Claude Code's built-in permission dialog.`,
 
 			default:
 				// ASK_USER or unrecognized — report decision and fall through.
-				reportDecision(agentName, request.ToolName, "ask_user", reason)
+				reportDecision(agentName, request.SessionID, request.ToolName, "ask_user", reason)
 				fmt.Fprintln(cmd.OutOrStdout(), "{}")
 			}
 
@@ -235,7 +235,7 @@ func (r *stringReaderImpl) Read(p []byte) (int, error) {
 // reportDecision sends a permission_decision hook event to the agent's socket.
 // This reports ALLOW, DENY, and ASK_USER decisions so they appear in the activity log
 // and the agent can track blocked state.
-func reportDecision(agentName, toolName, decision, reason string) {
+func reportDecision(agentName, sessionID, toolName, decision, reason string) {
 	sockPath, err := socketdir.Find(agentName)
 	if err != nil {
 		return // best-effort
@@ -248,6 +248,7 @@ func reportDecision(agentName, toolName, decision, reason string) {
 
 	payload, _ := json.Marshal(map[string]string{
 		"hook_event_name": "permission_decision",
+		"session_id":      sessionID,
 		"tool_name":       toolName,
 		"decision":        decision,
 		"reason":          reason,

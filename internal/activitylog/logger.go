@@ -44,27 +44,27 @@ type entry struct {
 }
 
 // HookEvent logs a Claude Code hook event.
-func (l *Logger) HookEvent(eventName, toolName string) {
+func (l *Logger) HookEvent(sessionID, eventName, toolName string) {
 	l.log(struct {
 		entry
 		HookEvent string `json:"hook_event"`
 		ToolName  string `json:"tool_name,omitempty"`
 	}{
-		entry:     l.entry("hook"),
+		entry:     l.entryWithSession("hook", sessionID),
 		HookEvent: eventName,
 		ToolName:  toolName,
 	})
 }
 
 // PermissionDecision logs a permission reviewer decision.
-func (l *Logger) PermissionDecision(toolName, decision, reason string) {
+func (l *Logger) PermissionDecision(sessionID, toolName, decision, reason string) {
 	l.log(struct {
 		entry
 		ToolName string `json:"tool_name"`
 		Decision string `json:"decision"`
 		Reason   string `json:"reason,omitempty"`
 	}{
-		entry:    l.entry("permission_decision"),
+		entry:    l.entryWithSession("permission_decision", sessionID),
 		ToolName: toolName,
 		Decision: decision,
 		Reason:   reason,
@@ -123,6 +123,15 @@ func (l *Logger) entry(event string) entry {
 		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
 		Actor:     l.actor,
 		SessionID: l.sessionID,
+		Event:     event,
+	}
+}
+
+func (l *Logger) entryWithSession(event, sessionID string) entry {
+	return entry{
+		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+		Actor:     l.actor,
+		SessionID: sessionID,
 		Event:     event,
 	}
 }

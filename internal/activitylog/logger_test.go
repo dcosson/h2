@@ -13,7 +13,7 @@ func TestHookEvent(t *testing.T) {
 	l := New(true, path, "test-agent", "sess-123")
 	defer l.Close()
 
-	l.HookEvent("PreToolUse", "Bash")
+	l.HookEvent("hook-sess-456", "PreToolUse", "Bash")
 
 	lines := readLines(t, path)
 	if len(lines) != 1 {
@@ -33,8 +33,8 @@ func TestHookEvent(t *testing.T) {
 	if e.Actor != "test-agent" {
 		t.Errorf("actor = %q, want %q", e.Actor, "test-agent")
 	}
-	if e.SessionID != "sess-123" {
-		t.Errorf("session_id = %q, want %q", e.SessionID, "sess-123")
+	if e.SessionID != "hook-sess-456" {
+		t.Errorf("session_id = %q, want %q", e.SessionID, "hook-sess-456")
 	}
 	if e.Event != "hook" {
 		t.Errorf("event = %q, want %q", e.Event, "hook")
@@ -52,7 +52,7 @@ func TestHookEventOmitsEmptyToolName(t *testing.T) {
 	l := New(true, path, "agent", "sess")
 	defer l.Close()
 
-	l.HookEvent("SessionStart", "")
+	l.HookEvent("sess", "SessionStart", "")
 
 	lines := readLines(t, path)
 	if strings.Contains(lines[0], "tool_name") {
@@ -65,7 +65,7 @@ func TestPermissionDecision(t *testing.T) {
 	l := New(true, path, "agent", "sess")
 	defer l.Close()
 
-	l.PermissionDecision("Bash", "allow", "Safe tool")
+	l.PermissionDecision("sess", "Bash", "allow", "Safe tool")
 
 	lines := readLines(t, path)
 	var e struct {
@@ -159,8 +159,8 @@ func TestDisabledLoggerIsNoop(t *testing.T) {
 	l := New(false, path, "agent", "sess")
 	defer l.Close()
 
-	l.HookEvent("PreToolUse", "Bash")
-	l.PermissionDecision("Bash", "allow", "ok")
+	l.HookEvent("sess", "PreToolUse", "Bash")
+	l.PermissionDecision("sess", "Bash", "allow", "ok")
 	l.OtelMetrics(100, 200, 0.01)
 	l.OtelConnected("/v1/logs")
 	l.StateChange("active", "idle")
@@ -173,8 +173,8 @@ func TestDisabledLoggerIsNoop(t *testing.T) {
 func TestNopLoggerIsNoop(t *testing.T) {
 	l := Nop()
 	// Should not panic.
-	l.HookEvent("PreToolUse", "Bash")
-	l.PermissionDecision("Bash", "allow", "ok")
+	l.HookEvent("sess", "PreToolUse", "Bash")
+	l.PermissionDecision("sess", "Bash", "allow", "ok")
 	l.OtelMetrics(100, 200, 0.01)
 	l.OtelConnected("/v1/logs")
 	l.StateChange("active", "idle")
@@ -186,8 +186,8 @@ func TestMultipleEntries(t *testing.T) {
 	l := New(true, path, "agent", "sess")
 	defer l.Close()
 
-	l.HookEvent("SessionStart", "")
-	l.HookEvent("PreToolUse", "Bash")
+	l.HookEvent("sess", "SessionStart", "")
+	l.HookEvent("sess", "PreToolUse", "Bash")
 	l.StateChange("active", "idle")
 
 	lines := readLines(t, path)
@@ -201,7 +201,7 @@ func TestTimestampPresent(t *testing.T) {
 	l := New(true, path, "agent", "sess")
 	defer l.Close()
 
-	l.HookEvent("Stop", "")
+	l.HookEvent("sess", "Stop", "")
 
 	lines := readLines(t, path)
 	var e struct {
