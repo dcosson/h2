@@ -164,9 +164,6 @@ func FormatTokens(n int64) string {
 
 // FormatCost returns a human-readable cost (e.g., "$0.12", "$1.23").
 func FormatCost(usd float64) string {
-	if usd < 0.01 {
-		return fmt.Sprintf("$%.3f", usd)
-	}
 	return fmt.Sprintf("$%.2f", usd)
 }
 
