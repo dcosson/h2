@@ -127,18 +127,19 @@ func TestHookCollector_StateCh_ExitedOnSessionEnd(t *testing.T) {
 	}
 }
 
-func TestHookCollector_StateCh_NoStateChangeOnSessionStart(t *testing.T) {
+func TestHookCollector_StateCh_IdleOnSessionStart(t *testing.T) {
 	hc := NewHookCollector(nil)
 	defer hc.Stop()
 
 	hc.ProcessEvent("SessionStart", nil)
 
-	// SessionStart should not emit a state change.
 	select {
 	case s := <-hc.StateCh():
-		t.Fatalf("unexpected state change %v on SessionStart", s)
-	case <-time.After(100 * time.Millisecond):
-		// Good — no state change.
+		if s != StateIdle {
+			t.Fatalf("expected StateIdle, got %v", s)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for StateIdle")
 	}
 }
 

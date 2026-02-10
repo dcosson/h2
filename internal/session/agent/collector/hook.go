@@ -147,12 +147,12 @@ func (c *HookCollector) runStateLoop() {
 			switch eventName {
 			case "UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest":
 				newState = StateActive
-			case "Stop":
+			case "SessionStart", "Stop":
 				newState = StateIdle
 			case "SessionEnd":
 				newState = StateExited
 			default:
-				// SessionStart, permission_decision, blocked_permission, etc.
+				// permission_decision, blocked_permission, etc.
 				// — no state change.
 				emit = false
 			}

@@ -9,14 +9,17 @@ const IdleThreshold = 2 * time.Second
 type State int
 
 const (
-	StateActive State = iota // receiving activity signals
-	StateIdle                // no activity for IdleThreshold
-	StateExited              // child process exited
+	StateInitialized State = iota // just created, no events yet
+	StateActive                   // receiving activity signals
+	StateIdle                     // no activity for IdleThreshold
+	StateExited                   // child process exited
 )
 
 // String returns a human-readable name for the state.
 func (s State) String() string {
 	switch s {
+	case StateInitialized:
+		return "initialized"
 	case StateActive:
 		return "active"
 	case StateIdle:

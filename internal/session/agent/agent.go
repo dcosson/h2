@@ -21,9 +21,10 @@ import (
 type State = collector.State
 
 const (
-	StateActive = collector.StateActive
-	StateIdle   = collector.StateIdle
-	StateExited = collector.StateExited
+	StateInitialized = collector.StateInitialized
+	StateActive      = collector.StateActive
+	StateIdle        = collector.StateIdle
+	StateExited      = collector.StateExited
 
 	IdleThreshold = collector.IdleThreshold
 )
@@ -68,7 +69,7 @@ func New(agentType AgentType) *Agent {
 	return &Agent{
 		agentType:      agentType,
 		metrics:        &OtelMetrics{},
-		state:          StateActive,
+		state:          StateInitialized,
 		stateChangedAt: time.Now(),
 		stateCh:        make(chan struct{}),
 		stopCh:         make(chan struct{}),

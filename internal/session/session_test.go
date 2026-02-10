@@ -222,6 +222,7 @@ func TestStateString(t *testing.T) {
 		state agent.State
 		want  string
 	}{
+		{agent.StateInitialized, "initialized"},
 		{agent.StateActive, "active"},
 		{agent.StateIdle, "idle"},
 		{agent.StateExited, "exited"},
