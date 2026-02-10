@@ -33,7 +33,7 @@ func newSendCmd() *cobra.Command {
 				}
 				body = string(data)
 			} else if len(args) > 1 {
-				body = strings.Join(args[1:], " ")
+				body = cleanLLMEscapes(strings.Join(args[1:], " "))
 			} else {
 				return fmt.Errorf("message body is required (provide as arguments or --file)")
 			}
@@ -87,4 +87,43 @@ func newSendCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&allowSelf, "allow-self", false, "Allow sending a message to yourself")
 
 	return cmd
+}
+
+// cleanLLMEscapes removes spurious backslash escapes that LLMs insert into
+// shell command arguments. For example, Claude Code often writes \! or \?
+// in strings even though these characters don't need escaping. We only strip
+// backslashes before characters that are never meaningful escape sequences
+// in plain text. Loops until stable to handle double-escaped backslashes
+// (e.g. \\! → \! → !) which occur when the Bash tool layer escapes
+// backslashes before bash processes them.
+func cleanLLMEscapes(s string) string {
+	for {
+		cleaned := stripBackslashPunctuation(s)
+		if cleaned == s {
+			return cleaned
+		}
+		s = cleaned
+	}
+}
+
+func stripBackslashPunctuation(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			next := s[i+1]
+			// Strip backslash before punctuation that never needs escaping
+			// in plain text messages.
+			switch next {
+			case '!', '?', '.', ',', ':', ';', ')', '(', ']', '[', '{', '}',
+				'#', '+', '-', '=', '|', '>', '<', '~', '^', '@', '&', '%',
+				'$', '\'', '"', '`', '/':
+				b.WriteByte(next)
+				i++ // skip the backslash
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }

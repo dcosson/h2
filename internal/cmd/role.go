@@ -160,9 +160,6 @@ instructions: |
   2. Do the work
   3. Reply with results: h2 send <sender> "Here's what I found: ..."
 
-  **Important**: Always use double quotes (not single quotes) for h2 send
-  messages to avoid shell escaping issues (e.g. \! in single-quoted strings).
-
   Example:
     [h2 message from: orchestrator] Can you check the test coverage?
 
@@ -174,7 +171,7 @@ instructions: |
   ## Available h2 Commands
 
   - h2 list              - See active agents and users
-  - h2 send <name> "msg" - Send message to agent or user (always use double quotes)
+  - h2 send <name> "msg" - Send message to agent or user
   - h2 whoami            - Check your agent name
 
   ## Your Role
@@ -271,9 +268,6 @@ instructions: |
   2. Do the work
   3. Reply with results: h2 send <sender> "Here's what I found: ..."
 
-  **Important**: Always use double quotes (not single quotes) for h2 send
-  messages to avoid shell escaping issues (e.g. \! in single-quoted strings).
-
   Example:
     [h2 message from: dcosson] Can you check the test coverage?
 
@@ -296,7 +290,7 @@ instructions: |
   ## Available h2 Commands
 
   - h2 list              - See active agents and users
-  - h2 send <name> "msg" - Send message to agent or user (always use double quotes)
+  - h2 send <name> "msg" - Send message to agent or user
   - h2 whoami            - Check your agent name
 
 permissions:

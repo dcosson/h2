@@ -19,6 +19,36 @@ func TestSendCmd_SelfSendBlocked(t *testing.T) {
 	}
 }
 
+func TestCleanLLMEscapes(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{`Hello\!`, `Hello!`},
+		{`What\?`, `What?`},
+		{`Done\! This is great\!`, `Done! This is great!`},
+		{`no escapes here`, `no escapes here`},
+		{`keep \\n newline`, `keep \\n newline`},
+		{`keep \\t tab`, `keep \\t tab`},
+		{`trailing backslash\`, `trailing backslash\`},
+		{`\(parens\)`, `(parens)`},
+		{`price is \$10`, `price is $10`},
+		{`mixed \! and \\n`, `mixed ! and \\n`},
+		// Double-escaped (Bash tool doubles backslashes)
+		{`Hello\\!`, `Hello!`},
+		{`Done\\! Great\\!`, `Done! Great!`},
+		// Triple backslash
+		{`Hello\\\!`, `Hello!`},
+		{``, ``},
+	}
+	for _, tt := range tests {
+		got := cleanLLMEscapes(tt.input)
+		if got != tt.want {
+			t.Errorf("cleanLLMEscapes(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
 func TestSendCmd_SelfSendAllowedWithFlag(t *testing.T) {
 	t.Setenv("H2_ACTOR", "test-agent")
 
