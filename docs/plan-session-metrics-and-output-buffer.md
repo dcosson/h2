@@ -178,10 +178,28 @@ LinesRemoved int64 `json:"lines_removed,omitempty"`
 // Per-tool counts from OTEL logs
 ToolCounts map[string]int64 `json:"tool_counts,omitempty"`
 
+// Per-model cost and token breakdowns from OTEL metrics
+// Replaces the current flat TotalTokens/TotalCostUSD fields
+ModelStats []ModelStat `json:"model_stats,omitempty"`
+TotalTokens  int64   `json:"total_tokens,omitempty"`   // sum across models (shown if >1 model)
+TotalCostUSD float64 `json:"total_cost_usd,omitempty"` // sum across models (shown if >1 model)
+
 // Point-in-time git working tree stats (computed on demand)
 GitFilesChanged int   `json:"git_files_changed,omitempty"`
 GitLinesAdded   int64 `json:"git_lines_added,omitempty"`
 GitLinesRemoved int64 `json:"git_lines_removed,omitempty"`
+```
+
+Where `ModelStat` is:
+```go
+type ModelStat struct {
+    Model        string  `json:"model"`
+    CostUSD      float64 `json:"cost_usd"`
+    InputTokens  int64   `json:"input_tokens"`
+    OutputTokens int64   `json:"output_tokens"`
+    CacheRead    int64   `json:"cache_read,omitempty"`
+    CacheCreate  int64   `json:"cache_create,omitempty"`
+}
 ```
 
 **SessionSummary additions** (logged to activity log on exit):
@@ -223,6 +241,6 @@ ToolCounts   map[string]int64
 6. **`h2 peek --summarize`** — pipe formatted output to haiku for one-sentence summary.
 7. **Session summary** — extend existing summary with new data (LOC, tool counts).
 
-## Open Questions
+## Resolved Questions
 
-- **Per-model breakdown in AgentInfo**: Do we want per-model cost/token breakdowns in `h2 status`, or just totals? Per-model is available from metrics but adds complexity to the display.
+- **Per-model breakdown in AgentInfo**: Yes — show per-model cost and token breakdowns. If more than one model was used, also include a total line summing them up. Data comes from OTEL metrics (`claude_code.cost.usage` and `claude_code.token.usage` keyed by `model` attribute).
