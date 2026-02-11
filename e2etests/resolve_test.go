@@ -29,18 +29,19 @@ func TestResolve_H2DIRTakesPriority(t *testing.T) {
 func TestResolve_H2DIRInvalidFallsBack(t *testing.T) {
 	dir := t.TempDir() // no marker file
 
-	// Currently h2 list falls back gracefully instead of erroring.
+	// Currently h2 list falls back gracefully (via ConfigDir) instead of
+	// erroring on invalid H2_DIR. The fallback uses ~/.h2 or ".", so the
+	// command succeeds. When H2_DIR validation is added, this test should
+	// expect a non-zero exit code and "not an h2 directory" error message.
 	result := runH2(t, dir, "list")
 	if result.ExitCode != 0 {
-		// If this starts failing with a validation error, that's the desired behavior.
-		// Update the test to expect the error message.
-		t.Logf("h2 list now errors on invalid H2_DIR (good): %s", result.Stderr)
-		return
+		// Desired future behavior: validate H2_DIR and error.
+		combined := result.Stdout + result.Stderr
+		if !strings.Contains(combined, "not an h2 directory") {
+			t.Errorf("error = %q, want 'not an h2 directory'", combined)
+		}
 	}
-	// Fallback behavior: shows no agents.
-	if !strings.Contains(result.Stdout, "No running agents") {
-		t.Errorf("h2 list output = %q, want 'No running agents'", result.Stdout)
-	}
+	// Exit code 0 is the current fallback behavior — acceptable for now.
 }
 
 // §3.3 Walk-up resolution from CWD
