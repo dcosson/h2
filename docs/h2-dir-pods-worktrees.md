@@ -66,6 +66,7 @@ h2 init --global        # init in ~/.h2/
   sockets/              # unix sockets
   claude-config/
     default/            # default claude config dir
+  projects/             # convention: project repos live here (see section 3.1)
   worktrees/            # git worktrees for agents
   pods/
     roles/              # pod-scoped role overrides
@@ -78,9 +79,45 @@ h2 init --global        # init in ~/.h2/
 - Write a default `config.yaml` with commented-out examples.
 - `--global` is sugar for `h2 init ~/.h2/`.
 
+### 3.1 Project layout convention
+
+When using a project-local h2 dir (not `~/.h2`), the expected layout is that projects live _inside_ the h2 dir, not the other way around:
+
+```
+my-h2/                    # the h2 dir
+  .h2-dir.txt
+  config.yaml
+  roles/
+  projects/
+    my-app/               # a git repo
+    my-lib/               # another git repo
+  worktrees/
+    feature-builder/      # worktree of my-app
+```
+
+The `projects/` directory is a convention -- h2 doesn't enforce it, but default values and docs should point here. This makes it straightforward to find the git repo for worktree creation: the role's `root_dir` identifies the project, and worktrees are created from that repo.
+
 ---
 
-## 4. Worktree Support
+## 4. Role `root_dir`
+
+Top-level role field that sets the working directory for the agent.
+
+```yaml
+name: feature-builder
+agent_type: claude
+root_dir: "."             # default: CWD where `h2 run` was invoked
+instructions: |
+  You build features.
+```
+
+- **Default `"."`**: interpreted as the CWD of the `h2 run` invocation. This preserves current behavior -- agents start wherever you run the command.
+- Can be set to an absolute path or a path relative to the h2 dir (e.g. `projects/my-app`).
+- This is also the git repo that worktrees are created from (see section 5).
+
+---
+
+## 5. Worktree Support
 
 Agents can run in their own git worktree so they don't conflict with each other or with the user's working directory.
 
@@ -89,6 +126,7 @@ Agents can run in their own git worktree so they don't conflict with each other 
 ```yaml
 name: feature-builder
 agent_type: claude
+root_dir: projects/my-app
 instructions: |
   You build features.
 
@@ -109,33 +147,57 @@ worktree:
 ### Behavior:
 
 - When `setupAndForkAgent` sees `worktree.enabled: true`, it creates a new git worktree before forking the daemon.
-- The worktree is created under `<h2-dir>/worktrees/<agent-name>/`.
-- The agent's working directory is set to the worktree path.
-- Requires that the h2 dir is inside (or associated with) a git repo. Error if not.
+- The source repo is determined by the role's `root_dir`. The worktree is created under `<h2-dir>/worktrees/<agent-name>/`.
+- The agent's working directory is set to the worktree path (overriding `root_dir`).
+- Errors if `root_dir` does not point to a git repository.
 - **`branch_from`** (default `"main"`): the branch to base the worktree on.
 - **`use_detached_head`** (default `false`):
   - `false`: creates a new branch named `<agent-name>` from `branch_from` and checks it out in the worktree.
   - `true`: creates the worktree with `--detach` on `branch_from`, letting the agent decide what branch to create.
 - On agent stop/cleanup: the worktree is left in place (not auto-removed). Could add a `h2 worktree prune` command later.
 
-### Open questions:
+---
 
-- How to determine the "root project" git repo when h2 dir is project-local? Probably walk up from the h2 dir to find `.git`.
-- Should we support a `root_dir` / `cwd` field on the role for non-worktree cases too? (e.g. always start agents in a specific directory)
+## 6. `h2 run --override`
+
+Override individual role fields from the command line without editing the role file.
+
+```
+h2 run --role feature-builder --override worktree.enabled=true
+h2 run --role default --override root_dir=/path/to/project
+h2 run --role default --override worktree.branch_from=develop --override worktree.use_detached_head=true
+```
+
+### Syntax:
+
+`--override <key>=<value>` where `<key>` uses dot notation to address nested fields.
+
+- `root_dir=./my-project` -- sets the top-level `root_dir`
+- `worktree.enabled=true` -- sets `worktree.enabled`
+- `worktree.branch_from=develop` -- sets `worktree.branch_from`
+- `heartbeat.idle_timeout=10m` -- sets `heartbeat.idle_timeout`
+
+### Behavior:
+
+- Can be specified multiple times to override multiple fields.
+- Applied after loading the role YAML, before any setup logic runs.
+- Values are parsed as strings and coerced to the target field's type (bool, int, string).
+- Invalid keys or type mismatches produce an error.
+- Overrides are recorded in the session metadata so it's clear what was changed.
 
 ---
 
-## 5. Pods
+## 7. Pods
 
 Pods are named groups of agents that work together. They enable scoping visibility (`h2 list`) and launching coordinated multi-agent setups from templates.
 
-### 5.1 Pod identity
+### 7.1 Pod identity
 
 - **`H2_POD` env var**: when set, the current agent belongs to this pod.
 - `h2 run --pod <name>`: sets `H2_POD` in the forked agent's environment.
 - Pod membership is just an env var -- no daemon-level registration required. Agents discover their pod peers via `h2 list`.
 
-### 5.2 `h2 list` changes
+### 7.2 `h2 list` changes
 
 **Current behavior**: lists all agents and bridges.
 
@@ -163,16 +225,16 @@ Pods are named groups of agents that work together. They enable scoping visibili
 
 - Bridges are always shown (not pod-scoped).
 
-### 5.3 `h2 run` changes
+### 7.3 `h2 run` changes
 
 - `--pod <name>`: launches the agent in this pod (sets `H2_POD` env var on the forked process).
 - Pod name validation: must match `[a-z0-9-]+`.
 
-### 5.4 `h2 send` -- no pod scoping
+### 7.4 `h2 send` -- no pod scoping
 
 `h2 send` is not pod-aware. Agents can message anyone. If they discover agents in other pods via `h2 list --pod '*'`, they're free to message them.
 
-### 5.5 Pod directory structure
+### 7.5 Pod directory structure
 
 ```
 <h2-dir>/pods/
@@ -182,7 +244,7 @@ Pods are named groups of agents that work together. They enable scoping visibili
     <template-name>.yaml     # pod launch templates
 ```
 
-### 5.6 Pod roles
+### 7.6 Pod roles
 
 Pod roles live in `<h2-dir>/pods/roles/` and use the same format as global roles.
 
@@ -192,7 +254,7 @@ Pod roles live in `<h2-dir>/pods/roles/` and use the same format as global roles
 
 This lets pods override or specialize roles without affecting global definitions.
 
-### 5.7 Pod templates
+### 7.7 Pod templates
 
 Templates define a set of agents to launch together as a pod.
 
@@ -219,7 +281,7 @@ h2 pod launch <template-name> --pod <name>  # override pod name
 
 This iterates through the agents list and runs each one with `--pod <pod-name>`.
 
-### 5.8 `h2 role list` changes
+### 7.8 `h2 role list` changes
 
 Group roles by scope:
 
@@ -235,7 +297,7 @@ Pod roles
 
 When viewing within a pod context (`H2_POD` set or `--pod` flag), show both pod roles and global roles (since global roles are always usable within pods).
 
-### 5.9 New pod commands
+### 7.9 New pod commands
 
 ```
 h2 pod launch <template>     # launch all agents in a pod template
@@ -245,17 +307,18 @@ h2 pod list                  # list pod templates
 
 ---
 
-## 6. Implementation Order
+## 8. Implementation Order
 
 Suggested sequencing (each step is independently useful):
 
 1. **Version** -- add version constant and `h2 version` command.
 2. **H2 dir resolution** -- `H2_DIR` env var, directory walk, marker file.
 3. **`h2 init`** -- create h2 directory with default structure.
-4. **Role `cwd` field** -- let roles specify a working directory for agents.
+4. **Role `root_dir`** -- top-level field for agent working directory (default `"."`).
 5. **Worktree support** -- `worktree` block in roles, worktree creation in agent setup.
-6. **Pod identity & env var** -- `H2_POD`, `--pod` on `h2 run`.
-7. **`h2 list` pod grouping** -- filter and group by pod.
-8. **Pod roles & resolution** -- `pods/roles/` directory, resolution order.
-9. **Pod templates & `h2 pod launch`** -- template format, launch command.
-10. **`h2 pod stop`** -- stop all agents in a pod.
+6. **`h2 run --override`** -- command-line overrides for role fields.
+7. **Pod identity & env var** -- `H2_POD`, `--pod` on `h2 run`.
+8. **`h2 list` pod grouping** -- filter and group by pod.
+9. **Pod roles & resolution** -- `pods/roles/` directory, resolution order.
+10. **Pod templates & `h2 pod launch`** -- template format, launch command.
+11. **`h2 pod stop`** -- stop all agents in a pod.
