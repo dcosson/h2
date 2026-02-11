@@ -347,6 +347,323 @@ func TestStartStop_FiltersChatID(t *testing.T) {
 	}
 }
 
+func TestPoll_SlashCommand_Intercepted(t *testing.T) {
+	var mu sync.Mutex
+	var handlerCalls []struct{ agent, body string }
+	var sentTexts []string
+	var getUpdatesCount int
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/botTOKEN/getUpdates":
+			mu.Lock()
+			n := getUpdatesCount
+			getUpdatesCount++
+			mu.Unlock()
+
+			if n == 0 {
+				json.NewEncoder(w).Encode(getUpdatesResponse{
+					OK: true,
+					Result: []update{
+						{
+							UpdateID: 400,
+							Message: &message{
+								Text: "/echo hello",
+								Chat: chat{ID: 42},
+							},
+						},
+					},
+				})
+			} else {
+				<-r.Context().Done()
+			}
+		case "/botTOKEN/sendMessage":
+			r.ParseForm()
+			mu.Lock()
+			sentTexts = append(sentTexts, r.FormValue("text"))
+			mu.Unlock()
+			json.NewEncoder(w).Encode(apiResponse{OK: true})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	tg := &Telegram{
+		Token:           "TOKEN",
+		ChatID:          42,
+		BaseURL:         srv.URL,
+		AllowedCommands: []string{"echo"},
+	}
+
+	handler := func(agent, body string) {
+		mu.Lock()
+		handlerCalls = append(handlerCalls, struct{ agent, body string }{agent, body})
+		mu.Unlock()
+	}
+
+	if err := tg.Start(context.Background(), handler); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Wait for the reply to be sent.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(sentTexts)
+		mu.Unlock()
+		if n >= 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	tg.Stop()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Handler should NOT have been called (slash command intercepted).
+	if len(handlerCalls) != 0 {
+		t.Errorf("handler called %d times, want 0 (command should be intercepted)", len(handlerCalls))
+	}
+	// Reply should have been sent with [echo result] prefix.
+	if len(sentTexts) != 1 {
+		t.Fatalf("expected 1 sent message, got %d", len(sentTexts))
+	}
+	if sentTexts[0] == "" {
+		t.Error("sent text is empty")
+	}
+	want := "[echo result]\nhello"
+	if sentTexts[0] != want {
+		t.Errorf("sent text = %q, want %q", sentTexts[0], want)
+	}
+}
+
+func TestPoll_PlainMessage_NotIntercepted(t *testing.T) {
+	var mu sync.Mutex
+	var handlerCalls []struct{ agent, body string }
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/botTOKEN/getUpdates" {
+			http.NotFound(w, r)
+			return
+		}
+
+		mu.Lock()
+		first := len(handlerCalls) == 0
+		mu.Unlock()
+
+		if first {
+			json.NewEncoder(w).Encode(getUpdatesResponse{
+				OK: true,
+				Result: []update{
+					{
+						UpdateID: 500,
+						Message: &message{
+							Text: "hello there",
+							Chat: chat{ID: 42},
+						},
+					},
+				},
+			})
+		} else {
+			<-r.Context().Done()
+		}
+	}))
+	defer srv.Close()
+
+	tg := &Telegram{
+		Token:           "TOKEN",
+		ChatID:          42,
+		BaseURL:         srv.URL,
+		AllowedCommands: []string{"h2"},
+	}
+
+	handler := func(agent, body string) {
+		mu.Lock()
+		handlerCalls = append(handlerCalls, struct{ agent, body string }{agent, body})
+		mu.Unlock()
+	}
+
+	if err := tg.Start(context.Background(), handler); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(handlerCalls)
+		mu.Unlock()
+		if n >= 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	tg.Stop()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(handlerCalls) != 1 {
+		t.Fatalf("handler called %d times, want 1", len(handlerCalls))
+	}
+	if handlerCalls[0].body != "hello there" {
+		t.Errorf("body = %q, want %q", handlerCalls[0].body, "hello there")
+	}
+}
+
+func TestPoll_SlashCommand_EmptyAllowedList(t *testing.T) {
+	var mu sync.Mutex
+	var handlerCalls []struct{ agent, body string }
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/botTOKEN/getUpdates" {
+			http.NotFound(w, r)
+			return
+		}
+
+		mu.Lock()
+		first := len(handlerCalls) == 0
+		mu.Unlock()
+
+		if first {
+			json.NewEncoder(w).Encode(getUpdatesResponse{
+				OK: true,
+				Result: []update{
+					{
+						UpdateID: 600,
+						Message: &message{
+							Text: "/h2 list",
+							Chat: chat{ID: 42},
+						},
+					},
+				},
+			})
+		} else {
+			<-r.Context().Done()
+		}
+	}))
+	defer srv.Close()
+
+	tg := &Telegram{
+		Token:           "TOKEN",
+		ChatID:          42,
+		BaseURL:         srv.URL,
+		AllowedCommands: nil, // empty
+	}
+
+	handler := func(agent, body string) {
+		mu.Lock()
+		handlerCalls = append(handlerCalls, struct{ agent, body string }{agent, body})
+		mu.Unlock()
+	}
+
+	if err := tg.Start(context.Background(), handler); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(handlerCalls)
+		mu.Unlock()
+		if n >= 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	tg.Stop()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// With empty AllowedCommands, /h2 should flow through to handler.
+	if len(handlerCalls) != 1 {
+		t.Fatalf("handler called %d times, want 1", len(handlerCalls))
+	}
+}
+
+func TestPoll_AgentPrefix_NotIntercepted(t *testing.T) {
+	var mu sync.Mutex
+	var handlerCalls []struct{ agent, body string }
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/botTOKEN/getUpdates" {
+			http.NotFound(w, r)
+			return
+		}
+
+		mu.Lock()
+		first := len(handlerCalls) == 0
+		mu.Unlock()
+
+		if first {
+			json.NewEncoder(w).Encode(getUpdatesResponse{
+				OK: true,
+				Result: []update{
+					{
+						UpdateID: 700,
+						Message: &message{
+							Text: "concierge: /h2 list",
+							Chat: chat{ID: 42},
+						},
+					},
+				},
+			})
+		} else {
+			<-r.Context().Done()
+		}
+	}))
+	defer srv.Close()
+
+	tg := &Telegram{
+		Token:           "TOKEN",
+		ChatID:          42,
+		BaseURL:         srv.URL,
+		AllowedCommands: []string{"h2"},
+	}
+
+	handler := func(agent, body string) {
+		mu.Lock()
+		handlerCalls = append(handlerCalls, struct{ agent, body string }{agent, body})
+		mu.Unlock()
+	}
+
+	if err := tg.Start(context.Background(), handler); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(handlerCalls)
+		mu.Unlock()
+		if n >= 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	tg.Stop()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// "concierge: /h2 list" doesn't start with /, so it routes to agent.
+	if len(handlerCalls) != 1 {
+		t.Fatalf("handler called %d times, want 1", len(handlerCalls))
+	}
+	if handlerCalls[0].agent != "concierge" {
+		t.Errorf("agent = %q, want %q", handlerCalls[0].agent, "concierge")
+	}
+	if handlerCalls[0].body != "/h2 list" {
+		t.Errorf("body = %q, want %q", handlerCalls[0].body, "/h2 list")
+	}
+}
+
 func TestPoll_ExponentialBackoff(t *testing.T) {
 	var requestCount atomic.Int64
 

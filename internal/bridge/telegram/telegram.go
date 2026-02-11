@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -21,8 +22,9 @@ const (
 // Telegram implements bridge.Bridge, bridge.Sender, and bridge.Receiver
 // using the Telegram Bot API. Standard library only — no external Telegram SDK.
 type Telegram struct {
-	Token  string
-	ChatID int64
+	Token           string
+	ChatID          int64
+	AllowedCommands []string
 
 	// BaseURL overrides the Telegram API base for testing.
 	// If empty, defaults to "https://api.telegram.org".
@@ -133,6 +135,13 @@ func (t *Telegram) poll(ctx context.Context, handler bridge.InboundHandler) {
 			if u.Message == nil || u.Message.Chat.ID != t.ChatID {
 				continue
 			}
+			// Check for slash commands before agent routing.
+			cmd, args := bridge.ParseSlashCommand(u.Message.Text, t.AllowedCommands)
+			if cmd != "" {
+				log.Printf("bridge: telegram: executing command /%s %s", cmd, args)
+				go t.execAndReply(ctx, cmd, args)
+				continue
+			}
 			agent, body := bridge.ParseAgentPrefix(u.Message.Text)
 			// If no explicit prefix, check reply-to message for agent tag.
 			if agent == "" && u.Message.ReplyToMessage != nil {
@@ -140,6 +149,14 @@ func (t *Telegram) poll(ctx context.Context, handler bridge.InboundHandler) {
 			}
 			handler(agent, body)
 		}
+	}
+}
+
+func (t *Telegram) execAndReply(ctx context.Context, cmd, args string) {
+	result := bridge.ExecCommand(cmd, args)
+	tagged := fmt.Sprintf("[%s result]\n%s", cmd, result)
+	if err := t.Send(ctx, tagged); err != nil {
+		log.Printf("bridge: telegram: send command result: %v", err)
 	}
 }
 
