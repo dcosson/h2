@@ -78,6 +78,96 @@ func TestLoadFrom_InvalidYAML(t *testing.T) {
 	}
 }
 
+func TestLoadFrom_AllowedCommands_Valid(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	data := `users:
+  dcosson:
+    bridges:
+      telegram:
+        bot_token: "tok"
+        chat_id: 1
+        allowed_commands:
+          - h2
+          - bd
+`
+	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+
+	cmds := cfg.Users["dcosson"].Bridges.Telegram.AllowedCommands
+	if len(cmds) != 2 || cmds[0] != "h2" || cmds[1] != "bd" {
+		t.Errorf("AllowedCommands = %v, want [h2 bd]", cmds)
+	}
+}
+
+func TestLoadFrom_AllowedCommands_Invalid(t *testing.T) {
+	tests := []struct {
+		name string
+		cmds string
+	}{
+		{"slash in path", `["/usr/bin/h2"]`},
+		{"space in name", `["rm -rf"]`},
+		{"semicolon", `["h2;echo"]`},
+		{"empty string", `[""]`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "config.yaml")
+
+			data := `users:
+  dcosson:
+    bridges:
+      telegram:
+        bot_token: "tok"
+        chat_id: 1
+        allowed_commands: ` + tt.cmds + "\n"
+			if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := LoadFrom(path)
+			if err == nil {
+				t.Fatalf("expected error for allowed_commands %s", tt.cmds)
+			}
+		})
+	}
+}
+
+func TestLoadFrom_AllowedCommands_NotSet(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	data := `users:
+  dcosson:
+    bridges:
+      telegram:
+        bot_token: "tok"
+        chat_id: 1
+`
+	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+
+	cmds := cfg.Users["dcosson"].Bridges.Telegram.AllowedCommands
+	if len(cmds) != 0 {
+		t.Errorf("AllowedCommands = %v, want empty", cmds)
+	}
+}
+
 func TestLoadFrom_NoBridges(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
