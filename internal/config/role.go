@@ -50,7 +50,7 @@ type Role struct {
 	AgentType       string           `yaml:"agent_type,omitempty"` // "claude" (default), future: other agent types
 	Model           string           `yaml:"model,omitempty"`
 	ClaudeConfigDir string           `yaml:"claude_config_dir,omitempty"`
-	RootDir         string           `yaml:"root_dir,omitempty"`  // agent CWD (default ".")
+	WorkingDir      string           `yaml:"working_dir,omitempty"` // agent CWD (default ".")
 	Worktree        *WorktreeConfig  `yaml:"worktree,omitempty"`  // git worktree settings
 	Instructions    string           `yaml:"instructions"`
 	Permissions     Permissions      `yaml:"permissions,omitempty"`
@@ -59,11 +59,11 @@ type Role struct {
 	Settings        yaml.Node        `yaml:"settings,omitempty"` // extra settings.json keys
 }
 
-// ResolveRootDir returns the absolute path for the agent's working directory.
+// ResolveWorkingDir returns the absolute path for the agent's working directory.
 // "." (or empty) is interpreted as invocationCWD. Relative paths are resolved
 // against the h2 dir. Absolute paths are used as-is.
-func (r *Role) ResolveRootDir(invocationCWD string) (string, error) {
-	dir := r.RootDir
+func (r *Role) ResolveWorkingDir(invocationCWD string) (string, error) {
+	dir := r.WorkingDir
 	if dir == "" || dir == "." {
 		return invocationCWD, nil
 	}
@@ -73,7 +73,7 @@ func (r *Role) ResolveRootDir(invocationCWD string) (string, error) {
 	// Relative path: resolve against h2 dir.
 	h2Dir, err := ResolveDir()
 	if err != nil {
-		return "", fmt.Errorf("resolve h2 dir for root_dir: %w", err)
+		return "", fmt.Errorf("resolve h2 dir for working_dir: %w", err)
 	}
 	return filepath.Join(h2Dir, dir), nil
 }

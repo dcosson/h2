@@ -50,9 +50,9 @@ func setupAndForkAgent(name string, role *config.Role, detach bool, pod string, 
 	if err != nil {
 		return fmt.Errorf("get working directory: %w", err)
 	}
-	agentCWD, err := role.ResolveRootDir(cwd)
+	agentCWD, err := role.ResolveWorkingDir(cwd)
 	if err != nil {
-		return fmt.Errorf("resolve root_dir: %w", err)
+		return fmt.Errorf("resolve working_dir: %w", err)
 	}
 
 	// Create git worktree if enabled.

@@ -22,7 +22,7 @@ func TestIntegration_FullWorkflow(t *testing.T) {
 name: builder
 agent_type: "true"
 instructions: Build features.
-root_dir: projects/webapp
+working_dir: projects/webapp
 worktree:
   enabled: true
   branch_from: main
@@ -31,7 +31,7 @@ worktree:
 name: reviewer
 agent_type: "true"
 instructions: Review code.
-root_dir: projects/webapp
+working_dir: projects/webapp
 worktree:
   enabled: true
   branch_from: main
@@ -153,7 +153,7 @@ agents:
 func TestBackwardCompat_LegacyRole(t *testing.T) {
 	h2Dir := createTestH2Dir(t)
 
-	// A role YAML with no root_dir, no worktree block — legacy format.
+	// A role YAML with no working_dir, no worktree block — legacy format.
 	createRole(t, h2Dir, "legacy", `
 name: legacy
 agent_type: "true"

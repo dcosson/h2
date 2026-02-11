@@ -103,18 +103,18 @@ my-h2/                    # the h2 dir
     feature-builder/      # worktree of my-app
 ```
 
-The `projects/` directory is a convention -- h2 doesn't enforce it, but default values and docs should point here. This makes it straightforward to find the git repo for worktree creation: the role's `root_dir` identifies the project, and worktrees are created from that repo.
+The `projects/` directory is a convention -- h2 doesn't enforce it, but default values and docs should point here. This makes it straightforward to find the git repo for worktree creation: the role's `working_dir` identifies the project, and worktrees are created from that repo.
 
 ---
 
-## 4. Role `root_dir`
+## 4. Role `working_dir`
 
 Top-level role field that sets the working directory for the agent.
 
 ```yaml
 name: feature-builder
 agent_type: claude
-root_dir: "."             # default: CWD where `h2 run` was invoked
+working_dir: "."             # default: CWD where `h2 run` was invoked
 instructions: |
   You build features.
 ```
@@ -135,7 +135,7 @@ Agents can run in their own git worktree so they don't conflict with each other 
 ```yaml
 name: feature-builder
 agent_type: claude
-root_dir: projects/my-app
+working_dir: projects/my-app
 instructions: |
   You build features.
 
@@ -156,9 +156,9 @@ worktree:
 ### Behavior:
 
 - When `setupAndForkAgent` sees `worktree.enabled: true`, it creates a new git worktree before forking the daemon.
-- The source repo is determined by the role's `root_dir`. The worktree is created under `<h2-dir>/worktrees/<agent-name>/`.
-- The agent's working directory is set to the worktree path (overriding `root_dir`).
-- Errors if `root_dir` does not point to a git repository.
+- The source repo is determined by the role's `working_dir`. The worktree is created under `<h2-dir>/worktrees/<agent-name>/`.
+- The agent's working directory is set to the worktree path (overriding `working_dir`).
+- Errors if `working_dir` does not point to a git repository.
 - **`branch_from`** (default `"main"`): the branch to base the worktree on.
 - **`use_detached_head`** (default `false`):
   - `false`: creates a new branch named `<agent-name>` from `branch_from` and checks it out in the worktree.
@@ -180,7 +180,7 @@ Override individual role fields from the command line without editing the role f
 
 ```
 h2 run --role feature-builder --override worktree.enabled=true
-h2 run --role default --override root_dir=/path/to/project
+h2 run --role default --override working_dir=/path/to/project
 h2 run --role default --override worktree.branch_from=develop --override worktree.use_detached_head=true
 ```
 
@@ -188,7 +188,7 @@ h2 run --role default --override worktree.branch_from=develop --override worktre
 
 `--override <key>=<value>` where `<key>` uses dot notation to address nested fields.
 
-- `root_dir=./my-project` -- sets the top-level `root_dir`
+- `working_dir=./my-project` -- sets the top-level `working_dir`
 - `worktree.enabled=true` -- sets `worktree.enabled`
 - `worktree.branch_from=develop` -- sets `worktree.branch_from`
 - `heartbeat.idle_timeout=10m` -- sets `heartbeat.idle_timeout`
@@ -339,7 +339,7 @@ h2 pod list                  # list pod templates
 
 - **No cross-h2-dir visibility**: Agents in different h2 dirs are invisible to each other. `h2 list` only shows agents in the resolved h2 dir. A future `h2 list --all` could query all known h2 dirs.
 - **No per-agent overrides in pod templates**: Pod templates specify `name` and `role` per agent. To customize individual agents beyond their role, launch them separately with `--override`.
-- **`--command` mode is unaffected by new features**: `root_dir`, `worktree`, and `--override` only apply to role-based launches. `--command` mode continues to work as today.
+- **`--command` mode is unaffected by new features**: `working_dir`, `worktree`, and `--override` only apply to role-based launches. `--command` mode continues to work as today.
 - **Worktree cleanup is manual**: Stopped agents leave their worktrees in place. A future `h2 worktree prune` command could clean up worktrees for stopped agents.
 
 ---
@@ -351,7 +351,7 @@ Suggested sequencing (each step is independently useful):
 1. **Version** -- add version constant and `h2 version` command.
 2. **H2 dir resolution** -- `H2_DIR` env var, directory walk, marker file.
 3. **`h2 init`** -- create h2 directory with default structure.
-4. **Role `root_dir`** -- top-level field for agent working directory (default `"."`).
+4. **Role `working_dir`** -- top-level field for agent working directory (default `"."`).
 5. **Worktree support** -- `worktree` block in roles, worktree creation in agent setup.
 6. **`h2 run --override`** -- command-line overrides for role fields.
 7. **Pod identity & env var** -- `H2_POD`, `--pod` on `h2 run`.

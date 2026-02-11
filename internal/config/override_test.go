@@ -7,27 +7,27 @@ import (
 
 func TestApplyOverrides_SimpleString(t *testing.T) {
 	role := &Role{Name: "test", Instructions: "test"}
-	err := ApplyOverrides(role, []string{"root_dir=/workspace/project"})
+	err := ApplyOverrides(role, []string{"working_dir=/workspace/project"})
 	if err != nil {
 		t.Fatalf("ApplyOverrides: %v", err)
 	}
-	if role.RootDir != "/workspace/project" {
-		t.Errorf("RootDir = %q, want %q", role.RootDir, "/workspace/project")
+	if role.WorkingDir != "/workspace/project" {
+		t.Errorf("WorkingDir = %q, want %q", role.WorkingDir, "/workspace/project")
 	}
 }
 
 func TestApplyOverrides_MultipleStrings(t *testing.T) {
 	role := &Role{Name: "test", Instructions: "test"}
 	err := ApplyOverrides(role, []string{
-		"root_dir=/workspace",
+		"working_dir=/workspace",
 		"model=opus",
 		"description=My agent",
 	})
 	if err != nil {
 		t.Fatalf("ApplyOverrides: %v", err)
 	}
-	if role.RootDir != "/workspace" {
-		t.Errorf("RootDir = %q, want %q", role.RootDir, "/workspace")
+	if role.WorkingDir != "/workspace" {
+		t.Errorf("WorkingDir = %q, want %q", role.WorkingDir, "/workspace")
 	}
 	if role.Model != "opus" {
 		t.Errorf("Model = %q, want %q", role.Model, "opus")
@@ -200,12 +200,12 @@ func TestApplyOverrides_EmptySlice(t *testing.T) {
 
 func TestApplyOverrides_ValueWithEquals(t *testing.T) {
 	role := &Role{Name: "test", Instructions: "test"}
-	err := ApplyOverrides(role, []string{"root_dir=/path/with=equals"})
+	err := ApplyOverrides(role, []string{"working_dir=/path/with=equals"})
 	if err != nil {
 		t.Fatalf("ApplyOverrides: %v", err)
 	}
-	if role.RootDir != "/path/with=equals" {
-		t.Errorf("RootDir = %q, want %q", role.RootDir, "/path/with=equals")
+	if role.WorkingDir != "/path/with=equals" {
+		t.Errorf("WorkingDir = %q, want %q", role.WorkingDir, "/path/with=equals")
 	}
 }
 
@@ -224,7 +224,7 @@ func TestApplyOverrides_NestedStringField(t *testing.T) {
 }
 
 func TestParseOverrides(t *testing.T) {
-	overrides := []string{"root_dir=/workspace", "model=opus"}
+	overrides := []string{"working_dir=/workspace", "model=opus"}
 	m, err := ParseOverrides(overrides)
 	if err != nil {
 		t.Fatalf("ParseOverrides: %v", err)
@@ -232,8 +232,8 @@ func TestParseOverrides(t *testing.T) {
 	if len(m) != 2 {
 		t.Fatalf("len = %d, want 2", len(m))
 	}
-	if m["root_dir"] != "/workspace" {
-		t.Errorf("root_dir = %q, want %q", m["root_dir"], "/workspace")
+	if m["working_dir"] != "/workspace" {
+		t.Errorf("working_dir = %q, want %q", m["working_dir"], "/workspace")
 	}
 	if m["model"] != "opus" {
 		t.Errorf("model = %q, want %q", m["model"], "opus")
@@ -244,7 +244,7 @@ func TestOverridesRecordedInMetadata(t *testing.T) {
 	dir := t.TempDir()
 
 	overrides := map[string]string{
-		"root_dir":         "/workspace",
+		"working_dir":         "/workspace",
 		"worktree.enabled": "true",
 	}
 	meta := SessionMetadata{
@@ -267,8 +267,8 @@ func TestOverridesRecordedInMetadata(t *testing.T) {
 	if len(got.Overrides) != 2 {
 		t.Fatalf("Overrides len = %d, want 2", len(got.Overrides))
 	}
-	if got.Overrides["root_dir"] != "/workspace" {
-		t.Errorf("Overrides[root_dir] = %q, want %q", got.Overrides["root_dir"], "/workspace")
+	if got.Overrides["working_dir"] != "/workspace" {
+		t.Errorf("Overrides[working_dir] = %q, want %q", got.Overrides["working_dir"], "/workspace")
 	}
 	if got.Overrides["worktree.enabled"] != "true" {
 		t.Errorf("Overrides[worktree.enabled] = %q, want %q", got.Overrides["worktree.enabled"], "true")

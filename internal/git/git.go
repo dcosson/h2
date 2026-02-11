@@ -18,7 +18,7 @@ import (
 func CreateWorktree(agentName, repoDir string, cfg *config.WorktreeConfig) (string, error) {
 	// Verify repoDir is a git repo.
 	if !isGitRepo(repoDir) {
-		return "", fmt.Errorf("root_dir %q is not a git repository", repoDir)
+		return "", fmt.Errorf("working_dir %q is not a git repository", repoDir)
 	}
 
 	worktreePath := filepath.Join(config.WorktreesDir(), agentName)

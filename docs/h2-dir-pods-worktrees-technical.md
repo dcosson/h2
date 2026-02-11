@@ -84,7 +84,7 @@ New fields added:
 type Role struct {
     // ... existing fields ...
 
-    RootDir  string          `yaml:"root_dir,omitempty"`  // agent CWD (default ".")
+    WorkingDir  string          `yaml:"working_dir,omitempty"`  // agent CWD (default ".")
     Worktree *WorktreeConfig `yaml:"worktree,omitempty"`  // git worktree settings
 }
 
@@ -98,10 +98,10 @@ type WorktreeConfig struct {
 New method:
 
 ```go
-// ResolveRootDir returns the absolute path for the agent's working directory.
+// ResolveWorkingDir returns the absolute path for the agent's working directory.
 // "." is interpreted as invocationCWD. Relative paths are resolved against
 // the h2 dir. Absolute paths are used as-is.
-func (r *Role) ResolveRootDir(invocationCWD string) (string, error)
+func (r *Role) ResolveWorkingDir(invocationCWD string) (string, error)
 ```
 
 ### 1.5 Modified: `internal/config/session_dir.go` — SessionMetadata
@@ -235,7 +235,7 @@ Role override application:
 
 ```go
 // ApplyOverrides applies --override key=value pairs to a loaded Role.
-// Keys use dot notation (e.g. "worktree.enabled", "root_dir").
+// Keys use dot notation (e.g. "worktree.enabled", "working_dir").
 // Returns an error for unknown keys or type mismatches.
 func ApplyOverrides(role *Role, overrides []string) error
 ```
@@ -348,7 +348,7 @@ sequenceDiagram
     RunCmd->>Config: ApplyOverrides(role, overrides)
     RunCmd->>Setup: setupAndForkAgent(name, role, detach, pod)
 
-    Setup->>Config: role.ResolveRootDir(cwd)
+    Setup->>Config: role.ResolveWorkingDir(cwd)
     Config-->>Setup: absoluteCWD
 
     alt worktree.enabled
@@ -415,7 +415,7 @@ instructions: |
 description: "Builds features"          # human description
 agent_type: claude                       # default: "claude"
 model: ""                                # model override
-root_dir: "."                            # CWD for agent (default: invocation CWD)
+working_dir: "."                            # CWD for agent (default: invocation CWD)
 claude_config_dir: ""                    # custom claude config dir
 
 # Optional blocks
@@ -549,7 +549,7 @@ The override mechanism maps dot-notation keys to struct fields via YAML tags:
 
 | Override Key | Struct Path | Type |
 |-------------|------------|------|
-| `root_dir` | `Role.RootDir` | `string` |
+| `working_dir` | `Role.WorkingDir` | `string` |
 | `agent_type` | `Role.AgentType` | `string` |
 | `model` | `Role.Model` | `string` |
 | `claude_config_dir` | `Role.ClaudeConfigDir` | `string` |
@@ -642,8 +642,8 @@ This avoids requiring cleanup between agent restarts and lets agents pick up whe
 
 ### Error conditions
 
-- `root_dir` does not exist → error
-- `root_dir` is not a git repo → error (check for `.git`)
+- `working_dir` does not exist → error
+- `working_dir` is not a git repo → error (check for `.git`)
 - Worktree directory exists but is not a valid git worktree → error with cleanup instructions
 - `branch_from` ref doesn't exist → git error, surfaced to user
 

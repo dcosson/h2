@@ -170,9 +170,9 @@ H2_DIR=/tmp/test-h2-propagate h2 list
 
 ---
 
-## 4. Role `root_dir`
+## 4. Role `working_dir`
 
-### 4.1 Default root_dir (CWD)
+### 4.1 Default working_dir (CWD)
 
 ```bash
 # Prerequisite: h2 initialized, a role exists
@@ -185,14 +185,14 @@ h2 status test-cwd  # or h2 list
 
 **Cleanup**: `h2 stop test-cwd`
 
-### 4.2 Absolute root_dir
+### 4.2 Absolute working_dir
 
 ```bash
-# Create role with absolute root_dir
+# Create role with absolute working_dir
 cat > "$(h2 config-dir 2>/dev/null || echo ~/.h2)/roles/abs-dir.yaml" <<'EOF'
 name: abs-dir
 instructions: test
-root_dir: /tmp
+working_dir: /tmp
 EOF
 
 h2 run --role abs-dir --name test-abs --detach
@@ -202,7 +202,7 @@ h2 run --role abs-dir --name test-abs --detach
 
 **Cleanup**: `h2 stop test-abs`
 
-### 4.3 Relative root_dir (resolved against h2 dir)
+### 4.3 Relative working_dir (resolved against h2 dir)
 
 ```bash
 h2 init /tmp/test-h2-reldir
@@ -210,7 +210,7 @@ mkdir -p /tmp/test-h2-reldir/projects/myapp
 cat > /tmp/test-h2-reldir/roles/rel-dir.yaml <<'EOF'
 name: rel-dir
 instructions: test
-root_dir: projects/myapp
+working_dir: projects/myapp
 EOF
 
 H2_DIR=/tmp/test-h2-reldir h2 run --role rel-dir --name test-rel --detach
@@ -235,7 +235,7 @@ git init && git commit --allow-empty -m "init" && git checkout -b main 2>/dev/nu
 cat > /tmp/test-h2-wt/roles/wt-agent.yaml <<'EOF'
 name: wt-agent
 instructions: test worktree agent
-root_dir: projects/myrepo
+working_dir: projects/myrepo
 worktree:
   enabled: true
   branch_from: main
@@ -260,7 +260,7 @@ H2_DIR=/tmp/test-h2-wt h2 run --role wt-agent --name wt-test --detach
 cat > /tmp/test-h2-wt/roles/wt-detached.yaml <<'EOF'
 name: wt-detached
 instructions: test detached worktree
-root_dir: projects/myrepo
+working_dir: projects/myrepo
 worktree:
   enabled: true
   branch_from: main
@@ -275,13 +275,13 @@ H2_DIR=/tmp/test-h2-wt h2 run --role wt-detached --name wt-detach --detach
 - `git -C /tmp/test-h2-wt/worktrees/wt-detach rev-parse --abbrev-ref HEAD` → `HEAD` (detached)
 - No branch named `wt-detach` created
 
-### 5.4 Worktree error: non-git root_dir
+### 5.4 Worktree error: non-git working_dir
 
 ```bash
 cat > /tmp/test-h2-wt/roles/wt-nogit.yaml <<'EOF'
 name: wt-nogit
 instructions: test
-root_dir: projects
+working_dir: projects
 worktree:
   enabled: true
 EOF
@@ -289,7 +289,7 @@ EOF
 H2_DIR=/tmp/test-h2-wt h2 run --role wt-nogit --name wt-fail --detach
 ```
 
-**Expected**: Error indicating `root_dir` is not a git repository.
+**Expected**: Error indicating `working_dir` is not a git repository.
 
 ### 5.5 Worktree error: name collision (agent stopped)
 
@@ -330,7 +330,7 @@ H2_DIR=/tmp/test-h2-wt h2 run --role wt-agent --name wt-test --detach
 ### 6.1 Override a simple string field
 
 ```bash
-h2 run --role default --override root_dir=/tmp --name test-override --detach
+h2 run --role default --override working_dir=/tmp --name test-override --detach
 ```
 
 **Expected**: Agent starts with CWD `/tmp`.
@@ -347,7 +347,7 @@ cd /tmp/test-h2-override/projects/repo && git init && git commit --allow-empty -
 cat > /tmp/test-h2-override/roles/no-wt.yaml <<'EOF'
 name: no-wt
 instructions: test
-root_dir: projects/repo
+working_dir: projects/repo
 EOF
 
 # Override worktree.enabled at launch time
@@ -375,11 +375,11 @@ h2 run --role default --override worktree.enabled=notabool --name test-type-err 
 ### 6.5 Overrides recorded in session metadata
 
 ```bash
-h2 run --role default --override root_dir=/tmp --name test-meta --detach
+h2 run --role default --override working_dir=/tmp --name test-meta --detach
 cat ~/.h2/sessions/test-meta/session.metadata.json | grep overrides
 ```
 
-**Expected**: `overrides` field contains `{"root_dir": "/tmp"}`.
+**Expected**: `overrides` field contains `{"working_dir": "/tmp"}`.
 
 **Cleanup**: `h2 stop test-meta; rm -rf /tmp/test-h2-override`
 
@@ -589,7 +589,7 @@ git init && echo "hello" > README.md && git add . && git commit -m "init"
 cat > /tmp/test-h2-full/roles/builder.yaml <<'EOF'
 name: builder
 instructions: Build features.
-root_dir: projects/webapp
+working_dir: projects/webapp
 worktree:
   enabled: true
   branch_from: main
@@ -598,7 +598,7 @@ EOF
 cat > /tmp/test-h2-full/roles/reviewer.yaml <<'EOF'
 name: reviewer
 instructions: Review code.
-root_dir: projects/webapp
+working_dir: projects/webapp
 worktree:
   enabled: true
   branch_from: main
@@ -688,7 +688,7 @@ h2 list
 ### 11.2 Roles without new fields still work
 
 ```bash
-# A role YAML with no root_dir, no worktree block
+# A role YAML with no working_dir, no worktree block
 cat > ~/.h2/roles/legacy.yaml <<'EOF'
 name: legacy
 instructions: I am a legacy role.
@@ -697,7 +697,7 @@ EOF
 h2 run --role legacy --name test-legacy --detach
 ```
 
-**Expected**: Agent starts normally. `root_dir` defaults to `.` (CWD), no worktree created.
+**Expected**: Agent starts normally. `working_dir` defaults to `.` (CWD), no worktree created.
 
 **Cleanup**: `h2 stop test-legacy; rm ~/.h2/roles/legacy.yaml`
 

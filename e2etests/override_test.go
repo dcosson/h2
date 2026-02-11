@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// §6.1 Override a simple string field (root_dir)
+// §6.1 Override a simple string field (working_dir)
 func TestOverride_SimpleStringField(t *testing.T) {
 	h2Dir := createTestH2Dir(t)
 	overrideDir := t.TempDir()
@@ -15,12 +15,12 @@ func TestOverride_SimpleStringField(t *testing.T) {
 name: override-str
 agent_type: "true"
 instructions: test override string field
-root_dir: /original/path
+working_dir: /original/path
 `)
 
 	result := runH2(t, h2Dir, "run", "--role", "override-str",
 		"--name", "test-override-str", "--detach",
-		"--override", "root_dir="+overrideDir)
+		"--override", "working_dir="+overrideDir)
 	if result.ExitCode != 0 {
 		t.Fatalf("h2 run failed: exit=%d stderr=%s stdout=%s", result.ExitCode, result.Stderr, result.Stdout)
 	}
@@ -44,7 +44,7 @@ func TestOverride_NestedBoolField(t *testing.T) {
 name: override-wt
 agent_type: "true"
 instructions: test override nested bool
-root_dir: projects/myrepo
+working_dir: projects/myrepo
 `)
 
 	result := runH2(t, h2Dir, "run", "--role", "override-wt",
@@ -127,7 +127,7 @@ instructions: test metadata recording
 
 	result := runH2(t, h2Dir, "run", "--role", "override-meta",
 		"--name", "test-override-meta", "--detach",
-		"--override", "root_dir="+overrideDir,
+		"--override", "working_dir="+overrideDir,
 		"--override", "model=opus")
 	if result.ExitCode != 0 {
 		t.Fatalf("h2 run failed: exit=%d stderr=%s stdout=%s", result.ExitCode, result.Stderr, result.Stdout)
@@ -138,8 +138,8 @@ instructions: test metadata recording
 	if meta.Overrides == nil {
 		t.Fatal("Overrides should not be nil in session metadata")
 	}
-	if meta.Overrides["root_dir"] != overrideDir {
-		t.Errorf("Overrides[root_dir] = %q, want %q", meta.Overrides["root_dir"], overrideDir)
+	if meta.Overrides["working_dir"] != overrideDir {
+		t.Errorf("Overrides[working_dir] = %q, want %q", meta.Overrides["working_dir"], overrideDir)
 	}
 	if meta.Overrides["model"] != "opus" {
 		t.Errorf("Overrides[model] = %q, want %q", meta.Overrides["model"], "opus")

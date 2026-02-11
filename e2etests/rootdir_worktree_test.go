@@ -9,13 +9,13 @@ import (
 	"testing"
 )
 
-// §4.1 Default root_dir (CWD)
-func TestRootDir_Default(t *testing.T) {
+// §4.1 Default working_dir (CWD)
+func TestWorkingDir_Default(t *testing.T) {
 	h2Dir := createTestH2Dir(t)
 	createRole(t, h2Dir, "default-cwd", `
 name: default-cwd
 agent_type: "true"
-instructions: test default root_dir
+instructions: test default working_dir
 `)
 
 	result := runH2(t, h2Dir, "run", "--role", "default-cwd", "--name", "test-default-cwd", "--detach")
@@ -32,16 +32,16 @@ instructions: test default root_dir
 	}
 }
 
-// §4.2 Absolute root_dir
-func TestRootDir_Absolute(t *testing.T) {
+// §4.2 Absolute working_dir
+func TestWorkingDir_Absolute(t *testing.T) {
 	h2Dir := createTestH2Dir(t)
 	absDir := t.TempDir()
 
 	createRole(t, h2Dir, "abs-dir", `
 name: abs-dir
 agent_type: "true"
-instructions: test absolute root_dir
-root_dir: "`+absDir+`"
+instructions: test absolute working_dir
+working_dir: "`+absDir+`"
 `)
 
 	result := runH2(t, h2Dir, "run", "--role", "abs-dir", "--name", "test-abs-dir", "--detach")
@@ -59,8 +59,8 @@ root_dir: "`+absDir+`"
 	}
 }
 
-// §4.3 Relative root_dir (resolved against h2 dir)
-func TestRootDir_Relative(t *testing.T) {
+// §4.3 Relative working_dir (resolved against h2 dir)
+func TestWorkingDir_Relative(t *testing.T) {
 	h2Dir := createTestH2Dir(t)
 
 	// Create the target directory under h2Dir.
@@ -70,8 +70,8 @@ func TestRootDir_Relative(t *testing.T) {
 	createRole(t, h2Dir, "rel-dir", `
 name: rel-dir
 agent_type: "true"
-instructions: test relative root_dir
-root_dir: projects/myapp
+instructions: test relative working_dir
+working_dir: projects/myapp
 `)
 
 	result := runH2(t, h2Dir, "run", "--role", "rel-dir", "--name", "test-rel-dir", "--detach")
@@ -97,7 +97,7 @@ func TestWorktree_NewBranch(t *testing.T) {
 name: wt-agent
 agent_type: "true"
 instructions: test worktree agent
-root_dir: projects/myrepo
+working_dir: projects/myrepo
 worktree:
   enabled: true
   branch_from: main
@@ -156,7 +156,7 @@ func TestWorktree_DetachedHead(t *testing.T) {
 name: wt-detached
 agent_type: "true"
 instructions: test detached worktree
-root_dir: projects/myrepo
+working_dir: projects/myrepo
 worktree:
   enabled: true
   branch_from: main
@@ -189,11 +189,11 @@ worktree:
 	}
 }
 
-// §5.4 Worktree error: non-git root_dir
-func TestWorktree_NonGitRootDir(t *testing.T) {
+// §5.4 Worktree error: non-git working_dir
+func TestWorktree_NonGitWorkingDir(t *testing.T) {
 	h2Dir := createTestH2Dir(t)
 
-	// Create a non-git directory for root_dir.
+	// Create a non-git directory for working_dir.
 	notGitDir := filepath.Join(h2Dir, "projects", "not-a-repo")
 	os.MkdirAll(notGitDir, 0o755)
 
@@ -201,7 +201,7 @@ func TestWorktree_NonGitRootDir(t *testing.T) {
 name: wt-nogit
 agent_type: "true"
 instructions: test
-root_dir: projects/not-a-repo
+working_dir: projects/not-a-repo
 worktree:
   enabled: true
 `)
@@ -209,7 +209,7 @@ worktree:
 	result := runH2(t, h2Dir, "run", "--role", "wt-nogit", "--name", "wt-fail", "--detach")
 	if result.ExitCode == 0 {
 		t.Cleanup(func() { stopAgent(t, h2Dir, "wt-fail") })
-		t.Fatal("expected error for non-git root_dir with worktree enabled")
+		t.Fatal("expected error for non-git working_dir with worktree enabled")
 	}
 
 	combined := result.Stdout + result.Stderr
@@ -227,7 +227,7 @@ func TestWorktree_CorruptWorktreeDir(t *testing.T) {
 name: wt-corrupt
 agent_type: "true"
 instructions: test
-root_dir: projects/myrepo
+working_dir: projects/myrepo
 worktree:
   enabled: true
   branch_from: main
@@ -259,7 +259,7 @@ func TestWorktree_ReuseExisting(t *testing.T) {
 name: wt-reuse
 agent_type: "true"
 instructions: test worktree reuse
-root_dir: projects/myrepo
+working_dir: projects/myrepo
 worktree:
   enabled: true
   branch_from: main
