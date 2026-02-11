@@ -10,16 +10,19 @@ This is fundamentally shell access scoped to a whitelist, not agent interaction.
 
 ```
 User sends in Telegram:     /h2 list
-Bot replies:                 [h2 result] NAME        STATE    POD
+Bot replies:                 [h2 result]
+                             NAME        STATE    POD
                              concierge   active
                              coder-1     idle     dev
 
 User sends:                  /bd list
-Bot replies:                 [bd result] h2-abc  open  Fix login bug
+Bot replies:                 [bd result]
+                             h2-abc  open  Fix login bug
                              h2-def  open  Add caching
 
 User sends:                  /h2 badcommand
-Bot replies:                 [h2 result] ERROR (exit 1):
+Bot replies:                 [h2 result]
+                             ERROR (exit 1):
                              Error: unknown command "badcommand" for "h2"
 
 User sends:                  /notwhitelisted foo
@@ -195,14 +198,14 @@ func (t *Telegram) poll(ctx context.Context, handler bridge.InboundHandler) {
 
 func (t *Telegram) execAndReply(ctx context.Context, cmd, args string) {
     result := bridge.ExecCommand(cmd, args)
-    tagged := fmt.Sprintf("[%s result] %s", cmd, result)
+    tagged := fmt.Sprintf("[%s result]\n%s", cmd, result)
     if err := t.Send(ctx, tagged); err != nil {
         log.Printf("bridge: telegram: send command result: %v", err)
     }
 }
 ```
 
-Commands run in a goroutine so they don't block the poll loop. The result is prefixed with `[command result]` (e.g., `[h2 result]`, `[bd result]`) to distinguish command output from agent messages.
+Commands run in a goroutine so they don't block the poll loop. The result is prefixed with `[command result]\n` (e.g., `[h2 result]\n`, `[bd result]\n`) followed by a newline to keep the tag separate from formatted command output (which often has header rows, columns, etc.).
 
 This means:
 - Slash commands are checked on the **raw message text** before `ParseAgentPrefix` runs
