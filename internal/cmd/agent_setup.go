@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 
 	"h2/internal/config"
+	"h2/internal/git"
 	"h2/internal/session"
 )
 
@@ -52,6 +53,15 @@ func setupAndForkAgent(name string, role *config.Role, detach bool) error {
 	agentCWD, err := role.ResolveRootDir(cwd)
 	if err != nil {
 		return fmt.Errorf("resolve root_dir: %w", err)
+	}
+
+	// Create git worktree if enabled.
+	if role.Worktree != nil && role.Worktree.Enabled {
+		worktreePath, err := git.CreateWorktree(name, agentCWD, role.Worktree)
+		if err != nil {
+			return fmt.Errorf("create worktree: %w", err)
+		}
+		agentCWD = worktreePath
 	}
 
 	sessionID := uuid.New().String()

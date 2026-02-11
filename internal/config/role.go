@@ -23,6 +23,26 @@ func (k *HeartbeatConfig) ParseIdleTimeout() (time.Duration, error) {
 	return time.ParseDuration(k.IdleTimeout)
 }
 
+// WorktreeConfig defines git worktree settings for an agent.
+type WorktreeConfig struct {
+	Enabled         bool   `yaml:"enabled"`
+	BranchFrom      string `yaml:"branch_from,omitempty"`       // default: "main"
+	UseDetachedHead bool   `yaml:"use_detached_head,omitempty"` // default: false
+}
+
+// GetBranchFrom returns the branch to base the worktree on, defaulting to "main".
+func (w *WorktreeConfig) GetBranchFrom() string {
+	if w.BranchFrom != "" {
+		return w.BranchFrom
+	}
+	return "main"
+}
+
+// WorktreesDir returns <h2-dir>/worktrees/.
+func WorktreesDir() string {
+	return filepath.Join(ConfigDir(), "worktrees")
+}
+
 // Role defines a named configuration bundle for an h2 agent.
 type Role struct {
 	Name            string           `yaml:"name"`
@@ -30,7 +50,8 @@ type Role struct {
 	AgentType       string           `yaml:"agent_type,omitempty"` // "claude" (default), future: other agent types
 	Model           string           `yaml:"model,omitempty"`
 	ClaudeConfigDir string           `yaml:"claude_config_dir,omitempty"`
-	RootDir         string           `yaml:"root_dir,omitempty"` // agent CWD (default ".")
+	RootDir         string           `yaml:"root_dir,omitempty"`  // agent CWD (default ".")
+	Worktree        *WorktreeConfig  `yaml:"worktree,omitempty"`  // git worktree settings
 	Instructions    string           `yaml:"instructions"`
 	Permissions     Permissions      `yaml:"permissions,omitempty"`
 	Heartbeat       *HeartbeatConfig `yaml:"heartbeat,omitempty"`
