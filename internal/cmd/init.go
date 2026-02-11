@@ -11,7 +11,7 @@ import (
 )
 
 const defaultConfigYAML = `# h2 configuration
-# See https://github.com/anthropics/h2 for documentation.
+# See https://github.com/dcosson/h2 for documentation.
 #
 # users:
 #   yourname:
