@@ -199,24 +199,37 @@ func LoadPodTemplate(name string) (*PodTemplate, error)
 func ListPodTemplates() ([]*PodTemplate, error)
 ```
 
-### 1.9 New: `internal/config/worktree.go`
+### 1.9 Config: worktree path helper
 
-Git worktree operations:
+The `WorktreesDir()` path helper stays in config (it's just path derivation):
 
 ```go
 // WorktreesDir returns <h2-dir>/worktrees/.
 func WorktreesDir() string
+```
+
+### 1.10 New: `internal/git/git.go`
+
+New package for git operations with side effects. This separates config (parsing/paths) from execution (running git commands).
+
+```go
+package git
+
+import "h2/internal/config"
 
 // CreateWorktree creates a git worktree for an agent.
 // Returns the absolute path to the new worktree.
-func CreateWorktree(agentName, repoDir string, cfg *WorktreeConfig) (string, error)
+func CreateWorktree(agentName, repoDir string, cfg *config.WorktreeConfig) (string, error)
 ```
 
 Implementation calls `git worktree add` with appropriate flags:
 - Default: `git worktree add -b <agent-name> <worktree-path> <branch_from>`
 - Detached: `git worktree add --detach <worktree-path> <branch_from>`
+- Reuse: if worktree path already exists with a valid `.git` file, skip creation and return the existing path.
 
-### 1.10 New: `internal/config/override.go`
+This package is also a natural home for the git diff stat logic currently used by `h2 status` (computing `GitFilesChanged`, `GitLinesAdded`, `GitLinesRemoved` in `AgentInfo`), and future operations like worktree pruning.
+
+### 1.11 New: `internal/config/override.go`
 
 Role override application:
 
@@ -260,6 +273,7 @@ graph TD
     cmd --> session
     cmd --> socketdir
     cmd --> version["version"]
+    cmd --> gitpkg["git"]
     session --> config
     session --> agent["session/agent"]
     session --> message["session/message"]
@@ -271,8 +285,10 @@ graph TD
     bridgeservice --> socketdir
     bridgeservice --> message
     socketdir --> config
+    gitpkg --> config
 
     style version fill:#90EE90
+    style gitpkg fill:#90EE90
     style socketdir fill:#FFD700
 
     classDef new fill:#90EE90
@@ -281,8 +297,10 @@ graph TD
 
 Key changes:
 - **New package**: `internal/version` (no imports, imported by `cmd`)
+- **New package**: `internal/git` (imports `config` for `WorktreeConfig` and `WorktreesDir()`)
 - **New import**: `socketdir` → `config` (to derive socket dir from resolved h2 dir)
-- **New files in config**: `pods.go`, `worktree.go`, `override.go`
+- **New import**: `cmd` → `git` (for worktree creation in agent setup)
+- **New files in config**: `pods.go`, `override.go` (worktree path helper stays in config)
 
 ### 2.3 New command registration
 
@@ -320,7 +338,7 @@ sequenceDiagram
     participant RunCmd as h2 run
     participant Config as config pkg
     participant Setup as setupAndForkAgent
-    participant Worktree as config.CreateWorktree
+    participant Worktree as git.CreateWorktree
     participant Fork as session.ForkDaemon
     participant Daemon as h2 _daemon
 
