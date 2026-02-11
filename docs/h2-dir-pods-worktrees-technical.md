@@ -23,7 +23,10 @@ Referenced by `h2 version` command and `h2 init` (writes to `.h2-dir.txt`).
 **Current** `ConfigDir()`:
 ```go
 func ConfigDir() string {
-    home, _ := os.UserHomeDir()
+    home, err := os.UserHomeDir()
+    if err != nil {
+        return filepath.Join(".", ".h2")
+    }
     return filepath.Join(home, ".h2")
 }
 ```
@@ -60,8 +63,7 @@ func WriteMarker(dir string) error
 **Current** `Dir()`:
 ```go
 func Dir() string {
-    home, _ := os.UserHomeDir()
-    return filepath.Join(home, ".h2", "sockets")
+    return filepath.Join(os.Getenv("HOME"), ".h2", "sockets")
 }
 ```
 
@@ -157,6 +159,7 @@ func PodRolesDir() string
 func PodTemplatesDir() string
 
 // LoadPodRole loads a role, checking pod roles first then global roles.
+// Only called when --pod is specified. Without --pod, use LoadRole() (global only).
 func LoadPodRole(name string) (*Role, error)
 
 // ListPodRoles returns roles from <h2-dir>/pods/roles/.
@@ -292,6 +295,8 @@ graph TD
 
 ## 3. Agent Startup Flow (after changes)
 
+Note: `setupAndForkAgent` is refactored to accept a `*Role` (after overrides are applied) instead of a role name string. Role loading and override application happen in the command handler before calling setup.
+
 ```mermaid
 sequenceDiagram
     participant User
@@ -345,7 +350,7 @@ sequenceDiagram
 
 ### Env vars passed to forked agents
 
-Currently `ForkDaemon` inherits the parent's environment via `os.Environ()` plus extras from `Session.ExtraEnv`. The changes add:
+Currently `ForkDaemon` does not explicitly set `cmd.Env`, so the child inherits the parent's full environment implicitly. After this change, `ForkDaemon` must explicitly build `cmd.Env` from `os.Environ()` plus additions (this is a change to the existing pattern). The additions are:
 
 1. `H2_POD=<pod-name>` -- if pod is specified
 2. `H2_DIR=<resolved-dir>` -- should be propagated so child `h2` commands resolve the same dir
@@ -459,13 +464,45 @@ func ResolveDir() (string, error) {
         return global, nil
     }
 
+    // 3a. Migration: auto-create marker for existing ~/.h2/ directories
+    if looksLikeH2Dir(global) {
+        WriteMarker(global)
+        return global, nil
+    }
+
     return "", fmt.Errorf("no h2 directory found; run 'h2 init' to create one")
+}
+```
+
+### Migration helper
+
+```go
+// looksLikeH2Dir returns true if dir exists and contains expected h2 subdirectories,
+// even without a .h2-dir.txt marker. Used for one-time migration of existing ~/.h2/.
+func looksLikeH2Dir(dir string) bool {
+    for _, sub := range []string{"roles", "sessions", "sockets"} {
+        if _, err := os.Stat(filepath.Join(dir, sub)); err != nil {
+            return false
+        }
+    }
+    return true
 }
 ```
 
 ### Caching
 
 `ResolveDir()` should cache its result for the process lifetime (using `sync.Once`). The h2 dir doesn't change mid-process.
+
+### Socket path length mitigation
+
+Unix domain sockets have a max path length of ~104 bytes on macOS (`sizeof(sockaddr_un.sun_path)`). With project-local h2 dirs, socket paths can exceed this.
+
+Mitigation in `socketdir.Dir()`:
+1. Compute the full socket dir path: `<h2-dir>/sockets/`
+2. If any potential socket path would exceed ~100 bytes, create a symlink from `/tmp/h2-<hash>/` (where hash is derived from the h2 dir path) pointing to the actual socket directory.
+3. Return the symlink path instead.
+
+This is transparent to all callers since they use `socketdir.Dir()` / `socketdir.Path()`.
 
 ---
 
@@ -489,6 +526,17 @@ The override mechanism maps dot-notation keys to struct fields via YAML tags:
 | `heartbeat.condition` | `Role.Heartbeat.Condition` | `string` |
 
 Nested structs (`Worktree`, `Heartbeat`) are auto-initialized if nil when an override targets them.
+
+### Non-overridable fields
+
+The following Role fields are excluded from the override mechanism:
+- `name` -- role identity, not meaningful to change at runtime
+- `instructions` -- too large for CLI; edit the YAML file instead
+- `permissions` -- structured (allow/deny lists, agent block); not expressible as key=value
+- `hooks` -- complex YAML node; not expressible as key=value
+- `settings` -- complex YAML node; not expressible as key=value
+
+`ApplyOverrides` returns an error if an override targets one of these fields.
 
 ### Type coercion rules
 
@@ -549,12 +597,19 @@ git -C <repo-dir> worktree add -b <agent-name> <h2-dir>/worktrees/<agent-name> <
 git -C <repo-dir> worktree add --detach <h2-dir>/worktrees/<agent-name> <branch-from>
 ```
 
+### Re-run behavior
+
+If an agent with the same name is launched again after a previous run:
+1. If the worktree directory already exists, **reuse it** — skip `git worktree add` and use the existing path as the agent's CWD.
+2. If the worktree directory exists but is corrupt (missing `.git` file), error with a message suggesting manual cleanup.
+
+This avoids requiring cleanup between agent restarts and lets agents pick up where they left off.
+
 ### Error conditions
 
 - `root_dir` does not exist → error
 - `root_dir` is not a git repo → error (check for `.git`)
-- Worktree path already exists → error (agent name collision; user must remove old worktree)
-- Branch name `<agent-name>` already exists (non-detached mode) → git error, surfaced to user
+- Worktree directory exists but is not a valid git worktree → error with cleanup instructions
 - `branch_from` ref doesn't exist → git error, surfaced to user
 
 ---

@@ -19,7 +19,6 @@ h2 version
 ### 1.2 Version is consistent with marker file
 
 ```bash
-h2 init /tmp/test-h2-version --global 2>/dev/null || true
 h2 init /tmp/test-h2-version
 cat /tmp/test-h2-version/.h2-dir.txt
 h2 version
@@ -128,7 +127,8 @@ h2 list
 ```bash
 h2 init /tmp/test-h2-outer
 h2 init /tmp/test-h2-outer/inner
-cd /tmp/test-h2-outer/inner/projects 2>/dev/null || (mkdir -p /tmp/test-h2-outer/inner/projects && cd /tmp/test-h2-outer/inner/projects)
+mkdir -p /tmp/test-h2-outer/inner/projects
+cd /tmp/test-h2-outer/inner/projects
 unset H2_DIR
 h2 list
 ```
@@ -300,6 +300,19 @@ H2_DIR=/tmp/test-h2-wt h2 run --role wt-agent --name wt-test --detach
 
 **Expected**: Error indicating worktree already exists.
 
+### 5.6 Worktree re-run reuses existing worktree
+
+```bash
+# Stop the agent from 5.2 but leave the worktree
+H2_DIR=/tmp/test-h2-wt h2 stop wt-test
+sleep 1
+
+# Re-launch with the same name
+H2_DIR=/tmp/test-h2-wt h2 run --role wt-agent --name wt-test --detach
+```
+
+**Expected**: Agent starts successfully, reusing the existing worktree at `/tmp/test-h2-wt/worktrees/wt-test/`. No error about worktree already existing.
+
 **Cleanup**: `H2_DIR=/tmp/test-h2-wt h2 stop wt-test; H2_DIR=/tmp/test-h2-wt h2 stop wt-detach; rm -rf /tmp/test-h2-wt`
 
 ---
@@ -355,7 +368,7 @@ h2 run --role default --override worktree.enabled=notabool --name test-type-err 
 
 ```bash
 h2 run --role default --override root_dir=/tmp --name test-meta --detach
-cat ~/.h2/sessions/test-meta/metadata.json | grep overrides
+cat ~/.h2/sessions/test-meta/session.metadata.json | grep overrides
 ```
 
 **Expected**: `overrides` field contains `{"root_dir": "/tmp"}`.
@@ -449,7 +462,7 @@ h2 run --role worker --pod "INVALID POD!" --name test-badpod --detach
 
 **Expected**: Error about invalid pod name (must match `[a-z0-9-]+`).
 
-**Cleanup**: `h2 stop builder tester ui-dev solo`
+**Cleanup**: `h2 stop builder; h2 stop tester; h2 stop ui-dev; h2 stop solo`
 
 ---
 
@@ -475,10 +488,11 @@ instructions: You are a GLOBAL worker (should be overridden).
 EOF
 
 h2 run --role pod-worker --pod test-pod --name test-pod-role --detach
-# Check which instructions were used (via session dir or status)
+# Verify by checking the session metadata for the role path used
+cat ~/.h2/sessions/test-pod-role/session.metadata.json | grep role
 ```
 
-**Expected**: The pod-scoped role (`pods/roles/pod-worker.yaml`) is used, not the global one.
+**Expected**: The session metadata shows `pod-worker` as the role, and the CLAUDE.md or instructions in the session dir match the pod-scoped version ("pod-specific worker", not "GLOBAL worker").
 
 ### 8.3 `h2 role list` shows both scopes
 
@@ -626,18 +640,31 @@ cat /tmp/test-h2-full/.h2-dir.txt  # same version
 
 ## 11. Backward Compatibility
 
-### 11.1 Existing ~/.h2 without marker file
+### 11.1 Existing ~/.h2 without marker file (migration)
 
 ```bash
-# Simulate pre-init ~/.h2
-mkdir -p /tmp/test-h2-compat
-# No .h2-dir.txt
+# Simulate a pre-existing ~/.h2 without marker
+mkdir -p /tmp/test-h2-compat/roles /tmp/test-h2-compat/sessions /tmp/test-h2-compat/sockets
+# No .h2-dir.txt — simulates an existing installation
 
-cd /tmp/test-h2-compat
+H2_DIR=/tmp/test-h2-compat h2 list
+ls /tmp/test-h2-compat/.h2-dir.txt
+```
+
+**Expected**: Auto-migration kicks in — `.h2-dir.txt` is created automatically because the directory has the expected subdirectories (roles/, sessions/, sockets/). `h2 list` succeeds. Subsequent runs use the marker normally.
+
+### 11.1b Random directory without h2 structure
+
+```bash
+mkdir -p /tmp/test-h2-random
+cd /tmp/test-h2-random
+unset H2_DIR
 h2 list
 ```
 
-**Expected**: Falls through walk-up (no marker found), falls back to `~/.h2` if that has a marker, or gives a clear error. Does NOT treat an unmarked directory as an h2 dir.
+**Expected**: Does NOT treat `/tmp/test-h2-random` as an h2 dir (no marker, no expected subdirectories). Falls back to `~/.h2` or errors.
+
+**Cleanup**: `rm -rf /tmp/test-h2-compat /tmp/test-h2-random`
 
 ### 11.2 Roles without new fields still work
 

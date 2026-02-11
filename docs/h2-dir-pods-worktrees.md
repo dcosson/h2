@@ -26,6 +26,10 @@ Add a version constant and `h2 version` command.
 2. **Walk up from CWD** -- starting at the current working directory, walk up parent directories looking for a `.h2-dir.txt` file. If found, that directory is the h2 root.
 3. **Fall back to `~/.h2/`** -- the global default (only if it contains `.h2-dir.txt`, i.e. has been initialized).
 
+### Migration for existing users
+
+Existing `~/.h2/` directories won't have `.h2-dir.txt`. To avoid breaking upgrades, the fallback step (3) should auto-create the marker file if `~/.h2/` exists and contains expected subdirectories (`roles/`, `sessions/`, `sockets/`). This is a one-time graceful migration -- subsequent runs use the marker normally.
+
 ### Marker file: `.h2-dir.txt`
 
 A plain text file placed at the root of every h2 directory. Contents:
@@ -43,6 +47,10 @@ Just the version string that created it. This serves two purposes:
 - Every function currently calling `ConfigDir()` automatically picks up the new resolution logic.
 - `socketdir.Dir()` currently hardcodes `~/.h2/sockets/` -- it should also derive from the resolved h2 dir.
 - Project-local h2 dirs mean multiple projects can have independent roles, configs, and sessions.
+
+### Socket path length
+
+Unix domain sockets have a max path length of ~104 bytes on macOS. With project-local h2 dirs, paths like `<h2-dir>/sockets/agent.<name>.sock` can exceed this for deeply nested directories. Mitigation: if the computed socket path exceeds the limit, create a symlink from a short path (e.g. `/tmp/h2-<hash>/`) to the actual socket directory.
 
 ---
 
@@ -111,8 +119,9 @@ instructions: |
   You build features.
 ```
 
-- **Default `"."`**: interpreted as the CWD of the `h2 run` invocation. This preserves current behavior -- agents start wherever you run the command.
-- Can be set to an absolute path or a path relative to the h2 dir (e.g. `projects/my-app`).
+- **Default `"."`**: interpreted as the CWD of the `h2 run` invocation. This preserves current behavior -- agents start wherever you run the command. Note: `"."` is special -- it's the only value resolved against invocation CWD rather than the h2 dir.
+- Any other relative path (e.g. `projects/my-app`) is resolved against the h2 dir. This makes role configs portable -- they reference stable project paths within the h2 directory structure.
+- Absolute paths are used as-is.
 - This is also the git repo that worktrees are created from (see section 5).
 
 ---
@@ -156,6 +165,13 @@ worktree:
   - `true`: creates the worktree with `--detach` on `branch_from`, letting the agent decide what branch to create.
 - On agent stop/cleanup: the worktree is left in place (not auto-removed). Could add a `h2 worktree prune` command later.
 
+### Worktree re-run behavior:
+
+If an agent with the same name is launched again after being stopped:
+- If the worktree directory already exists, reuse it (don't create a new one). The agent picks up where the previous instance left off.
+- If the worktree exists but the branch was deleted, error with a message suggesting cleanup.
+- This avoids the need for manual cleanup between runs and makes agent restarts natural.
+
 ---
 
 ## 6. `h2 run --override`
@@ -184,6 +200,16 @@ h2 run --role default --override worktree.branch_from=develop --override worktre
 - Values are parsed as strings and coerced to the target field's type (bool, int, string).
 - Invalid keys or type mismatches produce an error.
 - Overrides are recorded in the session metadata so it's clear what was changed.
+- Only applies to role-based launches. `--command` mode has no role to override.
+
+### Non-overridable fields:
+
+The following fields are not overridable because they define the role's identity or require structured input that doesn't fit a key=value syntax:
+- `name` -- the role's identity
+- `instructions` -- too long for CLI, edit the YAML instead
+- `permissions` -- structured (allow/deny lists, agent block)
+- `hooks` -- complex YAML structure
+- `settings` -- complex YAML structure
 
 ---
 
@@ -248,11 +274,13 @@ Pods are named groups of agents that work together. They enable scoping visibili
 
 Pod roles live in `<h2-dir>/pods/roles/` and use the same format as global roles.
 
-**Role resolution order** (when launching within a pod context):
+**Role resolution order** (only when `--pod` is specified):
 1. `<h2-dir>/pods/roles/<name>.yaml` (pod-scoped)
 2. `<h2-dir>/roles/<name>.yaml` (global)
 
-This lets pods override or specialize roles without affecting global definitions.
+Without `--pod`, only global roles (`<h2-dir>/roles/`) are checked. Pod role resolution only kicks in when launching in a pod context.
+
+This lets pods override or specialize roles without affecting global definitions or non-pod launches.
 
 ### 7.7 Pod templates
 
@@ -307,7 +335,16 @@ h2 pod list                  # list pod templates
 
 ---
 
-## 8. Implementation Order
+## 8. Known Limitations (v1)
+
+- **No cross-h2-dir visibility**: Agents in different h2 dirs are invisible to each other. `h2 list` only shows agents in the resolved h2 dir. A future `h2 list --all` could query all known h2 dirs.
+- **No per-agent overrides in pod templates**: Pod templates specify `name` and `role` per agent. To customize individual agents beyond their role, launch them separately with `--override`.
+- **`--command` mode is unaffected by new features**: `root_dir`, `worktree`, and `--override` only apply to role-based launches. `--command` mode continues to work as today.
+- **Worktree cleanup is manual**: Stopped agents leave their worktrees in place. A future `h2 worktree prune` command could clean up worktrees for stopped agents.
+
+---
+
+## 9. Implementation Order
 
 Suggested sequencing (each step is independently useful):
 
