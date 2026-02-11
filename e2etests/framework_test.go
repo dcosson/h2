@@ -98,6 +98,39 @@ func runH2(t *testing.T, h2Dir string, args ...string) H2Result {
 	}
 }
 
+// runH2WithEnv executes h2 with additional environment variables.
+// extraEnv entries are in "KEY=VALUE" format and override os.Environ().
+func runH2WithEnv(t *testing.T, h2Dir string, extraEnv []string, args ...string) H2Result {
+	t.Helper()
+
+	cmd := exec.Command(h2Binary, args...)
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	cmd.Env = append(os.Environ(), "H2_DIR=")
+	if h2Dir != "" {
+		cmd.Env = append(cmd.Env, "H2_DIR="+h2Dir)
+	}
+	cmd.Env = append(cmd.Env, extraEnv...)
+
+	err := cmd.Run()
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			t.Fatalf("h2 command failed to execute: %v", err)
+		}
+	}
+
+	return H2Result{
+		Stdout:   stdout.String(),
+		Stderr:   stderr.String(),
+		ExitCode: exitCode,
+	}
+}
+
 // createRole writes a role YAML file into the h2 dir's roles/ directory.
 func createRole(t *testing.T, h2Dir, name, content string) {
 	t.Helper()
