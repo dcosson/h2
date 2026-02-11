@@ -291,14 +291,22 @@ H2_DIR=/tmp/test-h2-wt h2 run --role wt-nogit --name wt-fail --detach
 
 **Expected**: Error indicating `root_dir` is not a git repository.
 
-### 5.5 Worktree error: name collision
+### 5.5 Worktree error: name collision (agent stopped)
 
 ```bash
-# wt-test worktree already exists from 5.2
+# Stop the agent from 5.2, then try to re-run with a conflicting branch
+H2_DIR=/tmp/test-h2-wt h2 stop wt-test
+sleep 1
+
+# Delete the worktree dir but leave the branch, then create a new worktree dir manually
+# to simulate a corrupt state
+rm -rf /tmp/test-h2-wt/worktrees/wt-test
+mkdir /tmp/test-h2-wt/worktrees/wt-test  # empty dir, no .git file
+
 H2_DIR=/tmp/test-h2-wt h2 run --role wt-agent --name wt-test --detach
 ```
 
-**Expected**: Error indicating worktree already exists.
+**Expected**: Error indicating the worktree directory exists but is not a valid git worktree, with cleanup instructions.
 
 ### 5.6 Worktree re-run reuses existing worktree
 
@@ -642,16 +650,27 @@ cat /tmp/test-h2-full/.h2-dir.txt  # same version
 
 ### 11.1 Existing ~/.h2 without marker file (migration)
 
+Migration only applies to the `~/.h2` fallback path (step 3a of ResolveDir), not to `H2_DIR` or walk-up resolution.
+
 ```bash
+# Backup existing ~/.h2
+mv ~/.h2 ~/.h2.bak 2>/dev/null || true
+
 # Simulate a pre-existing ~/.h2 without marker
-mkdir -p /tmp/test-h2-compat/roles /tmp/test-h2-compat/sessions /tmp/test-h2-compat/sockets
+mkdir -p ~/.h2/roles ~/.h2/sessions ~/.h2/sockets
 # No .h2-dir.txt — simulates an existing installation
 
-H2_DIR=/tmp/test-h2-compat h2 list
-ls /tmp/test-h2-compat/.h2-dir.txt
+cd /tmp  # ensure walk-up doesn't find an h2 dir
+unset H2_DIR
+h2 list
+ls ~/.h2/.h2-dir.txt
+
+# Restore
+rm -rf ~/.h2
+mv ~/.h2.bak ~/.h2 2>/dev/null || true
 ```
 
-**Expected**: Auto-migration kicks in — `.h2-dir.txt` is created automatically because the directory has the expected subdirectories (roles/, sessions/, sockets/). `h2 list` succeeds. Subsequent runs use the marker normally.
+**Expected**: Auto-migration kicks in — `.h2-dir.txt` is created automatically because `~/.h2` has the expected subdirectories (roles/, sessions/, sockets/). `h2 list` succeeds. Subsequent runs use the marker normally.
 
 ### 11.1b Random directory without h2 structure
 

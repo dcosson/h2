@@ -131,7 +131,7 @@ func ForkDaemon(name, sessionID, command string, args []string,
 ```
 
 The `cwd` is set via `cmd.Dir = cwd` on the exec.Command before starting.
-The `pod` is added to the child's environment: `cmd.Env = append(cmd.Env, "H2_POD="+pod)`.
+Environment is built explicitly: `cmd.Env = append(os.Environ(), "H2_POD="+pod, "H2_DIR="+resolvedDir)`. Note: once `cmd.Env` is set, Go no longer inherits the parent env implicitly, so `os.Environ()` must be included as the base.
 
 ### 1.7 Modified: `internal/session/message/protocol.go` — AgentInfo
 
