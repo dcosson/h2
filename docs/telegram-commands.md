@@ -10,16 +10,16 @@ This is fundamentally shell access scoped to a whitelist, not agent interaction.
 
 ```
 User sends in Telegram:     /h2 list
-Bot replies:                 NAME        STATE    POD
+Bot replies:                 [h2 result] NAME        STATE    POD
                              concierge   active
                              coder-1     idle     dev
 
 User sends:                  /bd list
-Bot replies:                 h2-abc  open  Fix login bug
+Bot replies:                 [bd result] h2-abc  open  Fix login bug
                              h2-def  open  Add caching
 
 User sends:                  /h2 badcommand
-Bot replies:                 ERROR (exit 1):
+Bot replies:                 [h2 result] ERROR (exit 1):
                              Error: unknown command "badcommand" for "h2"
 
 User sends:                  /notwhitelisted foo
@@ -181,8 +181,7 @@ func (t *Telegram) poll(ctx context.Context, handler bridge.InboundHandler) {
         cmd, args := bridge.ParseSlashCommand(u.Message.Text, t.AllowedCommands)
         if cmd != "" {
             log.Printf("bridge: telegram: executing command /%s %s", cmd, args)
-            result := bridge.ExecCommand(cmd, args)
-            t.Send(ctx, result)
+            go t.execAndReply(ctx, cmd, args)
             continue
         }
 
@@ -193,11 +192,23 @@ func (t *Telegram) poll(ctx context.Context, handler bridge.InboundHandler) {
         handler(agent, body)
     }
 }
+
+func (t *Telegram) execAndReply(ctx context.Context, cmd, args string) {
+    result := bridge.ExecCommand(cmd, args)
+    tagged := fmt.Sprintf("[%s result] %s", cmd, result)
+    if err := t.Send(ctx, tagged); err != nil {
+        log.Printf("bridge: telegram: send command result: %v", err)
+    }
+}
 ```
+
+Commands run in a goroutine so they don't block the poll loop. The result is prefixed with `[command result]` (e.g., `[h2 result]`, `[bd result]`) to distinguish command output from agent messages.
 
 This means:
 - Slash commands are checked on the **raw message text** before `ParseAgentPrefix` runs
-- The reply goes back to the originating bridge only (Telegram sends to Telegram) — this naturally solves the reply-broadcast issue from the reviewer feedback
+- Command execution is **async** — the poll loop continues processing messages immediately
+- The reply goes back to the originating bridge only (Telegram sends to Telegram) — naturally solves the reply-broadcast issue
+- Results are tagged with `[cmd result]` so the user knows what output belongs to
 - The bridge service's `handleInbound` is untouched
 - Future bridges (Slack, Discord) can independently decide whether to support commands
 
@@ -245,10 +256,6 @@ func FromConfig(cfg *config.BridgesConfig) []bridge.Bridge {
 - **Output size**: Truncated to fit Telegram's message limit.
 - **No stdin**: Commands get no stdin (nil).
 - **Working directory**: Commands run in the h2 dir (from `ConfigDir()`), same environment as the bridge daemon. This means `h2` subcommands will resolve the h2 dir correctly. Commands that are project-dir-sensitive (e.g. git) would operate in the h2 dir, not a project root — acceptable for the intended `h2`/`bd` use case.
-
-### Known Limitations (v1)
-
-- **Sequential command execution blocks polling**: `ExecCommand` runs synchronously in `poll()`. While a command executes (up to 30s timeout), no new messages are processed. Acceptable for v1 since `h2` and `bd` commands are fast (<1s). If long-running commands are added later, move execution to a goroutine.
 
 ### 8. Output Truncation
 
