@@ -232,6 +232,12 @@ func ForkDaemon(name, sessionID, command string, args []string, roleName, sessio
 
 	cmd := exec.Command(exe, daemonArgs...)
 	cmd.SysProcAttr = NewSysProcAttr()
+
+	// Propagate H2_DIR so the child process resolves the same h2 directory.
+	if h2Dir, err := config.ResolveDir(); err == nil {
+		cmd.Env = append(os.Environ(), "H2_DIR="+h2Dir)
+	}
+
 	cmd.Stdin = nil
 	cmd.Stdout = nil
 	cmd.Stderr = nil

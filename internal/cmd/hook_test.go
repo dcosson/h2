@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"h2/internal/config"
 	"h2/internal/session/message"
 	"h2/internal/socketdir"
 )
@@ -83,10 +84,24 @@ func shortHookTempDir(t *testing.T) string {
 // starts a mock agent socket. Returns the mock agent. Sets HOME to tmpDir.
 func setupMockAgent(t *testing.T, tmpDir, agentName string) *mockHookAgent {
 	t.Helper()
-	h2Dir := filepath.Join(tmpDir, ".h2", "sockets")
-	os.MkdirAll(h2Dir, 0o755)
-	sockPath := filepath.Join(h2Dir, socketdir.Format(socketdir.TypeAgent, agentName))
+
+	// Reset caches so socketdir.Dir() and config.ConfigDir() pick up the new HOME.
+	config.ResetResolveCache()
+	socketdir.ResetDirCache()
+	t.Cleanup(func() {
+		config.ResetResolveCache()
+		socketdir.ResetDirCache()
+	})
+
+	h2Root := filepath.Join(tmpDir, ".h2")
+	sockDir := filepath.Join(h2Root, "sockets")
+	os.MkdirAll(sockDir, 0o755)
+	// Write marker file so ResolveDir finds this as a valid h2 dir.
+	config.WriteMarker(h2Root)
+
+	sockPath := filepath.Join(sockDir, socketdir.Format(socketdir.TypeAgent, agentName))
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("H2_DIR", "")
 	return newMockHookAgent(t, sockPath)
 }
 

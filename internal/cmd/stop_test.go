@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"h2/internal/config"
 	"h2/internal/session/message"
 	"h2/internal/socketdir"
 )
@@ -20,10 +21,20 @@ func TestStopCmd_RequiresArg(t *testing.T) {
 }
 
 func TestStopCmd_NoSocket(t *testing.T) {
+	config.ResetResolveCache()
+	socketdir.ResetDirCache()
+	t.Cleanup(func() {
+		config.ResetResolveCache()
+		socketdir.ResetDirCache()
+	})
+
 	// Point socket dir at an empty temp dir so Find fails.
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
-	os.MkdirAll(filepath.Join(tmpDir, ".h2", "sockets"), 0o700)
+	t.Setenv("H2_DIR", "")
+	h2Root := filepath.Join(tmpDir, ".h2")
+	os.MkdirAll(filepath.Join(h2Root, "sockets"), 0o700)
+	config.WriteMarker(h2Root)
 
 	cmd := newStopCmd()
 	cmd.SetArgs([]string{"nonexistent"})
@@ -34,6 +45,13 @@ func TestStopCmd_NoSocket(t *testing.T) {
 }
 
 func TestStopCmd_SendsStopRequest(t *testing.T) {
+	config.ResetResolveCache()
+	socketdir.ResetDirCache()
+	t.Cleanup(func() {
+		config.ResetResolveCache()
+		socketdir.ResetDirCache()
+	})
+
 	// Use a short path to stay under macOS's ~104 byte socket path limit.
 	tmpDir, err := os.MkdirTemp("/tmp", "h2t-stop")
 	if err != nil {
@@ -41,14 +59,13 @@ func TestStopCmd_SendsStopRequest(t *testing.T) {
 	}
 	t.Cleanup(func() { os.RemoveAll(tmpDir) })
 
-	sockDir := filepath.Join(tmpDir, "s")
-	os.MkdirAll(sockDir, 0o700)
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("H2_DIR", "")
 
-	// Symlink ~/.h2/sockets -> our short sockDir so socketdir.Find works.
-	h2Dir := filepath.Join(tmpDir, ".h2", "sockets")
-	os.MkdirAll(filepath.Dir(h2Dir), 0o700)
-	os.Symlink(sockDir, h2Dir)
+	h2Root := filepath.Join(tmpDir, ".h2")
+	sockDir := filepath.Join(h2Root, "sockets")
+	os.MkdirAll(sockDir, 0o700)
+	config.WriteMarker(h2Root)
 
 	// Create a mock socket that handles the stop request.
 	sockPath := filepath.Join(sockDir, socketdir.Format(socketdir.TypeAgent, "a"))

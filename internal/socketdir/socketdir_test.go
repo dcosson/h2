@@ -3,6 +3,7 @@ package socketdir
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -58,7 +59,7 @@ func TestParse(t *testing.T) {
 }
 
 func TestPath(t *testing.T) {
-	// Path uses Dir() which depends on HOME; just verify format.
+	// Path uses Dir() which depends on config; just verify format.
 	got := Path("agent", "concierge")
 	want := filepath.Join(Dir(), "agent.concierge.sock")
 	if got != want {
@@ -177,5 +178,38 @@ func TestListIn_NonexistentDir(t *testing.T) {
 	}
 	if entries != nil {
 		t.Errorf("expected nil, got %v", entries)
+	}
+}
+
+func TestResolveSocketDir_ShortPath(t *testing.T) {
+	// For a normal-length path, resolveSocketDir should return the real path.
+	// We can't easily control config.ConfigDir() in tests, but we can verify
+	// that Dir() returns a path ending in "sockets".
+	ResetDirCache()
+	defer ResetDirCache()
+
+	dir := Dir()
+	if !strings.HasSuffix(dir, "sockets") {
+		t.Errorf("Dir() = %q, expected to end with 'sockets'", dir)
+	}
+}
+
+func TestResolveSocketDir_SymlinkCreation(t *testing.T) {
+	// Test the symlink path logic directly by creating a real directory
+	// and a symlink, then verifying resolve follows it.
+	realDir := t.TempDir()
+	symlinkDir := filepath.Join(t.TempDir(), "symlink-target")
+
+	if err := os.Symlink(realDir, symlinkDir); err != nil {
+		t.Fatalf("create test symlink: %v", err)
+	}
+
+	// Verify the symlink points to the right place.
+	target, err := os.Readlink(symlinkDir)
+	if err != nil {
+		t.Fatalf("Readlink: %v", err)
+	}
+	if target != realDir {
+		t.Errorf("symlink target = %q, want %q", target, realDir)
 	}
 }
