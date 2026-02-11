@@ -332,7 +332,8 @@ func gitRun(t *testing.T, dir string, args ...string) {
 
 // sessionMetadata is a minimal struct for reading session metadata JSON.
 type sessionMetadata struct {
-	CWD string `json:"cwd"`
+	CWD       string            `json:"cwd"`
+	Overrides map[string]string `json:"overrides,omitempty"`
 }
 
 // readSessionMetadata reads and parses session.metadata.json for the given agent.
