@@ -1,0 +1,4 @@
+name: static
+description: "A plain static role with no templates"
+instructions: |
+  You are a static agent. No template expressions here.

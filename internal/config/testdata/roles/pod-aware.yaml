@@ -1,0 +1,5 @@
+name: pod-aware
+instructions: |
+  You are {{ .AgentName }}.
+  Index: {{ .Index }}, Count: {{ .Count }}.
+  {{ if .PodName }}You are in pod {{ .PodName }}.{{ else }}Not in a pod.{{ end }}

@@ -1,0 +1,9 @@
+name: parameterized
+variables:
+  team:
+    description: "Team name"
+  env:
+    description: "Environment"
+    default: "dev"
+instructions: |
+  You are {{ .AgentName }} on team {{ .Var.team }} in {{ .Var.env }}.
