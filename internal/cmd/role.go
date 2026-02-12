@@ -131,8 +131,7 @@ func newRoleInitCmd() *cobra.Command {
 				return fmt.Errorf("role %q already exists at %s", name, path)
 			}
 
-			claudeConfigDir := config.DefaultClaudeConfigDir()
-			template := roleTemplate(name, claudeConfigDir)
+			template := roleTemplate(name)
 
 			if err := os.WriteFile(path, []byte(template), 0o644); err != nil {
 				return fmt.Errorf("write role file: %w", err)
@@ -146,18 +145,18 @@ func newRoleInitCmd() *cobra.Command {
 
 // roleTemplate returns the YAML template for a role, with special templates
 // for well-known role names (e.g. "concierge").
-func roleTemplate(name, claudeConfigDir string) string {
+func roleTemplate(name string) string {
 	switch name {
 	case "concierge":
-		return conciergeRoleTemplate(name, claudeConfigDir)
+		return conciergeRoleTemplate()
 	default:
-		return defaultRoleTemplate(name, claudeConfigDir)
+		return defaultRoleTemplate()
 	}
 }
 
-func defaultRoleTemplate(name, claudeConfigDir string) string {
-	return fmt.Sprintf(`name: %s
-description: "A %s agent for h2"
+func defaultRoleTemplate() string {
+	return `name: {{ .RoleName }}
+description: "A {{ .RoleName }} agent for h2"
 
 # Agent type (currently only "claude" is supported)
 agent_type: claude
@@ -168,10 +167,10 @@ model: opus
 # Claude config directory (for custom settings files, hooks, or auth)
 # You can create separate configs for roles with different requirements.
 # Set to ~/ to use the system default (no override).
-claude_config_dir: %s
+claude_config_dir: {{ .H2Dir }}/claude-config/default
 
 instructions: |
-  You are a %s agent running in h2, a terminal multiplexer with inter-agent messaging.
+  You are a {{ .RoleName }} agent running in h2, a terminal multiplexer with inter-agent messaging.
 
   ## h2 Messaging Protocol
 
@@ -189,7 +188,7 @@ instructions: |
   You should reply:
     h2 send orchestrator "Checking test coverage now"
     # ... do the work ...
-    h2 send orchestrator "Test coverage is 85%%. Details: ..."
+    h2 send orchestrator "Test coverage is 85%. Details: ..."
 
   ## Available h2 Commands
 
@@ -215,7 +214,7 @@ permissions:
   # AI permission reviewer - delegates permission decisions to haiku agent
   agent:
     instructions: |
-      You are reviewing permission requests for the %s agent in h2.
+      You are reviewing permission requests for the {{ .RoleName }} agent in h2.
 
       h2 is an agent-to-agent and agent-to-user communication protocol.
       Agents use it to coordinate work and respond to user requests.
@@ -239,11 +238,11 @@ permissions:
       Remember: h2 messages are part of normal agent operation - allow them
       unless they contain credentials or other sensitive data. Normal file cleanup
       like "rm -rf node_modules" or "rm -rf logs/" is fine.
-`, name, name, claudeConfigDir, name, name)
+`
 }
 
-func conciergeRoleTemplate(name, claudeConfigDir string) string {
-	return fmt.Sprintf(`name: %s
+func conciergeRoleTemplate() string {
+	return `name: {{ .RoleName }}
 description: "The concierge agent — your primary interface in h2"
 
 # Agent type (currently only "claude" is supported)
@@ -255,7 +254,7 @@ model: opus
 # Claude config directory (for custom settings files, hooks, or auth)
 # You can create separate configs for roles with different requirements.
 # Set to ~/ to use the system default (no override).
-claude_config_dir: %s
+claude_config_dir: {{ .H2Dir }}/claude-config/default
 
 instructions: |
   You are the concierge — the primary agent the user interacts with in h2.
@@ -297,7 +296,7 @@ instructions: |
   You should reply:
     h2 send dcosson "Checking test coverage now"
     # ... do the work ...
-    h2 send dcosson "Test coverage is 85%%. Details: ..."
+    h2 send dcosson "Test coverage is 85%. Details: ..."
 
   ## Coordinating with Other Agents
 
@@ -330,7 +329,7 @@ permissions:
   # AI permission reviewer - delegates permission decisions to haiku agent
   agent:
     instructions: |
-      You are reviewing permission requests for the %s (concierge) agent in h2.
+      You are reviewing permission requests for the {{ .RoleName }} (concierge) agent in h2.
 
       The concierge is the user's primary agent. It handles direct work (coding,
       debugging, file editing) and coordinates with other agents via h2 messaging.
@@ -354,7 +353,7 @@ permissions:
       Remember: h2 messages are part of normal agent operation - allow them
       unless they contain credentials or other sensitive data. Normal file cleanup
       like "rm -rf node_modules" or "rm -rf logs/" is fine.
-`, name, claudeConfigDir, name)
+`
 }
 
 func newRoleCheckCmd() *cobra.Command {
