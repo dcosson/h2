@@ -24,7 +24,14 @@ type Service struct {
 	user       string // "from" field for inbound messages
 	lastSender string // tracks last agent who sent outbound
 	cancel     context.CancelFunc
-	mu         sync.Mutex
+
+	// Status tracking.
+	startTime        time.Time
+	lastActivityTime time.Time
+	messagesSent     int64
+	messagesReceived int64
+
+	mu sync.Mutex
 }
 
 // New creates a bridge service.
@@ -34,6 +41,7 @@ func New(bridges []bridge.Bridge, concierge, socketDir, user string) *Service {
 		concierge: concierge,
 		socketDir: socketDir,
 		user:      user,
+		startTime: time.Now(),
 	}
 }
 
@@ -122,12 +130,17 @@ func (s *Service) handleConn(conn net.Conn) {
 	case "send":
 		s.handleOutbound(req.From, req.Body)
 		message.SendResponse(conn, &message.Response{OK: true})
+	case "status":
+		message.SendResponse(conn, &message.Response{
+			OK:     true,
+			Bridge: s.buildBridgeInfo(),
+		})
 	case "stop":
 		message.SendResponse(conn, &message.Response{OK: true})
 		s.cancel()
 	default:
 		message.SendResponse(conn, &message.Response{
-			Error: "bridge only handles 'send' and 'stop' requests",
+			Error: "bridge only handles 'send', 'status', and 'stop' requests",
 		})
 	}
 }
@@ -135,6 +148,10 @@ func (s *Service) handleConn(conn net.Conn) {
 // handleInbound routes a message from an external platform to an agent.
 func (s *Service) handleInbound(targetAgent, body string) {
 	log.Printf("bridge: inbound message (target=%q, body=%q)", targetAgent, body)
+	s.mu.Lock()
+	s.messagesReceived++
+	s.lastActivityTime = time.Now()
+	s.mu.Unlock()
 	target := targetAgent
 	if target == "" {
 		target = s.resolveDefaultTarget()
@@ -169,6 +186,8 @@ func (s *Service) replyError(msg string) {
 func (s *Service) handleOutbound(from, body string) {
 	s.mu.Lock()
 	s.lastSender = from
+	s.messagesSent++
+	s.lastActivityTime = time.Now()
 	s.mu.Unlock()
 
 	// Tag messages from non-concierge agents so reply routing works.
@@ -273,6 +292,36 @@ func (s *Service) queryAgentState(name string) (string, error) {
 		return "", fmt.Errorf("bad status response")
 	}
 	return resp.Agent.State, nil
+}
+
+// buildBridgeInfo constructs a BridgeInfo snapshot for status responses.
+func (s *Service) buildBridgeInfo() *message.BridgeInfo {
+	s.mu.Lock()
+	sent := s.messagesSent
+	received := s.messagesReceived
+	lastActivity := s.lastActivityTime
+	s.mu.Unlock()
+
+	var channels []string
+	for _, b := range s.bridges {
+		channels = append(channels, b.Name())
+	}
+
+	uptime := time.Since(s.startTime).Round(time.Second).String()
+
+	var lastActivityStr string
+	if !lastActivity.IsZero() {
+		lastActivityStr = time.Since(lastActivity).Round(time.Second).String()
+	}
+
+	return &message.BridgeInfo{
+		Name:             s.user,
+		Channels:         channels,
+		Uptime:           uptime,
+		MessagesSent:     sent,
+		MessagesReceived: received,
+		LastActivity:     lastActivityStr,
+	}
 }
 
 // resolveDefaultTarget returns the agent to route un-addressed inbound messages to.

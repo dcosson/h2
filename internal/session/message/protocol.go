@@ -36,6 +36,17 @@ type Response struct {
 	MessageID string       `json:"message_id,omitempty"`
 	Message   *MessageInfo `json:"message,omitempty"`
 	Agent     *AgentInfo   `json:"agent,omitempty"`
+	Bridge    *BridgeInfo  `json:"bridge,omitempty"`
+}
+
+// BridgeInfo is the public representation of bridge status.
+type BridgeInfo struct {
+	Name             string   `json:"name"`
+	Channels         []string `json:"channels"`
+	Uptime           string   `json:"uptime"`
+	MessagesSent     int64    `json:"messages_sent"`
+	MessagesReceived int64    `json:"messages_received"`
+	LastActivity     string   `json:"last_activity,omitempty"` // duration since last message, empty if none
 }
 
 // MessageInfo is the public representation of a message in responses.

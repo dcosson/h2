@@ -74,7 +74,7 @@ func newLsCmd() *cobra.Command {
 			if len(bridges) > 0 {
 				fmt.Printf("\n%s\n", s.Bold("Bridges"))
 				for _, e := range bridges {
-					fmt.Printf("  %s %s\n", s.GreenDot(), e.Name)
+					printBridgeEntry(e)
 				}
 			}
 
@@ -204,7 +204,13 @@ func printAgentLine(info *message.AgentInfo) {
 		symbol = s.GreenDot()
 		colorFn = s.Green
 	case "idle":
-		symbol = s.YellowDot()
+		// Keep green dot for recently-idle agents (< 2min) to reduce visual noise.
+		idleDur, _ := time.ParseDuration(info.StateDuration)
+		if idleDur > 0 && idleDur < 2*time.Minute {
+			symbol = s.GreenDot()
+		} else {
+			symbol = s.YellowDot()
+		}
 		colorFn = s.Yellow
 	case "exited":
 		symbol = s.RedDot()
@@ -341,7 +347,8 @@ func listAll() error {
 		if len(bridges) > 0 {
 			fmt.Printf("  %s\n", s.Bold("Bridges"))
 			for _, e := range bridges {
-				fmt.Printf("    %s %s\n", s.GreenDot(), e.Name)
+				fmt.Print("  ")
+				printBridgeEntry(e)
 			}
 		}
 	}
@@ -416,6 +423,57 @@ func agentConnError(name string, err error) error {
 		names[i] = a.Name
 	}
 	return fmt.Errorf("cannot connect to agent %q\n\nAvailable agents: %s", name, strings.Join(names, ", "))
+}
+
+// printBridgeEntry queries a bridge socket for status and prints a rich line,
+// falling back to a simple name-only line if the bridge doesn't respond.
+func printBridgeEntry(e socketdir.Entry) {
+	info := queryBridge(e.Path)
+	if info != nil {
+		printBridgeLine(info)
+	} else {
+		fmt.Printf("  %s %s\n", s.GreenDot(), e.Name)
+	}
+}
+
+func printBridgeLine(info *message.BridgeInfo) {
+	channels := ""
+	if len(info.Channels) > 0 {
+		channels = " " + s.Dim("("+strings.Join(info.Channels, ", ")+")")
+	}
+
+	activity := ""
+	if info.LastActivity != "" {
+		activity = fmt.Sprintf(", last msg %s ago", info.LastActivity)
+	}
+
+	msgs := ""
+	total := info.MessagesSent + info.MessagesReceived
+	if total > 0 {
+		msgs = fmt.Sprintf(", %d msgs", total)
+	}
+
+	fmt.Printf("  %s %s%s — up %s%s%s\n",
+		s.GreenDot(), info.Name, channels, info.Uptime, activity, msgs)
+}
+
+// queryBridge connects to a bridge socket and queries its status.
+func queryBridge(sockPath string) *message.BridgeInfo {
+	conn, err := net.DialTimeout("unix", sockPath, 2*time.Second)
+	if err != nil {
+		return nil
+	}
+	defer conn.Close()
+
+	if err := message.SendRequest(conn, &message.Request{Type: "status"}); err != nil {
+		return nil
+	}
+
+	resp, err := message.ReadResponse(conn)
+	if err != nil || !resp.OK {
+		return nil
+	}
+	return resp.Bridge
 }
 
 // queryAgent connects to a socket path and queries agent status.

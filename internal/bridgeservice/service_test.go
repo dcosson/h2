@@ -681,6 +681,163 @@ func TestTypingLoop_WorksWithoutConcierge(t *testing.T) {
 	}
 }
 
+// --- Status request tests ---
+
+func TestStatusRequest(t *testing.T) {
+	tmpDir := shortTempDir(t)
+	sender := &mockSender{name: "telegram"}
+	svc := New([]bridge.Bridge{sender}, "concierge", tmpDir, "alice")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- svc.Run(ctx) }()
+
+	sockPath := filepath.Join(tmpDir, socketdir.Format(socketdir.TypeBridge, "alice"))
+	waitForSocket(t, sockPath)
+
+	// Send a message first to bump counters.
+	conn1, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message.SendRequest(conn1, &message.Request{Type: "send", From: "agent1", Body: "hello"})
+	message.ReadResponse(conn1)
+	conn1.Close()
+
+	// Query status.
+	conn2, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn2.Close()
+
+	if err := message.SendRequest(conn2, &message.Request{Type: "status"}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := message.ReadResponse(conn2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.OK {
+		t.Errorf("expected OK, got error: %s", resp.Error)
+	}
+	if resp.Bridge == nil {
+		t.Fatal("expected bridge info, got nil")
+	}
+
+	b := resp.Bridge
+	if b.Name != "alice" {
+		t.Errorf("expected name=alice, got %q", b.Name)
+	}
+	if len(b.Channels) != 1 || b.Channels[0] != "telegram" {
+		t.Errorf("expected channels=[telegram], got %v", b.Channels)
+	}
+	if b.MessagesSent != 1 {
+		t.Errorf("expected 1 sent, got %d", b.MessagesSent)
+	}
+	if b.Uptime == "" {
+		t.Error("expected non-empty uptime")
+	}
+	if b.LastActivity == "" {
+		t.Error("expected non-empty last_activity after sending a message")
+	}
+
+	cancel()
+	<-errCh
+}
+
+func TestStatusRequest_MultipleChannels(t *testing.T) {
+	tmpDir := shortTempDir(t)
+	sender1 := &mockSender{name: "telegram"}
+	sender2 := &mockSender{name: "macos"}
+	svc := New([]bridge.Bridge{sender1, sender2}, "", tmpDir, "alice")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- svc.Run(ctx) }()
+
+	sockPath := filepath.Join(tmpDir, socketdir.Format(socketdir.TypeBridge, "alice"))
+	waitForSocket(t, sockPath)
+
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	message.SendRequest(conn, &message.Request{Type: "status"})
+	resp, err := message.ReadResponse(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b := resp.Bridge
+	if len(b.Channels) != 2 {
+		t.Fatalf("expected 2 channels, got %v", b.Channels)
+	}
+	if b.Channels[0] != "telegram" || b.Channels[1] != "macos" {
+		t.Errorf("expected [telegram, macos], got %v", b.Channels)
+	}
+	if b.MessagesSent != 0 {
+		t.Errorf("expected 0 sent, got %d", b.MessagesSent)
+	}
+	if b.LastActivity != "" {
+		t.Errorf("expected empty last_activity, got %q", b.LastActivity)
+	}
+
+	cancel()
+	<-errCh
+}
+
+func TestStatusRequest_CountsInbound(t *testing.T) {
+	tmpDir := shortTempDir(t)
+	sender := &mockSender{name: "telegram"}
+	recv := &mockReceiver{name: "telegram-recv"}
+	agent := newMockAgent(t, tmpDir, "concierge")
+	svc := New([]bridge.Bridge{sender, recv}, "concierge", tmpDir, "alice")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- svc.Run(ctx) }()
+
+	sockPath := filepath.Join(tmpDir, socketdir.Format(socketdir.TypeBridge, "alice"))
+	waitForSocket(t, sockPath)
+
+	// Simulate inbound messages.
+	recv.handler("concierge", "hello")
+	recv.handler("concierge", "world")
+
+	// Wait for messages to be delivered.
+	time.Sleep(100 * time.Millisecond)
+	_ = agent
+
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	message.SendRequest(conn, &message.Request{Type: "status"})
+	resp, err := message.ReadResponse(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if resp.Bridge.MessagesReceived != 2 {
+		t.Errorf("expected 2 received, got %d", resp.Bridge.MessagesReceived)
+	}
+
+	cancel()
+	<-errCh
+}
+
 func TestTypingLoop_RespondsToStateChange(t *testing.T) {
 	typingTickInterval = 50 * time.Millisecond
 	defer func() { typingTickInterval = 4 * time.Second }()
