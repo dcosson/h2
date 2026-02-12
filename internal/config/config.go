@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -29,8 +30,9 @@ type BridgesConfig struct {
 }
 
 type TelegramConfig struct {
-	BotToken string `yaml:"bot_token"`
-	ChatID   int64  `yaml:"chat_id"`
+	BotToken        string   `yaml:"bot_token"`
+	ChatID          int64    `yaml:"chat_id"`
+	AllowedCommands []string `yaml:"allowed_commands,omitempty"`
 }
 
 type MacOSNotifyConfig struct {
@@ -252,5 +254,34 @@ func LoadFrom(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
 	return &cfg, nil
+}
+
+var allowedCommandRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+func (c *Config) validate() error {
+	for username, u := range c.Users {
+		if u == nil || u.Bridges.Telegram == nil {
+			continue
+		}
+		if err := validateAllowedCommands(u.Bridges.Telegram.AllowedCommands); err != nil {
+			return fmt.Errorf("user %s: bridges.telegram: %w", username, err)
+		}
+	}
+	return nil
+}
+
+func validateAllowedCommands(cmds []string) error {
+	for _, cmd := range cmds {
+		if cmd == "" {
+			return fmt.Errorf("allowed_commands: empty string not permitted")
+		}
+		if !allowedCommandRe.MatchString(cmd) {
+			return fmt.Errorf("allowed_commands: invalid command name %q (must match [a-zA-Z0-9_-]+)", cmd)
+		}
+	}
+	return nil
 }

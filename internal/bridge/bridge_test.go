@@ -63,6 +63,33 @@ func TestFormatAgentTag(t *testing.T) {
 	}
 }
 
+func TestParseSlashCommand(t *testing.T) {
+	tests := []struct {
+		text    string
+		allowed []string
+		wantCmd string
+		wantArg string
+	}{
+		{"/h2 list", []string{"h2"}, "h2", "list"},
+		{"/bd create \"my issue\"", []string{"h2", "bd"}, "bd", "create \"my issue\""},
+		{"/h2", []string{"h2"}, "h2", ""},
+		{"/notallowed foo", []string{"h2"}, "", ""},
+		{"hello", []string{"h2"}, "", ""},
+		{"concierge: /h2 list", []string{"h2"}, "", ""},
+		{"/h2 list", nil, "", ""},
+		{"/H2 list", []string{"h2"}, "", ""},
+		{"/h2   ", []string{"h2"}, "h2", ""},
+	}
+
+	for _, tt := range tests {
+		cmd, args := ParseSlashCommand(tt.text, tt.allowed)
+		if cmd != tt.wantCmd || args != tt.wantArg {
+			t.Errorf("ParseSlashCommand(%q, %v) = (%q, %q), want (%q, %q)",
+				tt.text, tt.allowed, cmd, args, tt.wantCmd, tt.wantArg)
+		}
+	}
+}
+
 func TestStripH2Envelope(t *testing.T) {
 	tests := []struct {
 		input string

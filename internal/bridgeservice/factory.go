@@ -12,8 +12,9 @@ func FromConfig(cfg *config.BridgesConfig) []bridge.Bridge {
 	var bridges []bridge.Bridge
 	if cfg.Telegram != nil {
 		bridges = append(bridges, &telegram.Telegram{
-			Token:  cfg.Telegram.BotToken,
-			ChatID: cfg.Telegram.ChatID,
+			Token:           cfg.Telegram.BotToken,
+			ChatID:          cfg.Telegram.ChatID,
+			AllowedCommands: cfg.Telegram.AllowedCommands,
 		})
 	}
 	if cfg.MacOSNotify != nil && cfg.MacOSNotify.Enabled {

@@ -63,6 +63,33 @@ func ParseAgentPrefix(text string) (agent, body string) {
 	return strings.ToLower(m[1]), m[2]
 }
 
+// ParseSlashCommand checks if text starts with /<command> where command
+// is in the allowed list. Returns the command name and args string,
+// or empty command if not matched.
+func ParseSlashCommand(text string, allowed []string) (command, args string) {
+	if !strings.HasPrefix(text, "/") {
+		return "", ""
+	}
+	rest := text[1:] // strip leading /
+	parts := strings.SplitN(rest, " ", 2)
+	cmd := strings.TrimSpace(parts[0])
+	if cmd == "" {
+		return "", ""
+	}
+	for _, a := range allowed {
+		if cmd == a {
+			if len(parts) > 1 {
+				args := strings.TrimSpace(parts[1])
+				if args != "" {
+					return cmd, args
+				}
+			}
+			return cmd, ""
+		}
+	}
+	return "", ""
+}
+
 var envelopeRe = regexp.MustCompile(`^\[(URGENT )?h2 message from: [^\]]+\]\s*`)
 
 // StripH2Envelope strips "[h2 message from: X]" or "[URGENT h2 message from: X]"

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"h2/internal/bridge"
+	"h2/internal/bridge/telegram"
 	"h2/internal/config"
 )
 
@@ -70,6 +71,29 @@ func TestFromConfig_MacOSNotifyDisabled(t *testing.T) {
 	bridges := FromConfig(cfg)
 	if len(bridges) != 0 {
 		t.Fatalf("expected 0 bridges when disabled, got %d", len(bridges))
+	}
+}
+
+func TestFromConfig_AllowedCommandsPropagation(t *testing.T) {
+	cfg := &config.BridgesConfig{
+		Telegram: &config.TelegramConfig{
+			BotToken:        "tok",
+			ChatID:          1,
+			AllowedCommands: []string{"h2", "bd"},
+		},
+	}
+
+	bridges := FromConfig(cfg)
+	if len(bridges) != 1 {
+		t.Fatalf("expected 1 bridge, got %d", len(bridges))
+	}
+
+	tg, ok := bridges[0].(*telegram.Telegram)
+	if !ok {
+		t.Fatal("expected *telegram.Telegram")
+	}
+	if len(tg.AllowedCommands) != 2 || tg.AllowedCommands[0] != "h2" || tg.AllowedCommands[1] != "bd" {
+		t.Errorf("AllowedCommands = %v, want [h2 bd]", tg.AllowedCommands)
 	}
 }
 
