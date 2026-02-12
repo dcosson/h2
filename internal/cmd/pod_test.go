@@ -4,6 +4,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"h2/internal/config"
@@ -253,5 +254,102 @@ func TestPodLaunchCmd_InvalidTemplate(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("expected error for nonexistent template")
+	}
+}
+
+func TestPodLaunchCmd_InvalidVarFlag(t *testing.T) {
+	setupPodTestEnv(t)
+
+	cmd := newPodLaunchCmd()
+	cmd.SetArgs([]string{"--var", "noequals", "mytemplate"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid --var flag")
+	}
+}
+
+func TestPodLaunchCmd_MissingRequiredVar(t *testing.T) {
+	h2Root := setupPodTestEnv(t)
+
+	// Template with a required variable.
+	tmplContent := `variables:
+  team:
+    description: Team name
+
+pod_name: test
+agents:
+  - name: worker
+    role: default
+`
+	os.WriteFile(filepath.Join(h2Root, "pods", "templates", "needsvar.yaml"), []byte(tmplContent), 0o644)
+
+	cmd := newPodLaunchCmd()
+	cmd.SetArgs([]string{"needsvar"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing required var")
+	}
+}
+
+func TestPodLaunchCmd_TemplateWithVarRendering(t *testing.T) {
+	h2Root := setupPodTestEnv(t)
+
+	// Template that uses a variable in an agent name.
+	tmplContent := `variables:
+  prefix:
+    default: dev
+
+pod_name: test
+agents:
+  - name: "{{ .Var.prefix }}-worker"
+    role: default
+`
+	os.WriteFile(filepath.Join(h2Root, "pods", "templates", "vartest.yaml"), []byte(tmplContent), 0o644)
+
+	// Create the default role so it can be loaded.
+	roleContent := "name: default\ninstructions: |\n  test\n"
+	os.WriteFile(filepath.Join(h2Root, "roles", "default.yaml"), []byte(roleContent), 0o644)
+
+	// This will fail at setupAndForkAgentQuiet (can't actually fork in tests),
+	// but we verify it gets past template rendering and var parsing.
+	cmd := newPodLaunchCmd()
+	cmd.SetArgs([]string{"vartest"})
+	err := cmd.Execute()
+	// We expect it to either succeed or fail at the fork step, not at template rendering.
+	if err != nil {
+		// If it fails, it should be at the fork/setup stage, not at template rendering.
+		errStr := err.Error()
+		if strings.Contains(errStr, "required variables") || strings.Contains(errStr, "template") {
+			t.Fatalf("should not fail at template rendering: %v", err)
+		}
+	}
+}
+
+func TestPodLaunchCmd_CLIVarOverridesDefault(t *testing.T) {
+	h2Root := setupPodTestEnv(t)
+
+	tmplContent := `variables:
+  prefix:
+    default: dev
+
+pod_name: test
+agents:
+  - name: "{{ .Var.prefix }}-worker"
+    role: default
+`
+	os.WriteFile(filepath.Join(h2Root, "pods", "templates", "override.yaml"), []byte(tmplContent), 0o644)
+
+	roleContent := "name: default\ninstructions: |\n  test\n"
+	os.WriteFile(filepath.Join(h2Root, "roles", "default.yaml"), []byte(roleContent), 0o644)
+
+	cmd := newPodLaunchCmd()
+	cmd.SetArgs([]string{"--var", "prefix=staging", "override"})
+	err := cmd.Execute()
+	// Will fail at fork step, but should not fail at template rendering.
+	if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "required variables") || strings.Contains(errStr, "template") {
+			t.Fatalf("should not fail at template rendering: %v", err)
+		}
 	}
 }

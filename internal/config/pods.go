@@ -44,6 +44,18 @@ func LoadPodRole(name string) (*Role, error) {
 	return LoadRole(name)
 }
 
+// LoadPodRoleRendered loads a role with template rendering, checking pod roles
+// first then global roles. If ctx is nil, behaves like LoadPodRole.
+func LoadPodRoleRendered(name string, ctx *tmpl.Context) (*Role, error) {
+	// Try pod-scoped role first.
+	podPath := filepath.Join(PodRolesDir(), name+".yaml")
+	if _, err := os.Stat(podPath); err == nil {
+		return LoadRoleRenderedFrom(podPath, ctx)
+	}
+	// Fall back to global role.
+	return LoadRoleRendered(name, ctx)
+}
+
 // ListPodRoles returns roles from <h2-dir>/pods/roles/.
 func ListPodRoles() ([]*Role, error) {
 	dir := PodRolesDir()

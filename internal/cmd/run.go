@@ -9,6 +9,7 @@ import (
 
 	"h2/internal/config"
 	"h2/internal/session"
+	"h2/internal/tmpl"
 )
 
 func newRunCmd() *cobra.Command {
@@ -19,6 +20,7 @@ func newRunCmd() *cobra.Command {
 	var command string
 	var pod string
 	var overrides []string
+	var varFlags []string
 
 	cmd := &cobra.Command{
 		Use:   "run [flags]",
@@ -70,13 +72,33 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 				if roleName == "" {
 					roleName = "default"
 				}
+
+				// Parse --var flags into a map.
+				vars, err := parseVarFlags(varFlags)
+				if err != nil {
+					return err
+				}
+
+				// Build template context for role rendering.
+				agentName := name
+				if agentName == "" {
+					agentName = session.GenerateName()
+					name = agentName
+				}
+				ctx := &tmpl.Context{
+					AgentName: agentName,
+					RoleName:  roleName,
+					PodName:   pod,
+					H2Dir:     config.ConfigDir(),
+					Var:       vars,
+				}
+
 				// When --pod is specified, check pod roles first then global.
 				var role *config.Role
-				var err error
 				if pod != "" {
-					role, err = config.LoadPodRole(roleName)
+					role, err = config.LoadPodRoleRendered(roleName, ctx)
 				} else {
-					role, err = config.LoadRole(roleName)
+					role, err = config.LoadRoleRendered(roleName, ctx)
 				}
 				if err != nil {
 					if roleName == "concierge" {
@@ -131,6 +153,7 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 	cmd.Flags().StringVar(&command, "command", "", "Explicit command to run without a role")
 	cmd.Flags().StringVar(&pod, "pod", "", "Pod name for the agent (sets H2_POD env var)")
 	cmd.Flags().StringArrayVar(&overrides, "override", nil, "Override role field (key=value, e.g. worktree.enabled=true)")
+	cmd.Flags().StringArrayVar(&varFlags, "var", nil, "Set template variable (key=value, repeatable)")
 
 	return cmd
 }

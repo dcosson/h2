@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -28,4 +29,23 @@ func resolveActor() string {
 	}
 
 	return "unknown"
+}
+
+// parseVarFlags parses --var key=value flags into a map.
+// Each flag value is split on the first "=". Missing "=" is an error.
+// Empty values (key=) are allowed.
+func parseVarFlags(flags []string) (map[string]string, error) {
+	vars := make(map[string]string, len(flags))
+	for _, f := range flags {
+		idx := strings.Index(f, "=")
+		if idx < 0 {
+			return nil, fmt.Errorf("invalid --var %q: must be key=value", f)
+		}
+		key := f[:idx]
+		if key == "" {
+			return nil, fmt.Errorf("invalid --var %q: key cannot be empty", f)
+		}
+		vars[key] = f[idx+1:]
+	}
+	return vars, nil
 }
