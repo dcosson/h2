@@ -272,23 +272,26 @@ func LoadRoleRenderedFrom(path string, ctx *tmpl.Context) (*Role, error) {
 		return nil, fmt.Errorf("parse variables in role %q: %w", path, err)
 	}
 
-	// Fill in defaults for optional variables not already provided.
-	if ctx.Var == nil {
-		ctx.Var = make(map[string]string)
+	// Clone ctx.Var so we don't mutate the caller's map.
+	vars := make(map[string]string, len(ctx.Var))
+	for k, v := range ctx.Var {
+		vars[k] = v
 	}
 	for name, def := range defs {
-		if _, ok := ctx.Var[name]; !ok && def.Default != nil {
-			ctx.Var[name] = *def.Default
+		if _, ok := vars[name]; !ok && def.Default != nil {
+			vars[name] = *def.Default
 		}
 	}
 
 	// Validate that all required variables are present.
-	if err := tmpl.ValidateVars(defs, ctx.Var); err != nil {
+	if err := tmpl.ValidateVars(defs, vars); err != nil {
 		return nil, fmt.Errorf("role %q: %w", filepath.Base(path), err)
 	}
 
-	// Render template.
-	rendered, err := tmpl.Render(remaining, ctx)
+	// Render template with cloned vars.
+	renderCtx := *ctx
+	renderCtx.Var = vars
+	rendered, err := tmpl.Render(remaining, &renderCtx)
 	if err != nil {
 		return nil, fmt.Errorf("template error in role %q (%s): %w", filepath.Base(path), path, err)
 	}
