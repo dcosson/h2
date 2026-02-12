@@ -24,6 +24,15 @@ Companion to `plan-role-pod-templating.md`. Defines all test cases needed to ver
 | Multiple variables | 3 vars, mix of required/optional | All 3 parsed correctly |
 | Variables section has no template expressions | `variables:` with plain YAML | Parses successfully |
 
+### 1.3 Variable Name Validation
+
+| Test | Variable Name | Expected |
+|------|--------------|----------|
+| Underscore name | `my_var` | Works with `.Var.my_var` |
+| Hyphenated name | `my-var` | Must use `index .Var "my-var"` syntax |
+| Name matches built-in field | `AgentName` | No conflict — built-ins at `.AgentName`, user vars at `.Var.AgentName` |
+| Name matches context field | `Index` | No conflict — same reason, `.Index` vs `.Var.Index` |
+
 ## 2. Variable Validation (`internal/tmpl/`)
 
 ### 2.1 ValidateVars
@@ -71,16 +80,26 @@ Companion to `plan-role-pod-templating.md`. Defines all test cases needed to ver
 | if eq | `{{ if eq .Var.lang "go" }}go{{ end }}` | Var: {"lang":"go"} | `go` |
 | if gt for Index | `{{ if gt .Index 0 }}indexed{{ end }}` | Index: 0 | `` |
 | if gt for Index (positive) | `{{ if gt .Index 0 }}indexed{{ end }}` | Index: 1 | `indexed` |
+| if .Index (falsy at 0) | `{{ if .Index }}yes{{ else }}no{{ end }}` | Index: 0 | `no` |
 | Nested if | `{{ if .PodName }}{{ if gt .Count 1 }}multi{{ end }}{{ end }}` | PodName:"x", Count:3 | `multi` |
 
-### 3.3 Loops
+### 3.3 Whitespace Control
+
+| Test | Template | Expected |
+|------|----------|----------|
+| Left trim | `X {{- " Y" }}` | `X Y` (no space before Y) |
+| Right trim | `{{ "X " -}} Y` | `X Y` (no space after X) |
+| Both trim in conditional | `line1\n{{- if .PodName }} pod{{- end }}\nline2` | No blank lines from skipped conditional |
+| Trim doesn't break YAML | YAML with `{{- -}}` in list items | Renders valid YAML |
+
+### 3.4 Loops
 
 | Test | Template | Context | Expected |
 |------|----------|---------|----------|
 | range with seq | `{{ range $i := seq 1 3 }}{{ $i }} {{ end }}` | — | `1 2 3 ` |
 | range with split | `{{ range split .Var.list "," }}[{{ . }}]{{ end }}` | Var: {"list":"a,b,c"} | `[a][b][c]` |
 
-### 3.4 Error Handling
+### 3.5 Error Handling
 
 | Test | Template | Expected |
 |------|----------|----------|
@@ -89,6 +108,16 @@ Companion to `plan-role-pod-templating.md`. Defines all test cases needed to ver
 | Unclosed block | `{{ if .PodName }}no end` | Error mentioning unclosed action |
 | Error includes source context | any broken template | Error message includes file name if provided |
 
+### 3.6 Template Injection Safety
+
+Variable values are data, not template code. `text/template` inserts data values *after* template parsing, so `{{ }}` in variable values is never executed as template code. This is critical to test as a regression guard — if a future change introduces double-rendering, it would become an injection vector.
+
+| Test | Variable Value | Template | Expected |
+|------|---------------|----------|----------|
+| Value contains template syntax | Var: {"x": "{{ .H2Dir }}"} | `{{ .Var.x }}` | Literal `{{ .H2Dir }}` in output |
+| Value contains invalid template | Var: {"x": "{{ fail }}"} | `{{ .Var.x }}` | Literal `{{ fail }}` in output, no error |
+| Value contains close braces | Var: {"x": "}}"} | `{{ .Var.x }}` | Literal `}}` in output |
+
 ## 4. Custom Template Functions (`internal/tmpl/`)
 
 | Function | Test | Input | Expected |
@@ -96,12 +125,16 @@ Companion to `plan-role-pod-templating.md`. Defines all test cases needed to ver
 | `seq` | Basic range | `seq 1 3` | `[1, 2, 3]` |
 | `seq` | Single element | `seq 5 5` | `[5]` |
 | `seq` | Start > end | `seq 3 1` | `[]` (empty) |
+| `seq` | Large range capped | `seq 1 10000` | Error or capped (prevent resource exhaustion) |
 | `split` | Comma-separated | `split "a,b,c" ","` | `["a","b","c"]` |
 | `split` | No delimiter found | `split "abc" ","` | `["abc"]` |
 | `split` | Empty string | `split "" ","` | `[""]` |
+| `split` | Multi-char delimiter | `split "a::b::c" "::"` | `["a","b","c"]` |
 | `join` | Basic join | `join ["a","b"] ","` | `"a,b"` |
 | `default` | Value present | `default "hello" "fallback"` | `"hello"` |
 | `default` | Value empty | `default "" "fallback"` | `"fallback"` |
+| `default` | Value is "false" (non-empty) | `default "false" "fallback"` | `"false"` (string, not boolean) |
+| `default` | Value is "0" (non-empty) | `default "0" "fallback"` | `"0"` (string, not zero) |
 | `upper` | Basic | `upper "hello"` | `"HELLO"` |
 | `lower` | Basic | `lower "HELLO"` | `"hello"` |
 | `contains` | Match | `contains "hello world" "world"` | `true` |
@@ -109,6 +142,7 @@ Companion to `plan-role-pod-templating.md`. Defines all test cases needed to ver
 | `trimSpace` | Leading/trailing | `trimSpace "  hi  "` | `"hi"` |
 | `quote` | Plain string | `quote "hello"` | `"\"hello\""` |
 | `quote` | String with quotes | `quote "say \"hi\""` | Properly escaped |
+| `quote` | YAML-special chars | `quote "key: value"` | Safely embeddable in YAML |
 
 ## 5. Pod Template Expansion (`internal/config/`)
 
@@ -118,10 +152,13 @@ Companion to `plan-role-pod-templating.md`. Defines all test cases needed to ver
 |------|----------------|-------------------|
 | No count (default 1) | `name: coder, role: coding` | 1 agent: `coder` |
 | count: 1 explicit | `name: coder, count: 1` | 1 agent: `coder` (no index suffix) |
+| count: 1 with explicit Index | `name: "coder-{{ .Index }}", count: 1` | 1 agent: `coder-1` (Index is 1, not 0) |
 | count: 3 with Index | `name: "coder-{{ .Index }}", count: 3` | 3 agents: `coder-1`, `coder-2`, `coder-3` |
 | count: 3 without Index | `name: coder, count: 3` | 3 agents: `coder-1`, `coder-2`, `coder-3` (auto-suffix) |
 | count: 0 | `name: coder, count: 0` | 0 agents (skipped) |
 | Mixed agents | concierge (count 1) + coder (count 3) + reviewer (count 1) | 5 agents total |
+| Empty agents list | `agents: []` | 0 agents, no error |
+| Nil agents | `agents:` (YAML nil) | 0 agents, no error |
 
 ### 5.2 Name Collision Detection
 
@@ -149,6 +186,9 @@ Companion to `plan-role-pod-templating.md`. Defines all test cases needed to ver
 |------|----------|---------|----------|
 | Variables rendered in instructions | `instructions: "Hi {{ .AgentName }}"` | AgentName: "coder" | Role.Instructions == "Hi coder" |
 | Variables rendered in worktree config | `worktree:\n  branch_name: "feat/{{ .Var.ticket }}"` | Var: {"ticket":"123"} | Worktree.BranchName == "feat/123" |
+| Variables rendered in working_dir | `working_dir: "/projects/{{ .Var.project }}"` | Var: {"project":"h2"} | WorkingDir == "/projects/h2" |
+| Variables rendered in model | `model: "{{ .Var.model }}"` | Var: {"model":"haiku"} | Model == "haiku" |
+| Variables rendered in heartbeat | `heartbeat:\n  message: "Hey {{ .AgentName }}"` | AgentName: "coder" | Heartbeat.Message == "Hey coder" |
 | Required var provided | `variables: {team: {}}`, `{{ .Var.team }}` | Var: {"team":"x"} | Renders successfully |
 | Required var missing | `variables: {team: {}}`, `{{ .Var.team }}` | Var: {} | Error listing `team` |
 | No context (nil) = no rendering | Role with `{{ .AgentName }}` | nil | `{{ .AgentName }}` left as-is (backward compat) |
@@ -160,6 +200,27 @@ Companion to `plan-role-pod-templating.md`. Defines all test cases needed to ver
 | Existing role with no `{{ }}` expressions | Loads identically to current behavior |
 | Existing role with no `variables:` section | Loads without error |
 | `LoadRole(name)` (old API) | Still works, no rendering applied |
+
+### 6.3 Override Interaction
+
+Overrides (`--override`) apply after YAML parse. Template rendering applies before YAML parse. Overrides should win.
+
+| Test | Expected |
+|------|----------|
+| Template renders `working_dir: /foo`, override `working_dir=/bar` | Final value is `/bar` |
+| Template renders `model: opus`, override `model=haiku` | Final value is `haiku` |
+
+### 6.4 ListRoles with Templated Roles
+
+`ListRoles()` loads all roles from the directory. Roles with `{{ }}` expressions must not crash the listing.
+
+| Test | Expected |
+|------|----------|
+| ListRoles with mix of templated and static roles | Returns all roles, no error |
+| Templated role loaded without context | Renders with zero-value context (empty strings, 0 ints) or skips rendering |
+| Template expressions in instructions | Instructions contain unrendered `{{ }}` or empty values — not a crash |
+
+**Design decision:** `ListRoles()` should call `LoadRole()` (no rendering), not `LoadRoleRendered()`. Template expressions remain as literal text in the listing — they're only rendered at agent launch time.
 
 ## 7. CLI Integration (`internal/cmd/`)
 
@@ -201,15 +262,27 @@ Companion to `plan-role-pod-templating.md`. Defines all test cases needed to ver
 | Role rendered per-agent | Each agent's role gets its own context |
 | Role rendering fails for one agent | Error identifies which agent failed |
 
+### 8.3 Partial Pod Launch Failure
+
+When a pod expands to N agents and agent K's role rendering fails, agents 1..K-1 may already be running.
+
+| Test | Expected |
+|------|----------|
+| Agent 3 of 5 fails (missing var) | Error message identifies agent 3 and its role |
+| Error mentions already-started agents | Message notes agents 1-2 are running |
+| Already-started agents are not killed | Agents 1-2 remain running (user decides cleanup) |
+
+**Design decision:** Pod launch does not roll back already-started agents on failure. The error message should inform the user which agents started successfully so they can stop them manually if needed.
+
 ## 9. End-to-End Integration Tests
 
-These test the full pipeline from YAML file on disk through to the final Role/PodTemplate structs.
+These test the full pipeline from YAML fixture files on disk (in `testdata/` directories) through to the final Role/PodTemplate structs.
 
 ### 9.1 Parameterized Role E2E
 
 ```
-Given: Role file with variables (team required, env optional default "dev")
-When:  LoadRoleRendered("test-role", ctx) with Var: {"team": "backend"}
+Given: testdata/roles/parameterized.yaml with variables (team required, env optional default "dev")
+When:  LoadRoleRendered("parameterized", ctx) with Var: {"team": "backend"}
 Then:  - Instructions contain "backend" and "dev"
        - No error
 ```
@@ -217,8 +290,8 @@ Then:  - Instructions contain "backend" and "dev"
 ### 9.2 Parameterized Role Missing Var E2E
 
 ```
-Given: Role file with required variable "team"
-When:  LoadRoleRendered("test-role", ctx) with Var: {}
+Given: testdata/roles/parameterized.yaml with required variable "team"
+When:  LoadRoleRendered("parameterized", ctx) with Var: {}
 Then:  - Error message lists "team"
        - Error includes --var hint
 ```
@@ -226,7 +299,7 @@ Then:  - Error message lists "team"
 ### 9.3 Pod with Count E2E
 
 ```
-Given: Pod template with count: 3 agent using "coder-{{ .Index }}"
+Given: testdata/pods/count-template.yaml with count: 3 agent using "coder-{{ .Index }}"
 When:  Load and expand pod template
 Then:  - 3 expanded agents: coder-1, coder-2, coder-3
        - Each has Index 1/2/3 and Count 3
@@ -235,8 +308,8 @@ Then:  - 3 expanded agents: coder-1, coder-2, coder-3
 ### 9.4 Pod Vars to Role E2E
 
 ```
-Given: Pod template with per-agent vars: {team: backend}
-       Role with required variable "team" and instructions using {{ .Var.team }}
+Given: testdata/pods/vars-template.yaml with per-agent vars: {team: backend}
+       testdata/roles/needs-team.yaml with required variable "team" using {{ .Var.team }}
 When:  Full pipeline: load pod → expand → render each role
 Then:  - Role instructions contain "backend"
        - No missing-variable error
@@ -245,10 +318,21 @@ Then:  - Role instructions contain "backend"
 ### 9.5 Backward Compat E2E
 
 ```
-Given: Existing role file with no {{ }} expressions and no variables: section
-When:  LoadRoleRendered("existing-role", ctx)
-Then:  - Identical to LoadRole("existing-role")
+Given: testdata/roles/static.yaml with no {{ }} expressions and no variables: section
+When:  LoadRoleRendered("static", ctx)
+Then:  - Identical to LoadRole("static")
        - No errors, no changes to field values
+```
+
+### 9.6 Standalone Agent Zero-Values E2E
+
+```
+Given: testdata/roles/pod-aware.yaml using {{ .Index }}, {{ .Count }}, {{ if .PodName }}
+When:  LoadRoleRendered("pod-aware", ctx) with no pod context (standalone h2 run)
+Then:  - {{ .Index }} renders as "0"
+       - {{ .Count }} renders as "0"
+       - {{ if .PodName }} block is skipped
+       - No error
 ```
 
 ## 10. Edge Cases
@@ -258,12 +342,12 @@ Then:  - Identical to LoadRole("existing-role")
 | Empty template | `""` | Returns `""` |
 | Template with only whitespace | `"  \n  "` | Returns `"  \n  "` |
 | Very long template | 100KB instructions | Renders without error |
-| Variable value contains `{{ }}` | Var: {"x": "{{ not a template }}"} | Literal `{{ not a template }}` in output (Go templates auto-escape data) |
 | Variable name with special chars | `my-var` with hyphen | Must use `index .Var "my-var"` syntax (document this) |
 | Count as template expression | `count: {{ .Var.n }}` where n="3" | Parses as int 3 after rendering |
 | Count as template, non-numeric | `count: {{ .Var.n }}` where n="abc" | YAML parse error (clear message) |
 | Nested template delimiters | Instructions mentioning Go templates | Use `{{ "{{" }}` escape |
 | Unicode in variables | Var: {"name": "日本語"} | Renders correctly |
+| Old `${name}` syntax in role | Role with literal `${name}` | Appears as literal `${name}` in output (not processed) |
 
 ## 11. `h2 role init` Migration
 
@@ -271,15 +355,18 @@ Then:  - Identical to LoadRole("existing-role")
 |------|----------|
 | `h2 role init myname` generates `{{ }}` syntax | Role file uses `{{ .RoleName }}` not `${name}` |
 | Generated role is valid template | LoadRoleRendered succeeds on the generated file |
-| Old `${name}` roles still load | No `${}` processing happens — treated as literal text |
+| Old `${name}` roles still load | `${name}` appears literally in instructions (not processed) |
 
 ## Test File Locations
 
 | File | Tests |
 |------|-------|
-| `internal/tmpl/tmpl_test.go` | Sections 1–4: parsing, validation, rendering, functions |
-| `internal/config/role_test.go` | Section 6: LoadRoleRendered, backward compat |
-| `internal/config/pods_test.go` | Sections 5, 8: count expansion, name collision, var passing, two-phase rendering |
+| `internal/tmpl/tmpl_test.go` | Sections 1–4: parsing, validation, rendering, functions, injection safety |
+| `internal/tmpl/testdata/` | YAML fixture files for E2E tests |
+| `internal/config/role_test.go` | Section 6: LoadRoleRendered, backward compat, override interaction, ListRoles |
+| `internal/config/testdata/roles/` | Role YAML fixtures for E2E |
+| `internal/config/pods_test.go` | Sections 5, 8: count expansion, name collision, var passing, two-phase rendering, partial failure |
+| `internal/config/testdata/pods/` | Pod template YAML fixtures for E2E |
 | `internal/cmd/run_test.go` or `cmd_test.go` | Section 7.1: --var flag parsing |
 | `internal/cmd/pod_test.go` or `cmd_test.go` | Section 7.2: pod launch --var |
 
@@ -295,3 +382,5 @@ Before merging, all of the following must pass:
 - [ ] Manual: `h2 pod launch <template> --var num_coders=5` — count responds to variable
 - [ ] Manual: existing roles (no templates) load and behave identically to before
 - [ ] Manual: `h2 role init newrole` — generates role with `{{ }}` syntax, loads correctly
+- [ ] Manual: `h2 run` (no pod) with role using `{{ .Index }}` — renders as 0, no error
+- [ ] Manual: template injection — variable value containing `{{ }}` outputs literally, not executed
