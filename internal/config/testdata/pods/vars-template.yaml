@@ -1,0 +1,6 @@
+pod_name: vars-test
+agents:
+  - role: needs-team
+    name: coder
+    vars:
+      team: backend

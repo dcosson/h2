@@ -1,0 +1,9 @@
+pod_name: count-test
+agents:
+  - role: concierge
+    name: concierge
+  - role: coding
+    name: coder
+    count: 3
+  - role: reviewer
+    name: reviewer

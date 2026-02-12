@@ -1,0 +1,6 @@
+name: needs-team
+variables:
+  team:
+    description: "Team name"
+instructions: |
+  You work on the {{ .Var.team }} team.
