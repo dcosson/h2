@@ -9,13 +9,15 @@ More broadly, this is a general problem: any application built with h2 (or just 
 ## Vision
 
 `h2 qa` is a general-purpose, agent-driven QA platform. Users provide:
-1. A **Dockerfile** that defines the sandbox environment (what's installed, what services run)
+1. A **Dockerfile** (or docker-compose.yaml) that defines the sandbox environment
 2. **Test plans** as plain markdown (what to verify)
 3. A **config file** with project-specific context (how to talk to the system under test)
 
 h2 handles the plumbing: build the image, manage auth, launch the container, inject the test plan into a QA orchestrator agent, attach the terminal, extract results, clean up.
 
 Testing h2 itself is just one use case — the h2 project happens to have a Dockerfile that installs h2, and test plans that exercise h2 features. The QA system doesn't know or care what it's testing.
+
+**Implementation focus:** Phase 1 builds exclusively for the h2 use case. The config model is general-purpose by design, so generality comes for free later without rework. Port mapping, service readiness checks, and multi-service orchestration are deferred until a non-h2 project needs them.
 
 ## Appetite
 
@@ -27,7 +29,7 @@ Docker provides real isolation with key advantages:
 
 1. **Tests the natural path** — Inside the container, apps run normally. For h2, this means `~/.h2/` as the global config, exercising the real discovery mechanism instead of only the `H2_DIR` override.
 
-2. **Auth persistence** — Claude Code Max accounts use OAuth tied to the config directory. Auth once interactively (`h2 qa auth`), commit the container to an image, reuse on every QA run. No re-auth, no token copying, no API key workarounds.
+2. **Auth persistence** — Claude Code Max accounts use OAuth tied to the config directory. Auth once interactively (`h2 qa auth`), commit the container to an image, reuse on every QA run. No re-auth, no token copying. When tokens expire, re-run `h2 qa auth`.
 
 3. **True process isolation** — No risk of QA agents interfering with production processes on the host.
 
@@ -35,9 +37,11 @@ Docker provides real isolation with key advantages:
 
 5. **Clean cleanup** — `docker rm -f` kills everything. No orphaned processes.
 
+**Docker alternatives:** On macOS, Docker Desktop requires a commercial license for larger organizations. Podman and Colima are free, compatible alternatives. h2 qa should work with any OCI-compatible container runtime.
+
 ### Fallback: H2_DIR sandbox (no Docker)
 
-`h2 qa run --no-docker` falls back to directory-level isolation for environments without Docker. Creates a temp dir, sets `H2_DIR`, propagates auth via `ANTHROPIC_API_KEY`. Less isolated, no OAuth support, but works for quick local testing.
+`h2 qa run --no-docker` falls back to directory-level isolation for environments without Docker. Creates a temp dir, sets `H2_DIR`, propagates auth via `ANTHROPIC_API_KEY`. Less isolated, no OAuth support, but works for quick local testing with API keys.
 
 ## Project Configuration
 
@@ -46,7 +50,7 @@ Docker provides real isolation with key advantages:
 **Discovery order:**
 1. `./h2-qa.yaml` (project root)
 2. `./qa/h2-qa.yaml` (qa subdirectory)
-3. `h2 qa run --config <path>` (explicit)
+3. `h2 qa run --config <path>` (explicit override)
 
 All relative paths in the config resolve relative to the config file's parent directory.
 
@@ -54,36 +58,47 @@ All relative paths in the config resolve relative to the config file's parent di
 # h2-qa.yaml
 
 sandbox:
-  dockerfile: qa/Dockerfile        # User provides this
+  # Option A: single Dockerfile (simple case, v1)
+  dockerfile: qa/Dockerfile
+
+  # Option B: docker-compose (multi-service, future)
+  # compose: qa/docker-compose.yaml
+  # service: qa-agent              # Which service the QA agent runs in
+
   build_args:                       # Optional build-time args
     APP_VERSION: "latest"
-  setup:                            # Commands run after container starts
-    - "npm run build"
-    - "npm start &"
-    - "sleep 2"
+  setup:                            # Commands run inside container after start
+    - "h2 init ~/.h2"
   env:                              # Runtime env vars
-    - DATABASE_URL=postgres://test:test@localhost/testdb
-    - API_KEY                       # Passthrough from host (no =value)
-  ports: [3000, 5432]              # Exposed ports
+    - ANTHROPIC_API_KEY             # Passthrough from host (no =value)
   volumes:
     - ./src:/app/src               # Bind mounts into container
 
 orchestrator:
   model: opus                      # Model for the QA orchestrator agent
   extra_instructions: |            # Appended to the built-in QA protocol
-    The system under test is a REST API at http://localhost:3000.
-    Auth tokens: curl -X POST localhost:3000/auth/login -d '{"user":"test"}'
+    You are testing h2, a terminal multiplexer with agent messaging.
+    Full h2 commands are available.
 
 plans_dir: qa/plans/               # Where test plans live
 results_dir: qa/results/           # Where results are stored on the host
 ```
 
-### Example configurations by project type
+### Sandbox patterns
 
-**h2 itself:**
+The two clean patterns for sandboxing:
+
+**1. Everything in the container** — App server, database, browser, test tools, QA agent all run inside a single container (or docker-compose cluster). All localhost, no host networking. This covers most cases.
+
+**2. Testing against remote services** — The QA agent makes API calls to staging/production URLs. Nothing runs locally except the agent. Even simpler.
+
+Both patterns need zero port mapping between host and container. If someone eventually needs host-to-container networking for a specific workflow, docker-compose handles that natively.
+
+### Example: h2 project config (v1 target)
+
 ```yaml
 sandbox:
-  dockerfile: qa/Dockerfile        # Installs h2 binary, Claude Code
+  dockerfile: qa/Dockerfile
   setup:
     - "h2 init ~/.h2"
 orchestrator:
@@ -94,51 +109,29 @@ plans_dir: qa/plans/
 results_dir: qa/results/
 ```
 
+### Future examples (not built in v1)
+
 **REST API:**
 ```yaml
 sandbox:
-  dockerfile: qa/Dockerfile        # Node, Postgres, app built
-  setup:
-    - "pg_isready && npm run migrate"
-    - "npm start &"
-    - "sleep 3"
-  ports: [3000]
+  compose: qa/docker-compose.yaml   # App + Postgres + migrations
+  service: qa-agent
 orchestrator:
   extra_instructions: |
-    API is at localhost:3000. Use curl or httpie.
-    OpenAPI spec: localhost:3000/docs
-plans_dir: qa/plans/
-results_dir: qa/results/
-```
-
-**CLI tool:**
-```yaml
-sandbox:
-  dockerfile: qa/Dockerfile        # Go/Rust/Python + built binary
-  setup:
-    - "make build"
-orchestrator:
-  extra_instructions: |
-    The CLI under test is `mytool` in $PATH.
-    Run with various flags and verify output/exit codes.
-plans_dir: qa/plans/
-results_dir: qa/results/
+    API at localhost:3000. Use curl or httpie.
 ```
 
 **Web app with browser testing:**
 ```yaml
 sandbox:
-  dockerfile: qa/Dockerfile        # App + Playwright + headless Chrome
+  dockerfile: qa/Dockerfile          # App + Playwright + headless Chromium
   setup:
     - "npm start &"
     - "npx playwright install chromium"
-  ports: [3000]
 orchestrator:
   extra_instructions: |
     Use Playwright for browser testing. App at localhost:3000.
-    Screenshots: npx playwright screenshot localhost:3000 evidence.png
-plans_dir: qa/plans/
-results_dir: qa/results/
+    Save screenshots to ~/results/evidence/
 ```
 
 ## User Experience
@@ -149,16 +142,16 @@ h2 qa setup                       # Builds Docker image from qa/Dockerfile
 h2 qa auth                        # Interactive Claude Code login, commits to image
 
 # Write test plans
-vim qa/plans/auth-flow.md          # Plain markdown test cases
+vim qa/plans/messaging.md          # Plain markdown test cases
 
 # Run tests
-h2 qa run auth-flow                # Run a specific plan
+h2 qa run messaging                # Run a specific plan
 h2 qa run --all                    # Run all plans sequentially
 
 # View results
 h2 qa report                      # Show latest report
 h2 qa report --list               # Summary table of all runs
-h2 qa report auth-flow            # Latest run of a specific plan
+h2 qa report messaging            # Latest run of a specific plan
 ```
 
 ## Design Details
@@ -168,42 +161,44 @@ h2 qa report auth-flow            # Latest run of a specific plan
 `h2 qa <subcommand>` finds the config by checking:
 1. `./h2-qa.yaml`
 2. `./qa/h2-qa.yaml`
-3. Explicit `--config <path>` flag (overrides discovery)
+3. Explicit `--config <path>` flag
 
-If no config is found, `h2 qa setup` and `h2 qa run` fail with a helpful message. `h2 qa init` could scaffold the config + directory structure (future).
-
-All relative paths (dockerfile, plans_dir, results_dir, volumes) resolve from the config file's parent directory.
+If no config is found, commands fail with a helpful message pointing to `h2-qa.yaml`.
 
 ### Docker Image Layers
 
 ```
 Layer 1: Base (Ubuntu + standard tools + Claude Code)
-Layer 2: Project-specific (from user's Dockerfile — app binary, dependencies, etc.)
+Layer 2: Project-specific (from user's Dockerfile — h2 binary, app, dependencies)
 Layer 3: Auth state (committed after `h2 qa auth`)
 ```
 
 `h2 qa setup` builds layers 1-2. `h2 qa auth` adds layer 3 by:
 1. Running the image interactively
 2. User runs `claude` and completes OAuth login
-3. On exit, container is committed as the QA image with auth baked in
+3. On exit, container is committed as the QA image
 
-The image is tagged (e.g., `h2-qa:latest`) and reused across runs. Rebuild with `h2 qa setup` when the Dockerfile or app changes.
+**Image tagging:** Images are tagged per-project to avoid collisions when a user works on multiple projects. Tag format: `h2-qa-<project-hash>:latest` where the hash is derived from the config file's absolute path. This way `h2 qa setup` for project A doesn't overwrite project B's image.
+
+**Auth expiration:** Committed OAuth tokens will eventually expire. When they do, the QA run fails with an auth error. Users re-run `h2 qa auth` to refresh. Future improvement: detect stale auth on container start and prompt before running the plan.
 
 ### Container Runtime
 
 When `h2 qa run <plan>` executes:
 
-1. Start container from committed image
-2. Run `sandbox.setup` commands (start services, build app, etc.)
+1. Start container from committed image, with `results_dir` volume-mounted to `~/results/`
+2. Run `sandbox.setup` commands
 3. Copy test plan into container
-4. Write QA orchestrator role with test plan injected into instructions
-5. Launch orchestrator agent (`h2 run --role qa-orchestrator` or `claude` directly)
-6. Attach user's terminal (`docker exec -it`)
-7. On exit: copy results out, `docker rm -f`
+4. Write QA orchestrator role with test plan injected
+5. Launch orchestrator agent
+6. Attach user's terminal
+7. On exit: `docker rm -f` (results already on host via volume mount)
+
+**Results via volume mount:** The host's `results_dir` is mounted into the container at `~/results/`. The QA agent writes directly to the host filesystem. This means results survive container crashes, Ctrl+C, or agent hangs — no copy-on-exit step needed.
 
 ### QA Orchestrator Role
 
-The orchestrator is a Claude Code agent with built-in QA protocol instructions plus the user's `extra_instructions`:
+Built-in QA protocol instructions plus the user's `extra_instructions`:
 
 ```yaml
 name: qa-orchestrator
@@ -249,7 +244,7 @@ instructions: |
 
 ### Test Plan Format
 
-Plain markdown. No special syntax — the agent interprets it. Convention:
+Plain markdown. No special syntax — the agent interprets it:
 
 ```markdown
 # Test Plan: Messaging Priority
@@ -276,21 +271,21 @@ Plain markdown. No special syntax — the agent interprets it. Convention:
 
 ### Report Storage
 
-Reports are stored on the host in `results_dir` (defaults to `qa/results/`). Each run gets a timestamped directory named after the plan:
+Reports are stored on the host in `results_dir` (defaults to `qa/results/`), volume-mounted into the container. Each run gets a timestamped directory:
 
 ```
 qa/results/
-  2026-02-13T0645-auth-flow/
+  2026-02-13_0645-auth-flow/
     report.md              # Human-readable pass/fail results
     plan.md                # Copy of the test plan that was run
     metadata.json          # Machine-readable summary
     evidence/              # Screenshots, logs, diffs saved by QA agent
-  2026-02-13T0720-messaging/
+  2026-02-13_0720-messaging/
     report.md
     plan.md
     metadata.json
     evidence/
-  latest -> 2026-02-13T0720-messaging/   # Symlink to most recent run
+  latest -> 2026-02-13_0720-messaging/   # Symlink to most recent run
 ```
 
 **metadata.json:**
@@ -314,11 +309,10 @@ qa/results/
 **`h2 qa report` subcommand:**
 
 ```bash
-h2 qa report                       # Show latest report (formats report.md)
+h2 qa report                       # Show latest report
 h2 qa report --list                # Summary table of all runs
-h2 qa report auth-flow             # Most recent run of that plan
+h2 qa report messaging             # Latest run of that plan
 h2 qa report --json                # Latest metadata.json to stdout
-h2 qa report --diff messaging      # Compare latest vs previous run (future)
 ```
 
 **`h2 qa report --list` output:**
@@ -332,32 +326,21 @@ QA Results (qa/results/)
   2026-02-12 22:30     lifecycle      3     2     0     $3.40   6m08s
 ```
 
-The results directory should be gitignored (timestamps, costs, possible sensitive evidence). Test plans are versioned; results are not.
+The results directory should be gitignored. Test plans are versioned; results are not.
 
 ### What `h2 qa` Does NOT Do
 
 - **Run Go tests** — that's `make test`. QA is for agent-driven testing.
-- **Replace e2e tests** — Deterministic conformance tests belong in Go e2e. QA tests cover what Go tests can't (real agent behavior, real API interactions).
-- **Provide test framework primitives** — No assertion library, no fixtures, no mocking. The agent reads markdown and figures it out. That's the point.
-
-## Reviewer Feedback (from initial review, incorporated)
-
-The reviewer identified 6 gaps, all addressed:
-
-1. **Authentication** — Docker solves this. Auth once, commit to image, reuse.
-2. **Process cleanup** — `docker rm -f` kills everything. No orphans.
-3. **Beads isolation** — Docker: fully isolated. Fallback: QA agent works from sandbox dir.
-4. **Observation mechanisms** — Documented in orchestrator verification toolkit.
-5. **Timeout handling** — Explicit guidance in orchestrator instructions.
-6. **Cost visibility** — Cheaper models for sub-agents, cost in metadata.json.
-7. **Tier 1 in Go e2e** — Conformance tests belong in Go e2e, not QA.
+- **Replace e2e tests** — Deterministic conformance tests belong in Go e2e.
+- **Provide test framework primitives** — No assertion library, no fixtures. The agent reads markdown and figures it out.
 
 ## Rabbit Holes
 
 - **Test framework DSL** — Keep plans as plain markdown. No structured format.
 - **CI integration** — Future. Start with manual `h2 qa run`.
-- **Network isolation** — Not for v1. Agents need API access.
 - **Full determinism** — Accept non-determinism in agent tests. Report flakiness.
+- **Port mapping / host networking** — Not needed for v1. Everything runs in the container or calls remote services. Docker-compose handles networking natively when needed.
+- **Service readiness checks** — Setup commands use simple waits for v1. A `ready_check` field (with retry/timeout) is a good v2 addition.
 
 ## No-gos
 
@@ -368,16 +351,15 @@ The reviewer identified 6 gaps, all addressed:
 ## Implementation Plan
 
 ### Phase 1: Harness
-1. `h2-qa.yaml` config parsing and discovery
-2. `h2 qa setup` — build Docker image from user's Dockerfile
+1. Config parsing (`h2-qa.yaml`) and discovery
+2. `h2 qa setup` — build Docker image from Dockerfile, project-scoped tags
 3. `h2 qa auth` — interactive auth, commit image layer
-4. `h2 qa run <plan>` — launch container, run setup commands, inject plan, launch orchestrator, attach terminal
-5. Result extraction (copy results dir out of container on exit)
-6. `--no-docker` fallback (H2_DIR sandbox)
-7. Tests for the harness
+4. `h2 qa run <plan>` — launch container with results volume-mount, run setup commands, inject plan, launch orchestrator, attach terminal, cleanup
+5. `--no-docker` fallback (H2_DIR sandbox)
+6. Tests for the harness
 
 ### Phase 2: h2 test plans
-1. `qa/Dockerfile` for h2 project (h2 binary + Claude Code)
+1. `qa/Dockerfile` for h2 project
 2. `h2-qa.yaml` config for h2 project
 3. Integration test plan: messaging (send, priorities, interrupt)
 4. Integration test plan: agent lifecycle (start, idle, stop, pods)
@@ -386,19 +368,19 @@ The reviewer identified 6 gaps, all addressed:
 
 ### Phase 3: Reporting + polish
 1. `h2 qa report` — view latest, list all, filter by plan, JSON output
-2. `h2 qa report --diff` — compare runs
-3. `h2 qa run --all` — run all plans sequentially
-4. Cost summary from h2 list metrics
+2. `h2 qa run --all` — run all plans sequentially
+3. Cost aggregation from agent metrics
+4. Docker-compose support (`sandbox.compose` + `sandbox.service`)
 
 ## Files to Create/Modify
 
 | File | Change |
 |------|--------|
-| `internal/cmd/qa.go` | New — `h2 qa` command group, config parsing |
-| `internal/cmd/qa_setup.go` | New — Docker image build |
+| `internal/cmd/qa.go` | New — `h2 qa` command group, config parsing, discovery |
+| `internal/cmd/qa_setup.go` | New — Docker image build, project-scoped tagging |
 | `internal/cmd/qa_auth.go` | New — interactive auth + commit |
-| `internal/cmd/qa_run.go` | New — container launch, orchestrator, result extraction |
-| `internal/cmd/qa_report.go` | New — report viewing |
+| `internal/cmd/qa_run.go` | New — container launch, volume mount, orchestrator, cleanup |
+| `internal/cmd/qa_report.go` | New — report viewing, list, JSON output |
 | `internal/cmd/root.go` | Add `qa` subcommand |
 | `qa/Dockerfile` | New — h2 project's QA image |
 | `h2-qa.yaml` | New — h2 project's QA config |
@@ -409,10 +391,8 @@ The reviewer identified 6 gaps, all addressed:
 
 ## Open Questions
 
-1. **Base Docker image?** Ubuntu (more tools, larger) vs Alpine (smaller, may miss Claude Code deps). Leaning Ubuntu.
+1. **Base Docker image?** Ubuntu (more tools, larger) vs Alpine (smaller). Leaning Ubuntu for Claude Code compatibility.
 
-2. **Project source in container?** Bind-mount (fast, live updates) vs copy (isolated snapshot). Bind-mount for v1; copy option for destructive tests later.
+2. **Project source in container?** Bind-mount (live) vs copy (snapshot). Bind-mount for v1.
 
-3. **Image rebuild triggers?** Should `h2 qa run` auto-rebuild if the Dockerfile changed since last build? Or always require explicit `h2 qa setup`?
-
-4. **Multiple orchestrator agents?** For large test suites, could launch multiple QA agents in parallel (one per plan). Future optimization.
+3. **Auto-rebuild?** Should `h2 qa run` detect Dockerfile changes and auto-rebuild? Or always require explicit `h2 qa setup`? Leaning explicit for v1.
