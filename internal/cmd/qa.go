@@ -23,17 +23,6 @@ func newQACmd() *cobra.Command {
 	return cmd
 }
 
-func newQASetupCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "setup",
-		Short: "Build the QA Docker image",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Fprintln(cmd.ErrOrStderr(), "h2 qa setup: not yet implemented")
-			return nil
-		},
-	}
-}
-
 func newQAAuthCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "auth",
