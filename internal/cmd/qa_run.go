@@ -86,56 +86,23 @@ func runQADocker(cfg *QAConfig, planName string, planContent string) error {
 		return err
 	}
 
-	// Generate orchestrator role.
-	roleContent := GenerateOrchestratorRole(
-		cfg.Orchestrator.Model,
+	// Save plan.md to results dir for reference.
+	if err := os.WriteFile(filepath.Join(resultsDir, "plan.md"), []byte(planContent), 0o644); err != nil {
+		return fmt.Errorf("write plan to results dir: %w", err)
+	}
+
+	// Generate orchestrator instructions (plain text, not YAML).
+	instructions := GenerateOrchestratorInstructions(
 		cfg.Orchestrator.ExtraInstructions,
 		planContent,
-		planName,
 	)
-
-	// Write role to a temp file for copying into container.
-	roleTmpFile, err := os.CreateTemp("", "qa-orchestrator-*.yaml")
-	if err != nil {
-		return fmt.Errorf("create temp role file: %w", err)
-	}
-	defer os.Remove(roleTmpFile.Name())
-	if _, err := roleTmpFile.WriteString(roleContent); err != nil {
-		return fmt.Errorf("write temp role file: %w", err)
-	}
-	roleTmpFile.Close()
 
 	containerName := fmt.Sprintf("h2-qa-run-%s-%d", planName, time.Now().Unix())
 
-	// Build docker run args.
+	// Build docker run args using helper functions.
 	runArgs := []string{"run", "-d", "--name", containerName}
-
-	// Volume mount: results dir.
-	runArgs = append(runArgs, "-v", resultsDir+":/root/results")
-
-	// Volume mount: config-specified volumes.
-	for _, vol := range cfg.Sandbox.Volumes {
-		// Resolve relative host paths against config dir.
-		parts := strings.SplitN(vol, ":", 2)
-		if len(parts) == 2 && !filepath.IsAbs(parts[0]) {
-			parts[0] = cfg.ResolvePath(parts[0])
-			vol = parts[0] + ":" + parts[1]
-		}
-		runArgs = append(runArgs, "-v", vol)
-	}
-
-	// Env vars.
-	for _, env := range cfg.Sandbox.Env {
-		if strings.Contains(env, "=") {
-			runArgs = append(runArgs, "-e", env)
-		} else {
-			// Passthrough: resolve from host environment.
-			if val, ok := os.LookupEnv(env); ok {
-				runArgs = append(runArgs, "-e", env+"="+val)
-			}
-		}
-	}
-
+	runArgs = append(runArgs, buildVolumeArgs(cfg, resultsDir)...)
+	runArgs = append(runArgs, buildEnvArgs(cfg)...)
 	runArgs = append(runArgs, imageTag, "sleep", "infinity")
 
 	fmt.Fprintf(os.Stderr, "Starting QA container %s...\n", containerName)
@@ -152,18 +119,11 @@ func runQADocker(cfg *QAConfig, planName string, planContent string) error {
 		exec.Command("docker", "rm", "-f", containerName).Run()
 	}()
 
-	// Copy orchestrator role into container.
-	_, stderr, err = dockerExec("cp", roleTmpFile.Name(), containerName+":/root/qa-orchestrator.yaml")
-	if err != nil {
-		return fmt.Errorf("copy role to container: %s", stderr)
-	}
-
-	// Run setup commands.
+	// Run setup commands with streaming output.
 	for _, setupCmd := range cfg.Sandbox.Setup {
 		fmt.Fprintf(os.Stderr, "Running setup: %s\n", setupCmd)
-		_, stderr, err := dockerExec("exec", containerName, "sh", "-c", setupCmd)
-		if err != nil {
-			return fmt.Errorf("setup command failed (%s): %s", setupCmd, stderr)
+		if err := dockerExecStreaming("exec", containerName, "sh", "-c", setupCmd); err != nil {
+			return fmt.Errorf("setup command failed (%s): %w", setupCmd, err)
 		}
 	}
 
@@ -173,9 +133,9 @@ func runQADocker(cfg *QAConfig, planName string, planContent string) error {
 	// Launch the orchestrator agent and attach terminal.
 	fmt.Fprintf(os.Stderr, "Launching QA orchestrator (model: %s, plan: %s)...\n\n", cfg.Orchestrator.Model, planName)
 
-	// Use docker exec -it to run claude with the orchestrator role.
+	// Use docker exec -it to run claude with --system-prompt (plain text instructions).
 	execCmd := exec.Command("docker", "exec", "-it", containerName,
-		"claude", "--system-prompt", roleContent, "--permission-mode", "bypassPermissions",
+		"claude", "--system-prompt", instructions, "--permission-mode", "bypassPermissions",
 		"--model", cfg.Orchestrator.Model,
 		"Execute the test plan in your instructions. Write results to ~/results/report.md and ~/results/metadata.json.")
 	execCmd.Stdin = os.Stdin
@@ -210,30 +170,31 @@ func runQANoDocker(cfg *QAConfig, planName string, planContent string) error {
 		return err
 	}
 
-	// Initialize h2 in temp dir.
-	rolesDir := filepath.Join(tmpDir, "roles")
-	if err := os.MkdirAll(rolesDir, 0o755); err != nil {
-		return fmt.Errorf("create roles dir: %w", err)
+	// Save plan.md to results dir for reference.
+	if err := os.WriteFile(filepath.Join(resultsDir, "plan.md"), []byte(planContent), 0o644); err != nil {
+		return fmt.Errorf("write plan to results dir: %w", err)
 	}
 
-	// Write orchestrator role.
-	roleContent := GenerateOrchestratorRole(
-		cfg.Orchestrator.Model,
+	// Initialize h2 in temp dir via h2 init.
+	initCmd := exec.Command("h2", "init", tmpDir)
+	initCmd.Env = append(os.Environ(), "H2_DIR="+tmpDir)
+	if err := initCmd.Run(); err != nil {
+		// Fallback: manually create minimal directory structure.
+		os.MkdirAll(filepath.Join(tmpDir, "roles"), 0o755)
+	}
+
+	// Generate orchestrator instructions (plain text).
+	instructions := GenerateOrchestratorInstructions(
 		cfg.Orchestrator.ExtraInstructions,
 		planContent,
-		planName,
 	)
-	rolePath := filepath.Join(rolesDir, "qa-orchestrator.yaml")
-	if err := os.WriteFile(rolePath, []byte(roleContent), 0o644); err != nil {
-		return fmt.Errorf("write orchestrator role: %w", err)
-	}
 
 	fmt.Fprintf(os.Stderr, "Running QA without Docker (H2_DIR=%s)...\n", tmpDir)
 	fmt.Fprintf(os.Stderr, "Launching QA orchestrator (model: %s, plan: %s)...\n\n", cfg.Orchestrator.Model, planName)
 
-	// Run claude with the system prompt directly.
+	// Run claude with --system-prompt (plain text instructions).
 	cmd := exec.Command("claude",
-		"--system-prompt", roleContent,
+		"--system-prompt", instructions,
 		"--permission-mode", "bypassPermissions",
 		"--model", cfg.Orchestrator.Model,
 		"Execute the test plan in your instructions. Write results to "+resultsDir+"/report.md and "+resultsDir+"/metadata.json.")

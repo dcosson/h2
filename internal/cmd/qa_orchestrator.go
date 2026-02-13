@@ -57,20 +57,30 @@ Write machine-readable JSON:
 - Use cheaper models (sonnet/haiku) for sub-agents when possible
 - Only use opus for complex reasoning tasks`
 
-// GenerateOrchestratorRole generates the QA orchestrator role YAML content.
-func GenerateOrchestratorRole(model, extraInstructions, testPlanContent, planName string) string {
-	var instructions strings.Builder
+// GenerateOrchestratorInstructions returns the plain-text instructions string
+// for the QA orchestrator (protocol + extra instructions + test plan).
+// This is used with claude --system-prompt.
+func GenerateOrchestratorInstructions(extraInstructions, testPlanContent string) string {
+	var b strings.Builder
 
-	instructions.WriteString(qaOrchestratorProtocol)
+	b.WriteString(qaOrchestratorProtocol)
 
 	if extraInstructions != "" {
-		instructions.WriteString("\n\n## Project-Specific Instructions\n\n")
-		instructions.WriteString(strings.TrimSpace(extraInstructions))
+		b.WriteString("\n\n## Project-Specific Instructions\n\n")
+		b.WriteString(strings.TrimSpace(extraInstructions))
 	}
 
-	instructions.WriteString("\n\n## Test Plan\n\n")
-	instructions.WriteString(strings.TrimSpace(testPlanContent))
-	instructions.WriteString("\n")
+	b.WriteString("\n\n## Test Plan\n\n")
+	b.WriteString(strings.TrimSpace(testPlanContent))
+	b.WriteString("\n")
+
+	return b.String()
+}
+
+// GenerateOrchestratorRole generates the QA orchestrator role YAML content.
+// Used when writing a role file (e.g., for --no-docker with h2 run --role).
+func GenerateOrchestratorRole(model, extraInstructions, testPlanContent, planName string) string {
+	instructions := GenerateOrchestratorInstructions(extraInstructions, testPlanContent)
 
 	// Build YAML. We use fmt.Sprintf with a block scalar (|) for the instructions
 	// to preserve newlines and avoid YAML escaping issues.
@@ -78,7 +88,7 @@ func GenerateOrchestratorRole(model, extraInstructions, testPlanContent, planNam
 model: %s
 permission_mode: bypassPermissions
 instructions: |
-%s`, model, indentBlock(instructions.String(), "  "))
+%s`, model, indentBlock(instructions, "  "))
 
 	return yaml
 }

@@ -8,6 +8,37 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// qaAuthDeps holds injectable dependencies for the auth flow.
+// Production code uses the defaults; tests can override.
+type qaAuthDeps struct {
+	dockerAvailable func() error
+	imageExists     func(tag string) bool
+	dockerExec      func(args ...string) (string, string, error)
+	runInteractive  func(name, image string) error
+	removeContainer func(name string)
+}
+
+var defaultQAAuthDeps = qaAuthDeps{
+	dockerAvailable: dockerAvailable,
+	imageExists:     imageExists,
+	dockerExec:      dockerExec,
+	runInteractive: func(name, image string) error {
+		cmd := exec.Command("docker", "run", "-it", "--name", name, image, "/bin/sh")
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		return cmd.Run()
+	},
+	removeContainer: func(name string) {
+		exec.Command("docker", "rm", "-f", name).Run()
+	},
+}
+
+// authContainerName returns a project-specific container name for auth sessions.
+func authContainerName(configPath string) string {
+	return fmt.Sprintf("h2-qa-auth-%s", projectHash(configPath))
+}
+
 func newQAAuthCmd() *cobra.Command {
 	var configPath string
 	var force bool
@@ -28,8 +59,12 @@ func newQAAuthCmd() *cobra.Command {
 }
 
 func runQAAuth(configPath string, force bool) error {
+	return runQAAuthWithDeps(configPath, force, defaultQAAuthDeps)
+}
+
+func runQAAuthWithDeps(configPath string, force bool, deps qaAuthDeps) error {
 	// Check Docker is available.
-	if err := dockerAvailable(); err != nil {
+	if err := deps.dockerAvailable(); err != nil {
 		return err
 	}
 
@@ -43,45 +78,38 @@ func runQAAuth(configPath string, force bool) error {
 	authTag := authedImageTag(cfg.configPath)
 
 	// Verify base image exists.
-	if !imageExists(baseTag) {
+	if !deps.imageExists(baseTag) {
 		return fmt.Errorf("base image %q not found; run 'h2 qa setup' first", baseTag)
 	}
 
 	// Check if authed image already exists.
-	if imageExists(authTag) && !force {
+	if deps.imageExists(authTag) && !force {
 		fmt.Fprintf(os.Stderr, "Authed image %q already exists. Use --force to overwrite.\n", authTag)
 		return fmt.Errorf("authed image already exists (use --force to overwrite)")
 	}
 
-	// Start interactive container.
-	containerName := "h2-qa-auth-session"
+	containerName := authContainerName(cfg.configPath)
 
 	// Remove any leftover container from a previous failed auth.
-	exec.Command("docker", "rm", "-f", containerName).Run()
+	deps.removeContainer(containerName)
 
 	fmt.Fprintf(os.Stderr, "Starting interactive container from %s...\n", baseTag)
 	fmt.Fprintf(os.Stderr, "Log into Claude Code by running: claude\n")
 	fmt.Fprintf(os.Stderr, "When done, type 'exit' to save auth state.\n\n")
 
-	// docker run -it --name <name> <base-tag> /bin/sh
-	runCmd := exec.Command("docker", "run", "-it", "--name", containerName, baseTag, "/bin/sh")
-	runCmd.Stdin = os.Stdin
-	runCmd.Stdout = os.Stdout
-	runCmd.Stderr = os.Stderr
-
-	runErr := runCmd.Run()
+	runErr := deps.runInteractive(containerName, baseTag)
 
 	// Commit the container regardless of exit code (user may have ctrl+d'd).
 	fmt.Fprintf(os.Stderr, "\nCommitting auth state to %s...\n", authTag)
-	_, stderr, commitErr := dockerExec("commit", containerName, authTag)
+	_, stderr, commitErr := deps.dockerExec("commit", containerName, authTag)
 	if commitErr != nil {
 		// Clean up container before returning error.
-		exec.Command("docker", "rm", "-f", containerName).Run()
+		deps.removeContainer(containerName)
 		return fmt.Errorf("docker commit failed: %s", stderr)
 	}
 
 	// Remove the stopped container.
-	exec.Command("docker", "rm", "-f", containerName).Run()
+	deps.removeContainer(containerName)
 
 	if runErr != nil {
 		fmt.Fprintf(os.Stderr, "Warning: container exited with error: %v\n", runErr)
