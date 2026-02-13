@@ -90,6 +90,47 @@ func TestGenerateOrchestratorRole_YAMLStructure(t *testing.T) {
 	}
 }
 
+func TestGenerateOrchestratorInstructions_PlainText(t *testing.T) {
+	instructions := GenerateOrchestratorInstructions("Extra context", "# Test Plan\n\nDo stuff")
+
+	// Should NOT contain YAML role fields.
+	if strings.Contains(instructions, "name: qa-orchestrator") {
+		t.Error("instructions should not contain YAML role header")
+	}
+	if strings.Contains(instructions, "permission_mode:") {
+		t.Error("instructions should not contain YAML fields")
+	}
+
+	// Should contain protocol and injected content.
+	if !strings.Contains(instructions, "Verification Toolkit") {
+		t.Error("instructions should contain protocol")
+	}
+	if !strings.Contains(instructions, "Extra context") {
+		t.Error("instructions should contain extra instructions")
+	}
+	if !strings.Contains(instructions, "# Test Plan") {
+		t.Error("instructions should contain test plan")
+	}
+}
+
+func TestGenerateOrchestratorInstructions_UsedByRole(t *testing.T) {
+	// Verify that GenerateOrchestratorRole uses GenerateOrchestratorInstructions internally.
+	instructions := GenerateOrchestratorInstructions("Extra", "Plan content")
+	role := GenerateOrchestratorRole("opus", "Extra", "Plan content", "test")
+
+	// The role YAML should contain the instructions text (indented).
+	if !strings.Contains(role, "Verification Toolkit") {
+		t.Error("role should contain the same protocol as instructions")
+	}
+	if !strings.Contains(role, "Extra") {
+		t.Error("role should contain extra instructions")
+	}
+	// Instructions should be a substring of the role (without indentation).
+	if !strings.Contains(instructions, "Plan content") {
+		t.Error("instructions should contain plan content")
+	}
+}
+
 func TestIndentBlock(t *testing.T) {
 	input := "line1\nline2\n\nline4"
 	got := indentBlock(input, "  ")
