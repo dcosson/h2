@@ -7,16 +7,18 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
     curl \
     git \
-    build-essential \
     ca-certificates \
-    nodejs \
-    npm \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 20.x (Claude Code requires Node 18+).
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Claude Code.
 RUN npm install -g @anthropic-ai/claude-code
 
-# Copy the pre-built h2 binary.
+# Copy the pre-built h2 binary (run "make build" before "h2 qa setup").
 COPY h2 /usr/local/bin/h2
 RUN chmod +x /usr/local/bin/h2
 
