@@ -485,3 +485,121 @@ func TestChildArgs_DoesNotMutateOriginal(t *testing.T) {
 		t.Fatalf("childArgs mutated original slice: %v", original)
 	}
 }
+
+func TestChildArgs_WithInstructions(t *testing.T) {
+	s := New("test", "claude", []string{"--verbose"})
+	s.SessionID = "550e8400-e29b-41d4-a716-446655440000"
+	s.Instructions = "You are a coding agent.\nWrite tests."
+
+	args := s.childArgs()
+
+	// Should have: --session-id, <uuid>, --verbose, --append-system-prompt, <instructions>
+	if len(args) != 5 {
+		t.Fatalf("expected 5 args, got %d: %v", len(args), args)
+	}
+	if args[0] != "--session-id" {
+		t.Fatalf("expected first arg '--session-id', got %q", args[0])
+	}
+	if args[2] != "--verbose" {
+		t.Fatalf("expected third arg '--verbose', got %q", args[2])
+	}
+	if args[3] != "--append-system-prompt" {
+		t.Fatalf("expected fourth arg '--append-system-prompt', got %q", args[3])
+	}
+	if args[4] != "You are a coding agent.\nWrite tests." {
+		t.Fatalf("expected instructions as fifth arg, got %q", args[4])
+	}
+}
+
+func TestChildArgs_EmptyInstructionsNoFlag(t *testing.T) {
+	s := New("test", "claude", []string{"--verbose"})
+	s.SessionID = "550e8400-e29b-41d4-a716-446655440000"
+	s.Instructions = ""
+
+	args := s.childArgs()
+
+	// Should only have: --session-id, <uuid>, --verbose
+	if len(args) != 3 {
+		t.Fatalf("expected 3 args, got %d: %v", len(args), args)
+	}
+	for _, arg := range args {
+		if arg == "--append-system-prompt" {
+			t.Fatal("--append-system-prompt should not be present when instructions are empty")
+		}
+	}
+}
+
+func TestChildArgs_InstructionsWithoutSessionID(t *testing.T) {
+	s := New("test", "claude", nil)
+	s.Instructions = "Do stuff"
+
+	args := s.childArgs()
+
+	// No session ID means no prepend args, just --append-system-prompt
+	if len(args) != 2 {
+		t.Fatalf("expected 2 args, got %d: %v", len(args), args)
+	}
+	if args[0] != "--append-system-prompt" {
+		t.Fatalf("expected '--append-system-prompt', got %q", args[0])
+	}
+	if args[1] != "Do stuff" {
+		t.Fatalf("expected 'Do stuff', got %q", args[1])
+	}
+}
+
+func TestChildArgs_InstructionsNonClaude(t *testing.T) {
+	s := New("test", "bash", []string{"-c", "echo hi"})
+	s.Instructions = "Some instructions"
+
+	args := s.childArgs()
+
+	// Non-claude has no prepend args, but should still get --append-system-prompt
+	if len(args) != 4 {
+		t.Fatalf("expected 4 args, got %d: %v", len(args), args)
+	}
+	if args[0] != "-c" || args[1] != "echo hi" {
+		t.Fatalf("expected original args first, got %v", args[:2])
+	}
+	if args[2] != "--append-system-prompt" {
+		t.Fatalf("expected '--append-system-prompt', got %q", args[2])
+	}
+	if args[3] != "Some instructions" {
+		t.Fatalf("expected 'Some instructions', got %q", args[3])
+	}
+}
+
+func TestChildArgs_InstructionsWithSpecialCharacters(t *testing.T) {
+	s := New("test", "claude", nil)
+	s.SessionID = "test-uuid"
+	instructions := "Use `backticks` and \"quotes\" and $VARS and\nnewlines\tand\ttabs"
+	s.Instructions = instructions
+
+	args := s.childArgs()
+
+	// Find the --append-system-prompt value
+	found := false
+	for i, arg := range args {
+		if arg == "--append-system-prompt" && i+1 < len(args) {
+			found = true
+			if args[i+1] != instructions {
+				t.Fatalf("instructions not preserved exactly:\ngot:  %q\nwant: %q", args[i+1], instructions)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("--append-system-prompt not found in args")
+	}
+}
+
+func TestChildArgs_InstructionsDoNotMutateOriginalArgs(t *testing.T) {
+	original := []string{"--verbose"}
+	s := New("test", "claude", original)
+	s.SessionID = "some-uuid"
+	s.Instructions = "Test instructions"
+
+	_ = s.childArgs()
+
+	if len(original) != 1 || original[0] != "--verbose" {
+		t.Fatalf("childArgs with instructions mutated original slice: %v", original)
+	}
+}
