@@ -23,17 +23,6 @@ func newQACmd() *cobra.Command {
 	return cmd
 }
 
-func newQAAuthCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "auth",
-		Short: "Authenticate Claude Code in the QA container",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Fprintln(cmd.ErrOrStderr(), "h2 qa auth: not yet implemented")
-			return nil
-		},
-	}
-}
-
 func newQARunCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "run [plan]",
