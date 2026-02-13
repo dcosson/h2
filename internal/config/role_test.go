@@ -1151,6 +1151,127 @@ func TestE2E_PodAwareRole_StandaloneZeroValues(t *testing.T) {
 	}
 }
 
+// --- Validate tests for system_prompt and permission_mode ---
+
+func TestValidate_InstructionsOnly(t *testing.T) {
+	role := &Role{Name: "test", Instructions: "Do stuff"}
+	if err := role.Validate(); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+}
+
+func TestValidate_SystemPromptOnly(t *testing.T) {
+	role := &Role{Name: "test", SystemPrompt: "You are a custom agent."}
+	if err := role.Validate(); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+}
+
+func TestValidate_BothInstructionsAndSystemPrompt(t *testing.T) {
+	role := &Role{Name: "test", Instructions: "Do stuff", SystemPrompt: "Custom prompt"}
+	if err := role.Validate(); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+}
+
+func TestValidate_NeitherInstructionsNorSystemPrompt(t *testing.T) {
+	role := &Role{Name: "test"}
+	err := role.Validate()
+	if err == nil {
+		t.Fatal("expected error when both instructions and system_prompt are empty")
+	}
+	if !strings.Contains(err.Error(), "at least one of instructions or system_prompt") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestValidate_PermissionMode_Valid(t *testing.T) {
+	for _, mode := range ValidPermissionModes {
+		role := &Role{Name: "test", Instructions: "Do stuff", PermissionMode: mode}
+		if err := role.Validate(); err != nil {
+			t.Errorf("expected no error for permission_mode %q, got: %v", mode, err)
+		}
+	}
+}
+
+func TestValidate_PermissionMode_Invalid(t *testing.T) {
+	role := &Role{Name: "test", Instructions: "Do stuff", PermissionMode: "yolo"}
+	err := role.Validate()
+	if err == nil {
+		t.Fatal("expected error for invalid permission_mode")
+	}
+	if !strings.Contains(err.Error(), "invalid permission_mode") {
+		t.Errorf("expected 'invalid permission_mode' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "yolo") {
+		t.Errorf("error should contain the invalid value 'yolo', got: %v", err)
+	}
+	// Should list valid options.
+	if !strings.Contains(err.Error(), "default") || !strings.Contains(err.Error(), "bypassPermissions") {
+		t.Errorf("error should list valid options, got: %v", err)
+	}
+}
+
+func TestValidate_PermissionMode_Empty(t *testing.T) {
+	role := &Role{Name: "test", Instructions: "Do stuff", PermissionMode: ""}
+	if err := role.Validate(); err != nil {
+		t.Fatalf("empty permission_mode should be valid, got: %v", err)
+	}
+}
+
+func TestLoadRoleFrom_SystemPromptField(t *testing.T) {
+	yaml := `
+name: custom
+system_prompt: |
+  You are a completely custom agent with no default behavior.
+`
+	path := writeTempFile(t, "custom.yaml", yaml)
+	role, err := LoadRoleFrom(path)
+	if err != nil {
+		t.Fatalf("LoadRoleFrom: %v", err)
+	}
+	if !strings.Contains(role.SystemPrompt, "completely custom agent") {
+		t.Errorf("SystemPrompt not loaded, got: %q", role.SystemPrompt)
+	}
+	if role.Instructions != "" {
+		t.Errorf("Instructions should be empty, got: %q", role.Instructions)
+	}
+}
+
+func TestLoadRoleFrom_PermissionModeField(t *testing.T) {
+	yaml := `
+name: permissive
+instructions: |
+  Do stuff.
+permission_mode: bypassPermissions
+`
+	path := writeTempFile(t, "permissive.yaml", yaml)
+	role, err := LoadRoleFrom(path)
+	if err != nil {
+		t.Fatalf("LoadRoleFrom: %v", err)
+	}
+	if role.PermissionMode != "bypassPermissions" {
+		t.Errorf("PermissionMode = %q, want %q", role.PermissionMode, "bypassPermissions")
+	}
+}
+
+func TestLoadRoleFrom_InvalidPermissionMode(t *testing.T) {
+	yaml := `
+name: bad
+instructions: |
+  Do stuff.
+permission_mode: invalid_mode
+`
+	path := writeTempFile(t, "bad.yaml", yaml)
+	_, err := LoadRoleFrom(path)
+	if err == nil {
+		t.Fatal("expected error for invalid permission_mode")
+	}
+	if !strings.Contains(err.Error(), "invalid permission_mode") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 func writeTempFile(t *testing.T, name, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)

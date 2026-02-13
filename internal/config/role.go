@@ -86,6 +86,11 @@ func WorktreesDir() string {
 	return filepath.Join(ConfigDir(), "worktrees")
 }
 
+// ValidPermissionModes lists all valid values for the permission_mode field.
+var ValidPermissionModes = []string{
+	"default", "delegate", "acceptEdits", "plan", "dontAsk", "bypassPermissions",
+}
+
 // Role defines a named configuration bundle for an h2 agent.
 type Role struct {
 	Name            string                  `yaml:"name"`
@@ -93,9 +98,11 @@ type Role struct {
 	AgentType       string                  `yaml:"agent_type,omitempty"` // "claude" (default), future: other agent types
 	Model           string                  `yaml:"model,omitempty"`
 	ClaudeConfigDir string                  `yaml:"claude_config_dir,omitempty"`
-	WorkingDir      string                  `yaml:"working_dir,omitempty"` // agent CWD (default ".")
-	Worktree        *WorktreeConfig         `yaml:"worktree,omitempty"`   // git worktree settings
-	Instructions    string                  `yaml:"instructions"`
+	WorkingDir      string                  `yaml:"working_dir,omitempty"`  // agent CWD (default ".")
+	Worktree        *WorktreeConfig         `yaml:"worktree,omitempty"`    // git worktree settings
+	SystemPrompt    string                  `yaml:"system_prompt,omitempty"` // replaces Claude's entire default system prompt (--system-prompt)
+	Instructions    string                  `yaml:"instructions"`           // appended to default system prompt (--append-system-prompt)
+	PermissionMode  string                  `yaml:"permission_mode,omitempty"` // Claude CLI --permission-mode flag
 	Permissions     Permissions             `yaml:"permissions,omitempty"`
 	Heartbeat       *HeartbeatConfig        `yaml:"heartbeat,omitempty"`
 	Hooks           yaml.Node               `yaml:"hooks,omitempty"`      // passed through as-is to settings.json
@@ -341,8 +348,21 @@ func (r *Role) Validate() error {
 	if r.Name == "" {
 		return fmt.Errorf("name is required")
 	}
-	if r.Instructions == "" {
-		return fmt.Errorf("instructions are required")
+	if r.Instructions == "" && r.SystemPrompt == "" {
+		return fmt.Errorf("at least one of instructions or system_prompt is required")
+	}
+	if r.PermissionMode != "" {
+		valid := false
+		for _, mode := range ValidPermissionModes {
+			if r.PermissionMode == mode {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return fmt.Errorf("invalid permission_mode %q; valid values: %s",
+				r.PermissionMode, strings.Join(ValidPermissionModes, ", "))
+		}
 	}
 	// working_dir and worktree are mutually exclusive (working_dir "." or empty is allowed).
 	if r.Worktree != nil && r.WorkingDir != "" && r.WorkingDir != "." {
