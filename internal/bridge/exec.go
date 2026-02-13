@@ -10,8 +10,6 @@ import (
 	"github.com/google/shlex"
 )
 
-const maxOutputLen = 4000 // leave room for ERROR prefix / Telegram 4096 limit
-
 // ExecCommandTimeout is the default timeout for command execution.
 // Exposed as a variable so tests can override it.
 var ExecCommandTimeout = 30 * time.Second
@@ -41,22 +39,13 @@ func ExecCommand(command, args string) string {
 			exitCode = exitErr.ExitCode()
 		}
 		if ctx.Err() == context.DeadlineExceeded {
-			return truncateOutput(fmt.Sprintf("ERROR (timeout after 30s):\n%s", result))
+			return fmt.Sprintf("ERROR (timeout after 30s):\n%s", result)
 		}
-		return truncateOutput(fmt.Sprintf("ERROR (exit %d):\n%s", exitCode, result))
+		return fmt.Sprintf("ERROR (exit %d):\n%s", exitCode, result)
 	}
 
 	if result == "" {
 		return "(no output)"
 	}
-	return truncateOutput(result)
-}
-
-// truncateOutput truncates s to maxOutputLen runes, appending a suffix if truncated.
-func truncateOutput(s string) string {
-	runes := []rune(s)
-	if len(runes) <= maxOutputLen {
-		return s
-	}
-	return string(runes[:maxOutputLen]) + "\n... (truncated)"
+	return result
 }
