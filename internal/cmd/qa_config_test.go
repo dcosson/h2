@@ -318,6 +318,63 @@ sandbox:
 	}
 }
 
+func TestLoadQAConfig_SetsConfigPath(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "h2-qa.yaml")
+	os.WriteFile(configPath, []byte(`
+sandbox:
+  dockerfile: Dockerfile
+`), 0o644)
+
+	cfg, err := LoadQAConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadQAConfig: %v", err)
+	}
+
+	absPath, _ := filepath.Abs(configPath)
+	if cfg.configPath != absPath {
+		t.Errorf("configPath = %q, want %q", cfg.configPath, absPath)
+	}
+}
+
+func TestQAConfig_Validate_MissingDockerfile(t *testing.T) {
+	cfg := &QAConfig{}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected error for missing dockerfile")
+	}
+	if !strings.Contains(err.Error(), "sandbox.dockerfile") {
+		t.Errorf("error should mention sandbox.dockerfile, got: %v", err)
+	}
+}
+
+func TestQAConfig_Validate_WithDockerfile(t *testing.T) {
+	cfg := &QAConfig{
+		Sandbox: QASandboxConfig{
+			Dockerfile: "Dockerfile",
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() should pass with dockerfile set, got: %v", err)
+	}
+}
+
+func TestLoadQAConfig_ValidationError(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "h2-qa.yaml")
+	os.WriteFile(configPath, []byte(`
+sandbox: {}
+`), 0o644)
+
+	_, err := LoadQAConfig(configPath)
+	if err == nil {
+		t.Fatal("expected validation error for missing dockerfile")
+	}
+	if !strings.Contains(err.Error(), "sandbox.dockerfile") {
+		t.Errorf("error should mention sandbox.dockerfile, got: %v", err)
+	}
+}
+
 func TestDiscoverQAConfig_PrefersRootOverSubdir(t *testing.T) {
 	dir := t.TempDir()
 

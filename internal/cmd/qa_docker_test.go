@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -72,6 +73,66 @@ func TestAuthedImageTag_SameHashAsProject(t *testing.T) {
 
 	if baseHash != authedHash {
 		t.Errorf("base and authed should share same hash: %q vs %q", baseHash, authedHash)
+	}
+}
+
+func TestProjectHash_Deterministic(t *testing.T) {
+	h1 := projectHash("/home/user/project/h2-qa.yaml")
+	h2 := projectHash("/home/user/project/h2-qa.yaml")
+	if h1 != h2 {
+		t.Errorf("projectHash should be deterministic: %q vs %q", h1, h2)
+	}
+}
+
+func TestProjectHash_VariesByPath(t *testing.T) {
+	h1 := projectHash("/home/user/projectA/h2-qa.yaml")
+	h2 := projectHash("/home/user/projectB/h2-qa.yaml")
+	if h1 == h2 {
+		t.Errorf("projectHash should differ for different paths: both %q", h1)
+	}
+}
+
+func TestProjectHash_UsedByBothTags(t *testing.T) {
+	path := "/some/path/h2-qa.yaml"
+	hash := projectHash(path)
+	base := projectImageTag(path)
+	authed := authedImageTag(path)
+
+	if !strings.Contains(base, hash) {
+		t.Errorf("projectImageTag should contain hash %q, got %q", hash, base)
+	}
+	if !strings.Contains(authed, hash) {
+		t.Errorf("authedImageTag should contain hash %q, got %q", hash, authed)
+	}
+}
+
+func TestFormatImageSize_Bytes(t *testing.T) {
+	if got := formatImageSize("500"); got != "500 bytes" {
+		t.Errorf("formatImageSize(500) = %q, want %q", got, "500 bytes")
+	}
+}
+
+func TestFormatImageSize_KB(t *testing.T) {
+	if got := formatImageSize("5120"); got != "5.0 KB" {
+		t.Errorf("formatImageSize(5120) = %q, want %q", got, "5.0 KB")
+	}
+}
+
+func TestFormatImageSize_MB(t *testing.T) {
+	if got := formatImageSize("52428800"); got != "50.0 MB" {
+		t.Errorf("formatImageSize(52428800) = %q, want %q", got, "50.0 MB")
+	}
+}
+
+func TestFormatImageSize_GB(t *testing.T) {
+	if got := formatImageSize("1288490188"); got != "1.2 GB" {
+		t.Errorf("formatImageSize(1288490188) = %q, want %q", got, "1.2 GB")
+	}
+}
+
+func TestFormatImageSize_InvalidInput(t *testing.T) {
+	if got := formatImageSize("not-a-number"); got != "not-a-number" {
+		t.Errorf("formatImageSize(invalid) = %q, want original string", got)
 	}
 }
 

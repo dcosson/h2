@@ -38,27 +38,11 @@ func runQASetup(configPath string) error {
 
 	// Resolve Dockerfile path.
 	dockerfile := cfg.ResolvedDockerfile()
-	if dockerfile == "" {
-		return fmt.Errorf("sandbox.dockerfile is required in h2-qa.yaml")
-	}
 	if _, err := os.Stat(dockerfile); os.IsNotExist(err) {
 		return fmt.Errorf("Dockerfile not found: %s", dockerfile)
 	}
 
-	// Determine the config file path for tag generation.
-	// Use the explicit path or re-discover.
-	tagPath := configPath
-	if tagPath == "" {
-		// Resolve to an absolute path for deterministic tagging.
-		candidates := []string{"h2-qa.yaml", "qa/h2-qa.yaml"}
-		for _, c := range candidates {
-			if _, err := os.Stat(c); err == nil {
-				tagPath = c
-				break
-			}
-		}
-	}
-	tag := projectImageTag(tagPath)
+	tag := projectImageTag(cfg.configPath)
 
 	// Build docker command args.
 	buildArgs := []string{"build", "-f", dockerfile, "-t", tag}
@@ -72,9 +56,8 @@ func runQASetup(configPath string) error {
 
 	fmt.Fprintf(os.Stderr, "Building QA image %s from %s...\n", tag, dockerfile)
 
-	_, stderr, err := dockerExec(buildArgs...)
-	if err != nil {
-		return fmt.Errorf("docker build failed: %s", stderr)
+	if err := dockerExecStreaming(buildArgs...); err != nil {
+		return fmt.Errorf("docker build failed: %w", err)
 	}
 
 	// Get image size for display.
@@ -82,7 +65,7 @@ func runQASetup(configPath string) error {
 
 	fmt.Fprintf(os.Stderr, "QA image built: %s", tag)
 	if size != "" {
-		fmt.Fprintf(os.Stderr, " (%s bytes)", size)
+		fmt.Fprintf(os.Stderr, " (%s)", formatImageSize(size))
 	}
 	fmt.Fprintln(os.Stderr)
 

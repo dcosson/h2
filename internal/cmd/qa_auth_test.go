@@ -69,40 +69,6 @@ sandbox:
 	}
 }
 
-func TestResolveTagPath_ExplicitPath(t *testing.T) {
-	got := resolveTagPath("/explicit/path/config.yaml")
-	if got != "/explicit/path/config.yaml" {
-		t.Errorf("resolveTagPath with explicit = %q, want explicit path", got)
-	}
-}
-
-func TestResolveTagPath_Discovery(t *testing.T) {
-	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "h2-qa.yaml"), []byte(""), 0o644)
-
-	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
-
-	got := resolveTagPath("")
-	if got != "h2-qa.yaml" {
-		t.Errorf("resolveTagPath discovery = %q, want h2-qa.yaml", got)
-	}
-}
-
-func TestResolveTagPath_Fallback(t *testing.T) {
-	dir := t.TempDir()
-
-	origDir, _ := os.Getwd()
-	os.Chdir(dir)
-	defer os.Chdir(origDir)
-
-	got := resolveTagPath("")
-	if got != "h2-qa.yaml" {
-		t.Errorf("resolveTagPath fallback = %q, want h2-qa.yaml", got)
-	}
-}
-
 // TestQAAuth_Integration tests the full auth flow with a trivial image.
 // Skipped if Docker is not available.
 func TestQAAuth_Integration(t *testing.T) {

@@ -35,6 +35,10 @@ type QAConfig struct {
 	// configDir is the directory containing the config file.
 	// All relative paths are resolved against this directory.
 	configDir string
+
+	// configPath is the absolute path to the config file itself.
+	// Used for deterministic Docker image tagging.
+	configPath string
 }
 
 // DefaultPlansDir is the default directory for test plans.
@@ -64,6 +68,7 @@ func LoadQAConfig(path string) (*QAConfig, error) {
 	}
 
 	cfg.configDir = filepath.Dir(absPath)
+	cfg.configPath = absPath
 
 	// Apply defaults.
 	if cfg.PlansDir == "" {
@@ -76,7 +81,19 @@ func LoadQAConfig(path string) (*QAConfig, error) {
 		cfg.Orchestrator.Model = DefaultOrchestratorModel
 	}
 
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
 	return &cfg, nil
+}
+
+// Validate checks that the QA config has the minimum required fields.
+func (c *QAConfig) Validate() error {
+	if c.Sandbox.Dockerfile == "" {
+		return fmt.Errorf("sandbox.dockerfile is required in h2-qa.yaml")
+	}
+	return nil
 }
 
 // ResolvePath resolves a path relative to the config file's directory.

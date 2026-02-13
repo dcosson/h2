@@ -39,16 +39,13 @@ func runQAAuth(configPath string, force bool) error {
 		return err
 	}
 
-	// Resolve the config path for tag generation.
-	tagPath := resolveTagPath(configPath)
-	baseTag := projectImageTag(tagPath)
-	authTag := authedImageTag(tagPath)
+	baseTag := projectImageTag(cfg.configPath)
+	authTag := authedImageTag(cfg.configPath)
 
 	// Verify base image exists.
 	if !imageExists(baseTag) {
 		return fmt.Errorf("base image %q not found; run 'h2 qa setup' first", baseTag)
 	}
-	_ = cfg // config loaded successfully, tags derived from it
 
 	// Check if authed image already exists.
 	if imageExists(authTag) && !force {
@@ -93,19 +90,4 @@ func runQAAuth(configPath string, force bool) error {
 
 	fmt.Fprintf(os.Stderr, "Auth image saved: %s\n", authTag)
 	return nil
-}
-
-// resolveTagPath returns the config path to use for tag generation.
-// If an explicit path was given, use it. Otherwise, discover which candidate exists.
-func resolveTagPath(configPath string) string {
-	if configPath != "" {
-		return configPath
-	}
-	candidates := []string{"h2-qa.yaml", "qa/h2-qa.yaml"}
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			return c
-		}
-	}
-	return "h2-qa.yaml" // fallback (DiscoverQAConfig will error anyway)
 }

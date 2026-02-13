@@ -23,17 +23,6 @@ func newQACmd() *cobra.Command {
 	return cmd
 }
 
-func newQARunCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "run [plan]",
-		Short: "Run a QA test plan",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Fprintln(cmd.ErrOrStderr(), "h2 qa run: not yet implemented")
-			return nil
-		},
-	}
-}
-
 func newQAReportCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "report [plan]",
