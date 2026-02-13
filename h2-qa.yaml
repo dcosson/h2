@@ -1,0 +1,43 @@
+sandbox:
+  dockerfile: qa/Dockerfile
+  setup:
+    - "h2 init ~/.h2"
+  env:
+    - ANTHROPIC_API_KEY
+
+orchestrator:
+  model: opus
+  extra_instructions: |
+    You are testing h2, a terminal multiplexer with inter-agent messaging.
+
+    ## Available h2 commands
+    - h2 run <role> — Start an agent with a role
+    - h2 run --dry-run <role> — Show resolved config without launching
+    - h2 pod launch <pod> — Launch a pod (group of agents)
+    - h2 pod launch --dry-run <pod> — Show pod config without launching
+    - h2 stop <agent> — Stop a running agent
+    - h2 pod stop <pod> — Stop all agents in a pod
+    - h2 list — List running agents
+    - h2 peek <agent> — View an agent's terminal output
+    - h2 send <agent> "message" — Send a message to an agent
+    - h2 init <dir> — Initialize an h2 config directory
+
+    ## How messaging works
+    - Messages are delivered via files in ~/.h2/messages/<recipient>/
+    - Agents see messages prefixed with [h2 message from: <sender>]
+    - Priority levels: interrupt (immediate), normal (next pause), idle (when idle)
+    - Use h2 send for all inter-agent communication
+
+    ## Verifying agent state
+    - h2 list shows agent name, PID, status, and role
+    - h2 peek <agent> shows recent terminal output (useful for checking if agent responded)
+    - Check ~/.h2/sessions/<agent>/ for session files
+    - Check exit codes and stderr for error conditions
+
+    ## Test agent roles
+    - Use haiku or sonnet models for test sub-agents to minimize cost
+    - Create minimal roles in ~/.h2/roles/ as needed for each test case
+    - Clean up roles and agents after each test case
+
+plans_dir: qa/plans/
+results_dir: qa/results/
