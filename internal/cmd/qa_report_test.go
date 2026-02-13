@@ -10,9 +10,12 @@ import (
 	"h2/internal/termstyle"
 )
 
-func init() {
-	// Disable ANSI colors in tests for predictable string matching.
+// disableColors disables ANSI colors for the duration of the test.
+func disableColors(t *testing.T) {
+	t.Helper()
+	prev := termstyle.Enabled()
 	termstyle.SetEnabled(false)
+	t.Cleanup(func() { termstyle.SetEnabled(prev) })
 }
 
 func TestResolveLatestRun_FollowsSymlink(t *testing.T) {
@@ -221,7 +224,7 @@ func TestFormatDuration(t *testing.T) {
 }
 
 func TestColorizeReport(t *testing.T) {
-	// With termstyle disabled, colorize should still replace keywords.
+	disableColors(t)
 	input := "TC-1: PASS\nTC-2: FAIL\nTC-3: SKIP"
 	got := colorizeReport(input)
 
@@ -237,7 +240,43 @@ func TestColorizeReport(t *testing.T) {
 	}
 }
 
+func TestColorizeReport_NoSubstringMatch(t *testing.T) {
+	disableColors(t)
+	input := "PASSPORT check: PASS\nFAILURE mode off\nSKIPPER active"
+	got := colorizeReport(input)
+
+	// "PASSPORT", "FAILURE", "SKIPPER" should remain untouched.
+	if !strings.Contains(got, "PASSPORT") {
+		t.Error("PASSPORT should not be altered")
+	}
+	if !strings.Contains(got, "FAILURE") {
+		t.Error("FAILURE should not be altered")
+	}
+	if !strings.Contains(got, "SKIPPER") {
+		t.Error("SKIPPER should not be altered")
+	}
+}
+
+func TestColorizeReport_WithColors(t *testing.T) {
+	prev := termstyle.Enabled()
+	termstyle.SetEnabled(true)
+	t.Cleanup(func() { termstyle.SetEnabled(prev) })
+
+	input := "TC-1: PASS\nPASSPORT check"
+	got := colorizeReport(input)
+
+	// Standalone PASS should be colorized (contains ANSI escape).
+	if !strings.Contains(got, "\033[32m") {
+		t.Error("standalone PASS should be colorized green")
+	}
+	// PASSPORT should NOT contain color codes inserted mid-word.
+	if strings.Contains(got, "PASS\033[0mPORT") {
+		t.Error("PASSPORT should not have PASS colorized within it")
+	}
+}
+
 func TestRunQAReport_WithMetadataAndReport(t *testing.T) {
+	disableColors(t)
 	dir := t.TempDir()
 	resultsDir := filepath.Join(dir, "results")
 	runDir := filepath.Join(resultsDir, "2026-02-13_1500-messaging")
@@ -304,6 +343,7 @@ func TestRunQAReportJSON(t *testing.T) {
 }
 
 func TestRunQAReportList_SortsByDateDesc(t *testing.T) {
+	disableColors(t)
 	dir := t.TempDir()
 	resultsDir := filepath.Join(dir, "results")
 
@@ -350,6 +390,7 @@ func TestRunQAReportList_EmptyDir(t *testing.T) {
 }
 
 func TestRunQAReportList_MissingMetadata(t *testing.T) {
+	disableColors(t)
 	dir := t.TempDir()
 	resultsDir := filepath.Join(dir, "results")
 	runDir := filepath.Join(resultsDir, "2026-02-13_1500-messaging")
