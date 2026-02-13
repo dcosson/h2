@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -168,21 +169,22 @@ func runQAReportList(configPath string) error {
 			duration = formatDuration(m.DurationSeconds)
 		}
 
-		passStr := fmt.Sprintf("%d", m.Pass)
-		failStr := fmt.Sprintf("%d", m.Fail)
-		skipStr := fmt.Sprintf("%d", m.Skip)
+		// Pad numbers before colorizing to avoid ANSI codes breaking column alignment.
+		passStr := fmt.Sprintf("%5d", m.Pass)
+		failStr := fmt.Sprintf("%5d", m.Fail)
+		skipStr := fmt.Sprintf("%5d", m.Skip)
 
-		if m.Fail > 0 {
-			failStr = termstyle.Red(failStr)
-		}
 		if m.Pass > 0 {
 			passStr = termstyle.Green(passStr)
+		}
+		if m.Fail > 0 {
+			failStr = termstyle.Red(failStr)
 		}
 		if m.Skip > 0 {
 			skipStr = termstyle.Yellow(skipStr)
 		}
 
-		fmt.Fprintf(os.Stderr, "  %-20s %-20s %5s %5s %5s %8s %8s\n",
+		fmt.Fprintf(os.Stderr, "  %-20s %-20s %s %s %s %8s %8s\n",
 			date, m.Plan, passStr, failStr, skipStr, cost, duration)
 	}
 
@@ -326,13 +328,20 @@ func printMetadataSummary(meta *QAMetadata) {
 	fmt.Println(summary)
 }
 
-// colorizeReport adds terminal colors to PASS/FAIL/SKIP in report text.
+// colorizeReport adds terminal colors to standalone PASS/FAIL/SKIP in report text.
+// Uses word-boundary matching to avoid colorizing substrings (e.g. PASSPORT).
 func colorizeReport(text string) string {
-	text = strings.ReplaceAll(text, "PASS", termstyle.Green("PASS"))
-	text = strings.ReplaceAll(text, "FAIL", termstyle.Red("FAIL"))
-	text = strings.ReplaceAll(text, "SKIP", termstyle.Yellow("SKIP"))
+	text = rePass.ReplaceAllStringFunc(text, func(m string) string { return termstyle.Green(m) })
+	text = reFail.ReplaceAllStringFunc(text, func(m string) string { return termstyle.Red(m) })
+	text = reSkip.ReplaceAllStringFunc(text, func(m string) string { return termstyle.Yellow(m) })
 	return text
 }
+
+var (
+	rePass = regexp.MustCompile(`\bPASS\b`)
+	reFail = regexp.MustCompile(`\bFAIL\b`)
+	reSkip = regexp.MustCompile(`\bSKIP\b`)
+)
 
 // parsePlanFromDirName extracts the plan name from a results directory name.
 // Format: YYYY-MM-DD_HHMM-<plan-name>
