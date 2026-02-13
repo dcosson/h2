@@ -15,6 +15,7 @@ import (
 func newRunCmd() *cobra.Command {
 	var name string
 	var detach bool
+	var dryRun bool
 	var roleName string
 	var agentType string
 	var command string
@@ -114,7 +115,20 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 						return fmt.Errorf("apply overrides: %w", err)
 					}
 				}
+				if dryRun {
+					rc, err := resolveAgentConfig(name, role, pod, overrides)
+					if err != nil {
+						return err
+					}
+					printDryRun(rc)
+					return nil
+				}
 				return setupAndForkAgent(name, role, detach, pod, overrides)
+			}
+
+			// Agent-type or command mode: --dry-run requires a role.
+			if dryRun {
+				return fmt.Errorf("--dry-run requires a role (use --role or the default role)")
 			}
 
 			// Agent-type or command mode: fork without a role.
@@ -148,6 +162,7 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 
 	cmd.Flags().StringVar(&name, "name", "", "Agent name (auto-generated if omitted)")
 	cmd.Flags().BoolVar(&detach, "detach", false, "Don't auto-attach after starting")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show resolved config without launching")
 	cmd.Flags().StringVar(&roleName, "role", "", "Role to use (defaults to 'default')")
 	cmd.Flags().StringVar(&agentType, "agent-type", "", "Agent type to run without a role (e.g. claude)")
 	cmd.Flags().StringVar(&command, "command", "", "Explicit command to run without a role")
