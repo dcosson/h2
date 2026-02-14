@@ -44,53 +44,6 @@ func TestSend(t *testing.T) {
 	}
 }
 
-func TestSplitMessage_Short(t *testing.T) {
-	chunks := splitMessage("hello", 4096)
-	if len(chunks) != 1 || chunks[0] != "hello" {
-		t.Errorf("expected single chunk, got %v", chunks)
-	}
-}
-
-func TestSplitMessage_ExactLimit(t *testing.T) {
-	msg := strings.Repeat("a", 4096)
-	chunks := splitMessage(msg, 4096)
-	if len(chunks) != 1 || chunks[0] != msg {
-		t.Errorf("expected single chunk for exact limit, got %d chunks", len(chunks))
-	}
-}
-
-func TestSplitMessage_SplitsAtNewline(t *testing.T) {
-	// 3 lines of 40 chars each, split at max 90 chars — should split after line 2.
-	line := strings.Repeat("x", 39) + "\n"
-	msg := line + line + line
-	chunks := splitMessage(msg, 90)
-	if len(chunks) != 2 {
-		t.Fatalf("expected 2 chunks, got %d: %v", len(chunks), chunks)
-	}
-	if chunks[0] != line+line {
-		t.Errorf("chunk[0] = %q, want two lines", chunks[0])
-	}
-	if chunks[1] != line {
-		t.Errorf("chunk[1] = %q, want one line", chunks[1])
-	}
-}
-
-func TestSplitMessage_HardCutNoNewline(t *testing.T) {
-	msg := strings.Repeat("a", 100)
-	chunks := splitMessage(msg, 30)
-	if len(chunks) != 4 {
-		t.Fatalf("expected 4 chunks, got %d", len(chunks))
-	}
-	for i, c := range chunks {
-		if i < 3 && len(c) != 30 {
-			t.Errorf("chunk[%d] len = %d, want 30", i, len(c))
-		}
-	}
-	if chunks[3] != strings.Repeat("a", 10) {
-		t.Errorf("last chunk = %q", chunks[3])
-	}
-}
-
 func TestSend_ChunksLongMessage(t *testing.T) {
 	var mu sync.Mutex
 	var sentTexts []string

@@ -27,19 +27,12 @@ func TestExecCommand_NotFound(t *testing.T) {
 	}
 }
 
-func TestExecCommand_Truncation(t *testing.T) {
-	// Generate a string longer than maxOutputLen via repeated echo.
-	// Use printf to avoid newline issues; repeat 'A' 5000 times.
+func TestExecCommand_LongOutput(t *testing.T) {
+	// ExecCommand no longer truncates — it returns the full output.
+	// Paging is handled by the bridge's Send method.
 	got := ExecCommand("python3", "-c \"print('A' * 5000)\"")
-	if !strings.HasSuffix(got, "\n... (truncated)") {
-		t.Errorf("ExecCommand(long output) should be truncated, got suffix: %q",
-			got[max(0, len(got)-30):])
-	}
-	// The truncated output should have maxOutputLen runes + suffix.
-	runes := []rune(got)
-	expectedLen := maxOutputLen + len([]rune("\n... (truncated)"))
-	if len(runes) != expectedLen {
-		t.Errorf("truncated output length = %d runes, want %d", len(runes), expectedLen)
+	if len(got) != 5000 {
+		t.Errorf("ExecCommand(long output) len = %d, want 5000", len(got))
 	}
 }
 
@@ -68,20 +61,3 @@ func TestExecCommand_ArgumentQuoting(t *testing.T) {
 	}
 }
 
-func TestTruncateOutput(t *testing.T) {
-	short := "hello"
-	if got := truncateOutput(short); got != short {
-		t.Errorf("truncateOutput(%q) = %q, want unchanged", short, got)
-	}
-
-	long := strings.Repeat("x", maxOutputLen+100)
-	got := truncateOutput(long)
-	if !strings.HasSuffix(got, "\n... (truncated)") {
-		t.Errorf("truncateOutput(long) should end with truncation suffix")
-	}
-	runes := []rune(got)
-	expectedLen := maxOutputLen + len([]rune("\n... (truncated)"))
-	if len(runes) != expectedLen {
-		t.Errorf("truncateOutput length = %d runes, want %d", len(runes), expectedLen)
-	}
-}

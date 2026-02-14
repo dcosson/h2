@@ -360,6 +360,15 @@ func (c *Client) FlushPassthroughEscIfComplete() bool {
 		c.RenderBar()
 		return true
 	}
+	// Intercept SGR mouse events (ESC [ < ... M/m) so scroll works
+	// in passthrough mode instead of forwarding raw sequences to the child.
+	if isSGRMouseSequence(c.PassthroughEsc) {
+		params := c.PassthroughEsc[2 : len(c.PassthroughEsc)-1]
+		press := c.PassthroughEsc[len(c.PassthroughEsc)-1] == 'M'
+		c.PassthroughEsc = c.PassthroughEsc[:0]
+		c.HandleSGRMouse(params, press)
+		return true
+	}
 	if virtualterminal.IsShiftEnterSequence(c.PassthroughEsc) {
 		c.writePTYOrHang([]byte{'\n'})
 	} else {
@@ -608,6 +617,16 @@ func (c *Client) ClampScrollOffset() {
 	}
 }
 
+// isSGRMouseSequence returns true if seq is an SGR mouse event
+// (ESC [ < Cb;Cx;Cy M/m).
+func isSGRMouseSequence(seq []byte) bool {
+	if len(seq) < 4 || seq[0] != 0x1B || seq[1] != '[' {
+		return false
+	}
+	final := seq[len(seq)-1]
+	return (final == 'M' || final == 'm') && seq[2] == '<'
+}
+
 // HandleSGRMouse processes an SGR mouse event. The params bytes contain
 // the "<Cb;Cx;Cy" portion (everything between ESC[ and the final M/m).
 // press is true for button press (M), false for release (m).
@@ -635,9 +654,6 @@ func (c *Client) HandleSGRMouse(params []byte, press bool) {
 			c.ShowSelectHint()
 		}
 	case 64: // scroll up
-		if c.Mode == ModePassthrough {
-			return
-		}
 		if c.Mode != ModeScroll {
 			c.EnterScrollMode()
 		}

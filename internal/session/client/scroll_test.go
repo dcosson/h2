@@ -212,12 +212,25 @@ func TestHandleSGRMouse_ScrollDownInMode(t *testing.T) {
 	}
 }
 
-func TestHandleSGRMouse_IgnoredInPassthrough(t *testing.T) {
+func TestHandleSGRMouse_ScrollInPassthrough(t *testing.T) {
 	o := newTestClient(10, 80)
 	o.Mode = ModePassthrough
 	o.HandleSGRMouse([]byte("<64;1;1"), true)
-	if o.Mode != ModePassthrough {
-		t.Fatalf("expected mode to stay ModePassthrough, got %d", o.Mode)
+	if o.Mode != ModeScroll {
+		t.Fatalf("expected scroll mode from passthrough, got %d", o.Mode)
+	}
+}
+
+func TestPassthrough_ScrollSequenceIntercepted(t *testing.T) {
+	// SGR mouse scroll-up sequence sent during passthrough should enter
+	// scroll mode rather than being forwarded as raw escape chars.
+	o := newTestClient(10, 80)
+	o.Mode = ModePassthrough
+	// ESC [ < 64 ; 1 ; 1 M  (scroll up press)
+	buf := []byte("\x1b[<64;1;1M")
+	o.HandlePassthroughBytes(buf, 0, len(buf))
+	if o.Mode != ModeScroll {
+		t.Fatalf("expected ModeScroll after scroll-up in passthrough, got %d", o.Mode)
 	}
 }
 

@@ -2,14 +2,14 @@
 
 ## UI Bugs
 
-### Scroll escape characters in passthrough mode
-When scrolling in passthrough mode, raw escape characters show up instead of the terminal scrolling properly.
+### ~~Scroll escape characters in passthrough mode~~
+~~When scrolling in passthrough mode, raw escape characters show up instead of the terminal scrolling properly.~~
 
 ### Ctrl+Enter not working
 The Ctrl+Enter submit path never fires — always falls back to Ctrl+\. Needs investigation into terminal key sequence detection.
 
-### Blank screen on attach
-When attaching to a running session, the screen is sometimes blank or only shows the blinking status bar at the bottom. Content only appears after a command triggers a re-render in the child application.
+### ~~Blank screen on attach~~
+~~When attaching to a running session, the screen is sometimes blank or only shows the blinking status bar at the bottom. Content only appears after a command triggers a re-render in the child application.~~
 
 ## Agent Support
 
