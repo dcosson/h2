@@ -216,21 +216,21 @@ func TestHandleSGRMouse_ScrollInPassthrough(t *testing.T) {
 	o := newTestClient(10, 80)
 	o.Mode = ModePassthrough
 	o.HandleSGRMouse([]byte("<64;1;1"), true)
-	if o.Mode != ModeScroll {
-		t.Fatalf("expected scroll mode from passthrough, got %d", o.Mode)
+	if o.Mode != ModePassthroughScroll {
+		t.Fatalf("expected ModePassthroughScroll from passthrough, got %d", o.Mode)
 	}
 }
 
 func TestPassthrough_ScrollSequenceIntercepted(t *testing.T) {
 	// SGR mouse scroll-up sequence sent during passthrough should enter
-	// scroll mode rather than being forwarded as raw escape chars.
+	// passthrough scroll mode rather than being forwarded as raw escape chars.
 	o := newTestClient(10, 80)
 	o.Mode = ModePassthrough
 	// ESC [ < 64 ; 1 ; 1 M  (scroll up press)
 	buf := []byte("\x1b[<64;1;1M")
 	o.HandlePassthroughBytes(buf, 0, len(buf))
-	if o.Mode != ModeScroll {
-		t.Fatalf("expected ModeScroll after scroll-up in passthrough, got %d", o.Mode)
+	if o.Mode != ModePassthroughScroll {
+		t.Fatalf("expected ModePassthroughScroll after scroll-up in passthrough, got %d", o.Mode)
 	}
 }
 
@@ -922,5 +922,174 @@ func TestModeLabel_Normal(t *testing.T) {
 	o.Mode = ModeNormal
 	if got := o.ModeLabel(); got != "Normal" {
 		t.Fatalf("expected 'Normal', got %q", got)
+	}
+}
+
+// --- ModePassthroughScroll ---
+
+func TestEnterScrollFromPassthrough_EntersPassthroughScroll(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.Mode = ModePassthrough
+	o.EnterScrollMode()
+	if o.Mode != ModePassthroughScroll {
+		t.Fatalf("expected ModePassthroughScroll, got %d", o.Mode)
+	}
+}
+
+func TestExitScrollFromPassthroughScroll_RestoresPassthrough(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.Mode = ModePassthrough
+	o.EnterScrollMode()
+	if o.Mode != ModePassthroughScroll {
+		t.Fatalf("expected ModePassthroughScroll, got %d", o.Mode)
+	}
+	o.ScrollOffset = 5
+	o.ExitScrollMode()
+	if o.Mode != ModePassthrough {
+		t.Fatalf("expected ModePassthrough after exit, got %d", o.Mode)
+	}
+	if o.ScrollOffset != 0 {
+		t.Fatalf("expected offset 0 after exit, got %d", o.ScrollOffset)
+	}
+}
+
+func TestEnterScrollFromNormal_StillModeScroll(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.Mode = ModeNormal
+	o.EnterScrollMode()
+	if o.Mode != ModeScroll {
+		t.Fatalf("expected ModeScroll from normal, got %d", o.Mode)
+	}
+}
+
+func TestExitScrollFromModeScroll_RestoresNormal(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.EnterScrollMode()
+	o.ExitScrollMode()
+	if o.Mode != ModeNormal {
+		t.Fatalf("expected ModeNormal after exit from ModeScroll, got %d", o.Mode)
+	}
+}
+
+func TestModeBarStyle_PassthroughScroll_Yellow(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.Mode = ModePassthroughScroll
+	got := o.ModeBarStyle()
+	expected := "\033[7m\033[33m" // yellow inverse (same as passthrough)
+	if got != expected {
+		t.Fatalf("expected yellow style %q, got %q", expected, got)
+	}
+}
+
+func TestModeBarStyle_Scroll_Cyan(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.Mode = ModeScroll
+	got := o.ModeBarStyle()
+	expected := "\033[7m\033[36m" // cyan inverse
+	if got != expected {
+		t.Fatalf("expected cyan style %q, got %q", expected, got)
+	}
+}
+
+func TestModeLabel_PassthroughScroll(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.Mode = ModePassthroughScroll
+	if got := o.ModeLabel(); got != "Scroll (PT)" {
+		t.Fatalf("expected 'Scroll (PT)', got %q", got)
+	}
+}
+
+func TestHelpLabel_PassthroughScroll(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.Mode = ModePassthroughScroll
+	got := o.HelpLabel()
+	if got != "Scroll/Up/Down navigate | Esc exit scroll" {
+		t.Fatalf("unexpected help label: %q", got)
+	}
+}
+
+func TestScrollDownToBottom_FromPassthroughScroll_RestoresPassthrough(t *testing.T) {
+	o := newTestClient(10, 80)
+	for i := 0; i < 30; i++ {
+		o.VT.Scrollback.Write([]byte("line\n"))
+	}
+	o.Mode = ModePassthrough
+	o.EnterScrollMode()
+	o.ScrollUp(3)
+	if o.Mode != ModePassthroughScroll {
+		t.Fatalf("expected ModePassthroughScroll, got %d", o.Mode)
+	}
+
+	// Scroll down past zero exits back to passthrough.
+	o.ScrollDown(10)
+	if o.Mode != ModePassthrough {
+		t.Fatalf("expected ModePassthrough after scrolling to bottom, got %d", o.Mode)
+	}
+	if o.ScrollOffset != 0 {
+		t.Fatalf("expected offset 0, got %d", o.ScrollOffset)
+	}
+}
+
+func TestPassthrough_SGRMouseScroll_EntersPassthroughScroll(t *testing.T) {
+	o := newTestClient(10, 80)
+	for i := 0; i < 20; i++ {
+		o.VT.Scrollback.Write([]byte("line\n"))
+	}
+	o.Mode = ModePassthrough
+	// SGR mouse scroll up: button 64
+	o.HandleSGRMouse([]byte("<64;1;1"), true)
+	if o.Mode != ModePassthroughScroll {
+		t.Fatalf("expected ModePassthroughScroll, got %d", o.Mode)
+	}
+	if o.ScrollOffset != scrollStep {
+		t.Fatalf("expected offset %d, got %d", scrollStep, o.ScrollOffset)
+	}
+}
+
+func TestPassthrough_ScrollSequence_EntersPassthroughScroll(t *testing.T) {
+	// Full SGR mouse scroll-up sequence via HandlePassthroughBytes.
+	o := newTestClient(10, 80)
+	for i := 0; i < 20; i++ {
+		o.VT.Scrollback.Write([]byte("line\n"))
+	}
+	o.Mode = ModePassthrough
+	buf := []byte("\x1b[<64;1;1M")
+	o.HandlePassthroughBytes(buf, 0, len(buf))
+	if o.Mode != ModePassthroughScroll {
+		t.Fatalf("expected ModePassthroughScroll after scroll-up in passthrough, got %d", o.Mode)
+	}
+}
+
+func TestIsScrollMode(t *testing.T) {
+	o := newTestClient(10, 80)
+
+	o.Mode = ModeNormal
+	if o.IsScrollMode() {
+		t.Fatal("ModeNormal should not be scroll mode")
+	}
+	o.Mode = ModePassthrough
+	if o.IsScrollMode() {
+		t.Fatal("ModePassthrough should not be scroll mode")
+	}
+	o.Mode = ModeScroll
+	if !o.IsScrollMode() {
+		t.Fatal("ModeScroll should be scroll mode")
+	}
+	o.Mode = ModePassthroughScroll
+	if !o.IsScrollMode() {
+		t.Fatal("ModePassthroughScroll should be scroll mode")
+	}
+}
+
+func TestRenderSelectHint_PassthroughScrollMode(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.Mode = ModePassthroughScroll
+	o.SelectHint = true
+	var buf bytes.Buffer
+	o.renderSelectHint(&buf)
+	output := buf.String()
+	// Hint should be on row 2 when in passthrough scroll mode (same as ModeScroll).
+	if !bytes.Contains([]byte(output), []byte("[2;")) {
+		t.Fatal("expected hint on row 2 in passthrough scroll mode")
 	}
 }

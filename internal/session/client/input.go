@@ -89,7 +89,7 @@ func (c *Client) StartPendingEsc() {
 			// Pass bare Escape through to the child process.
 			c.PassthroughEsc = c.PassthroughEsc[:0]
 			c.writePTYOrHang([]byte{0x1B})
-		case ModeScroll:
+		case ModeScroll, ModePassthroughScroll:
 			c.ExitScrollMode()
 		}
 	})
@@ -438,7 +438,7 @@ func (c *Client) HandleCSI(remaining []byte) (consumed int, handled bool) {
 			c.writePTYOrHang(append([]byte{0x1B, '['}, remaining[:i+1]...))
 			break
 		}
-		if c.Mode == ModeScroll {
+		if c.IsScrollMode() {
 			if final == 'A' {
 				c.ScrollUp(1)
 			} else {
@@ -558,17 +558,27 @@ func (c *Client) HandleScrollBytes(buf []byte, start, n int) int {
 }
 
 // EnterScrollMode switches to scroll mode, freezing the display.
+// If currently in passthrough, enters ModePassthroughScroll to preserve state.
 func (c *Client) EnterScrollMode() {
-	c.setMode(ModeScroll)
+	if c.Mode == ModePassthrough {
+		c.setMode(ModePassthroughScroll)
+	} else {
+		c.setMode(ModeScroll)
+	}
 	c.ScrollOffset = 0
 	c.RenderScreen()
 	c.RenderBar()
 }
 
-// ExitScrollMode returns to default mode and re-renders the live view.
+// ExitScrollMode returns to the appropriate mode and re-renders the live view.
+// ModePassthroughScroll restores ModePassthrough; ModeScroll restores ModeNormal.
 func (c *Client) ExitScrollMode() {
 	c.ScrollOffset = 0
-	c.setMode(ModeNormal)
+	if c.Mode == ModePassthroughScroll {
+		c.setMode(ModePassthrough)
+	} else {
+		c.setMode(ModeNormal)
+	}
 	c.RenderScreen()
 	c.RenderBar()
 }
@@ -654,12 +664,12 @@ func (c *Client) HandleSGRMouse(params []byte, press bool) {
 			c.ShowSelectHint()
 		}
 	case 64: // scroll up
-		if c.Mode != ModeScroll {
+		if !c.IsScrollMode() {
 			c.EnterScrollMode()
 		}
 		c.ScrollUp(scrollStep)
 	case 65: // scroll down
-		if c.Mode == ModeScroll {
+		if c.IsScrollMode() {
 			c.ScrollDown(scrollStep)
 		}
 	}

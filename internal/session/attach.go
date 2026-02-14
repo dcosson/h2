@@ -110,7 +110,7 @@ func (d *Daemon) readClientInput(conn net.Conn, cl *client.Client) {
 					i = cl.HandlePassthroughBytes(payload, i, len(payload))
 				case client.ModeMenu:
 					i = cl.HandleMenuBytes(payload, i, len(payload))
-				case client.ModeScroll:
+				case client.ModeScroll, client.ModePassthroughScroll:
 					i = cl.HandleScrollBytes(payload, i, len(payload))
 				default:
 					i = cl.HandleDefaultBytes(payload, i, len(payload))
@@ -128,7 +128,7 @@ func (d *Daemon) readClientInput(conn net.Conn, cl *client.Client) {
 				vt.Mu.Lock()
 				childRows := ctrl.Rows - cl.ReservedRows()
 				vt.Resize(ctrl.Rows, ctrl.Cols, childRows)
-				if cl.Mode == client.ModeScroll {
+				if cl.IsScrollMode() {
 					cl.ClampScrollOffset()
 				}
 				cl.Output.Write([]byte("\033[2J"))

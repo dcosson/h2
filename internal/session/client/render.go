@@ -21,7 +21,7 @@ import (
 func (c *Client) RenderScreen() {
 	var buf bytes.Buffer
 	buf.WriteString("\033[?25l")
-	if c.Mode == ModeScroll {
+	if c.IsScrollMode() {
 		c.renderScrollView(&buf)
 	} else {
 		c.renderLiveView(&buf)
@@ -37,7 +37,7 @@ func (c *Client) renderSelectHint(buf *bytes.Buffer) {
 	}
 	hint := "(hold shift to select)"
 	row := 1
-	if c.Mode == ModeScroll {
+	if c.IsScrollMode() {
 		row = 2
 	}
 	col := c.VT.Cols - len(hint) + 1
@@ -148,7 +148,7 @@ func (c *Client) RenderBar() {
 	var style, label string
 	if c.VT.ChildExited {
 		style = "\033[7m\033[31m" // red inverse
-		if c.Mode == ModeScroll {
+		if c.IsScrollMode() {
 			label = " Scroll | " + c.exitMessage() + " | Esc exit"
 		} else {
 			label = " " + c.exitMessage() + " | [Enter] relaunch \u00b7 [q] quit"
@@ -274,7 +274,7 @@ func (c *Client) RenderBar() {
 		}
 	}
 
-	if c.Mode == ModePassthrough {
+	if c.Mode == ModePassthrough || c.Mode == ModePassthroughScroll {
 		buf.WriteString("\033[?25l")
 	} else {
 		buf.WriteString("\033[?25h")
@@ -291,6 +291,8 @@ func (c *Client) ModeLabel() string {
 		return c.MenuLabel()
 	case ModeScroll:
 		return "Scroll"
+	case ModePassthroughScroll:
+		return "Scroll (PT)"
 	default:
 		return "Normal"
 	}
@@ -299,7 +301,7 @@ func (c *Client) ModeLabel() string {
 // ModeBarStyle returns the ANSI style for the current mode.
 func (c *Client) ModeBarStyle() string {
 	switch c.Mode {
-	case ModePassthrough:
+	case ModePassthrough, ModePassthroughScroll:
 		return "\033[7m\033[33m"
 	case ModeMenu:
 		return "\033[7m\033[34m"
@@ -317,7 +319,7 @@ func (c *Client) HelpLabel() string {
 		return c.keybindingHelp().PassthroughMode
 	case ModeMenu:
 		return "esc exit"
-	case ModeScroll:
+	case ModeScroll, ModePassthroughScroll:
 		return "Scroll/Up/Down navigate | Esc exit scroll"
 	default:
 		return c.keybindingHelp().NormalMode

@@ -27,7 +27,13 @@ const (
 	ModePassthrough
 	ModeMenu
 	ModeScroll
+	ModePassthroughScroll
 )
+
+// IsScrollMode returns true if the client is in any scroll mode.
+func (c *Client) IsScrollMode() bool {
+	return c.Mode == ModeScroll || c.Mode == ModePassthroughScroll
+}
 
 // Client owns all UI state and holds a pointer to the underlying VT.
 type Client struct {
@@ -104,7 +110,7 @@ func (c *Client) ReadInput() {
 				i = c.HandlePassthroughBytes(buf, i, n)
 			case ModeMenu:
 				i = c.HandleMenuBytes(buf, i, n)
-			case ModeScroll:
+			case ModeScroll, ModePassthroughScroll:
 				i = c.HandleScrollBytes(buf, i, n)
 			default:
 				i = c.HandleDefaultBytes(buf, i, n)
@@ -145,7 +151,7 @@ func (c *Client) WatchResize(sigCh <-chan os.Signal) {
 
 		c.VT.Mu.Lock()
 		c.VT.Resize(rows, cols, rows-c.ReservedRows())
-		if c.Mode == ModeScroll {
+		if c.IsScrollMode() {
 			c.ClampScrollOffset()
 		}
 		c.Output.Write([]byte("\033[2J"))

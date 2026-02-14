@@ -179,7 +179,8 @@ func (s *Session) NewClient() *client.Client {
 	}
 	cl.OnModeChange = func(mode client.InputMode) {
 		// If leaving passthrough, release the lock.
-		if mode != client.ModePassthrough && s.PassthroughOwner == cl {
+		// ModePassthroughScroll preserves passthrough ownership.
+		if mode != client.ModePassthrough && mode != client.ModePassthroughScroll && s.PassthroughOwner == cl {
 			s.PassthroughOwner = nil
 			s.Queue.Unpause()
 		}
@@ -277,7 +278,7 @@ func (s *Session) pipeOutputCallback() func() {
 		// NoteOutput for the session (only need to call once).
 		s.NoteOutput()
 		s.ForEachClient(func(cl *client.Client) {
-			if cl.Mode != client.ModeScroll {
+			if !cl.IsScrollMode() {
 				cl.RenderScreen()
 				cl.RenderBar()
 			}
