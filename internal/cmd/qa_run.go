@@ -201,7 +201,7 @@ func runQANoDocker(cfg *QAConfig, planName string, planContent string) error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Env = append(os.Environ(), "H2_DIR="+tmpDir)
+	cmd.Env = append(filteredEnv("CLAUDECODE"), "H2_DIR="+tmpDir)
 
 	execErr := cmd.Run()
 
@@ -336,4 +336,25 @@ func buildEnvArgs(cfg *QAConfig) []string {
 		}
 	}
 	return args
+}
+
+// filteredEnv returns os.Environ() with the specified keys removed.
+// This is used to strip env vars like CLAUDECODE that prevent nested
+// Claude Code sessions from launching.
+func filteredEnv(keys ...string) []string {
+	env := os.Environ()
+	filtered := make([]string, 0, len(env))
+	for _, e := range env {
+		skip := false
+		for _, key := range keys {
+			if strings.HasPrefix(e, key+"=") {
+				skip = true
+				break
+			}
+		}
+		if !skip {
+			filtered = append(filtered, e)
+		}
+	}
+	return filtered
 }
