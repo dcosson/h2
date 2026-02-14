@@ -26,8 +26,11 @@ When a permission request results in DENY or ASK_USER, send a notification to th
 
 ## Testing
 
-### QA automation skill
-A skill that allows a QA agent to execute all manual test steps from test plans and PRs — spinning up agents, running commands, verifying output, checking for regressions. Should be able to run the conformance checklists from docs like plan-role-pod-templating-tests.md end-to-end.
+### QA cost aggregation
+The `h2 qa` system is built (Phase 1-2 complete) but doesn't yet track costs. Add cost aggregation from Claude agent metrics so `metadata.json` includes `estimated_cost_usd` and `h2 qa report --list` shows a COST column. Requires reading token usage from the orchestrator session.
+
+### QA docker-compose support
+Add `sandbox.compose` and `sandbox.service` fields to `h2-qa.yaml` as an alternative to `sandbox.dockerfile`. This enables multi-service QA environments (e.g., app + database + QA agent) using docker-compose. The QA agent runs in the specified service while other services provide the system under test.
 
 ### Messaging fuzz/chaos tests
 Stress test the message delivery system across all priority modes (normal, interrupt, idle, idle-first). Verify all messages are received regardless of agent state and concurrent activity. Run against all supported agent types (Claude, Codex, Gemini). May need to tune timeouts and delivery retry logic to ensure reliability under load.
