@@ -19,6 +19,7 @@ func newQARunCmd() *cobra.Command {
 	var configPath string
 	var all bool
 	var noDocker bool
+	var verbose bool
 
 	cmd := &cobra.Command{
 		Use:   "run [plan]",
@@ -26,24 +27,28 @@ func newQARunCmd() *cobra.Command {
 		Long:  "Launches a container, injects the test plan, and runs the QA orchestrator agent.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if all {
-				return runQAAll(configPath, noDocker)
+				return runQAAll(configPath, noDocker, verbose)
 			}
 			if len(args) < 1 {
 				return fmt.Errorf("usage: h2 qa run <plan-name> or h2 qa run --all")
 			}
-			return runQARun(configPath, args[0], noDocker)
+			return runQARun(configPath, args[0], noDocker, verbose)
 		},
 	}
 
 	cmd.Flags().StringVar(&configPath, "config", "", "Path to h2-qa.yaml config file")
 	cmd.Flags().BoolVar(&all, "all", false, "Run all test plans sequentially")
 	cmd.Flags().BoolVar(&noDocker, "no-docker", false, "Use H2_DIR sandbox instead of Docker")
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Show claude tool calls and progress during execution")
 
 	return cmd
 }
 
 // runQARun executes a single test plan.
-func runQARun(configPath string, planName string, noDocker bool) error {
+func runQARun(configPath string, planName string, noDocker bool, verbose bool) error {
+	// Strip .md extension if provided (we add it ourselves).
+	planName = strings.TrimSuffix(planName, ".md")
+
 	cfg, err := DiscoverQAConfig(configPath)
 	if err != nil {
 		return err
@@ -60,13 +65,13 @@ func runQARun(configPath string, planName string, noDocker bool) error {
 	}
 
 	if noDocker {
-		return runQANoDocker(cfg, planName, string(planContent))
+		return runQANoDocker(cfg, planName, string(planContent), verbose)
 	}
-	return runQADocker(cfg, planName, string(planContent))
+	return runQADocker(cfg, planName, string(planContent), verbose)
 }
 
 // runQADocker runs a test plan in a Docker container.
-func runQADocker(cfg *QAConfig, planName string, planContent string) error {
+func runQADocker(cfg *QAConfig, planName string, planContent string, verbose bool) error {
 	if err := dockerAvailable(); err != nil {
 		return err
 	}
@@ -137,10 +142,15 @@ func runQADocker(cfg *QAConfig, planName string, planContent string) error {
 	// Launch the orchestrator agent in non-interactive mode.
 	fmt.Fprintf(os.Stderr, "Launching QA orchestrator (model: %s, plan: %s)...\n\n", cfg.Orchestrator.Model, planName)
 
-	execCmd := exec.Command("docker", "exec", containerName,
+	claudeArgs := []string{"exec", containerName,
 		"claude", "--print", "--system-prompt", instructions, "--permission-mode", "bypassPermissions",
 		"--model", cfg.Orchestrator.Model,
-		"Execute the test plan in your instructions. Write results to ~/results/report.md and ~/results/metadata.json.")
+	}
+	if verbose {
+		claudeArgs = append(claudeArgs, "--verbose")
+	}
+	claudeArgs = append(claudeArgs, "Execute the test plan in your instructions. Write results to ~/results/report.md and ~/results/metadata.json.")
+	execCmd := exec.Command("docker", claudeArgs...)
 	execCmd.Stdout = os.Stdout
 	execCmd.Stderr = os.Stderr
 
@@ -158,7 +168,7 @@ func runQADocker(cfg *QAConfig, planName string, planContent string) error {
 }
 
 // runQANoDocker runs a test plan using H2_DIR-based isolation (no Docker).
-func runQANoDocker(cfg *QAConfig, planName string, planContent string) error {
+func runQANoDocker(cfg *QAConfig, planName string, planContent string, verbose bool) error {
 	// Create temp dir for isolated H2 environment.
 	tmpDir, err := os.MkdirTemp("", "h2-qa-*")
 	if err != nil {
@@ -195,11 +205,16 @@ func runQANoDocker(cfg *QAConfig, planName string, planContent string) error {
 	fmt.Fprintf(os.Stderr, "Launching QA orchestrator (model: %s, plan: %s)...\n\n", cfg.Orchestrator.Model, planName)
 
 	// Run claude in non-interactive mode (--print exits after completing the task).
-	cmd := execCommand("claude", "--print",
+	claudeArgs := []string{"--print",
 		"--system-prompt", instructions,
 		"--permission-mode", "bypassPermissions",
 		"--model", cfg.Orchestrator.Model,
-		"Execute the test plan in your instructions. Write results to "+resultsDir+"/report.md and "+resultsDir+"/metadata.json.")
+	}
+	if verbose {
+		claudeArgs = append(claudeArgs, "--verbose")
+	}
+	claudeArgs = append(claudeArgs, "Execute the test plan in your instructions. Write results to "+resultsDir+"/report.md and "+resultsDir+"/metadata.json.")
+	cmd := execCommand("claude", claudeArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Env = append(filteredEnv("CLAUDECODE", "H2_QA_INTEGRATION"), "H2_DIR="+tmpDir)
@@ -217,7 +232,7 @@ func runQANoDocker(cfg *QAConfig, planName string, planContent string) error {
 }
 
 // runQAAll runs all test plans in the plans directory sequentially.
-func runQAAll(configPath string, noDocker bool) error {
+func runQAAll(configPath string, noDocker bool, verbose bool) error {
 	cfg, err := DiscoverQAConfig(configPath)
 	if err != nil {
 		return err
@@ -237,7 +252,7 @@ func runQAAll(configPath string, noDocker bool) error {
 	var failures []string
 	for _, plan := range plans {
 		fmt.Fprintf(os.Stderr, "=== Running plan: %s ===\n", plan)
-		if err := runQARun(configPath, plan, noDocker); err != nil {
+		if err := runQARun(configPath, plan, noDocker, verbose); err != nil {
 			fmt.Fprintf(os.Stderr, "Plan %q failed: %v\n\n", plan, err)
 			failures = append(failures, plan)
 		} else {

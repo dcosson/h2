@@ -245,7 +245,7 @@ sandbox:
 plans_dir: plans/
 `), 0o644)
 
-	err := runQARun(configPath, "nonexistent-plan", true) // --no-docker to avoid docker dependency
+	err := runQARun(configPath, "nonexistent-plan", true, false) // --no-docker to avoid docker dependency
 	if err == nil {
 		t.Fatal("expected error for missing plan")
 	}
@@ -268,7 +268,7 @@ plans_dir: plans/
 `), 0o644)
 
 	// Docker mode — should fail because no image exists.
-	err := runQARun(configPath, "test", false)
+	err := runQARun(configPath, "test", false, false)
 	if err == nil {
 		t.Fatal("expected error when no Docker image exists")
 	}
@@ -299,7 +299,7 @@ sandbox:
 plans_dir: plans/
 `), 0o644)
 
-	err := runQAAll(configPath, true)
+	err := runQAAll(configPath, true, false)
 	if err != nil {
 		t.Fatalf("runQAAll: %v", err)
 	}
@@ -321,5 +321,46 @@ plans_dir: plans/
 		if !strings.Contains(args, "bypassPermissions") {
 			t.Errorf("call %d missing bypassPermissions: %v", i, call)
 		}
+		if strings.Contains(args, "--verbose") {
+			t.Errorf("call %d should not have --verbose when verbose=false: %v", i, call)
+		}
+	}
+}
+
+func TestRunQAAll_VerbosePassesFlag(t *testing.T) {
+	orig := execCommand
+	var claudeCalls [][]string
+	execCommand = func(name string, arg ...string) *exec.Cmd {
+		if name == "claude" {
+			claudeCalls = append(claudeCalls, append([]string{name}, arg...))
+		}
+		return exec.Command("true")
+	}
+	t.Cleanup(func() { execCommand = orig })
+
+	dir := t.TempDir()
+	plansDir := filepath.Join(dir, "plans")
+	os.MkdirAll(plansDir, 0o755)
+	os.WriteFile(filepath.Join(plansDir, "plan-a.md"), []byte("# Plan A"), 0o644)
+
+	configPath := filepath.Join(dir, "h2-qa.yaml")
+	os.WriteFile(configPath, []byte(`
+sandbox:
+  dockerfile: Dockerfile
+plans_dir: plans/
+`), 0o644)
+
+	err := runQAAll(configPath, true, true) // verbose=true
+	if err != nil {
+		t.Fatalf("runQAAll: %v", err)
+	}
+
+	if len(claudeCalls) != 1 {
+		t.Fatalf("expected 1 claude invocation, got %d", len(claudeCalls))
+	}
+
+	args := strings.Join(claudeCalls[0], " ")
+	if !strings.Contains(args, "--verbose") {
+		t.Errorf("expected --verbose in claude args: %v", claudeCalls[0])
 	}
 }
