@@ -21,27 +21,17 @@ func TestResolve_H2DIRTakesPriority(t *testing.T) {
 }
 
 // §3.2 H2_DIR with invalid directory errors
-//
-// Currently ConfigDir() silently falls back when ResolveDir() fails, so
-// commands like "h2 list" don't error on invalid H2_DIR. This test verifies
-// the current fallback behavior. When command-level H2_DIR validation is
-// added, update this test to expect an error.
 func TestResolve_H2DIRInvalidFallsBack(t *testing.T) {
 	dir := t.TempDir() // no marker file
 
-	// Currently h2 list falls back gracefully (via ConfigDir) instead of
-	// erroring on invalid H2_DIR. The fallback uses ~/.h2 or ".", so the
-	// command succeeds. When H2_DIR validation is added, this test should
-	// expect a non-zero exit code and "not an h2 directory" error message.
 	result := runH2(t, dir, "list")
-	if result.ExitCode != 0 {
-		// Desired future behavior: validate H2_DIR and error.
-		combined := result.Stdout + result.Stderr
-		if !strings.Contains(combined, "not an h2 directory") {
-			t.Errorf("error = %q, want 'not an h2 directory'", combined)
-		}
+	if result.ExitCode == 0 {
+		t.Fatal("expected non-zero exit code for invalid H2_DIR")
 	}
-	// Exit code 0 is the current fallback behavior — acceptable for now.
+	combined := result.Stdout + result.Stderr
+	if !strings.Contains(combined, "not an h2 directory") {
+		t.Errorf("error = %q, want 'not an h2 directory'", combined)
+	}
 }
 
 // §3.3 Walk-up resolution from CWD
@@ -172,11 +162,6 @@ func TestResolve_MigrationAutoCreatesMarker(t *testing.T) {
 }
 
 // §11.1b Random directory without h2 structure is not treated as h2 dir
-//
-// Currently ConfigDir() silently falls back when ResolveDir() fails, so
-// h2 list returns "No running agents" instead of erroring. This test
-// verifies the fallback behavior. When command-level validation is added,
-// update this test to expect an error.
 func TestResolve_RandomDirNotH2(t *testing.T) {
 	fakeHome := t.TempDir()
 	// No ~/.h2 at all.
@@ -184,17 +169,11 @@ func TestResolve_RandomDirNotH2(t *testing.T) {
 	isolated := t.TempDir()
 	result := runH2InDir(t, isolated, []string{"HOME=" + fakeHome}, "list")
 
-	if result.ExitCode != 0 {
-		// If this starts erroring, that's the desired behavior.
-		combined := result.Stdout + result.Stderr
-		if !strings.Contains(combined, "no h2 directory found") {
-			t.Errorf("error = %q, want 'no h2 directory found'", combined)
-		}
-		return
+	if result.ExitCode == 0 {
+		t.Fatal("expected non-zero exit code when no h2 directory found")
 	}
-
-	// Current fallback behavior: list succeeds with no agents.
-	if !strings.Contains(result.Stdout, "No running agents") {
-		t.Errorf("h2 list output = %q, want 'No running agents'", result.Stdout)
+	combined := result.Stdout + result.Stderr
+	if !strings.Contains(combined, "no h2 directory found") {
+		t.Errorf("error = %q, want 'no h2 directory found'", combined)
 	}
 }

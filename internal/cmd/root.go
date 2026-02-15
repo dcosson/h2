@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"github.com/spf13/cobra"
+
+	"h2/internal/config"
 )
 
 // NewRootCmd creates the root cobra command with all subcommands.
@@ -10,6 +12,14 @@ func NewRootCmd() *cobra.Command {
 		Use:   "h2",
 		Short: "Terminal wrapper with inter-agent messaging",
 		Long:  "h2 wraps a TUI application with a persistent input bar and supports inter-agent messaging via Unix domain sockets.",
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			switch cmd.Name() {
+			case "init", "version", "help", "completion":
+				return nil
+			}
+			_, err := config.ResolveDir()
+			return err
+		},
 	}
 
 	listCmd := newLsCmd()
