@@ -111,7 +111,7 @@ func resolveUser(cfg *config.Config, forUser string) (string, *config.UserConfig
 	}
 
 	if len(cfg.Users) == 0 {
-		return "", nil, fmt.Errorf("no users configured in ~/.h2/config.yaml")
+		return "", nil, fmt.Errorf("no users configured in %s/config.yaml", config.ConfigDir())
 	}
 
 	return "", nil, fmt.Errorf("multiple users configured; use --for to specify which one")
