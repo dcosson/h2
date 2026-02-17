@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"h2/internal/config"
@@ -303,7 +304,9 @@ func ForkDaemon(opts ForkDaemonOpts) error {
 	cmd.SysProcAttr = NewSysProcAttr()
 
 	// Explicitly build environment: inherit parent env + additions.
-	env := os.Environ()
+	// Filter CLAUDECODE to prevent "nested session" errors when an agent
+	// (running inside Claude Code) spawns another agent.
+	env := filteredEnv(os.Environ(), "CLAUDECODE")
 	if h2Dir, err := config.ResolveDir(); err == nil {
 		env = append(env, "H2_DIR="+h2Dir)
 	}
@@ -351,4 +354,24 @@ func ForkDaemon(opts ForkDaemonOpts) error {
 	}
 
 	return fmt.Errorf("daemon did not start (socket %s not found)", sockPath)
+}
+
+// filteredEnv returns a copy of env with entries matching any of the given
+// keys removed. This prevents env vars like CLAUDECODE from leaking into
+// child agent processes and triggering nested-session detection.
+func filteredEnv(env []string, keys ...string) []string {
+	filtered := make([]string, 0, len(env))
+	for _, e := range env {
+		skip := false
+		for _, key := range keys {
+			if strings.HasPrefix(e, key+"=") {
+				skip = true
+				break
+			}
+		}
+		if !skip {
+			filtered = append(filtered, e)
+		}
+	}
+	return filtered
 }
