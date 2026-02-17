@@ -238,7 +238,7 @@ func createWorkFiles(t *testing.T, projectDir string, count int)
 ### Group 5: Compaction
 
 **Test: DuringCompaction**
-- Give agent enough work to trigger an auto-compaction (fill context)
+- Trigger compaction via `h2 send --raw "/compact"` (no need to fill context)
 - Send tokens before, during, and after compaction
 - Use PreCompact hook event to detect compaction start
 - Use SessionStart to detect compaction end
