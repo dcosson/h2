@@ -324,6 +324,7 @@ func TestSubState_String(t *testing.T) {
 		{SubStateThinking, "thinking"},
 		{SubStateToolUse, "tool_use"},
 		{SubStateWaitingForPermission, "waiting_for_permission"},
+		{SubStateCompacting, "compacting"},
 		{SubState(99), ""},
 	}
 	for _, tt := range tests {
@@ -350,6 +351,166 @@ func TestHookCollector_StateCh_PermissionDecisionEmitsSubState(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for StateUpdate from permission_decision")
+	}
+}
+
+func TestHookCollector_PermissionAllow_TransitionsToActive(t *testing.T) {
+	hc := NewHookCollector(nil)
+	defer hc.Stop()
+
+	// Reproduce the exact bug scenario:
+	// 1. PreToolUse → Active
+	// 2. PermissionRequest → Active
+	// 3. SessionStart (reviewer) → Idle
+	// 4. Stop (reviewer ends) → Idle
+	// 5. permission_decision (allow) → should be Active (was staying Idle!)
+
+	hc.ProcessEvent("PreToolUse", json.RawMessage(`{"tool_name": "Bash"}`))
+	<-hc.StateCh() // drain: Active
+
+	hc.ProcessEvent("PermissionRequest", json.RawMessage(`{"tool_name": "Bash"}`))
+	<-hc.StateCh() // drain: Active
+
+	hc.ProcessEvent("SessionStart", nil)
+	su := <-hc.StateCh()
+	if su.State != StateIdle {
+		t.Fatalf("after SessionStart: expected StateIdle, got %v", su.State)
+	}
+
+	hc.ProcessEvent("Stop", nil)
+	su = <-hc.StateCh()
+	if su.State != StateIdle {
+		t.Fatalf("after Stop: expected StateIdle, got %v", su.State)
+	}
+
+	// permission_decision with allow should transition back to Active.
+	hc.ProcessEvent("permission_decision", json.RawMessage(`{"tool_name": "Bash", "decision": "allow"}`))
+	select {
+	case su = <-hc.StateCh():
+		if su.State != StateActive {
+			t.Fatalf("after permission_decision allow: expected StateActive, got %v", su.State)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for StateActive after permission_decision allow")
+	}
+}
+
+func TestHookCollector_PermissionAskUser_StaysIdle(t *testing.T) {
+	hc := NewHookCollector(nil)
+	defer hc.Stop()
+
+	// Same sequence but with ask_user — should stay idle.
+	hc.ProcessEvent("PreToolUse", json.RawMessage(`{"tool_name": "Bash"}`))
+	<-hc.StateCh()
+
+	hc.ProcessEvent("SessionStart", nil)
+	<-hc.StateCh()
+
+	hc.ProcessEvent("Stop", nil)
+	<-hc.StateCh()
+
+	hc.ProcessEvent("permission_decision", json.RawMessage(`{"tool_name": "Bash", "decision": "ask_user"}`))
+	select {
+	case su := <-hc.StateCh():
+		// ask_user: state should NOT transition to Active.
+		if su.State != StateIdle {
+			t.Fatalf("after permission_decision ask_user: expected StateIdle, got %v", su.State)
+		}
+		if su.SubState != SubStateWaitingForPermission {
+			t.Fatalf("expected SubStateWaitingForPermission, got %v", su.SubState)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for StateUpdate")
+	}
+}
+
+func TestHookCollector_PreCompact_SetsCompactingSubState(t *testing.T) {
+	hc := NewHookCollector(nil)
+	defer hc.Stop()
+
+	// Simulate: agent is active, then PreCompact fires.
+	hc.ProcessEvent("PostToolUse", json.RawMessage(`{"tool_name": "Bash"}`))
+	<-hc.StateCh() // drain: Active/Thinking
+
+	hc.ProcessEvent("PreCompact", nil)
+	select {
+	case su := <-hc.StateCh():
+		if su.State != StateActive {
+			t.Fatalf("expected StateActive during compaction, got %v", su.State)
+		}
+		if su.SubState != SubStateCompacting {
+			t.Fatalf("expected SubStateCompacting, got %v", su.SubState)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for compacting state")
+	}
+
+	// Verify snapshot also shows compacting.
+	snap := hc.Snapshot()
+	if !snap.Compacting {
+		t.Fatal("Snapshot.Compacting should be true after PreCompact")
+	}
+}
+
+func TestHookCollector_CompactionCleared_BySessionStart(t *testing.T) {
+	hc := NewHookCollector(nil)
+	defer hc.Stop()
+
+	// Start compaction.
+	hc.ProcessEvent("PreCompact", nil)
+	<-hc.StateCh() // drain
+
+	// SessionStart after compaction — should clear compacting and go idle.
+	hc.ProcessEvent("SessionStart", nil)
+	select {
+	case su := <-hc.StateCh():
+		if su.State != StateIdle {
+			t.Fatalf("expected StateIdle after compaction SessionStart, got %v", su.State)
+		}
+		if su.SubState != SubStateNone {
+			t.Fatalf("expected SubStateNone after compaction, got %v", su.SubState)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out")
+	}
+
+	if hc.Snapshot().Compacting {
+		t.Fatal("Compacting should be false after SessionStart")
+	}
+}
+
+func TestHookCollector_CompactionFullSequence(t *testing.T) {
+	hc := NewHookCollector(nil)
+	defer hc.Stop()
+
+	// Reproduce the real compaction sequence from logs:
+	// 1. PostToolUse → Active/Thinking
+	// 2. PreCompact → Active/Compacting
+	// 3. SessionStart → Idle (compaction done, session resumes)
+	// 4. PreToolUse Read → Active/ToolUse (agent re-reads files)
+
+	hc.ProcessEvent("PostToolUse", json.RawMessage(`{"tool_name": "Bash"}`))
+	su := <-hc.StateCh()
+	if su.SubState != SubStateThinking {
+		t.Fatalf("step 1: expected Thinking, got %v", su.SubState)
+	}
+
+	hc.ProcessEvent("PreCompact", nil)
+	su = <-hc.StateCh()
+	if su.State != StateActive || su.SubState != SubStateCompacting {
+		t.Fatalf("step 2: expected Active/Compacting, got %v/%v", su.State, su.SubState)
+	}
+
+	hc.ProcessEvent("SessionStart", nil)
+	su = <-hc.StateCh()
+	if su.State != StateIdle || su.SubState != SubStateNone {
+		t.Fatalf("step 3: expected Idle/None, got %v/%v", su.State, su.SubState)
+	}
+
+	hc.ProcessEvent("PreToolUse", json.RawMessage(`{"tool_name": "Read"}`))
+	su = <-hc.StateCh()
+	if su.State != StateActive || su.SubState != SubStateToolUse {
+		t.Fatalf("step 4: expected Active/ToolUse, got %v/%v", su.State, su.SubState)
 	}
 }
 

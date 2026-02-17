@@ -22,6 +22,7 @@ type HookCollector struct {
 	toolUseCount        int64
 	blockedOnPermission bool
 	blockedToolName     string
+	compacting          bool
 
 	activityCh  chan string // internal: event names for state derivation
 	stateCh     chan StateUpdate
@@ -90,7 +91,9 @@ func (c *HookCollector) ProcessEvent(eventName string, payload json.RawMessage) 
 		c.toolUseCount++
 	}
 
-	// Handle permission_decision: update blocked state based on decision.
+	// Handle permission_decision: update blocked state based on decision,
+	// and derive a synthetic event name for the state loop.
+	stateEvent := eventName
 	if eventName == "permission_decision" {
 		decision := extractDecision(payload)
 		reason := extractReason(payload)
@@ -101,6 +104,8 @@ func (c *HookCollector) ProcessEvent(eventName string, payload json.RawMessage) 
 		} else {
 			c.blockedOnPermission = false
 			c.blockedToolName = ""
+			// Permission granted — the tool is about to execute.
+			stateEvent = "permission_allow"
 		}
 	} else {
 		c.activityLog.HookEvent(sessionID, eventName, toolName)
@@ -110,6 +115,15 @@ func (c *HookCollector) ProcessEvent(eventName string, payload json.RawMessage) 
 	if eventName == "blocked_permission" {
 		c.blockedOnPermission = true
 		c.blockedToolName = toolName
+	}
+
+	// Track compaction state.
+	if eventName == "PreCompact" {
+		c.compacting = true
+	} else if c.compacting && eventName != "permission_decision" {
+		// Any non-permission event after PreCompact means compaction finished.
+		// SessionStart is the typical "compaction done" signal.
+		c.compacting = false
 	}
 
 	// Clear blocked state on events that indicate the agent has resumed.
@@ -124,7 +138,7 @@ func (c *HookCollector) ProcessEvent(eventName string, payload json.RawMessage) 
 
 	// Send event name to state derivation loop (non-blocking).
 	select {
-	case c.activityCh <- eventName:
+	case c.activityCh <- stateEvent:
 	default:
 	}
 }
@@ -140,6 +154,7 @@ func (c *HookCollector) Snapshot() HookState {
 		ToolUseCount:        c.toolUseCount,
 		BlockedOnPermission: c.blockedOnPermission,
 		BlockedToolName:     c.blockedToolName,
+		Compacting:          c.compacting,
 	}
 }
 
@@ -151,10 +166,14 @@ type HookState struct {
 	ToolUseCount        int64
 	BlockedOnPermission bool
 	BlockedToolName     string
+	Compacting          bool
 }
 
 // SubState derives the agent sub-state from this snapshot.
 func (hs HookState) SubState() SubState {
+	if hs.Compacting {
+		return SubStateCompacting
+	}
 	if hs.BlockedOnPermission {
 		return SubStateWaitingForPermission
 	}
@@ -180,7 +199,7 @@ func (c *HookCollector) runStateLoop() {
 		select {
 		case eventName := <-c.activityCh:
 			switch eventName {
-			case "UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest":
+			case "UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "permission_allow", "PreCompact":
 				currentState = StateActive
 			case "SessionStart", "Stop", "Interrupt":
 				currentState = StateIdle
