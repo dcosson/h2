@@ -16,11 +16,12 @@ func newSendCmd() *cobra.Command {
 	var priority string
 	var file string
 	var allowSelf bool
+	var raw bool
 
 	cmd := &cobra.Command{
-		Use:   "send <name> [--priority=normal] [--file=path] [message...]",
+		Use:   "send <name> [--priority=normal] [--file=path] [--raw] [message...]",
 		Short: "Send a message to an agent",
-		Long:  "Send a message to a running agent. The message body can be provided as arguments or read from a file.",
+		Long:  "Send a message to a running agent. The message body can be provided as arguments or read from a file.\nWith --raw, the body is sent directly to the agent's PTY without the [h2 message from: ...] prefix. This is useful for responding to permission prompts remotely.",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
@@ -65,6 +66,7 @@ func newSendCmd() *cobra.Command {
 				Priority: priority,
 				From:     from,
 				Body:     body,
+				Raw:      raw,
 			}); err != nil {
 				return fmt.Errorf("send request: %w", err)
 			}
@@ -85,6 +87,7 @@ func newSendCmd() *cobra.Command {
 	cmd.Flags().StringVar(&priority, "priority", "normal", "Message priority (interrupt|normal|idle-first|idle)")
 	cmd.Flags().StringVar(&file, "file", "", "Read message body from file")
 	cmd.Flags().BoolVar(&allowSelf, "allow-self", false, "Allow sending a message to yourself")
+	cmd.Flags().BoolVar(&raw, "raw", false, "Send body directly to PTY without [h2 message from: ...] prefix (useful for permission prompts)")
 
 	return cmd
 }
