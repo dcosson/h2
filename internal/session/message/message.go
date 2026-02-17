@@ -61,6 +61,7 @@ type Message struct {
 	Priority    Priority
 	Body        string
 	FilePath    string
+	Raw         bool // send body directly to PTY, skip Ctrl+C interrupt loop
 	Status      MessageStatus
 	CreatedAt   time.Time
 	DeliveredAt *time.Time
