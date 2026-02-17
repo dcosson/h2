@@ -36,6 +36,12 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
   h2 run --agent-type claude    Run an agent type without a role
   h2 run --command "vim"        Run an explicit command`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Safety check: when running inside a Claude Code session,
+			// require --detach to prevent hijacking the parent's terminal.
+			if os.Getenv("CLAUDECODE") != "" && !detach {
+				return fmt.Errorf("running inside a Claude Code session (CLAUDECODE is set); use --detach to avoid hijacking the parent terminal")
+			}
+
 			// Validate pod name if provided.
 			if pod != "" {
 				if err := config.ValidatePodName(pod); err != nil {
