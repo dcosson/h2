@@ -19,6 +19,7 @@ func TestFormatStateLabel(t *testing.T) {
 		{"active", "thinking", "Active (thinking)"},
 		{"active", "tool_use", "Active (tool use)"},
 		{"active", "waiting_for_permission", "Active (permission)"},
+		{"active", "compacting", "Active (compacting)"},
 
 		// Unknown sub-state passed through.
 		{"active", "something_new", "Active (something_new)"},

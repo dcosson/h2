@@ -39,6 +39,7 @@ const (
 	SubStateThinking             = collector.SubStateThinking
 	SubStateToolUse              = collector.SubStateToolUse
 	SubStateWaitingForPermission = collector.SubStateWaitingForPermission
+	SubStateCompacting           = collector.SubStateCompacting
 )
 
 type StateUpdate = collector.StateUpdate
