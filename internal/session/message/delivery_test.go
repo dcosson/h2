@@ -422,6 +422,60 @@ func TestDeliver_NormalDoesNotCallNoteInterrupt(t *testing.T) {
 	}
 }
 
+func TestEnqueueRaw_BypassesBlockedAndNoPrefix(t *testing.T) {
+	var buf threadSafeBuffer
+	q := NewMessageQueue()
+	stop := make(chan struct{})
+
+	// EnqueueRaw should create a message with interrupt priority and no file path.
+	id := EnqueueRaw(q, "y")
+	if id == "" {
+		t.Fatal("expected non-empty message ID")
+	}
+
+	delivered := make(chan struct{}, 1)
+	go RunDelivery(DeliveryConfig{
+		Queue:     q,
+		PtyWriter: &buf,
+		IsIdle:    func() bool { return false },
+		IsBlocked: func() bool { return true }, // agent is blocked on permission
+		WaitForIdle: func(ctx context.Context) bool {
+			return true // go idle immediately after Ctrl+C
+		},
+		OnDeliver: func() {
+			select {
+			case delivered <- struct{}{}:
+			default:
+			}
+		},
+		Stop: stop,
+	})
+
+	select {
+	case <-delivered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("delivery timed out — raw message should bypass blocked check")
+	}
+	close(stop)
+
+	out := buf.String()
+	// Should NOT contain Ctrl+C despite using interrupt priority.
+	if strings.Contains(out, "\x03") {
+		t.Fatal("raw message should not send Ctrl+C")
+	}
+	// Should NOT contain the [h2 message from: ...] prefix.
+	if strings.Contains(out, "[h2 message") || strings.Contains(out, "[URGENT") {
+		t.Fatalf("raw message should not have prefix, got %q", out)
+	}
+	// Should contain the body followed by \r.
+	if !strings.Contains(out, "y") {
+		t.Fatalf("expected body 'y' in output, got %q", out)
+	}
+	if !strings.HasSuffix(out, "\r") {
+		t.Fatal("expected output to end with \\r")
+	}
+}
+
 func TestDeliver_NormalNoWaitForIdle(t *testing.T) {
 	var buf threadSafeBuffer
 	q := NewMessageQueue()

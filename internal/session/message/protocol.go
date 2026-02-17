@@ -16,6 +16,7 @@ type Request struct {
 	Priority string `json:"priority,omitempty"`
 	From     string `json:"from,omitempty"`
 	Body     string `json:"body,omitempty"`
+	Raw      bool   `json:"raw,omitempty"` // send body directly to PTY without prefix
 
 	// attach fields
 	Cols int `json:"cols,omitempty"`

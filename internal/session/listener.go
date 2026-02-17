@@ -49,6 +49,19 @@ func (d *Daemon) handleSend(conn net.Conn, req *message.Request) {
 	defer conn.Close()
 
 	s := d.Session
+
+	if req.Raw {
+		// Raw mode: send body directly to PTY without prefix.
+		// Uses interrupt priority so it bypasses the blocked-agent check
+		// (the main use case is responding to permission prompts).
+		id := message.EnqueueRaw(s.Queue, req.Body)
+		message.SendResponse(conn, &message.Response{
+			OK:        true,
+			MessageID: id,
+		})
+		return
+	}
+
 	priority, ok := message.ParsePriority(req.Priority)
 	if !ok {
 		message.SendResponse(conn, &message.Response{

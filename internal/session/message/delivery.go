@@ -36,6 +36,25 @@ type DeliveryConfig struct {
 
 }
 
+// EnqueueRaw creates a raw Message (no file, no prefix) with interrupt priority
+// and enqueues it. The delivery loop will write the body directly to the PTY.
+// This is used for responding to permission prompts and other cases where
+// exact text needs to be typed into the agent's terminal.
+func EnqueueRaw(q *MessageQueue, body string) string {
+	id := uuid.New().String()
+	now := time.Now()
+	msg := &Message{
+		ID:        id,
+		Priority:  PriorityInterrupt,
+		Body:      body,
+		Raw:       true,
+		Status:    StatusQueued,
+		CreatedAt: now,
+	}
+	q.Enqueue(msg)
+	return id
+}
+
 // PrepareMessage creates a Message, writes its body to disk, and enqueues it.
 // Returns the message ID.
 func PrepareMessage(q *MessageQueue, agentName, from, body string, priority Priority) (string, error) {
@@ -102,7 +121,7 @@ const (
 var interruptWaitTimeout = 5 * time.Second
 
 func deliver(cfg DeliveryConfig, msg *Message) {
-	if msg.Priority == PriorityInterrupt {
+	if msg.Priority == PriorityInterrupt && !msg.Raw {
 		// Send Ctrl+C, wait for idle, retry up to 3 times.
 		// If still not idle after retries, send anyway (like normal).
 		for attempt := 0; attempt < interruptRetries; attempt++ {
