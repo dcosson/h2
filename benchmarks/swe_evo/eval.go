@@ -1,11 +1,7 @@
 package swe_evo
 
 import (
-	"fmt"
-	"os/exec"
-	"regexp"
-	"strconv"
-	"strings"
+	"h2/benchmarks/evalutil"
 )
 
 // EvalResult contains detailed evaluation results for a single SWE-EVO task.
@@ -42,13 +38,13 @@ func Evaluate(workDir string, task Task) (*EvalResult, error) {
 	}
 
 	// Run tests.
-	testOut, testErr := runShellCmd(workDir, testCmd)
+	testOut, testErr := evalutil.RunShellCmd(workDir, testCmd)
 	if testErr != nil {
 		result.TestError = testErr.Error()
 	}
 
 	// Parse test results.
-	result.TestsPassed, result.TestsTotal = parsePytestSummary(testOut)
+	result.TestsPassed, result.TestsTotal = evalutil.ParsePytestSummary(testOut)
 	if result.TestsTotal > 0 {
 		result.TestPassRate = float64(result.TestsPassed) / float64(result.TestsTotal)
 	}
@@ -59,38 +55,3 @@ func Evaluate(workDir string, task Task) (*EvalResult, error) {
 	return result, nil
 }
 
-// parsePytestSummary extracts passed/total from pytest summary output.
-// Looks for patterns like "5 passed, 2 failed" or "10 passed".
-func parsePytestSummary(output string) (passed, total int) {
-	passedRe := regexp.MustCompile(`(\d+) passed`)
-	if m := passedRe.FindStringSubmatch(output); len(m) > 1 {
-		passed, _ = strconv.Atoi(m[1])
-	}
-
-	total = passed
-
-	failedRe := regexp.MustCompile(`(\d+) failed`)
-	if m := failedRe.FindStringSubmatch(output); len(m) > 1 {
-		n, _ := strconv.Atoi(m[1])
-		total += n
-	}
-
-	errorRe := regexp.MustCompile(`(\d+) error`)
-	if m := errorRe.FindStringSubmatch(output); len(m) > 1 {
-		n, _ := strconv.Atoi(m[1])
-		total += n
-	}
-
-	return passed, total
-}
-
-func runShellCmd(workDir, command string) (string, error) {
-	parts := strings.Fields(command)
-	if len(parts) == 0 {
-		return "", fmt.Errorf("empty command")
-	}
-	cmd := exec.Command(parts[0], parts[1:]...)
-	cmd.Dir = workDir
-	out, err := cmd.CombinedOutput()
-	return string(out), err
-}

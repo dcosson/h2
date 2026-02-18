@@ -241,15 +241,6 @@ func TestEvalResult_ScoreNorm(t *testing.T) {
 	}
 }
 
-func TestTruncate(t *testing.T) {
-	if got := truncate("hello", 10); got != "hello" {
-		t.Errorf("truncate short = %q", got)
-	}
-	if got := truncate("hello world", 5); got != "hello..." {
-		t.Errorf("truncate long = %q, want %q", got, "hello...")
-	}
-}
-
 func TestFormatPrompt(t *testing.T) {
 	env := Environment{
 		Name:        "Test Env",

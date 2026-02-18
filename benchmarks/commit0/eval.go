@@ -1,11 +1,10 @@
 package commit0
 
 import (
-	"fmt"
-	"os/exec"
 	"regexp"
 	"strconv"
-	"strings"
+
+	"h2/benchmarks/evalutil"
 )
 
 // EvalResult contains detailed evaluation results for a Commit0 library.
@@ -52,11 +51,11 @@ func Evaluate(workDir string, lib Library) (*EvalResult, error) {
 	if testCmd == "" {
 		testCmd = "python -m pytest --tb=short -q"
 	}
-	testOut, testErr := runShellCmd(workDir, testCmd)
+	testOut, testErr := evalutil.RunShellCmd(workDir, testCmd)
 	if testErr != nil {
 		result.TestError = testErr.Error()
 	}
-	result.TestsPassed, result.TestsTotal = parsePytestSummary(testOut)
+	result.TestsPassed, result.TestsTotal = evalutil.ParsePytestSummary(testOut)
 	if result.TestsTotal > 0 {
 		result.TestPassRate = float64(result.TestsPassed) / float64(result.TestsTotal)
 	}
@@ -67,7 +66,7 @@ func Evaluate(workDir string, lib Library) (*EvalResult, error) {
 	if covCmd == "" {
 		covCmd = "python -m pytest --cov --cov-report=term-missing -q"
 	}
-	covOut, covErr := runShellCmd(workDir, covCmd)
+	covOut, covErr := evalutil.RunShellCmd(workDir, covCmd)
 	if covErr != nil {
 		result.CoverageError = covErr.Error()
 	}
@@ -78,41 +77,13 @@ func Evaluate(workDir string, lib Library) (*EvalResult, error) {
 	if lintCmd == "" {
 		lintCmd = "python -m pylint --exit-zero --score=y ."
 	}
-	lintOut, lintErr := runShellCmd(workDir, lintCmd)
+	lintOut, lintErr := evalutil.RunShellCmd(workDir, lintCmd)
 	if lintErr != nil {
 		result.LintError = lintErr.Error()
 	}
 	result.LintScore = parsePylintScore(lintOut)
 
 	return result, nil
-}
-
-// parsePytestSummary extracts passed/total from pytest output.
-// Looks for patterns like "5 passed, 2 failed" or "10 passed".
-func parsePytestSummary(output string) (passed, total int) {
-	// Match "N passed".
-	passedRe := regexp.MustCompile(`(\d+) passed`)
-	if m := passedRe.FindStringSubmatch(output); len(m) > 1 {
-		passed, _ = strconv.Atoi(m[1])
-	}
-
-	total = passed
-
-	// Match "N failed".
-	failedRe := regexp.MustCompile(`(\d+) failed`)
-	if m := failedRe.FindStringSubmatch(output); len(m) > 1 {
-		n, _ := strconv.Atoi(m[1])
-		total += n
-	}
-
-	// Match "N error".
-	errorRe := regexp.MustCompile(`(\d+) error`)
-	if m := errorRe.FindStringSubmatch(output); len(m) > 1 {
-		n, _ := strconv.Atoi(m[1])
-		total += n
-	}
-
-	return passed, total
 }
 
 // parseCoveragePercent extracts the total coverage percentage from pytest-cov output.
@@ -139,13 +110,3 @@ func parsePylintScore(output string) float64 {
 	return 0
 }
 
-func runShellCmd(workDir, command string) (string, error) {
-	parts := strings.Fields(command)
-	if len(parts) == 0 {
-		return "", fmt.Errorf("empty command")
-	}
-	cmd := exec.Command(parts[0], parts[1:]...)
-	cmd.Dir = workDir
-	out, err := cmd.CombinedOutput()
-	return string(out), err
-}

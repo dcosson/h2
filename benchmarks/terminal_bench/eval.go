@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"h2/benchmarks/evalutil"
 )
 
 // EvalResult contains detailed evaluation results for a Terminal-Bench task.
@@ -118,7 +120,7 @@ func checkFileContains(workDir, file, expected string) CheckResult {
 		Type:    "file_contains",
 		Target:  file,
 		Passed:  false,
-		Details: fmt.Sprintf("file does not contain expected string %q", truncate(expected, 100)),
+		Details: fmt.Sprintf("file does not contain expected string %q", evalutil.Truncate(expected, 100)),
 	}
 }
 
@@ -140,7 +142,7 @@ func checkCommandOutput(workDir, command, expected string) CheckResult {
 		Type:    "command_output",
 		Target:  command,
 		Passed:  false,
-		Details: fmt.Sprintf("output %q does not contain %q", truncate(output, 200), truncate(expected, 100)),
+		Details: fmt.Sprintf("output %q does not contain %q", evalutil.Truncate(output, 200), evalutil.Truncate(expected, 100)),
 	}
 }
 
@@ -177,11 +179,4 @@ func checkExitCode(workDir, command, expected string) CheckResult {
 		Passed:  false,
 		Details: fmt.Sprintf("exit code %s, want %s", exitCode, expected),
 	}
-}
-
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "..."
 }

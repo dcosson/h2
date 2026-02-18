@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"h2/benchmarks/evalutil"
 )
 
 // EvalResult contains detailed evaluation results for an RE-bench environment.
@@ -79,7 +81,7 @@ func RunScoreCmd(workDir, scoreCmd string) (float64, error) {
 	cmd.Dir = workDir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return 0, fmt.Errorf("score command failed: %s: %w", truncate(string(out), 500), err)
+		return 0, fmt.Errorf("score command failed: %s: %w", evalutil.Truncate(string(out), 500), err)
 	}
 
 	return parseScore(string(out))
@@ -103,12 +105,5 @@ func parseScore(output string) (float64, error) {
 		}
 	}
 
-	return 0, fmt.Errorf("no numeric score found in output:\n%s", truncate(output, 500))
-}
-
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "..."
+	return 0, fmt.Errorf("no numeric score found in output:\n%s", evalutil.Truncate(output, 500))
 }

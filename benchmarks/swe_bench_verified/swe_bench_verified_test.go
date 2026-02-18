@@ -2,9 +2,7 @@ package swe_bench_verified
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -222,105 +220,6 @@ func TestToBenchmarkTasks(t *testing.T) {
 	}
 }
 
-// --- Eval tests ---
-
-func TestParsePytestOutput(t *testing.T) {
-	output := `
-tests/test_foo.py::test_one PASSED
-tests/test_foo.py::test_two FAILED
-tests/test_foo.py::test_three ERROR
-`
-	results := parsePytestOutput(output)
-
-	if !results["tests/test_foo.py::test_one"] {
-		t.Error("test_one should be PASSED")
-	}
-	if results["tests/test_foo.py::test_two"] {
-		t.Error("test_two should be FAILED")
-	}
-	if results["tests/test_foo.py::test_three"] {
-		t.Error("test_three should be ERROR")
-	}
-}
-
-func TestParsePytestOutput_Empty(t *testing.T) {
-	results := parsePytestOutput("")
-	if len(results) != 0 {
-		t.Errorf("expected 0 results, got %d", len(results))
-	}
-}
-
-func TestCheckTestsPassed_AllPass(t *testing.T) {
-	results := map[string]bool{"test_a": true, "test_b": true}
-	if !checkTestsPassed([]string{"test_a", "test_b"}, results) {
-		t.Error("expected all tests to pass")
-	}
-}
-
-func TestCheckTestsPassed_OneFails(t *testing.T) {
-	results := map[string]bool{"test_a": true, "test_b": false}
-	if checkTestsPassed([]string{"test_a", "test_b"}, results) {
-		t.Error("expected failure")
-	}
-}
-
-func TestCheckTestsPassed_Missing(t *testing.T) {
-	results := map[string]bool{"test_a": true}
-	if checkTestsPassed([]string{"test_a", "test_missing"}, results) {
-		t.Error("expected failure for missing test")
-	}
-}
-
-func TestCheckTestsPassed_EmptyList(t *testing.T) {
-	if !checkTestsPassed(nil, map[string]bool{"test_a": false}) {
-		t.Error("empty list should pass")
-	}
-}
-
-// --- ApplyPatch tests ---
-
-func TestApplyPatch_EmptyPatch(t *testing.T) {
-	if err := ApplyPatch(t.TempDir(), ""); err != nil {
-		t.Fatalf("ApplyPatch empty: %v", err)
-	}
-}
-
-func TestApplyPatch_ValidPatch(t *testing.T) {
-	workDir := t.TempDir()
-	initGitRepo(t, workDir)
-
-	os.WriteFile(filepath.Join(workDir, "hello.py"), []byte("print('hello')\n"), 0o644)
-	gitAdd(t, workDir, "hello.py")
-	gitCommit(t, workDir, "add hello")
-
-	patch := `diff --git a/hello.py b/hello.py
-index 1234567..abcdefg 100644
---- a/hello.py
-+++ b/hello.py
-@@ -1 +1,2 @@
- print('hello')
-+print('world')
-`
-	if err := ApplyPatch(workDir, patch); err != nil {
-		t.Fatalf("ApplyPatch: %v", err)
-	}
-
-	data, _ := os.ReadFile(filepath.Join(workDir, "hello.py"))
-	if !strings.Contains(string(data), "world") {
-		t.Error("patch should have added 'world'")
-	}
-}
-
-func TestApplyPatch_InvalidPatch(t *testing.T) {
-	workDir := t.TempDir()
-	initGitRepo(t, workDir)
-
-	err := ApplyPatch(workDir, "garbage not a patch")
-	if err == nil {
-		t.Error("expected error for invalid patch")
-	}
-}
-
 // --- Evaluate integration test ---
 
 func TestEvaluate_NoTestPatch(t *testing.T) {
@@ -339,39 +238,3 @@ func TestEvaluate_NoTestPatch(t *testing.T) {
 	}
 }
 
-func TestTruncate(t *testing.T) {
-	if got := truncate("hello", 10); got != "hello" {
-		t.Errorf("truncate short = %q", got)
-	}
-	if got := truncate("hello world", 5); got != "hello..." {
-		t.Errorf("truncate long = %q", got)
-	}
-}
-
-// --- Helpers ---
-
-func initGitRepo(t *testing.T, dir string) {
-	t.Helper()
-	runCmd(t, dir, "git", "init")
-	runCmd(t, dir, "git", "config", "user.email", "test@test.com")
-	runCmd(t, dir, "git", "config", "user.name", "Test")
-}
-
-func gitAdd(t *testing.T, dir, file string) {
-	t.Helper()
-	runCmd(t, dir, "git", "add", file)
-}
-
-func gitCommit(t *testing.T, dir, msg string) {
-	t.Helper()
-	runCmd(t, dir, "git", "commit", "-m", msg)
-}
-
-func runCmd(t *testing.T, dir string, name string, args ...string) {
-	t.Helper()
-	cmd := exec.Command(name, args...)
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("%s %v failed: %s: %v", name, args, string(out), err)
-	}
-}

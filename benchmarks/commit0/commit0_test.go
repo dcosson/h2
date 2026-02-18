@@ -193,58 +193,6 @@ func TestToBenchmarkTasks(t *testing.T) {
 
 // --- Eval parsing tests ---
 
-func TestParsePytestSummary(t *testing.T) {
-	tests := []struct {
-		name       string
-		output     string
-		wantPassed int
-		wantTotal  int
-	}{
-		{
-			name:       "passed only",
-			output:     "10 passed in 5.2s",
-			wantPassed: 10,
-			wantTotal:  10,
-		},
-		{
-			name:       "passed and failed",
-			output:     "5 passed, 3 failed in 8.1s",
-			wantPassed: 5,
-			wantTotal:  8,
-		},
-		{
-			name:       "passed, failed, and errors",
-			output:     "5 passed, 2 failed, 1 error in 3.0s",
-			wantPassed: 5,
-			wantTotal:  8,
-		},
-		{
-			name:       "no output",
-			output:     "",
-			wantPassed: 0,
-			wantTotal:  0,
-		},
-		{
-			name:       "no tests collected",
-			output:     "no tests ran in 0.01s",
-			wantPassed: 0,
-			wantTotal:  0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			passed, total := parsePytestSummary(tt.output)
-			if passed != tt.wantPassed {
-				t.Errorf("passed = %d, want %d", passed, tt.wantPassed)
-			}
-			if total != tt.wantTotal {
-				t.Errorf("total = %d, want %d", total, tt.wantTotal)
-			}
-		})
-	}
-}
-
 func TestParseCoveragePercent(t *testing.T) {
 	tests := []struct {
 		name    string

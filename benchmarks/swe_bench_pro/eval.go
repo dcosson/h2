@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"h2/benchmarks/evalutil"
 )
 
 // EvalResult contains detailed evaluation results for a single instance.
@@ -40,7 +42,7 @@ func Evaluate(workDir string, inst Instance) (*EvalResult, error) {
 
 	// 1. Apply test patch.
 	if inst.TestPatch != "" {
-		if err := ApplyPatch(workDir, inst.TestPatch); err != nil {
+		if err := evalutil.ApplyPatch(workDir, inst.TestPatch); err != nil {
 			result.TestPatchError = err.Error()
 			return result, fmt.Errorf("apply test patch: %w", err)
 		}
@@ -70,10 +72,10 @@ func Evaluate(workDir string, inst Instance) (*EvalResult, error) {
 	}
 
 	// 5. Check fail-to-pass criteria.
-	result.FailToPassAll = checkTestsPassed(failToPass, testResults)
+	result.FailToPassAll = evalutil.CheckTestsPassed(failToPass, testResults)
 
 	// 6. Check pass-to-pass criteria.
-	result.PassToPassAll = checkTestsPassed(passToPass, testResults)
+	result.PassToPassAll = evalutil.CheckTestsPassed(passToPass, testResults)
 
 	// Collect failed tests for reporting.
 	for testID, passed := range testResults {
@@ -85,41 +87,6 @@ func Evaluate(workDir string, inst Instance) (*EvalResult, error) {
 	// 7. Resolved = all fail-to-pass pass AND all pass-to-pass pass.
 	result.Resolved = result.FailToPassAll && result.PassToPassAll
 	return result, nil
-}
-
-// ApplyPatch applies a unified diff patch to the working directory.
-// Tries multiple strategies following the SWE-bench harness approach.
-func ApplyPatch(workDir, patch string) error {
-	if patch == "" {
-		return nil
-	}
-
-	// Write patch to a temp file.
-	patchFile := filepath.Join(workDir, ".swebench_test_patch.diff")
-	if err := os.WriteFile(patchFile, []byte(patch), 0o644); err != nil {
-		return fmt.Errorf("write patch file: %w", err)
-	}
-	defer os.Remove(patchFile)
-
-	// Try git apply strategies in order (matching SWE-bench harness).
-	strategies := [][]string{
-		{"git", "-C", workDir, "apply", "-v", patchFile},
-		{"git", "-C", workDir, "apply", "-v", "--no-index", patchFile},
-		{"patch", "-d", workDir, "-p1", "-i", patchFile},
-	}
-
-	var lastErr error
-	for _, args := range strategies {
-		cmd := exec.Command(args[0], args[1:]...)
-		cmd.Dir = workDir
-		if out, err := cmd.CombinedOutput(); err == nil {
-			return nil
-		} else {
-			lastErr = fmt.Errorf("%s: %s: %w", args[0], truncate(string(out), 500), err)
-		}
-	}
-
-	return fmt.Errorf("all patch strategies failed: %w", lastErr)
 }
 
 // RunTests runs the specified test files in the working directory and returns
@@ -199,65 +166,9 @@ func parseTestOutput(output string, testRunner TestRunner, runErr error) map[str
 
 	switch testRunner {
 	case RunnerPytest, RunnerTox, RunnerUnknown:
-		results = parsePytestOutput(output)
+		results = evalutil.ParsePytestOutput(output)
 	}
 
 	return results
 }
 
-// parsePytestOutput parses pytest output to extract test results.
-// Pytest outputs lines like:
-//
-//	test_file.py::TestClass::test_method PASSED
-//	test_file.py::TestClass::test_method FAILED
-func parsePytestOutput(output string) map[string]bool {
-	results := make(map[string]bool)
-
-	for _, line := range strings.Split(output, "\n") {
-		line = strings.TrimSpace(line)
-
-		// Look for PASSED/FAILED markers.
-		if strings.HasSuffix(line, " PASSED") {
-			testID := strings.TrimSuffix(line, " PASSED")
-			testID = strings.TrimSpace(testID)
-			if testID != "" {
-				results[testID] = true
-			}
-		} else if strings.HasSuffix(line, " FAILED") {
-			testID := strings.TrimSuffix(line, " FAILED")
-			testID = strings.TrimSpace(testID)
-			if testID != "" {
-				results[testID] = false
-			}
-		} else if strings.HasSuffix(line, " ERROR") {
-			testID := strings.TrimSuffix(line, " ERROR")
-			testID = strings.TrimSpace(testID)
-			if testID != "" {
-				results[testID] = false
-			}
-		}
-	}
-
-	return results
-}
-
-// checkTestsPassed verifies that all specified tests are in the results and passed.
-func checkTestsPassed(testIDs []string, results map[string]bool) bool {
-	if len(testIDs) == 0 {
-		return true
-	}
-	for _, id := range testIDs {
-		passed, found := results[id]
-		if !found || !passed {
-			return false
-		}
-	}
-	return true
-}
-
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "..."
-}
