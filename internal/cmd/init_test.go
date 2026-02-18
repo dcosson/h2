@@ -24,13 +24,15 @@ func expectedDirs() []string {
 	}
 }
 
-// setupFakeHome sets HOME and H2_ROOT_DIR to a temp dir so route registration
-// doesn't touch the real filesystem.
+// setupFakeHome isolates tests from the real filesystem by setting HOME,
+// H2_ROOT_DIR, and H2_DIR to temp directories. Returns the fake home dir.
 func setupFakeHome(t *testing.T) string {
 	t.Helper()
 	fakeHome := t.TempDir()
+	fakeRootDir := filepath.Join(fakeHome, ".h2")
 	t.Setenv("HOME", fakeHome)
-	t.Setenv("H2_ROOT_DIR", "")
+	t.Setenv("H2_ROOT_DIR", fakeRootDir)
+	t.Setenv("H2_DIR", "")
 	return fakeHome
 }
 

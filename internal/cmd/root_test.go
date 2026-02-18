@@ -13,6 +13,7 @@ func TestRootCmd_H2DIRValidation_InvalidDir(t *testing.T) {
 	config.ResetResolveCache()
 	t.Cleanup(config.ResetResolveCache)
 
+	setupFakeHome(t)
 	dir := t.TempDir() // no marker file
 	t.Setenv("H2_DIR", dir)
 
@@ -31,10 +32,10 @@ func TestRootCmd_H2DIRValidation_InitExempt(t *testing.T) {
 	config.ResetResolveCache()
 	t.Cleanup(config.ResetResolveCache)
 
-	dir := t.TempDir() // no marker file
-	t.Setenv("H2_DIR", dir)
+	fakeHome := setupFakeHome(t)
+	t.Setenv("H2_DIR", t.TempDir()) // invalid h2 dir (no marker)
 
-	newDir := filepath.Join(t.TempDir(), "newh2")
+	newDir := filepath.Join(fakeHome, "newh2")
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"init", newDir})
@@ -53,6 +54,7 @@ func TestRootCmd_H2DIRValidation_VersionExempt(t *testing.T) {
 	config.ResetResolveCache()
 	t.Cleanup(config.ResetResolveCache)
 
+	setupFakeHome(t)
 	dir := t.TempDir() // no marker file
 	t.Setenv("H2_DIR", dir)
 

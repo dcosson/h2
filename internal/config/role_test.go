@@ -187,11 +187,7 @@ instructions: |
 }
 
 func TestSetupSessionDir(t *testing.T) {
-	// Override the config dir for this test.
-	origHome := os.Getenv("HOME")
-	tmpHome := t.TempDir()
-	os.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", origHome)
+	setupFakeHome(t)
 
 	role := &Role{
 		Name:  "architect",
@@ -271,10 +267,7 @@ func TestEnsureClaudeConfigDir(t *testing.T) {
 }
 
 func TestSetupSessionDir_NoAgent(t *testing.T) {
-	origHome := os.Getenv("HOME")
-	tmpHome := t.TempDir()
-	os.Setenv("HOME", tmpHome)
-	defer os.Setenv("HOME", origHome)
+	setupFakeHome(t)
 
 	role := &Role{
 		Name:         "coder",
@@ -379,10 +372,13 @@ func TestIsClaudeConfigAuthenticated(t *testing.T) {
 }
 
 func TestRole_GetClaudeConfigDir(t *testing.T) {
-	// Save and restore HOME env var.
-	origHome := os.Getenv("HOME")
-	defer os.Setenv("HOME", origHome)
-	os.Setenv("HOME", "/Users/testuser")
+	ResetResolveCache()
+	t.Cleanup(ResetResolveCache)
+	// Use a fixed path for HOME so test expectations are deterministic.
+	t.Setenv("HOME", "/Users/testuser")
+	t.Setenv("H2_ROOT_DIR", "/Users/testuser/.h2")
+	t.Setenv("H2_DIR", "")
+	t.Setenv("H2_ACTOR", "")
 
 	tests := []struct {
 		name            string

@@ -105,8 +105,10 @@ func runH2Opts(t *testing.T, opts h2Opts, args ...string) H2Result {
 		cmd.Dir = opts.workDir
 	}
 
-	// Start with a clean env to avoid inheriting the test runner's H2_DIR.
-	cmd.Env = append(os.Environ(), "H2_DIR=")
+	// Start with a clean env to avoid inheriting the test runner's H2_DIR,
+	// and isolate route registration from real ~/.h2/routes.jsonl.
+	fakeRootDir := t.TempDir()
+	cmd.Env = append(os.Environ(), "H2_DIR=", "H2_ROOT_DIR="+fakeRootDir)
 	if opts.h2Dir != "" {
 		cmd.Env = append(cmd.Env, "H2_DIR="+opts.h2Dir)
 	}

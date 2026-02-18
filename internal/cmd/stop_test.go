@@ -31,6 +31,7 @@ func TestStopCmd_NoSocket(t *testing.T) {
 	// Point socket dir at an empty temp dir so Find fails.
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("H2_ROOT_DIR", filepath.Join(tmpDir, ".h2"))
 	t.Setenv("H2_DIR", "")
 	h2Root := filepath.Join(tmpDir, ".h2")
 	os.MkdirAll(filepath.Join(h2Root, "sockets"), 0o700)
@@ -60,6 +61,7 @@ func TestStopCmd_SendsStopRequest(t *testing.T) {
 	t.Cleanup(func() { os.RemoveAll(tmpDir) })
 
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("H2_ROOT_DIR", filepath.Join(tmpDir, ".h2"))
 	t.Setenv("H2_DIR", "")
 
 	h2Root := filepath.Join(tmpDir, ".h2")

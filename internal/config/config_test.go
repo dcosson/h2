@@ -9,6 +9,21 @@ import (
 	"h2/internal/version"
 )
 
+// setupFakeHome isolates tests from the real filesystem by setting HOME,
+// H2_ROOT_DIR, and H2_DIR to temp directories and resetting the resolve cache.
+// Returns the fake home dir.
+func setupFakeHome(t *testing.T) string {
+	t.Helper()
+	fakeHome := t.TempDir()
+	fakeRootDir := filepath.Join(fakeHome, ".h2")
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("H2_ROOT_DIR", fakeRootDir)
+	t.Setenv("H2_DIR", "")
+	ResetResolveCache()
+	t.Cleanup(ResetResolveCache)
+	return fakeHome
+}
+
 func TestLoadFrom_ValidYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
@@ -372,6 +387,7 @@ func TestResolveDir_FallbackHome(t *testing.T) {
 
 	t.Setenv("H2_DIR", "")
 	t.Setenv("HOME", fakeHome)
+	t.Setenv("H2_ROOT_DIR", h2Home)
 
 	// Chdir to a place with no marker in any parent.
 	isolated := t.TempDir()
@@ -401,6 +417,7 @@ func TestResolveDir_MigrationAutoCreatesMarker(t *testing.T) {
 
 	t.Setenv("H2_DIR", "")
 	t.Setenv("HOME", fakeHome)
+	t.Setenv("H2_ROOT_DIR", h2Home)
 
 	// Chdir to a place with no marker.
 	isolated := t.TempDir()

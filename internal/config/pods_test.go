@@ -46,17 +46,17 @@ func TestValidatePodName(t *testing.T) {
 	}
 }
 
-// setupTestH2Dir creates a temp h2 directory and sets H2_DIR + resets the resolve cache.
-// Returns the h2 dir path.
+// setupTestH2Dir creates a temp h2 directory and sets H2_DIR, H2_ROOT_DIR,
+// HOME + resets the resolve cache. Returns the h2 dir path.
 func setupTestH2Dir(t *testing.T) string {
 	t.Helper()
+	fakeHome := setupFakeHome(t)
 	dir := t.TempDir()
 	WriteMarker(dir)
 	os.MkdirAll(filepath.Join(dir, "roles"), 0o755)
 	os.MkdirAll(filepath.Join(dir, "pods", "roles"), 0o755)
 	t.Setenv("H2_DIR", dir)
-	ResetResolveCache()
-	t.Cleanup(func() { ResetResolveCache() })
+	_ = fakeHome // HOME, H2_ROOT_DIR, resolve cache handled by setupFakeHome
 	return dir
 }
 

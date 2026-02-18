@@ -31,6 +31,7 @@ func setupPodTestEnv(t *testing.T) string {
 	t.Cleanup(func() { os.RemoveAll(tmpDir) })
 
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("H2_ROOT_DIR", filepath.Join(tmpDir, ".h2"))
 	t.Setenv("H2_DIR", "")
 
 	h2Root := filepath.Join(tmpDir, ".h2")
