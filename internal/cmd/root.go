@@ -46,6 +46,7 @@ func NewRootCmd() *cobra.Command {
 		newVersionCmd(),
 		newInitCmd(),
 		newQACmd(),
+		newSandboxCmd(),
 	)
 
 	return rootCmd
