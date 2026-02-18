@@ -189,18 +189,34 @@ instructions: |
 
 func opusPodTemplates() map[string]string {
 	return map[string]string{
-		"benchmark": `pod_name: benchmark
+		"benchmark": BenchmarkPodTemplate,
+	}
+}
+
+// BenchmarkPodTemplate is the standard pod template for benchmark runs.
+// It defines concierge, coder (x2), and reviewer agents, all using
+// {{ .Var.working_dir }} so the benchmark runner can point them at the
+// cloned repo for each task.
+const BenchmarkPodTemplate = `pod_name: benchmark
+variables:
+  working_dir:
+    description: "Working directory for agents (benchmark repo clone)"
+    required: true
 agents:
   - name: concierge
     role: concierge
+    vars:
+      working_dir: "{{ .Var.working_dir }}"
   - name: coder
     role: coder
     count: 2
+    vars:
+      working_dir: "{{ .Var.working_dir }}"
   - name: reviewer
     role: reviewer
-`,
-	}
-}
+    vars:
+      working_dir: "{{ .Var.working_dir }}"
+`
 
 // --- Shared hooks ---
 
