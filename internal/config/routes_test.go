@@ -369,6 +369,25 @@ func TestRegisterRouteWithAutoPrefix_ExplicitPrefixConflict(t *testing.T) {
 	}
 }
 
+func TestRegisterRouteWithAutoPrefix_ExplicitMatchingBasename(t *testing.T) {
+	rootDir := t.TempDir()
+
+	// Register "myproject" first.
+	if err := RegisterRoute(rootDir, Route{Prefix: "myproject", Path: "/other"}); err != nil {
+		t.Fatalf("RegisterRoute: %v", err)
+	}
+
+	// Explicit prefix "myproject" that matches the basename — should fail, NOT auto-increment.
+	h2Path := filepath.Join(t.TempDir(), "myproject")
+	_, err := RegisterRouteWithAutoPrefix(rootDir, "myproject", h2Path)
+	if err == nil {
+		t.Fatal("expected error when explicit prefix conflicts, even if it matches basename")
+	}
+	if !strings.Contains(err.Error(), "already registered") {
+		t.Errorf("error = %q, want it to contain 'already registered'", err.Error())
+	}
+}
+
 func TestRegisterRouteWithAutoPrefix_AutoIncrement(t *testing.T) {
 	rootDir := t.TempDir()
 

@@ -295,65 +295,156 @@ func newLsAlias(listCmd *cobra.Command) *cobra.Command {
 	}
 }
 
-// listAll discovers all h2 directories and lists agents from each.
+// listAll reads the routes registry and lists agents from each registered h2 directory.
 func listAll() error {
-	h2Dirs := config.ResolveDirAll()
-	if len(h2Dirs) == 0 {
-		fmt.Println("No h2 directories found.")
+	rootDir, err := config.RootDir()
+	if err != nil {
+		return fmt.Errorf("resolve root h2 dir: %w", err)
+	}
+
+	routes, err := config.ReadRoutes(rootDir)
+	if err != nil {
+		return fmt.Errorf("read routes: %w", err)
+	}
+
+	// Resolve the current h2 dir for marking (current).
+	currentDir, _ := config.ResolveDir()
+
+	if len(routes) == 0 {
+		// Graceful fallback: list just the current dir if it exists.
+		if currentDir != "" {
+			fmt.Printf("%s %s\n", s.Bold(shortenHome(currentDir)), s.Dim("(current)"))
+			listDirAgents(currentDir, "")
+		} else {
+			fmt.Println("No h2 directories registered.")
+		}
+		fmt.Println()
+		fmt.Println(s.Dim("Hint: run 'h2 init' to register directories for cross-directory discovery."))
 		return nil
 	}
 
-	for i, h2Dir := range h2Dirs {
+	// Order routes: current first, root second, others in file order.
+	ordered := orderRoutes(routes, currentDir, rootDir)
+
+	for i, entry := range ordered {
 		if i > 0 {
 			fmt.Println()
 		}
 
-		fmt.Printf("%s\n", s.Bold(shortenHome(h2Dir)))
+		// Header: "<prefix> <path> (current)" or "<prefix> <path>"
+		header := fmt.Sprintf("%s %s", s.Bold(entry.route.Prefix), shortenHome(entry.route.Path))
+		if entry.isCurrent {
+			header += " " + s.Dim("(current)")
+		}
+		fmt.Println(header)
 
-		sockDir := socketdir.ResolveSocketDir(h2Dir)
-		entries, err := socketdir.ListIn(sockDir)
-		if err != nil {
-			fmt.Printf("  %s\n", s.Dim(fmt.Sprintf("(error reading sockets: %v)", err)))
-			continue
+		// Agents in the current dir have no prefix; others get <prefix>/.
+		agentPrefix := ""
+		if !entry.isCurrent {
+			agentPrefix = entry.route.Prefix + "/"
 		}
 
-		if len(entries) == 0 {
-			fmt.Println("  No running agents.")
+		listDirAgents(entry.route.Path, agentPrefix)
+	}
+
+	return nil
+}
+
+// orderedRoute is a route with metadata for display ordering.
+type orderedRoute struct {
+	route     config.Route
+	isCurrent bool
+}
+
+// orderRoutes sorts routes: current first, root second, rest in original order.
+func orderRoutes(routes []config.Route, currentDir, rootDir string) []orderedRoute {
+	// First pass: identify current and root.
+	var currentIdx, rootIdx int = -1, -1
+	for i := range routes {
+		if routes[i].Path == currentDir {
+			currentIdx = i
+		}
+		if routes[i].Path == rootDir {
+			rootIdx = i
+		}
+	}
+
+	// If current wasn't found but root exists, treat root as current.
+	if currentIdx == -1 && rootIdx != -1 {
+		currentIdx = rootIdx
+		rootIdx = -1
+	}
+
+	// If current IS root, don't list root separately.
+	if currentIdx == rootIdx {
+		rootIdx = -1
+	}
+
+	var ordered []orderedRoute
+	if currentIdx >= 0 {
+		ordered = append(ordered, orderedRoute{route: routes[currentIdx], isCurrent: true})
+	}
+	if rootIdx >= 0 {
+		ordered = append(ordered, orderedRoute{route: routes[rootIdx]})
+	}
+	for i := range routes {
+		if i == currentIdx || i == rootIdx {
 			continue
 		}
+		ordered = append(ordered, orderedRoute{route: routes[i]})
+	}
 
-		var bridges []socketdir.Entry
-		var agentInfos []*message.AgentInfo
-		var unresponsive []string
-		for _, e := range entries {
-			switch e.Type {
-			case socketdir.TypeBridge:
-				bridges = append(bridges, e)
-			case socketdir.TypeAgent:
-				info := queryAgent(e.Path)
-				if info != nil {
-					agentInfos = append(agentInfos, info)
-				} else {
-					unresponsive = append(unresponsive, e.Name)
+	return ordered
+}
+
+// listDirAgents lists agents and bridges for a single h2 directory.
+// If agentPrefix is non-empty, it's prepended to agent names (e.g. "root/").
+func listDirAgents(h2Dir string, agentPrefix string) {
+	sockDir := socketdir.ResolveSocketDir(h2Dir)
+	entries, err := socketdir.ListIn(sockDir)
+	if err != nil {
+		fmt.Printf("  %s\n", s.Dim(fmt.Sprintf("(error reading sockets: %v)", err)))
+		return
+	}
+
+	if len(entries) == 0 {
+		fmt.Println("  No running agents.")
+		return
+	}
+
+	var bridges []socketdir.Entry
+	var agentInfos []*message.AgentInfo
+	var unresponsive []string
+	for _, e := range entries {
+		switch e.Type {
+		case socketdir.TypeBridge:
+			bridges = append(bridges, e)
+		case socketdir.TypeAgent:
+			info := queryAgent(e.Path)
+			if info != nil {
+				// Prefix agent name for non-current dirs.
+				if agentPrefix != "" {
+					info.Name = agentPrefix + info.Name
 				}
-			}
-		}
-
-		groups := groupAgentsByPod(agentInfos, "*")
-		if len(groups) > 0 || len(unresponsive) > 0 {
-			printPodGroupsIndented(groups, unresponsive)
-		}
-
-		if len(bridges) > 0 {
-			fmt.Printf("  %s\n", s.Bold("Bridges"))
-			for _, e := range bridges {
-				fmt.Print("  ")
-				printBridgeEntry(e)
+				agentInfos = append(agentInfos, info)
+			} else {
+				unresponsive = append(unresponsive, agentPrefix+e.Name)
 			}
 		}
 	}
 
-	return nil
+	groups := groupAgentsByPod(agentInfos, "*")
+	if len(groups) > 0 || len(unresponsive) > 0 {
+		printPodGroupsIndented(groups, unresponsive)
+	}
+
+	if len(bridges) > 0 {
+		fmt.Printf("  %s\n", s.Bold("Bridges"))
+		for _, e := range bridges {
+			fmt.Print("  ")
+			printBridgeEntry(e)
+		}
+	}
 }
 
 // printPodGroupsIndented renders grouped agent output with extra indent for --all mode.

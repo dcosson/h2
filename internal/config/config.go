@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"sync"
 
@@ -158,79 +157,6 @@ func ConfigDir() string {
 		return filepath.Join(home, ".h2")
 	}
 	return dir
-}
-
-// ResolveDirAll discovers all h2 directories on the system.
-// Returns a deduplicated, sorted list of absolute paths.
-// Best-effort: silently skips inaccessible directories.
-func ResolveDirAll() []string {
-	seen := make(map[string]bool)
-	var dirs []string
-
-	add := func(dir string) {
-		abs, err := filepath.Abs(dir)
-		if err != nil {
-			return
-		}
-		// Resolve symlinks for dedup.
-		if real, err := filepath.EvalSymlinks(abs); err == nil {
-			abs = real
-		}
-		if !seen[abs] {
-			seen[abs] = true
-			dirs = append(dirs, abs)
-		}
-	}
-
-	// 1. H2_DIR env var.
-	if dir := os.Getenv("H2_DIR"); dir != "" {
-		if IsH2Dir(dir) {
-			add(dir)
-		}
-	}
-
-	// 2. Walk up from CWD, checking each level and its siblings.
-	if cwd, err := os.Getwd(); err == nil {
-		dir := cwd
-		for {
-			// Check the directory itself.
-			if IsH2Dir(dir) {
-				add(dir)
-			}
-
-			// Check siblings (one level only).
-			parent := filepath.Dir(dir)
-			if entries, err := os.ReadDir(parent); err == nil {
-				for _, e := range entries {
-					if !e.IsDir() {
-						continue
-					}
-					sibling := filepath.Join(parent, e.Name())
-					if IsH2Dir(sibling) {
-						add(sibling)
-					}
-				}
-			}
-
-			if parent == dir {
-				break // reached filesystem root
-			}
-			dir = parent
-		}
-	}
-
-	// 3. ~/.h2/ fallback (including migration check).
-	if home, err := os.UserHomeDir(); err == nil {
-		global := filepath.Join(home, ".h2")
-		if IsH2Dir(global) {
-			add(global)
-		} else if looksLikeH2Dir(global) {
-			add(global)
-		}
-	}
-
-	sort.Strings(dirs)
-	return dirs
 }
 
 // Load reads the h2 config from <h2-dir>/config.yaml.

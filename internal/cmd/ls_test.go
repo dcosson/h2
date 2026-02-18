@@ -3,6 +3,7 @@ package cmd
 import (
 	"testing"
 
+	"h2/internal/config"
 	"h2/internal/session/message"
 )
 
@@ -155,5 +156,132 @@ func TestGroupAgentsByPod_OnlyPoddedAgents(t *testing.T) {
 	}
 	if groups[1].Pod != "frontend" {
 		t.Errorf("group[1] pod = %q, want %q", groups[1].Pod, "frontend")
+	}
+}
+
+// --- orderRoutes tests ---
+
+func TestOrderRoutes_CurrentFirst(t *testing.T) {
+	routes := []config.Route{
+		{Prefix: "root", Path: "/root"},
+		{Prefix: "project-a", Path: "/project-a"},
+		{Prefix: "h2home", Path: "/h2home"},
+	}
+
+	ordered := orderRoutes(routes, "/h2home", "/root")
+
+	if len(ordered) != 3 {
+		t.Fatalf("expected 3 ordered routes, got %d", len(ordered))
+	}
+
+	// Current should be first.
+	if ordered[0].route.Prefix != "h2home" || !ordered[0].isCurrent {
+		t.Errorf("ordered[0] = %+v, want h2home (current)", ordered[0])
+	}
+
+	// Root should be second.
+	if ordered[1].route.Prefix != "root" || ordered[1].isCurrent {
+		t.Errorf("ordered[1] = %+v, want root (not current)", ordered[1])
+	}
+
+	// Others after.
+	if ordered[2].route.Prefix != "project-a" || ordered[2].isCurrent {
+		t.Errorf("ordered[2] = %+v, want project-a (not current)", ordered[2])
+	}
+}
+
+func TestOrderRoutes_CurrentIsRoot(t *testing.T) {
+	routes := []config.Route{
+		{Prefix: "root", Path: "/root"},
+		{Prefix: "project-a", Path: "/project-a"},
+	}
+
+	// Current dir is the root dir.
+	ordered := orderRoutes(routes, "/root", "/root")
+
+	if len(ordered) != 2 {
+		t.Fatalf("expected 2 ordered routes, got %d", len(ordered))
+	}
+
+	// Root should be first and marked current.
+	if ordered[0].route.Prefix != "root" || !ordered[0].isCurrent {
+		t.Errorf("ordered[0] = %+v, want root (current)", ordered[0])
+	}
+
+	// Other follows.
+	if ordered[1].route.Prefix != "project-a" {
+		t.Errorf("ordered[1] = %+v, want project-a", ordered[1])
+	}
+}
+
+func TestOrderRoutes_NoCurrentDir(t *testing.T) {
+	routes := []config.Route{
+		{Prefix: "root", Path: "/root"},
+		{Prefix: "project-a", Path: "/project-a"},
+	}
+
+	// No current dir resolved (empty string).
+	ordered := orderRoutes(routes, "", "/root")
+
+	if len(ordered) != 2 {
+		t.Fatalf("expected 2 ordered routes, got %d", len(ordered))
+	}
+
+	// Root should still come first (as "current" since it's the fallback).
+	if ordered[0].route.Prefix != "root" {
+		t.Errorf("ordered[0] = %+v, want root", ordered[0])
+	}
+}
+
+func TestOrderRoutes_PreservesFileOrder(t *testing.T) {
+	routes := []config.Route{
+		{Prefix: "root", Path: "/root"},
+		{Prefix: "charlie", Path: "/charlie"},
+		{Prefix: "alpha", Path: "/alpha"},
+		{Prefix: "beta", Path: "/beta"},
+	}
+
+	ordered := orderRoutes(routes, "/root", "/root")
+
+	// root is current, so first. Then others should be in file order.
+	if ordered[0].route.Prefix != "root" {
+		t.Errorf("ordered[0] = %q, want root", ordered[0].route.Prefix)
+	}
+	if ordered[1].route.Prefix != "charlie" {
+		t.Errorf("ordered[1] = %q, want charlie", ordered[1].route.Prefix)
+	}
+	if ordered[2].route.Prefix != "alpha" {
+		t.Errorf("ordered[2] = %q, want alpha", ordered[2].route.Prefix)
+	}
+	if ordered[3].route.Prefix != "beta" {
+		t.Errorf("ordered[3] = %q, want beta", ordered[3].route.Prefix)
+	}
+}
+
+func TestOrderRoutes_Empty(t *testing.T) {
+	ordered := orderRoutes(nil, "/whatever", "/root")
+	if len(ordered) != 0 {
+		t.Errorf("expected 0 ordered routes, got %d", len(ordered))
+	}
+}
+
+func TestOrderRoutes_CurrentNotInRoutes(t *testing.T) {
+	routes := []config.Route{
+		{Prefix: "root", Path: "/root"},
+		{Prefix: "project-a", Path: "/project-a"},
+	}
+
+	// Current dir isn't in routes.
+	ordered := orderRoutes(routes, "/unknown", "/root")
+
+	// Root should be first (no current found), then project-a.
+	if len(ordered) != 2 {
+		t.Fatalf("expected 2 ordered routes, got %d", len(ordered))
+	}
+	if ordered[0].route.Prefix != "root" {
+		t.Errorf("ordered[0] = %q, want root", ordered[0].route.Prefix)
+	}
+	if ordered[1].route.Prefix != "project-a" {
+		t.Errorf("ordered[1] = %q, want project-a", ordered[1].route.Prefix)
 	}
 }

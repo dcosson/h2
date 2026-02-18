@@ -233,7 +233,7 @@ func RegisterRoute(rootDir string, route Route) error {
 // atomically under a single exclusive lock. This avoids the TOCTOU race between
 // resolving a prefix and registering it in separate calls.
 //
-// If explicitPrefix is non-empty, it is used as-is (fails on conflict).
+// If explicitPrefix is non-empty, it is used as-is (fails on conflict, no auto-increment).
 // Otherwise, the prefix is derived from the h2Path basename with auto-increment.
 // If h2Path is the root dir itself, the prefix "root" is always used.
 func RegisterRouteWithAutoPrefix(rootDir string, explicitPrefix string, h2Path string) (string, error) {
@@ -270,7 +270,8 @@ func RegisterRouteWithAutoPrefix(rootDir string, explicitPrefix string, h2Path s
 	}
 
 	// Resolve the prefix under the same lock.
-	prefix, err := resolvePrefix(rootDir, explicitPrefix, absPath, existing)
+	isExplicit := explicitPrefix != ""
+	prefix, err := resolvePrefix(rootDir, explicitPrefix, absPath, existing, isExplicit)
 	if err != nil {
 		return "", err
 	}
@@ -289,7 +290,9 @@ func RegisterRouteWithAutoPrefix(rootDir string, explicitPrefix string, h2Path s
 
 // resolvePrefix generates a unique prefix for a new h2 directory.
 // Must be called with an exclusive lock held. existing is the current routes list.
-func resolvePrefix(rootDir string, desired string, h2Path string, existing []Route) (string, error) {
+// If isExplicit is true, the desired prefix is treated as user-provided and will
+// fail on conflict rather than auto-incrementing.
+func resolvePrefix(rootDir string, desired string, h2Path string, existing []Route, isExplicit bool) (string, error) {
 	// If the path is the root dir itself, always use "root".
 	rootAbs, err := filepath.Abs(rootDir)
 	if err != nil {
@@ -309,9 +312,8 @@ func resolvePrefix(rootDir string, desired string, h2Path string, existing []Rou
 		prefixSet[r.Prefix] = true
 	}
 
-	// Explicit prefix: fail on conflict.
-	if desired != "" && desired != filepath.Base(h2Path) {
-		// This was explicitly provided, don't auto-increment.
+	// Explicit prefix: fail on conflict, no auto-increment.
+	if isExplicit {
 		if prefixSet[desired] {
 			return "", fmt.Errorf("prefix %q already registered", desired)
 		}
@@ -343,5 +345,5 @@ func ResolvePrefix(rootDir string, desired string, h2Path string) (string, error
 	if err != nil {
 		return "", err
 	}
-	return resolvePrefix(rootDir, desired, h2Path, existing)
+	return resolvePrefix(rootDir, desired, h2Path, existing, false)
 }
