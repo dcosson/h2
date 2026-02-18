@@ -2,6 +2,7 @@ package e2etests
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -214,11 +215,7 @@ func TestCreateWorkFiles(t *testing.T) {
 	dir := t.TempDir()
 	createWorkFiles(t, dir, 5)
 	for i := 0; i < 5; i++ {
-		name := filepath.Join(dir, "work-"+string(rune('0'+i))+".txt")
-		// Use the actual format string.
-		name = filepath.Join(dir, func() string {
-			return "work-" + string([]byte{byte('0' + i)}) + ".txt"
-		}())
+		name := filepath.Join(dir, fmt.Sprintf("work-%d.txt", i))
 		if _, err := os.Stat(name); err != nil {
 			t.Errorf("work file %d not found: %v", i, err)
 		}
@@ -280,10 +277,106 @@ func TestReadActivityLog_MissingFile(t *testing.T) {
 	}
 }
 
+// --- collectReceivedTokens ---
+
+func TestCollectReceivedTokens_FromActivityLog(t *testing.T) {
+	dir := t.TempDir()
+	agentName := "token-agent"
+	sessionDir := filepath.Join(dir, "sessions", agentName)
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write activity log with RECEIPT tokens embedded in various events.
+	// Tokens appear as JSON values like "tool_name":"RECEIPT-..." which
+	// extractTokensFromText handles by splitting on JSON delimiters too.
+	lines := []string{
+		`{"ts":"2025-01-01T00:00:00Z","actor":"token-agent","session_id":"abc","event":"hook","hook_event":"UserPromptSubmit"}`,
+		`{"ts":"2025-01-01T00:00:01Z","actor":"token-agent","session_id":"abc","event":"hook","hook_event":"UserPromptSubmit","body":"RECEIPT-test-0-111"}`,
+		`{"ts":"2025-01-01T00:00:02Z","actor":"token-agent","session_id":"abc","event":"hook","hook_event":"PreToolUse","tool_name":"RECEIPT-test-1-222"}`,
+		`{"ts":"2025-01-01T00:00:03Z","actor":"token-agent","session_id":"abc","event":"state_change","from":"idle","to":"active"}`,
+	}
+	content := strings.Join(lines, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(sessionDir, "session-activity.jsonl"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tokens := collectReceivedTokens(t, dir, agentName)
+	if len(tokens) != 2 {
+		t.Fatalf("expected 2 tokens, got %d: %v", len(tokens), tokens)
+	}
+}
+
+func TestCollectReceivedTokens_MissingLog(t *testing.T) {
+	dir := t.TempDir()
+	tokens := collectReceivedTokens(t, dir, "nonexistent")
+	if tokens != nil {
+		t.Errorf("expected nil for missing log, got %d tokens", len(tokens))
+	}
+}
+
+func TestCollectReceivedTokens_DeduplicatesTokens(t *testing.T) {
+	dir := t.TempDir()
+	agentName := "dedup-agent"
+	sessionDir := filepath.Join(dir, "sessions", agentName)
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Same token appears in two lines.
+	lines := []string{
+		`{"ts":"2025-01-01T00:00:00Z","event":"hook","body":"RECEIPT-test-0-111"}`,
+		`{"ts":"2025-01-01T00:00:01Z","event":"hook","body":"RECEIPT-test-0-111"}`,
+	}
+	content := strings.Join(lines, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(sessionDir, "session-activity.jsonl"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tokens := collectReceivedTokens(t, dir, agentName)
+	if len(tokens) != 1 {
+		t.Errorf("expected 1 deduplicated token, got %d: %v", len(tokens), tokens)
+	}
+}
+
+// --- countUserPromptSubmits ---
+
+func TestCountUserPromptSubmits(t *testing.T) {
+	dir := t.TempDir()
+	agentName := "submit-agent"
+	sessionDir := filepath.Join(dir, "sessions", agentName)
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := []map[string]string{
+		{"ts": "2025-01-01T00:00:00Z", "actor": agentName, "session_id": "abc", "event": "hook", "hook_event": "UserPromptSubmit"},
+		{"ts": "2025-01-01T00:00:01Z", "actor": agentName, "session_id": "abc", "event": "hook", "hook_event": "PreToolUse"},
+		{"ts": "2025-01-01T00:00:02Z", "actor": agentName, "session_id": "abc", "event": "hook", "hook_event": "UserPromptSubmit"},
+		{"ts": "2025-01-01T00:00:03Z", "actor": agentName, "session_id": "abc", "event": "state_change", "from": "idle", "to": "active"},
+		{"ts": "2025-01-01T00:00:04Z", "actor": agentName, "session_id": "abc", "event": "hook", "hook_event": "UserPromptSubmit"},
+	}
+	f, err := os.Create(filepath.Join(sessionDir, "session-activity.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		data, _ := json.Marshal(e)
+		f.Write(data)
+		f.Write([]byte("\n"))
+	}
+	f.Close()
+
+	count := countUserPromptSubmits(t, dir, agentName)
+	if count != 3 {
+		t.Errorf("expected 3 UserPromptSubmit events, got %d", count)
+	}
+}
+
 // --- createReliabilitySandbox ---
 
 func TestCreateReliabilitySandbox_CreatesStructure(t *testing.T) {
-	sb := createReliabilitySandbox(t, "test-agent", "")
+	sb := createReliabilitySandbox(t, "test-agent", sandboxOpts{})
 
 	// h2Dir should exist.
 	if _, err := os.Stat(sb.H2Dir); err != nil {
@@ -313,10 +406,45 @@ func TestCreateReliabilitySandbox_CreatesStructure(t *testing.T) {
 	}
 }
 
+func TestCreateReliabilitySandbox_DefaultsToClaudeAgent(t *testing.T) {
+	sb := createReliabilitySandbox(t, "default-agent", sandboxOpts{})
+
+	roleData, err := os.ReadFile(filepath.Join(sb.H2Dir, "roles", "default-agent.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(roleData)
+	if !strings.Contains(content, "agent_type: claude") {
+		t.Errorf("role should default to agent_type: claude, got:\n%s", content)
+	}
+	if !strings.Contains(content, "model: haiku") {
+		t.Errorf("role should default to model: haiku, got:\n%s", content)
+	}
+}
+
+func TestCreateReliabilitySandbox_CustomAgentType(t *testing.T) {
+	sb := createReliabilitySandbox(t, "custom-agent", sandboxOpts{
+		agentType: "true",
+		model:     "sonnet",
+	})
+
+	roleData, err := os.ReadFile(filepath.Join(sb.H2Dir, "roles", "custom-agent.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(roleData)
+	if !strings.Contains(content, "agent_type: true") {
+		t.Errorf("role should use custom agent_type, got:\n%s", content)
+	}
+	if !strings.Contains(content, "model: sonnet") {
+		t.Errorf("role should use custom model, got:\n%s", content)
+	}
+}
+
 func TestCreateReliabilitySandbox_WithPermissionScript(t *testing.T) {
 	dir := t.TempDir()
 	scriptPath := createPermissionScript(t, dir, "allow", 0)
-	sb := createReliabilitySandbox(t, "perm-test", scriptPath)
+	sb := createReliabilitySandbox(t, "perm-test", sandboxOpts{permissionScript: scriptPath})
 
 	// Role should reference the permission script in hooks.
 	roleData, err := os.ReadFile(filepath.Join(sb.H2Dir, "roles", "perm-test.yaml"))
