@@ -2,7 +2,7 @@
 
 A harness for your harnesses. An agent runner, messaging, and orchestration layer for AI coding Agents.
 
-<p align="center">
+<p align="left">
   <img src="docs/images/h2-hero.jpg" alt="Ox with a harness pulling a payload" width="600">
 </p>
 
