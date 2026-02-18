@@ -138,8 +138,10 @@ func ResolveDirAllFromRoutes() ([]Route, error) {
 
 **Display ordering in `h2 list --all`:**
 1. **Current** — the h2 dir resolved for the current working directory. Marked with `(current)`. Agents listed without prefix.
-2. **Root** — the root h2 dir (if it's different from current and is a full h2 dir). Listed with `root/` prefix.
-3. **Others** — remaining h2 dirs in the order they appear in `routes.jsonl`. Listed with `<prefix>/` prefix.
+2. **Root** — the root h2 dir (if it's different from current and is a full h2 dir). Listed with `root/` prefix on agents.
+3. **Others** — remaining h2 dirs in the order they appear in `routes.jsonl`. Listed with `<prefix>/` prefix on agents.
+
+Only the current h2 dir's agents are shown without prefixes. All other dirs — including root — always show `<prefix>/agent-name`. This means agent names don't need to be unique across h2 directories.
 
 **Example output:**
 ```
@@ -152,7 +154,7 @@ h2home ~/h2home (current)
 
 root ~/.h2
   Agents
-    ○ solo (default) claude — Idle 30m, up 1h, 5k in / 2k out $0.50
+    ○ root/solo (default) claude — Idle 30m, up 1h, 5k in / 2k out $0.50
 
 project-a ~/work/project-a
   Agents
@@ -237,8 +239,8 @@ func ResolvePrefix(rootDir string, desired string) (string, error)
 
 - `TestListAll_UsesRoutes` — reads from routes.jsonl instead of BFS
 - `TestListAll_CurrentFirst` — current h2 dir listed first
-- `TestListAll_PrefixedNames` — non-current agents show prefix/name
-- `TestListAll_CurrentNoPrefixes` — current dir agents have no prefix
+- `TestListAll_PrefixedNames` — non-current agents show prefix/name (including root/)
+- `TestListAll_CurrentNoPrefixes` — only current dir agents have no prefix
 
 ## Migration
 
