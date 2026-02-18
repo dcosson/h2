@@ -17,7 +17,12 @@ import (
 )
 
 func newPermissionRequestCmd() *cobra.Command {
-	var agentName string
+	var (
+		agentName    string
+		forceAllow   bool
+		forceDeny    bool
+		forceAskUser bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "permission-request",
@@ -28,7 +33,12 @@ reviews it using role-specific AI reviewer instructions, and returns a decision.
 Designed to be registered as a PermissionRequest hook in settings.json.
 When the AI reviewer returns ASK_USER (or no reviewer is configured),
 sends a blocked_permission event to the agent and returns empty output
-to fall through to Claude Code's built-in permission dialog.`,
+to fall through to Claude Code's built-in permission dialog.
+
+Bypass flags (mutually exclusive) skip the AI reviewer entirely:
+  --force-allow    Always approve (useful for benchmarks)
+  --force-deny     Always reject
+  --force-ask-user Always fall through to user prompt`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -37,6 +47,12 @@ to fall through to Claude Code's built-in permission dialog.`,
 			}
 			if agentName == "" {
 				return fmt.Errorf("--agent is required (or set H2_ACTOR)")
+			}
+
+			// Validate mutual exclusivity of force flags.
+			forceCount := boolCount(forceAllow, forceDeny, forceAskUser)
+			if forceCount > 1 {
+				return fmt.Errorf("--force-allow, --force-deny, and --force-ask-user are mutually exclusive")
 			}
 
 			data, err := io.ReadAll(cmd.InOrStdin())
@@ -48,6 +64,20 @@ to fall through to Claude Code's built-in permission dialog.`,
 			var request permissionInput
 			if err := json.Unmarshal(data, &request); err != nil {
 				return fmt.Errorf("parse permission request: %w", err)
+			}
+
+			// Handle force flags — bypass reviewer entirely.
+			if forceAllow {
+				emitDecision(cmd, agentName, request, "ALLOW", "forced by --force-allow")
+				return nil
+			}
+			if forceDeny {
+				emitDecision(cmd, agentName, request, "DENY", "forced by --force-deny")
+				return nil
+			}
+			if forceAskUser {
+				emitDecision(cmd, agentName, request, "ASK_USER", "forced by --force-ask-user")
+				return nil
 			}
 
 			// Skip review for non-risky tools.
@@ -73,51 +103,70 @@ to fall through to Claude Code's built-in permission dialog.`,
 
 			// Call claude --print --model haiku with reviewer instructions.
 			decision, reason := callReviewer(string(reviewerInstructions), request)
-
-			switch decision {
-			case "ALLOW":
-				reportDecision(agentName, request.SessionID, request.ToolName, "allow", reason)
-				resp := hookResponse{
-					HookSpecificOutput: hookDecision{
-						HookEventName: "PermissionRequest",
-						Decision: decisionPayload{
-							Behavior: "allow",
-						},
-					},
-				}
-				out, _ := json.Marshal(resp)
-				fmt.Fprintln(cmd.OutOrStdout(), string(out))
-
-			case "DENY":
-				if reason == "" {
-					reason = "Denied by permission reviewer"
-				}
-				reportDecision(agentName, request.SessionID, request.ToolName, "deny", reason)
-				resp := hookResponse{
-					HookSpecificOutput: hookDecision{
-						HookEventName: "PermissionRequest",
-						Decision: decisionPayload{
-							Behavior: "deny",
-							Message:  reason,
-						},
-					},
-				}
-				out, _ := json.Marshal(resp)
-				fmt.Fprintln(cmd.OutOrStdout(), string(out))
-
-			default:
-				// ASK_USER or unrecognized — report decision and fall through.
-				reportDecision(agentName, request.SessionID, request.ToolName, "ask_user", reason)
-				fmt.Fprintln(cmd.OutOrStdout(), "{}")
-			}
+			emitDecision(cmd, agentName, request, decision, reason)
 
 			return nil
 		},
 	}
 
 	cmd.Flags().StringVar(&agentName, "agent", "", "Agent name (defaults to $H2_ACTOR)")
+	cmd.Flags().BoolVar(&forceAllow, "force-allow", false, "Always approve (skip AI reviewer)")
+	cmd.Flags().BoolVar(&forceDeny, "force-deny", false, "Always deny (skip AI reviewer)")
+	cmd.Flags().BoolVar(&forceAskUser, "force-ask-user", false, "Always fall through to user (skip AI reviewer)")
 
 	return cmd
+}
+
+// emitDecision writes the appropriate hook response for the given decision
+// and reports it to the agent socket.
+func emitDecision(cmd *cobra.Command, agentName string, request permissionInput, decision, reason string) {
+	switch decision {
+	case "ALLOW":
+		reportDecision(agentName, request.SessionID, request.ToolName, "allow", reason)
+		resp := hookResponse{
+			HookSpecificOutput: hookDecision{
+				HookEventName: "PermissionRequest",
+				Decision: decisionPayload{
+					Behavior: "allow",
+				},
+			},
+		}
+		out, _ := json.Marshal(resp)
+		fmt.Fprintln(cmd.OutOrStdout(), string(out))
+
+	case "DENY":
+		if reason == "" {
+			reason = "Denied by permission reviewer"
+		}
+		reportDecision(agentName, request.SessionID, request.ToolName, "deny", reason)
+		resp := hookResponse{
+			HookSpecificOutput: hookDecision{
+				HookEventName: "PermissionRequest",
+				Decision: decisionPayload{
+					Behavior: "deny",
+					Message:  reason,
+				},
+			},
+		}
+		out, _ := json.Marshal(resp)
+		fmt.Fprintln(cmd.OutOrStdout(), string(out))
+
+	default:
+		// ASK_USER or unrecognized — report decision and fall through.
+		reportDecision(agentName, request.SessionID, request.ToolName, "ask_user", reason)
+		fmt.Fprintln(cmd.OutOrStdout(), "{}")
+	}
+}
+
+// boolCount returns the number of true values among the given booleans.
+func boolCount(flags ...bool) int {
+	n := 0
+	for _, f := range flags {
+		if f {
+			n++
+		}
+	}
+	return n
 }
 
 // permissionInput is the JSON payload from a PermissionRequest hook.

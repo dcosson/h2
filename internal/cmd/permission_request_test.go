@@ -154,3 +154,143 @@ func TestPermissionRequest_RequiresAgent(t *testing.T) {
 		t.Errorf("error = %q, want to contain --agent", err.Error())
 	}
 }
+
+// --- Force flag tests ---
+
+func TestPermissionRequest_ForceAllow(t *testing.T) {
+	cmd := newPermissionRequestCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetIn(strings.NewReader(`{"tool_name":"Bash","tool_input":{"command":"rm -rf /"}}`))
+	cmd.SetArgs([]string{"--force-allow"})
+
+	os.Setenv("H2_ACTOR", "test-agent")
+	defer os.Unsetenv("H2_ACTOR")
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, `"behavior":"allow"`) {
+		t.Errorf("expected allow behavior, got: %s", output)
+	}
+}
+
+func TestPermissionRequest_ForceDeny(t *testing.T) {
+	cmd := newPermissionRequestCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetIn(strings.NewReader(`{"tool_name":"Bash","tool_input":{"command":"make test"}}`))
+	cmd.SetArgs([]string{"--force-deny"})
+
+	os.Setenv("H2_ACTOR", "test-agent")
+	defer os.Unsetenv("H2_ACTOR")
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, `"behavior":"deny"`) {
+		t.Errorf("expected deny behavior, got: %s", output)
+	}
+	if !strings.Contains(output, "force-deny") {
+		t.Errorf("expected reason to mention force-deny, got: %s", output)
+	}
+}
+
+func TestPermissionRequest_ForceAskUser(t *testing.T) {
+	cmd := newPermissionRequestCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetIn(strings.NewReader(`{"tool_name":"Bash","tool_input":{"command":"ls"}}`))
+	cmd.SetArgs([]string{"--force-ask-user"})
+
+	os.Setenv("H2_ACTOR", "test-agent")
+	defer os.Unsetenv("H2_ACTOR")
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	// ASK_USER returns empty JSON to fall through to user prompt.
+	if strings.TrimSpace(out.String()) != "{}" {
+		t.Errorf("expected {}, got: %s", out.String())
+	}
+}
+
+func TestPermissionRequest_ForceAllow_SkipsNonRiskyCheck(t *testing.T) {
+	// With --force-allow, even non-risky tools should get an explicit allow
+	// response (not just {}), because the force flag takes precedence.
+	cmd := newPermissionRequestCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetIn(strings.NewReader(`{"tool_name":"AskUserQuestion","tool_input":{}}`))
+	cmd.SetArgs([]string{"--force-allow"})
+
+	os.Setenv("H2_ACTOR", "test-agent")
+	defer os.Unsetenv("H2_ACTOR")
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, `"behavior":"allow"`) {
+		t.Errorf("force-allow should produce allow even for non-risky tools, got: %s", output)
+	}
+}
+
+func TestPermissionRequest_MutuallyExclusiveFlags(t *testing.T) {
+	tests := []struct {
+		name  string
+		flags []string
+	}{
+		{"allow+deny", []string{"--force-allow", "--force-deny"}},
+		{"allow+ask", []string{"--force-allow", "--force-ask-user"}},
+		{"deny+ask", []string{"--force-deny", "--force-ask-user"}},
+		{"all three", []string{"--force-allow", "--force-deny", "--force-ask-user"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := newPermissionRequestCmd()
+			var out bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetErr(&out)
+			cmd.SetIn(strings.NewReader(`{"tool_name":"Bash","tool_input":{}}`))
+			cmd.SetArgs(tt.flags)
+
+			os.Setenv("H2_ACTOR", "test-agent")
+			defer os.Unsetenv("H2_ACTOR")
+
+			err := cmd.Execute()
+			if err == nil {
+				t.Fatal("expected error for mutually exclusive flags")
+			}
+			if !strings.Contains(err.Error(), "mutually exclusive") {
+				t.Errorf("error = %q, want to contain 'mutually exclusive'", err.Error())
+			}
+		})
+	}
+}
+
+func TestBoolCount(t *testing.T) {
+	if boolCount(false, false, false) != 0 {
+		t.Error("expected 0")
+	}
+	if boolCount(true, false, false) != 1 {
+		t.Error("expected 1")
+	}
+	if boolCount(true, true, false) != 2 {
+		t.Error("expected 2")
+	}
+	if boolCount(true, true, true) != 3 {
+		t.Error("expected 3")
+	}
+}
