@@ -175,7 +175,7 @@ func buildTestCommand(testRunner TestRunner, testFile string) []string {
 	case RunnerTox:
 		return []string{"tox", "-e", "py", "--", testFile}
 	default:
-		return []string{"python", "-m", "pytest", "-xvs", testFile}
+		return []string{"python", "-m", "pytest", "-vs", testFile}
 	}
 }
 
