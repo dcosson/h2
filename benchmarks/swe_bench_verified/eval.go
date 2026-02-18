@@ -121,7 +121,7 @@ func RunTests(workDir string, testFiles []string) (map[string]bool, error) {
 	results := make(map[string]bool)
 
 	for _, testFile := range testFiles {
-		cmd := exec.Command("python", "-m", "pytest", "-xvs", testFile)
+		cmd := exec.Command("python", "-m", "pytest", "-vs", testFile)
 		cmd.Dir = workDir
 		out, _ := cmd.CombinedOutput()
 
