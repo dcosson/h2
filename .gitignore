@@ -1,2 +1,8 @@
 /h2
 qa/results/
+
+# Credentials and secrets
+.env*
+*.pem
+*.key
+credentials.json
