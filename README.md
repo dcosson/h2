@@ -1,10 +1,10 @@
+<p align="center">
+  <img src="docs/images/h2-hero.jpg" alt="Ox with a harness pulling a payload" width="600">
+</p>
+
 # h2
 
 A harness for your harnesses. An agent runner, messaging, and orchestration layer for AI coding Agents.
-
-<p align="center">
-  <img src="docs/images/h2-hero.jpg" alt="Ox with a harness pulling a payload">
-</p>
 
 h2 manages AI coding agents as background processes, lets them message each other and you, and coordinates teams of agents working on projects together. It's a 3-tier system — use as much or as little as you need.
 
@@ -26,8 +26,8 @@ h2 stop coder-1                 # stop an agent
 
 When you run an agent (or attach to one already running) you'll see the h2 status bar and input bar at the bottom of the window, with the regular agent TUI app running above it. H2 is in its default Normal mode - in this mode, almost all control sequences, arrows, enter, escape, mouse scroll wheel, etc. pass through to the underlying app so you can navigate & respond to most menu options. Your cursor is active in the h2 input bar at the bottom of the screen, so you can type messages and send them as if you were typing into the agent's input directly.
 
-<p align="center">
-  <img src="docs/images/h2-normal-mode.png" alt="h2 UI example">
+<p align="left">
+  <img src="docs/images/h2-normal-mode.png" alt="h2 UI example" width="400">
 </p>
 
 The benefit of having separate h2 input bar is that while you're typing out a manual message, the agent can be receive messages from other agents and it won't conflict with what you're writing (which was a problem I ran into using tmux and send-keys for messaging).
