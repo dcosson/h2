@@ -3,6 +3,9 @@
 package e2etests
 
 import (
+	"encoding/json"
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -189,12 +192,18 @@ func TestReliability_IdleFirstPriority_Ordering(t *testing.T) {
 	received := collectReceivedTokens(t, sb.H2Dir, sb.AgentName)
 	verifyReceipt(t, sent, received)
 
-	// Log the delivery order from UserPromptSubmit events.
-	entries := readActivityLog(t, sb.H2Dir, sb.AgentName)
-	t.Log("Activity log entries with RECEIPT tokens (check ordering):")
-	for _, e := range entries {
-		if e.Event == "hook" && e.HookEvent == "UserPromptSubmit" {
-			t.Logf("  %s: %s", e.Timestamp, e.HookEvent)
+	// Log the delivery order by scanning raw log lines for RECEIPT tokens.
+	logPath := sb.H2Dir + "/sessions/" + sb.AgentName + "/session-activity.jsonl"
+	if data, err := os.ReadFile(logPath); err == nil {
+		t.Log("RECEIPT token delivery order (from activity log):")
+		for _, line := range strings.Split(string(data), "\n") {
+			tokens := extractTokensFromText(line)
+			if len(tokens) > 0 {
+				// Extract timestamp from the JSON line.
+				var entry struct{ Ts string `json:"ts"` }
+				json.Unmarshal([]byte(line), &entry)
+				t.Logf("  %s: %v", entry.Ts, tokens)
+			}
 		}
 	}
 }
@@ -261,14 +270,13 @@ func TestReliability_DuringBackgroundBash(t *testing.T) {
 	t.Parallel()
 
 	sb := createReliabilitySandbox(t, "bash-bg", sandboxOpts{})
+	createWorkFiles(t, sb.ProjectDir, 1)
 	launchReliabilityAgent(t, sb)
 	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
 
 	// Ask the agent to run a background bash command.
 	sendMessage(t, sb.H2Dir, sb.AgentName,
 		"Run a bash command in the background using run_in_background: true. Command: sleep 10 && echo background-done. After starting it, read work-0.txt.")
-
-	createWorkFiles(t, sb.ProjectDir, 1)
 	waitForActive(t, sb.H2Dir, sb.AgentName, 30*time.Second)
 
 	stopTokens := sendTokensAsync(t, sb.H2Dir, sb.AgentName, "BashBg", slowInterval, "normal")
