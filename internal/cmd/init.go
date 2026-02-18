@@ -86,31 +86,14 @@ func newInitCmd() *cobra.Command {
 				return fmt.Errorf("resolve root h2 dir: %w", err)
 			}
 
-			// Determine prefix.
-			var resolvedPrefix string
+			// Determine explicit prefix (if provided) and register atomically.
+			var explicitPrefix string
 			if cmd.Flags().Changed("prefix") {
-				// Explicit prefix — fail if it conflicts.
-				resolvedPrefix = prefix
-				existing, readErr := config.ReadRoutes(rootDir)
-				if readErr != nil {
-					return fmt.Errorf("read routes: %w", readErr)
-				}
-				for _, r := range existing {
-					if r.Prefix == resolvedPrefix {
-						return fmt.Errorf("prefix %q already registered (path: %s)", resolvedPrefix, r.Path)
-					}
-				}
-			} else {
-				resolvedPrefix, err = config.ResolvePrefix(rootDir, "", abs)
-				if err != nil {
-					return fmt.Errorf("resolve prefix: %w", err)
-				}
+				explicitPrefix = prefix
 			}
 
-			if err := config.RegisterRoute(rootDir, config.Route{
-				Prefix: resolvedPrefix,
-				Path:   abs,
-			}); err != nil {
+			resolvedPrefix, err := config.RegisterRouteWithAutoPrefix(rootDir, explicitPrefix, abs)
+			if err != nil {
 				return fmt.Errorf("register route: %w", err)
 			}
 

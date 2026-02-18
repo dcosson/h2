@@ -39,6 +39,36 @@ func TestRootDir_EnvOverride(t *testing.T) {
 	}
 }
 
+// --- ValidatePrefix ---
+
+func TestValidatePrefix_Valid(t *testing.T) {
+	valid := []string{"root", "myproject", "project-a", "h2home", "test_123", "A1"}
+	for _, p := range valid {
+		if err := ValidatePrefix(p); err != nil {
+			t.Errorf("ValidatePrefix(%q) = %v, want nil", p, err)
+		}
+	}
+}
+
+func TestValidatePrefix_Invalid(t *testing.T) {
+	invalid := []string{
+		"",           // empty
+		"-leading",   // starts with hyphen
+		"_leading",   // starts with underscore
+		"has space",  // space
+		"has/slash",  // slash
+		"has.dot",    // dot
+		"café",       // non-ASCII
+	}
+	for _, p := range invalid {
+		if err := ValidatePrefix(p); err == nil {
+			t.Errorf("ValidatePrefix(%q) = nil, want error", p)
+		}
+	}
+}
+
+// --- ReadRoutes ---
+
 func TestReadRoutes_Empty(t *testing.T) {
 	rootDir := t.TempDir()
 
@@ -122,20 +152,39 @@ not valid json
 	}
 }
 
+func TestReadRoutes_NonexistentRootDir(t *testing.T) {
+	rootDir := filepath.Join(t.TempDir(), "nonexistent", "root")
+
+	routes, err := ReadRoutes(rootDir)
+	if err != nil {
+		t.Fatalf("ReadRoutes: %v", err)
+	}
+	if len(routes) != 0 {
+		t.Errorf("expected empty routes, got %d", len(routes))
+	}
+
+	// Root dir should have been created (by the lock function).
+	info, err := os.Stat(rootDir)
+	if err != nil {
+		t.Fatalf("expected root dir to exist: %v", err)
+	}
+	if !info.IsDir() {
+		t.Error("expected root dir to be a directory")
+	}
+}
+
+// --- RegisterRoute ---
+
 func TestRegisterRoute_AppendsToFile(t *testing.T) {
 	rootDir := t.TempDir()
 
-	// Register first route.
 	if err := RegisterRoute(rootDir, Route{Prefix: "alpha", Path: "/alpha"}); err != nil {
 		t.Fatalf("RegisterRoute: %v", err)
 	}
-
-	// Register second route.
 	if err := RegisterRoute(rootDir, Route{Prefix: "beta", Path: "/beta"}); err != nil {
 		t.Fatalf("RegisterRoute: %v", err)
 	}
 
-	// Read back.
 	routes, err := ReadRoutes(rootDir)
 	if err != nil {
 		t.Fatalf("ReadRoutes: %v", err)
@@ -167,6 +216,31 @@ func TestRegisterRoute_AppendsToFile(t *testing.T) {
 	}
 }
 
+func TestRegisterRoute_NormalizesPath(t *testing.T) {
+	rootDir := t.TempDir()
+	relPath := "relative/path"
+
+	if err := RegisterRoute(rootDir, Route{Prefix: "test", Path: relPath}); err != nil {
+		t.Fatalf("RegisterRoute: %v", err)
+	}
+
+	routes, err := ReadRoutes(rootDir)
+	if err != nil {
+		t.Fatalf("ReadRoutes: %v", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("expected 1 route, got %d", len(routes))
+	}
+
+	// Path should be absolute, not the original relative path.
+	if !filepath.IsAbs(routes[0].Path) {
+		t.Errorf("path = %q, want absolute path", routes[0].Path)
+	}
+	if routes[0].Path == relPath {
+		t.Errorf("path was not normalized: %q", routes[0].Path)
+	}
+}
+
 func TestRegisterRoute_RejectsExistingPrefix(t *testing.T) {
 	rootDir := t.TempDir()
 
@@ -185,7 +259,7 @@ func TestRegisterRoute_RejectsExistingPrefix(t *testing.T) {
 
 func TestRegisterRoute_RejectsDuplicatePath(t *testing.T) {
 	rootDir := t.TempDir()
-	dir := t.TempDir() // a real path so Abs works
+	dir := t.TempDir()
 
 	if err := RegisterRoute(rootDir, Route{Prefix: "first", Path: dir}); err != nil {
 		t.Fatalf("RegisterRoute: %v", err)
@@ -211,10 +285,190 @@ func TestRegisterRoute_RejectsEmptyFields(t *testing.T) {
 	}
 }
 
+func TestRegisterRoute_RejectsInvalidPrefix(t *testing.T) {
+	rootDir := t.TempDir()
+
+	err := RegisterRoute(rootDir, Route{Prefix: "has space", Path: "/a"})
+	if err == nil {
+		t.Fatal("expected error for invalid prefix")
+	}
+	if !strings.Contains(err.Error(), "invalid") {
+		t.Errorf("error = %q, want it to contain 'invalid'", err.Error())
+	}
+}
+
+func TestRegisterRoute_CreatesRootDirIfMissing(t *testing.T) {
+	rootDir := filepath.Join(t.TempDir(), "nonexistent", "root")
+
+	if err := RegisterRoute(rootDir, Route{Prefix: "test", Path: "/test"}); err != nil {
+		t.Fatalf("RegisterRoute: %v", err)
+	}
+
+	routes, err := ReadRoutes(rootDir)
+	if err != nil {
+		t.Fatalf("ReadRoutes: %v", err)
+	}
+	if len(routes) != 1 {
+		t.Errorf("expected 1 route, got %d", len(routes))
+	}
+}
+
+// --- RegisterRouteWithAutoPrefix ---
+
+func TestRegisterRouteWithAutoPrefix_Default(t *testing.T) {
+	rootDir := t.TempDir()
+	h2Path := filepath.Join(t.TempDir(), "myproject")
+
+	prefix, err := RegisterRouteWithAutoPrefix(rootDir, "", h2Path)
+	if err != nil {
+		t.Fatalf("RegisterRouteWithAutoPrefix: %v", err)
+	}
+	if prefix != "myproject" {
+		t.Errorf("prefix = %q, want %q", prefix, "myproject")
+	}
+
+	routes, err := ReadRoutes(rootDir)
+	if err != nil {
+		t.Fatalf("ReadRoutes: %v", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("expected 1 route, got %d", len(routes))
+	}
+	if routes[0].Prefix != "myproject" {
+		t.Errorf("routes[0].Prefix = %q", routes[0].Prefix)
+	}
+}
+
+func TestRegisterRouteWithAutoPrefix_ExplicitPrefix(t *testing.T) {
+	rootDir := t.TempDir()
+	h2Path := filepath.Join(t.TempDir(), "myproject")
+
+	prefix, err := RegisterRouteWithAutoPrefix(rootDir, "custom", h2Path)
+	if err != nil {
+		t.Fatalf("RegisterRouteWithAutoPrefix: %v", err)
+	}
+	if prefix != "custom" {
+		t.Errorf("prefix = %q, want %q", prefix, "custom")
+	}
+}
+
+func TestRegisterRouteWithAutoPrefix_ExplicitPrefixConflict(t *testing.T) {
+	rootDir := t.TempDir()
+
+	// Register first.
+	if err := RegisterRoute(rootDir, Route{Prefix: "taken", Path: "/other"}); err != nil {
+		t.Fatalf("RegisterRoute: %v", err)
+	}
+
+	_, err := RegisterRouteWithAutoPrefix(rootDir, "taken", filepath.Join(t.TempDir(), "new"))
+	if err == nil {
+		t.Fatal("expected error for conflicting explicit prefix")
+	}
+	if !strings.Contains(err.Error(), "already registered") {
+		t.Errorf("error = %q, want it to contain 'already registered'", err.Error())
+	}
+}
+
+func TestRegisterRouteWithAutoPrefix_AutoIncrement(t *testing.T) {
+	rootDir := t.TempDir()
+
+	// Register "myproject" first.
+	if err := RegisterRoute(rootDir, Route{Prefix: "myproject", Path: "/other"}); err != nil {
+		t.Fatalf("RegisterRoute: %v", err)
+	}
+
+	h2Path := filepath.Join(t.TempDir(), "myproject")
+	prefix, err := RegisterRouteWithAutoPrefix(rootDir, "", h2Path)
+	if err != nil {
+		t.Fatalf("RegisterRouteWithAutoPrefix: %v", err)
+	}
+	if prefix != "myproject-2" {
+		t.Errorf("prefix = %q, want %q", prefix, "myproject-2")
+	}
+}
+
+func TestRegisterRouteWithAutoPrefix_RootDir(t *testing.T) {
+	rootDir := t.TempDir()
+
+	prefix, err := RegisterRouteWithAutoPrefix(rootDir, "", rootDir)
+	if err != nil {
+		t.Fatalf("RegisterRouteWithAutoPrefix: %v", err)
+	}
+	if prefix != "root" {
+		t.Errorf("prefix = %q, want %q", prefix, "root")
+	}
+}
+
+func TestRegisterRouteWithAutoPrefix_DuplicatePath(t *testing.T) {
+	rootDir := t.TempDir()
+	h2Path := t.TempDir()
+
+	if _, err := RegisterRouteWithAutoPrefix(rootDir, "", h2Path); err != nil {
+		t.Fatalf("first registration: %v", err)
+	}
+
+	_, err := RegisterRouteWithAutoPrefix(rootDir, "other", h2Path)
+	if err == nil {
+		t.Fatal("expected error for duplicate path")
+	}
+	if !strings.Contains(err.Error(), "already registered") {
+		t.Errorf("error = %q, want it to contain 'already registered'", err.Error())
+	}
+}
+
+func TestRegisterRouteWithAutoPrefix_ConcurrentAutoIncrement(t *testing.T) {
+	rootDir := t.TempDir()
+
+	// All goroutines will try to register dirs named "worker",
+	// auto-prefix should produce worker, worker-2, worker-3, etc.
+	const n = 5
+	var wg sync.WaitGroup
+	prefixes := make([]string, n)
+	errs := make([]error, n)
+
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			h2Path := filepath.Join(t.TempDir(), "worker")
+			prefixes[i], errs[i] = RegisterRouteWithAutoPrefix(rootDir, "", h2Path)
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("goroutine %d: %v", i, err)
+		}
+	}
+
+	// All prefixes should be unique.
+	seen := make(map[string]bool)
+	for _, p := range prefixes {
+		if p == "" {
+			continue
+		}
+		if seen[p] {
+			t.Errorf("duplicate prefix %q", p)
+		}
+		seen[p] = true
+	}
+
+	// Should have n routes total.
+	routes, err := ReadRoutes(rootDir)
+	if err != nil {
+		t.Fatalf("ReadRoutes: %v", err)
+	}
+	if len(routes) != n {
+		t.Errorf("expected %d routes, got %d", n, len(routes))
+	}
+}
+
+// --- ResolvePrefix (public, for backward compat) ---
+
 func TestResolvePrefix_Default(t *testing.T) {
 	rootDir := t.TempDir()
 
-	// No routes file — no conflicts.
 	prefix, err := ResolvePrefix(rootDir, "", "/home/user/myproject")
 	if err != nil {
 		t.Fatalf("ResolvePrefix: %v", err)
@@ -224,22 +478,9 @@ func TestResolvePrefix_Default(t *testing.T) {
 	}
 }
 
-func TestResolvePrefix_UsesDesired(t *testing.T) {
-	rootDir := t.TempDir()
-
-	prefix, err := ResolvePrefix(rootDir, "custom", "/home/user/myproject")
-	if err != nil {
-		t.Fatalf("ResolvePrefix: %v", err)
-	}
-	if prefix != "custom" {
-		t.Errorf("prefix = %q, want %q", prefix, "custom")
-	}
-}
-
 func TestResolvePrefix_AutoIncrement(t *testing.T) {
 	rootDir := t.TempDir()
 
-	// Register "myproject" prefix.
 	if err := RegisterRoute(rootDir, Route{Prefix: "myproject", Path: "/a"}); err != nil {
 		t.Fatalf("RegisterRoute: %v", err)
 	}
@@ -250,25 +491,6 @@ func TestResolvePrefix_AutoIncrement(t *testing.T) {
 	}
 	if prefix != "myproject-2" {
 		t.Errorf("prefix = %q, want %q", prefix, "myproject-2")
-	}
-}
-
-func TestResolvePrefix_AutoIncrementChain(t *testing.T) {
-	rootDir := t.TempDir()
-
-	// Register "foo", "foo-2", "foo-3".
-	for _, p := range []string{"foo", "foo-2", "foo-3"} {
-		if err := RegisterRoute(rootDir, Route{Prefix: p, Path: "/" + p}); err != nil {
-			t.Fatalf("RegisterRoute(%s): %v", p, err)
-		}
-	}
-
-	prefix, err := ResolvePrefix(rootDir, "foo", "/new")
-	if err != nil {
-		t.Fatalf("ResolvePrefix: %v", err)
-	}
-	if prefix != "foo-4" {
-		t.Errorf("prefix = %q, want %q", prefix, "foo-4")
 	}
 }
 
@@ -284,18 +506,7 @@ func TestResolvePrefix_RootDir(t *testing.T) {
 	}
 }
 
-func TestResolvePrefix_RootDirIgnoresDesired(t *testing.T) {
-	rootDir := t.TempDir()
-
-	// Even if desired is something else, root dir always gets "root".
-	prefix, err := ResolvePrefix(rootDir, "customname", rootDir)
-	if err != nil {
-		t.Fatalf("ResolvePrefix: %v", err)
-	}
-	if prefix != "root" {
-		t.Errorf("prefix = %q, want %q", prefix, "root")
-	}
-}
+// --- Concurrent RegisterRoute ---
 
 func TestConcurrentRegistration(t *testing.T) {
 	rootDir := t.TempDir()
@@ -308,14 +519,9 @@ func TestConcurrentRegistration(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			prefix := "agent"
-			path := filepath.Join(t.TempDir(), "dir")
-			// Use ResolvePrefix to get unique prefix, then register.
-			// We need to do this under the write lock to avoid races,
-			// but for this test we just register with unique prefixes.
 			errs[i] = RegisterRoute(rootDir, Route{
-				Prefix: prefix + "-" + string(rune('a'+i)),
-				Path:   path,
+				Prefix: "agent-" + string(rune('a'+i)),
+				Path:   filepath.Join(t.TempDir(), "dir"),
 			})
 		}(i)
 	}
@@ -327,7 +533,6 @@ func TestConcurrentRegistration(t *testing.T) {
 		}
 	}
 
-	// Verify all routes were written.
 	routes, err := ReadRoutes(rootDir)
 	if err != nil {
 		t.Fatalf("ReadRoutes: %v", err)
@@ -336,7 +541,6 @@ func TestConcurrentRegistration(t *testing.T) {
 		t.Errorf("expected %d routes, got %d", n, len(routes))
 	}
 
-	// Verify no duplicate prefixes.
 	seen := make(map[string]bool)
 	for _, r := range routes {
 		if seen[r.Prefix] {
@@ -349,7 +553,6 @@ func TestConcurrentRegistration(t *testing.T) {
 func TestConcurrentRegistration_SamePrefix(t *testing.T) {
 	rootDir := t.TempDir()
 
-	// Try to register the same prefix concurrently — only one should succeed.
 	const n = 5
 	var wg sync.WaitGroup
 	errs := make([]error, n)
@@ -367,56 +570,13 @@ func TestConcurrentRegistration_SamePrefix(t *testing.T) {
 	wg.Wait()
 
 	successes := 0
-	failures := 0
 	for _, err := range errs {
 		if err == nil {
 			successes++
-		} else {
-			failures++
 		}
 	}
 
 	if successes != 1 {
 		t.Errorf("expected exactly 1 success, got %d", successes)
-	}
-	if failures != n-1 {
-		t.Errorf("expected %d failures, got %d", n-1, failures)
-	}
-}
-
-func TestReadRoutes_CreatesRootDirIfMissing(t *testing.T) {
-	rootDir := filepath.Join(t.TempDir(), "nonexistent", "root")
-
-	routes, err := ReadRoutes(rootDir)
-	if err != nil {
-		t.Fatalf("ReadRoutes: %v", err)
-	}
-	if len(routes) != 0 {
-		t.Errorf("expected empty routes, got %d", len(routes))
-	}
-
-	// Root dir should have been created.
-	info, err := os.Stat(rootDir)
-	if err != nil {
-		t.Fatalf("expected root dir to exist: %v", err)
-	}
-	if !info.IsDir() {
-		t.Error("expected root dir to be a directory")
-	}
-}
-
-func TestRegisterRoute_CreatesRootDirIfMissing(t *testing.T) {
-	rootDir := filepath.Join(t.TempDir(), "nonexistent", "root")
-
-	if err := RegisterRoute(rootDir, Route{Prefix: "test", Path: "/test"}); err != nil {
-		t.Fatalf("RegisterRoute: %v", err)
-	}
-
-	routes, err := ReadRoutes(rootDir)
-	if err != nil {
-		t.Fatalf("ReadRoutes: %v", err)
-	}
-	if len(routes) != 1 {
-		t.Errorf("expected 1 route, got %d", len(routes))
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,6 +18,21 @@ import (
 type Route struct {
 	Prefix string `json:"prefix"`
 	Path   string `json:"path"`
+}
+
+// prefixRe validates route prefixes: must start with alphanumeric,
+// then alphanumeric, underscore, or hyphen.
+var prefixRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
+
+// ValidatePrefix checks that a prefix is well-formed.
+func ValidatePrefix(prefix string) error {
+	if prefix == "" {
+		return fmt.Errorf("prefix must not be empty")
+	}
+	if !prefixRe.MatchString(prefix) {
+		return fmt.Errorf("prefix %q is invalid (must match %s)", prefix, prefixRe.String())
+	}
+	return nil
 }
 
 // RootDir returns the root h2 directory.
@@ -51,7 +67,12 @@ const lockTimeout = 5 * time.Second
 
 // acquireExclusiveLock takes an exclusive (write) lock on routes.jsonl.
 // The caller must call Unlock() on the returned lock when done.
+// Ensures the root directory exists before acquiring the lock.
 func acquireExclusiveLock(rootDir string) (*flock.Flock, error) {
+	if err := os.MkdirAll(rootDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create root dir: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), lockTimeout)
 	defer cancel()
 
@@ -68,7 +89,12 @@ func acquireExclusiveLock(rootDir string) (*flock.Flock, error) {
 
 // acquireSharedLock takes a shared (read) lock on routes.jsonl.
 // The caller must call Unlock() on the returned lock when done.
+// Ensures the root directory exists before acquiring the lock.
 func acquireSharedLock(rootDir string) (*flock.Flock, error) {
+	if err := os.MkdirAll(rootDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create root dir: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), lockTimeout)
 	defer cancel()
 
@@ -86,11 +112,6 @@ func acquireSharedLock(rootDir string) (*flock.Flock, error) {
 // ReadRoutes reads and parses routes.jsonl from the given root dir.
 // Takes a shared (read) lock. Returns an empty slice if the file doesn't exist.
 func ReadRoutes(rootDir string) ([]Route, error) {
-	// Ensure root dir exists so we can create the lock file.
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create root dir: %w", err)
-	}
-
 	fl, err := acquireSharedLock(rootDir)
 	if err != nil {
 		return nil, err
@@ -136,54 +157,16 @@ func readRoutesUnlocked(rootDir string) ([]Route, error) {
 	return routes, nil
 }
 
-// RegisterRoute appends a route to routes.jsonl.
-// Takes an exclusive (write) lock. Validates that the prefix is unique.
-func RegisterRoute(rootDir string, route Route) error {
-	if route.Prefix == "" {
-		return fmt.Errorf("route prefix must not be empty")
-	}
-	if route.Path == "" {
-		return fmt.Errorf("route path must not be empty")
-	}
-
-	// Ensure root dir exists.
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
-		return fmt.Errorf("create root dir: %w", err)
-	}
-
-	fl, err := acquireExclusiveLock(rootDir)
-	if err != nil {
-		return err
-	}
-	defer fl.Unlock()
-
-	// Check for prefix conflicts.
-	existing, err := readRoutesUnlocked(rootDir)
-	if err != nil {
-		return err
-	}
-	for _, r := range existing {
-		if r.Prefix == route.Prefix {
-			return fmt.Errorf("prefix %q already registered (path: %s)", route.Prefix, r.Path)
-		}
-	}
-
-	// Also check for path duplicates — same path shouldn't be registered twice.
+// appendRouteUnlocked writes a route to routes.jsonl without acquiring a lock.
+// Caller must hold an exclusive lock. Path is normalized to absolute before writing.
+func appendRouteUnlocked(rootDir string, route Route) error {
+	// Normalize path to absolute.
 	absPath, err := filepath.Abs(route.Path)
 	if err != nil {
 		return fmt.Errorf("resolve route path: %w", err)
 	}
-	for _, r := range existing {
-		existingAbs, err := filepath.Abs(r.Path)
-		if err != nil {
-			continue
-		}
-		if existingAbs == absPath {
-			return fmt.Errorf("path %s already registered with prefix %q", absPath, r.Prefix)
-		}
-	}
+	route.Path = absPath
 
-	// Append the new route.
 	data, err := json.Marshal(route)
 	if err != nil {
 		return fmt.Errorf("marshal route: %w", err)
@@ -202,27 +185,117 @@ func RegisterRoute(rootDir string, route Route) error {
 	return nil
 }
 
-// ResolvePrefix generates a unique prefix for a new h2 directory.
-// If the desired prefix conflicts with an existing one, it auto-increments
-// by appending -2, -3, etc. If the path being registered is the root h2 dir,
-// the prefix "root" is used.
+// RegisterRoute appends a route to routes.jsonl.
+// Takes an exclusive (write) lock. Validates prefix format and uniqueness.
+// Normalizes route.Path to absolute before writing.
+func RegisterRoute(rootDir string, route Route) error {
+	if err := ValidatePrefix(route.Prefix); err != nil {
+		return err
+	}
+	if route.Path == "" {
+		return fmt.Errorf("route path must not be empty")
+	}
+
+	fl, err := acquireExclusiveLock(rootDir)
+	if err != nil {
+		return err
+	}
+	defer fl.Unlock()
+
+	// Check for prefix and path conflicts.
+	existing, err := readRoutesUnlocked(rootDir)
+	if err != nil {
+		return err
+	}
+
+	absPath, err := filepath.Abs(route.Path)
+	if err != nil {
+		return fmt.Errorf("resolve route path: %w", err)
+	}
+
+	for _, r := range existing {
+		if r.Prefix == route.Prefix {
+			return fmt.Errorf("prefix %q already registered (path: %s)", route.Prefix, r.Path)
+		}
+		existingAbs, err := filepath.Abs(r.Path)
+		if err != nil {
+			continue
+		}
+		if existingAbs == absPath {
+			return fmt.Errorf("path %s already registered with prefix %q", absPath, r.Prefix)
+		}
+	}
+
+	return appendRouteUnlocked(rootDir, route)
+}
+
+// RegisterRouteWithAutoPrefix resolves a unique prefix and registers the route
+// atomically under a single exclusive lock. This avoids the TOCTOU race between
+// resolving a prefix and registering it in separate calls.
 //
-// The rootDir parameter is the root h2 directory (where routes.jsonl lives).
-// The desired parameter is the preferred prefix (typically the directory basename).
-// The h2Path is the absolute path of the h2 directory being registered.
-//
-// Caller should hold a lock or call this within a locked context.
-func ResolvePrefix(rootDir string, desired string, h2Path string) (string, error) {
+// If explicitPrefix is non-empty, it is used as-is (fails on conflict).
+// Otherwise, the prefix is derived from the h2Path basename with auto-increment.
+// If h2Path is the root dir itself, the prefix "root" is always used.
+func RegisterRouteWithAutoPrefix(rootDir string, explicitPrefix string, h2Path string) (string, error) {
+	if h2Path == "" {
+		return "", fmt.Errorf("h2 path must not be empty")
+	}
+
+	absPath, err := filepath.Abs(h2Path)
+	if err != nil {
+		return "", fmt.Errorf("resolve h2 path: %w", err)
+	}
+
+	fl, err := acquireExclusiveLock(rootDir)
+	if err != nil {
+		return "", err
+	}
+	defer fl.Unlock()
+
+	// Read existing routes under the lock.
+	existing, err := readRoutesUnlocked(rootDir)
+	if err != nil {
+		return "", err
+	}
+
+	// Check for path duplicates.
+	for _, r := range existing {
+		existingAbs, err := filepath.Abs(r.Path)
+		if err != nil {
+			continue
+		}
+		if existingAbs == absPath {
+			return "", fmt.Errorf("path %s already registered with prefix %q", absPath, r.Prefix)
+		}
+	}
+
+	// Resolve the prefix under the same lock.
+	prefix, err := resolvePrefix(rootDir, explicitPrefix, absPath, existing)
+	if err != nil {
+		return "", err
+	}
+
+	// Validate and write.
+	if err := ValidatePrefix(prefix); err != nil {
+		return "", err
+	}
+
+	if err := appendRouteUnlocked(rootDir, Route{Prefix: prefix, Path: absPath}); err != nil {
+		return "", err
+	}
+
+	return prefix, nil
+}
+
+// resolvePrefix generates a unique prefix for a new h2 directory.
+// Must be called with an exclusive lock held. existing is the current routes list.
+func resolvePrefix(rootDir string, desired string, h2Path string, existing []Route) (string, error) {
 	// If the path is the root dir itself, always use "root".
 	rootAbs, err := filepath.Abs(rootDir)
 	if err != nil {
 		return "", fmt.Errorf("resolve root dir: %w", err)
 	}
-	pathAbs, err := filepath.Abs(h2Path)
-	if err != nil {
-		return "", fmt.Errorf("resolve h2 path: %w", err)
-	}
-	if rootAbs == pathAbs {
+	if rootAbs == h2Path {
 		return "root", nil
 	}
 
@@ -231,15 +304,18 @@ func ResolvePrefix(rootDir string, desired string, h2Path string) (string, error
 		desired = filepath.Base(h2Path)
 	}
 
-	// Read existing routes to check for conflicts.
-	existing, err := readRoutesUnlocked(rootDir)
-	if err != nil {
-		return "", err
-	}
-
 	prefixSet := make(map[string]bool, len(existing))
 	for _, r := range existing {
 		prefixSet[r.Prefix] = true
+	}
+
+	// Explicit prefix: fail on conflict.
+	if desired != "" && desired != filepath.Base(h2Path) {
+		// This was explicitly provided, don't auto-increment.
+		if prefixSet[desired] {
+			return "", fmt.Errorf("prefix %q already registered", desired)
+		}
+		return desired, nil
 	}
 
 	// If no conflict, use the desired prefix as-is.
@@ -256,4 +332,16 @@ func ResolvePrefix(rootDir string, desired string, h2Path string) (string, error
 	}
 
 	return "", fmt.Errorf("could not find unique prefix for %q after 100 attempts", desired)
+}
+
+// ResolvePrefix is the public API for resolving a prefix. It reads routes
+// from disk (without holding a lock, so it's subject to TOCTOU races).
+// Prefer RegisterRouteWithAutoPrefix for atomic resolve+register.
+// Kept for testing and cases where the caller manages their own locking.
+func ResolvePrefix(rootDir string, desired string, h2Path string) (string, error) {
+	existing, err := readRoutesUnlocked(rootDir)
+	if err != nil {
+		return "", err
+	}
+	return resolvePrefix(rootDir, desired, h2Path, existing)
 }
