@@ -67,7 +67,13 @@ Connect a Telegram bot so you can message agents from your phone:
 h2 bridge    # starts the bridge + a concierge agent
 ```
 
-The bridge routes your Telegram messages to a **concierge** agent — your main point of contact who can coordinate with other agents on your behalf. You can also run h2 and beads commands directly from Telegram to check statuses and manage tasks.
+Messages go to the **concierge** agent by default — your main point of contact who can coordinate with other agents on your behalf. To message a specific agent, prefix with their name:
+
+```
+coder-1: how's the auth module coming along?
+```
+
+You can also reply directly to a message from a particular agent to continue the conversation with them. Run `/h2` and `/bd` commands in Telegram to check on agent and project statuses without leaving the chat.
 
 ## Tier 3: Orchestration
 
