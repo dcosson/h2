@@ -413,17 +413,6 @@ func TestEvaluate_NotResolvedWhenNoTests(t *testing.T) {
 	}
 }
 
-// --- Report and utility tests ---
-
-func TestRepeatStr(t *testing.T) {
-	if got := repeatStr("-", 5); got != "-----" {
-		t.Errorf("repeatStr('-', 5) = %q", got)
-	}
-	if got := repeatStr("", 3); got != "" {
-		t.Errorf("repeatStr('', 3) = %q", got)
-	}
-}
-
 // --- DatasetDir / DefaultDatasetPath tests ---
 
 func TestDatasetDir(t *testing.T) {

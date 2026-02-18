@@ -525,16 +525,7 @@ func TestEvaluate_NoTestPatch(t *testing.T) {
 	}
 }
 
-// --- Report and utility tests ---
-
-func TestRepeatStr(t *testing.T) {
-	if got := repeatStr("-", 5); got != "-----" {
-		t.Errorf("repeatStr('-', 5) = %q", got)
-	}
-	if got := repeatStr("", 3); got != "" {
-		t.Errorf("repeatStr('', 3) = %q", got)
-	}
-}
+// --- Utility tests ---
 
 func TestTruncate(t *testing.T) {
 	if got := truncate("hello", 10); got != "hello" {

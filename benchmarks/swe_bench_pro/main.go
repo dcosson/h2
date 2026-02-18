@@ -3,7 +3,6 @@ package swe_bench_pro
 import (
 	"context"
 	"fmt"
-	"io"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -123,66 +122,4 @@ Examples:
 	_ = cmd.MarkFlagRequired("sandbox")
 
 	return cmd
-}
-
-// NewReportCommand creates the benchmark report command.
-func NewReportCommand() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "report <results-dir> [results-dir...]",
-		Short: "Display benchmark results comparison",
-		Long: `Show a comparison table of benchmark results from one or more run directories.
-
-Example:
-  h2 benchmark report benchmarks/results/swe_bench_pro/20260217-143000 benchmarks/results/swe_bench_pro/20260217-150000`,
-		Args: cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			var summaries []runner.RunSummary
-
-			for _, dir := range args {
-				s, err := runner.LoadSummary(dir)
-				if err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "warning: skipping %s: %v\n", dir, err)
-					continue
-				}
-				summaries = append(summaries, *s)
-			}
-
-			if len(summaries) == 0 {
-				return fmt.Errorf("no valid results found")
-			}
-
-			PrintReport(cmd.OutOrStdout(), summaries)
-			return nil
-		},
-	}
-
-	return cmd
-}
-
-// PrintReport outputs a comparison table of benchmark results.
-func PrintReport(w io.Writer, summaries []runner.RunSummary) {
-	fmt.Fprintf(w, "\n%-12s %-10s %-8s %10s %10s %12s %10s\n",
-		"Benchmark", "Mode", "Preset", "Resolved", "Rate", "Avg Time", "Cost")
-	fmt.Fprintf(w, "%s\n", repeatStr("-", 74))
-
-	for _, s := range summaries {
-		fmt.Fprintf(w, "%-12s %-10s %-8s %4d/%-5d %8.1f%% %12s $%8.2f\n",
-			s.Benchmark,
-			s.Mode,
-			s.Preset,
-			s.Resolved, s.Evaluated,
-			s.ResolveRate*100,
-			s.AvgDuration.Round(time.Second),
-			s.TotalCost,
-		)
-	}
-	fmt.Fprintln(w)
-}
-
-func repeatStr(s string, n int) string {
-	result := ""
-	for i := 0; i < n; i++ {
-		result += s
-	}
-	return result
 }
