@@ -4,8 +4,10 @@ package e2etests
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -503,6 +505,403 @@ func TestReliability_DuringPermissionPrompt_Deny(t *testing.T) {
 
 	stopTokens := sendTokensAsync(t, sb.H2Dir, sb.AgentName, "PermDeny", tokenInterval, "normal")
 	time.Sleep(8 * tokenInterval)
+	sent := stopTokens()
+
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+
+	received := collectReceivedTokens(t, sb.H2Dir, sb.AgentName)
+	verifyReceipt(t, sent, received)
+}
+
+// =============================================================================
+// Group 4: Agent Subprocesses and Background Work
+// =============================================================================
+
+// TestReliability_DuringSubagentExecution sends tokens while the agent is
+// running a subagent via the Task tool.
+func TestReliability_DuringSubagentExecution(t *testing.T) {
+	t.Parallel()
+
+	sb := createReliabilitySandbox(t, "subagent-exec", sandboxOpts{})
+	createWorkFiles(t, sb.ProjectDir, 3)
+	launchReliabilityAgent(t, sb)
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+
+	// Ask agent to spawn a subagent via the Task tool.
+	sendMessage(t, sb.H2Dir, sb.AgentName,
+		"Use the Task tool to launch a subagent that reads work-0.txt, work-1.txt, and work-2.txt and summarizes them. Wait for the subagent to complete and report the result.")
+
+	waitForActive(t, sb.H2Dir, sb.AgentName, 30*time.Second)
+
+	stopTokens := sendTokensAsync(t, sb.H2Dir, sb.AgentName, "SubagentExec", slowInterval, "normal")
+	time.Sleep(15 * slowInterval)
+	sent := stopTokens()
+
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+
+	received := collectReceivedTokens(t, sb.H2Dir, sb.AgentName)
+	verifyReceipt(t, sent, received)
+}
+
+// TestReliability_DuringBackgroundTask_WithPolling sends tokens while the
+// agent runs a background bash task and polls for its output.
+func TestReliability_DuringBackgroundTask_WithPolling(t *testing.T) {
+	t.Parallel()
+
+	sb := createReliabilitySandbox(t, "bg-poll", sandboxOpts{})
+	launchReliabilityAgent(t, sb)
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+
+	// Ask agent to start a background task and poll it.
+	sendMessage(t, sb.H2Dir, sb.AgentName,
+		"Run a bash command in the background: for i in 1 2 3 4 5; do echo step-$i; sleep 1; done. Then poll for its output using TaskOutput every 2 seconds until it completes.")
+
+	waitForActive(t, sb.H2Dir, sb.AgentName, 30*time.Second)
+
+	stopTokens := sendTokensAsync(t, sb.H2Dir, sb.AgentName, "BgPoll", slowInterval, "normal")
+	time.Sleep(12 * slowInterval)
+	sent := stopTokens()
+
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+
+	received := collectReceivedTokens(t, sb.H2Dir, sb.AgentName)
+	verifyReceipt(t, sent, received)
+}
+
+// TestReliability_DuringTaskList_MultiStep sends tokens while the agent creates
+// and works through a task list using TaskCreate/TaskUpdate.
+func TestReliability_DuringTaskList_MultiStep(t *testing.T) {
+	t.Parallel()
+
+	sb := createReliabilitySandbox(t, "tasklist-multi", sandboxOpts{})
+	createWorkFiles(t, sb.ProjectDir, 4)
+	launchReliabilityAgent(t, sb)
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+
+	// Ask agent to create a task list and work through it.
+	sendMessage(t, sb.H2Dir, sb.AgentName,
+		"Create a task list with 4 tasks: read work-0.txt, read work-1.txt, read work-2.txt, read work-3.txt. Then work through each task, marking them in progress and then completed as you go.")
+
+	waitForActive(t, sb.H2Dir, sb.AgentName, 30*time.Second)
+
+	stopTokens := sendTokensAsync(t, sb.H2Dir, sb.AgentName, "TaskListMulti", slowInterval, "normal")
+	time.Sleep(15 * slowInterval)
+	sent := stopTokens()
+
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+
+	received := collectReceivedTokens(t, sb.H2Dir, sb.AgentName)
+	verifyReceipt(t, sent, received)
+}
+
+// =============================================================================
+// Group 5: Compaction
+// =============================================================================
+
+// TestReliability_DuringCompaction sends tokens before, during, and after a
+// context compaction triggered by /compact.
+func TestReliability_DuringCompaction(t *testing.T) {
+	t.Parallel()
+
+	sb := createReliabilitySandbox(t, "compaction", sandboxOpts{})
+	createWorkFiles(t, sb.ProjectDir, 3)
+	launchReliabilityAgent(t, sb)
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+
+	// Build some context first so compaction has something to work with.
+	sendMessage(t, sb.H2Dir, sb.AgentName,
+		"Read work-0.txt, work-1.txt, and work-2.txt. Summarize each one.")
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+
+	// Phase 1: Send pre-compaction tokens.
+	var preTokens []string
+	for i := 0; i < 3; i++ {
+		token := fmt.Sprintf("RECEIPT-PreCompact-%d", i)
+		sendMessageWithPriority(t, sb.H2Dir, sb.AgentName, token, "normal")
+		preTokens = append(preTokens, token)
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	// Wait for pre-compaction tokens to be received.
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+
+	// Phase 2: Trigger compaction and send tokens during it.
+	sendRawMessage(t, sb.H2Dir, sb.AgentName, "/compact")
+	time.Sleep(500 * time.Millisecond)
+
+	var duringTokens []string
+	for i := 0; i < 5; i++ {
+		token := fmt.Sprintf("RECEIPT-DuringCompact-%d", i)
+		sendMessageWithPriority(t, sb.H2Dir, sb.AgentName, token, "normal")
+		duringTokens = append(duringTokens, token)
+		time.Sleep(300 * time.Millisecond)
+	}
+
+	// Phase 3: Wait for compaction to finish, send post-compaction tokens.
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+
+	var postTokens []string
+	for i := 0; i < 3; i++ {
+		token := fmt.Sprintf("RECEIPT-PostCompact-%d", i)
+		sendMessageWithPriority(t, sb.H2Dir, sb.AgentName, token, "normal")
+		postTokens = append(postTokens, token)
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+
+	// All tokens from all phases should be received.
+	var allSent []string
+	allSent = append(allSent, preTokens...)
+	allSent = append(allSent, duringTokens...)
+	allSent = append(allSent, postTokens...)
+
+	received := collectReceivedTokens(t, sb.H2Dir, sb.AgentName)
+	verifyReceipt(t, allSent, received)
+
+	// Log compaction events for diagnostics.
+	logPath := sb.H2Dir + "/sessions/" + sb.AgentName + "/session-activity.jsonl"
+	if data, err := os.ReadFile(logPath); err == nil {
+		t.Log("Compaction-related events:")
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.Contains(line, "Compact") || strings.Contains(line, "compact") {
+				t.Logf("  %s", line)
+			}
+		}
+	}
+}
+
+// =============================================================================
+// Group 6: Mixed Priority Under Load
+// =============================================================================
+
+// TestReliability_MixedPriorities_Concurrent sends tokens at all 4 priority
+// levels simultaneously from separate goroutines while the agent is working.
+func TestReliability_MixedPriorities_Concurrent(t *testing.T) {
+	t.Parallel()
+
+	sb := createReliabilitySandbox(t, "mixed-priority", sandboxOpts{})
+	createWorkFiles(t, sb.ProjectDir, 5)
+	launchReliabilityAgent(t, sb)
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+
+	// Give agent work.
+	sendMessage(t, sb.H2Dir, sb.AgentName,
+		"Read all work-*.txt files and create a report.txt with their contents concatenated.")
+	waitForActive(t, sb.H2Dir, sb.AgentName, 30*time.Second)
+
+	// Send tokens at all 4 priority levels concurrently.
+	type priConfig struct {
+		priority string
+		label    string
+	}
+	configs := []priConfig{
+		{"interrupt", "MixedInterrupt"},
+		{"normal", "MixedNormal"},
+		{"idle-first", "MixedIdleFirst"},
+		{"idle", "MixedIdle"},
+	}
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var allSent []string
+
+	for _, cfg := range configs {
+		wg.Add(1)
+		go func(c priConfig) {
+			defer wg.Done()
+			stop := sendTokensAsync(t, sb.H2Dir, sb.AgentName, c.label, tokenInterval, c.priority)
+			time.Sleep(8 * tokenInterval)
+			tokens := stop()
+			mu.Lock()
+			allSent = append(allSent, tokens...)
+			mu.Unlock()
+		}(cfg)
+	}
+	wg.Wait()
+
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+	// Extra drain time for idle-priority messages.
+	time.Sleep(5 * time.Second)
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+
+	received := collectReceivedTokens(t, sb.H2Dir, sb.AgentName)
+	verifyReceipt(t, allSent, received)
+}
+
+// TestReliability_HighVolume_BurstSend sends 50 tokens in a rapid burst to
+// test queue capacity and delivery throughput.
+func TestReliability_HighVolume_BurstSend(t *testing.T) {
+	t.Parallel()
+
+	sb := createReliabilitySandbox(t, "burst-send", sandboxOpts{})
+	createWorkFiles(t, sb.ProjectDir, 3)
+	launchReliabilityAgent(t, sb)
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+
+	// Give agent work so it's active.
+	sendMessage(t, sb.H2Dir, sb.AgentName,
+		"Read work-0.txt, work-1.txt, and work-2.txt and write a combined report to report.txt.")
+	waitForActive(t, sb.H2Dir, sb.AgentName, 30*time.Second)
+
+	// Send 50 tokens in rapid burst (50ms intervals).
+	burstInterval := 50 * time.Millisecond
+	stopTokens := sendTokensAsync(t, sb.H2Dir, sb.AgentName, "Burst", burstInterval, "normal")
+	time.Sleep(50 * burstInterval) // 2.5 seconds
+	sent := stopTokens()
+
+	t.Logf("Burst: sent %d tokens", len(sent))
+
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+
+	received := collectReceivedTokens(t, sb.H2Dir, sb.AgentName)
+	verifyReceipt(t, sent, received)
+}
+
+// TestReliability_RawMessage_DuringPermission verifies that raw messages work
+// correctly to interact with a permission prompt, and that subsequent normal
+// messages are still delivered.
+func TestReliability_RawMessage_DuringPermission(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	scriptPath := createPermissionScript(t, dir, "ask-user", 0)
+	sb := createReliabilitySandbox(t, "raw-perm", sandboxOpts{permissionScript: scriptPath})
+	launchReliabilityAgent(t, sb)
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+
+	// Trigger permission prompt.
+	sendMessage(t, sb.H2Dir, sb.AgentName,
+		"Run these bash commands one at a time: echo test1, echo test2, echo test3")
+	waitForActive(t, sb.H2Dir, sb.AgentName, 30*time.Second)
+
+	// Wait for blocked-on-permission state.
+	deadline := time.Now().Add(30 * time.Second)
+	blocked := false
+	for time.Now().Before(deadline) {
+		status := queryAgentStatus(t, sb.H2Dir, sb.AgentName)
+		if status != nil && status.BlockedOnPermission {
+			blocked = true
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if !blocked {
+		t.Fatal("Agent did not reach blocked-on-permission state")
+	}
+
+	// Send raw "y" to accept the permission prompt.
+	sendRawMessage(t, sb.H2Dir, sb.AgentName, "y")
+	time.Sleep(1 * time.Second)
+
+	// Send normal tokens after permission is resolved.
+	stopTokens := sendTokensAsync(t, sb.H2Dir, sb.AgentName, "RawPerm", tokenInterval, "normal")
+	time.Sleep(10 * tokenInterval)
+	sent := stopTokens()
+
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+
+	received := collectReceivedTokens(t, sb.H2Dir, sb.AgentName)
+	verifyReceipt(t, sent, received)
+}
+
+// =============================================================================
+// Group 7: Edge Cases
+// =============================================================================
+
+// TestReliability_MessageDuringAgentStartup sends messages immediately after
+// launching the agent, before it is fully initialized, to verify that messages
+// are queued and delivered once the agent is ready.
+func TestReliability_MessageDuringAgentStartup(t *testing.T) {
+	t.Parallel()
+
+	sb := createReliabilitySandbox(t, "startup-msg", sandboxOpts{})
+	createWorkFiles(t, sb.ProjectDir, 1)
+	launchReliabilityAgent(t, sb)
+
+	// DON'T wait for idle — send messages immediately during startup.
+	var sent []string
+	for i := 0; i < 5; i++ {
+		token := fmt.Sprintf("RECEIPT-Startup-%d", i)
+		sendMessageWithPriority(t, sb.H2Dir, sb.AgentName, token, "normal")
+		sent = append(sent, token)
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	// Now wait for agent to be fully ready and process everything.
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+	time.Sleep(5 * time.Second)
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+
+	received := collectReceivedTokens(t, sb.H2Dir, sb.AgentName)
+	verifyReceipt(t, sent, received)
+}
+
+// TestReliability_LongMessage_FileReference sends a message longer than 300
+// characters to trigger the file reference delivery path, and verifies the
+// agent still receives the embedded RECEIPT tokens.
+func TestReliability_LongMessage_FileReference(t *testing.T) {
+	t.Parallel()
+
+	sb := createReliabilitySandbox(t, "long-msg", sandboxOpts{})
+	launchReliabilityAgent(t, sb)
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+
+	// Build a message longer than 300 chars that contains RECEIPT tokens.
+	var longBody strings.Builder
+	longBody.WriteString("Here is a long message with multiple RECEIPT tokens embedded. ")
+	var sent []string
+	for i := 0; i < 10; i++ {
+		token := fmt.Sprintf("RECEIPT-LongMsg-%d", i)
+		sent = append(sent, token)
+		longBody.WriteString(token)
+		longBody.WriteString(" is an important token. Please acknowledge it. ")
+	}
+	// Pad to ensure we exceed 300 chars.
+	for longBody.Len() < 400 {
+		longBody.WriteString("padding text to exceed the file reference threshold. ")
+	}
+
+	t.Logf("Long message length: %d chars", longBody.Len())
+
+	sendMessage(t, sb.H2Dir, sb.AgentName, longBody.String())
+
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+
+	received := collectReceivedTokens(t, sb.H2Dir, sb.AgentName)
+	verifyReceipt(t, sent, received)
+}
+
+// TestReliability_MessageAfterCompaction_ContextRebuild sends tokens after a
+// compaction while the agent is rebuilding context by re-reading files.
+func TestReliability_MessageAfterCompaction_ContextRebuild(t *testing.T) {
+	t.Parallel()
+
+	sb := createReliabilitySandbox(t, "post-compact", sandboxOpts{})
+	createWorkFiles(t, sb.ProjectDir, 5)
+	launchReliabilityAgent(t, sb)
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+
+	// Build context for the agent.
+	sendMessage(t, sb.H2Dir, sb.AgentName,
+		"Read all work-*.txt files and summarize each one.")
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+
+	// Trigger compaction.
+	sendRawMessage(t, sb.H2Dir, sb.AgentName, "/compact")
+
+	// Wait for compaction to complete.
+	time.Sleep(2 * time.Second)
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+
+	// Send tokens during the post-compaction phase, when the agent may be
+	// rebuilding context by re-reading files.
+	sendMessage(t, sb.H2Dir, sb.AgentName,
+		"Read work-0.txt and work-1.txt again to verify your summaries are correct.")
+	waitForActive(t, sb.H2Dir, sb.AgentName, 30*time.Second)
+
+	stopTokens := sendTokensAsync(t, sb.H2Dir, sb.AgentName, "PostCompact", tokenInterval, "normal")
+	time.Sleep(10 * tokenInterval)
 	sent := stopTokens()
 
 	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
