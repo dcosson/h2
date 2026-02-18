@@ -6,6 +6,8 @@ A harness for your harnesses. An agent runner, messaging, and orchestration laye
   <img src="docs/images/h2-hero.jpg" alt="Ox with a harness pulling a payload" width="600">
 </p>
 
+## What is h2?
+
 h2 manages AI coding agents as background processes, lets them message each other and you, and coordinates teams of agents working on projects together. It's a 3-tier system — use as much or as little as you need.
 
 h2 is not a custom harness — it wraps existing agent tools (Claude Code, Codex, etc.) by communicating through their TTY interface. It works with Claude Max and ChatGPT Pro plans out of the box. No API keys or `setup-token` required.
