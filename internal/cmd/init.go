@@ -25,20 +25,17 @@ const defaultConfigYAML = `# h2 configuration
 
 func newInitCmd() *cobra.Command {
 	var global bool
+	var prefix string
 
 	cmd := &cobra.Command{
-		Use:   "init <dir>",
+		Use:   "init [dir]",
 		Short: "Initialize an h2 directory",
-		Long:  "Create an h2 directory with the standard structure. Use --global to initialize ~/.h2/.",
+		Long:  "Create an h2 directory with the standard structure. Use --global or omit dir to initialize ~/.h2/.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !global && len(args) == 0 {
-				return fmt.Errorf("directory argument is required (or use --global for ~/.h2/)")
-			}
-
 			var dir string
 			switch {
-			case global:
+			case global || len(args) == 0:
 				home, err := os.UserHomeDir()
 				if err != nil {
 					return fmt.Errorf("cannot determine home directory: %w", err)
@@ -83,11 +80,46 @@ func newInitCmd() *cobra.Command {
 				return fmt.Errorf("write config.yaml: %w", err)
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Initialized h2 directory at %s\n", abs)
+			// Register this h2 directory in the routes registry.
+			rootDir, err := config.RootDir()
+			if err != nil {
+				return fmt.Errorf("resolve root h2 dir: %w", err)
+			}
+
+			// Determine prefix.
+			var resolvedPrefix string
+			if cmd.Flags().Changed("prefix") {
+				// Explicit prefix — fail if it conflicts.
+				resolvedPrefix = prefix
+				existing, readErr := config.ReadRoutes(rootDir)
+				if readErr != nil {
+					return fmt.Errorf("read routes: %w", readErr)
+				}
+				for _, r := range existing {
+					if r.Prefix == resolvedPrefix {
+						return fmt.Errorf("prefix %q already registered (path: %s)", resolvedPrefix, r.Path)
+					}
+				}
+			} else {
+				resolvedPrefix, err = config.ResolvePrefix(rootDir, "", abs)
+				if err != nil {
+					return fmt.Errorf("resolve prefix: %w", err)
+				}
+			}
+
+			if err := config.RegisterRoute(rootDir, config.Route{
+				Prefix: resolvedPrefix,
+				Path:   abs,
+			}); err != nil {
+				return fmt.Errorf("register route: %w", err)
+			}
+
+			fmt.Fprintf(cmd.OutOrStdout(), "Initialized h2 directory at %s (prefix: %s)\n", abs, resolvedPrefix)
 			return nil
 		},
 	}
 
 	cmd.Flags().BoolVar(&global, "global", false, "Initialize ~/.h2/ as the h2 directory")
+	cmd.Flags().StringVar(&prefix, "prefix", "", "Custom prefix for this h2 directory in the routes registry")
 	return cmd
 }
