@@ -3,10 +3,10 @@
 A harness for your harnesses. An agent runner, messaging, and orchestration layer for AI coding Agents.
 
 <p align="center">
-  <img src="docs/images/h2-hero.jpg" alt="Ox with a harness pulling a payload" width="600">
+  <img src="docs/images/h2-hero.jpg" alt="Ox with a harness pulling a payload" width="800">
 </p>
 
-## What is h2?
+## What it does
 
 h2 manages AI coding agents as background processes, lets them message each other and you, and coordinates teams of agents working on projects together. It's a 3-tier system — use as much or as little as you need.
 
