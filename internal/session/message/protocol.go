@@ -76,9 +76,11 @@ type AgentInfo struct {
 	QueuedCount   int    `json:"queued_count"`
 
 	// Per-model cost and token breakdowns from OTEL metrics
-	ModelStats   []ModelStat `json:"model_stats,omitempty"`
-	TotalTokens  int64       `json:"total_tokens,omitempty"`
-	TotalCostUSD float64     `json:"total_cost_usd,omitempty"`
+	ModelStats    []ModelStat `json:"model_stats,omitempty"`
+	InputTokens   int64       `json:"input_tokens,omitempty"`
+	OutputTokens  int64       `json:"output_tokens,omitempty"`
+	TotalTokens   int64       `json:"total_tokens,omitempty"`
+	TotalCostUSD  float64     `json:"total_cost_usd,omitempty"`
 
 	// Cumulative session LOC from OTEL metrics
 	LinesAdded   int64 `json:"lines_added,omitempty"`

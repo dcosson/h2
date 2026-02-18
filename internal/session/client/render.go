@@ -164,9 +164,9 @@ func (c *Client) RenderBar() {
 
 			// OTEL metrics (tokens and cost)
 			if c.OtelMetrics != nil {
-				tokens, cost, connected, port := c.OtelMetrics()
+				inTok, outTok, cost, connected, port := c.OtelMetrics()
 				if connected {
-					label += " | " + agent.FormatTokens(tokens) + " " + agent.FormatCost(cost)
+					label += " | " + agent.FormatTokens(inTok) + " in / " + agent.FormatTokens(outTok) + " out " + agent.FormatCost(cost)
 				} else {
 					label += fmt.Sprintf(" | [otel:%d]", port)
 				}
