@@ -47,6 +47,7 @@ func NewRootCmd() *cobra.Command {
 		newInitCmd(),
 		newQACmd(),
 		newSandboxCmd(),
+		newBenchmarkCmd(),
 	)
 
 	return rootCmd

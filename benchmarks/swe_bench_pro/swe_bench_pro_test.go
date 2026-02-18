@@ -470,7 +470,7 @@ func TestDetectTestRunner_UnknownLanguage(t *testing.T) {
 
 func TestBuildTestCommand_Pytest(t *testing.T) {
 	cmd := buildTestCommand(RunnerPytest, "tests/test_foo.py")
-	// python -m pytest -xvs tests/test_foo.py = 5 args
+	// python -m pytest -vs tests/test_foo.py = 5 args
 	if len(cmd) != 5 {
 		t.Fatalf("expected 5 args, got %d: %v", len(cmd), cmd)
 	}
@@ -479,6 +479,15 @@ func TestBuildTestCommand_Pytest(t *testing.T) {
 	}
 	if cmd[4] != "tests/test_foo.py" {
 		t.Errorf("test file = %q", cmd[4])
+	}
+}
+
+func TestBuildTestCommand_Pytest_NoStopOnFirstFailure(t *testing.T) {
+	cmd := buildTestCommand(RunnerPytest, "tests/test_foo.py")
+	joined := strings.Join(cmd, " ")
+	// -x stops on first failure, which causes false negatives in evaluation.
+	if strings.Contains(joined, "-x") {
+		t.Errorf("pytest command should NOT contain -x flag (stops on first failure): %v", cmd)
 	}
 }
 

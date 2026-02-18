@@ -183,7 +183,9 @@ func detectTestRunner(workDir string, repoLanguage string) TestRunner {
 func buildTestCommand(testRunner TestRunner, testFile string) []string {
 	switch testRunner {
 	case RunnerPytest:
-		return []string{"python", "-m", "pytest", "-xvs", testFile}
+		// Don't use -x (stop on first failure) — we need all tests to run
+		// for complete fail-to-pass/pass-to-pass evaluation.
+		return []string{"python", "-m", "pytest", "-vs", testFile}
 	case RunnerTox:
 		return []string{"tox", "-e", "py", "--", testFile}
 	default:
