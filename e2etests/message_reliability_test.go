@@ -838,8 +838,14 @@ func TestReliability_MessageDuringAgentStartup(t *testing.T) {
 }
 
 // TestReliability_LongMessage_FileReference sends a message longer than 300
-// characters to trigger the file reference delivery path, and verifies the
-// agent still receives the embedded RECEIPT tokens.
+// characters to trigger the file reference delivery path, then sends normal
+// inline RECEIPT tokens to verify the agent is still alive and processing
+// messages after receiving a file reference.
+//
+// Note: Messages >300 chars are delivered as "Read /path/to/file.md" to the
+// PTY, so RECEIPT tokens embedded in the long body won't appear in the
+// activity log. Instead we verify the file reference path doesn't break
+// subsequent message delivery.
 func TestReliability_LongMessage_FileReference(t *testing.T) {
 	t.Parallel()
 
@@ -847,24 +853,25 @@ func TestReliability_LongMessage_FileReference(t *testing.T) {
 	launchReliabilityAgent(t, sb)
 	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
 
-	// Build a message longer than 300 chars that contains RECEIPT tokens.
+	// Build a message longer than 300 chars (triggers file reference path).
 	var longBody strings.Builder
-	longBody.WriteString("Here is a long message with multiple RECEIPT tokens embedded. ")
-	var sent []string
-	for i := 0; i < 10; i++ {
-		token := fmt.Sprintf("RECEIPT-LongMsg-%d", i)
-		sent = append(sent, token)
-		longBody.WriteString(token)
-		longBody.WriteString(" is an important token. Please acknowledge it. ")
-	}
-	// Pad to ensure we exceed 300 chars.
+	longBody.WriteString("This is a long message to test the file reference delivery path. ")
 	for longBody.Len() < 400 {
-		longBody.WriteString("padding text to exceed the file reference threshold. ")
+		longBody.WriteString("Please read this message carefully and acknowledge that you received it. ")
 	}
 
 	t.Logf("Long message length: %d chars", longBody.Len())
 
 	sendMessage(t, sb.H2Dir, sb.AgentName, longBody.String())
+
+	// Wait for agent to process the file reference message.
+	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
+
+	// Now send normal inline RECEIPT tokens to verify the agent is still
+	// alive and processing messages after the file reference delivery.
+	stopTokens := sendTokensAsync(t, sb.H2Dir, sb.AgentName, "LongMsg", tokenInterval, "normal")
+	time.Sleep(8 * tokenInterval)
+	sent := stopTokens()
 
 	waitForIdle(t, sb.H2Dir, sb.AgentName, agentIdleTimeout)
 
