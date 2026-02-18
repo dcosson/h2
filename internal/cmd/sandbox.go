@@ -47,7 +47,7 @@ from the default h2 config (or --auth-from) and survive resets.`,
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Created sandbox %q (preset: %s) at %s\n", sb.Name, sb.Preset, sb.Dir)
+			fmt.Fprintf(cmd.OutOrStdout(), "Created sandbox %q (preset: %s) at %s\n", sb.Name, sb.Preset, sb.Dir)
 			return nil
 		},
 	}
@@ -69,12 +69,13 @@ func newSandboxListCmd() *cobra.Command {
 				return err
 			}
 
+			out := cmd.OutOrStdout()
 			if len(infos) == 0 {
-				fmt.Println("No sandboxes found.")
+				fmt.Fprintln(out, "No sandboxes found.")
 				return nil
 			}
 
-			w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+			w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 			fmt.Fprintln(w, "NAME\tPRESET\tAUTH\tCREATED")
 			for _, info := range infos {
 				auth := "none"
@@ -105,7 +106,7 @@ Optionally changes the preset with --preset.`,
 			if err := sandbox.Reset(args[0], preset, ""); err != nil {
 				return err
 			}
-			fmt.Printf("Reset sandbox %q.\n", args[0])
+			fmt.Fprintf(cmd.OutOrStdout(), "Reset sandbox %q.\n", args[0])
 			return nil
 		},
 	}
@@ -124,7 +125,7 @@ func newSandboxDestroyCmd() *cobra.Command {
 			if err := sandbox.Destroy(args[0], ""); err != nil {
 				return err
 			}
-			fmt.Printf("Destroyed sandbox %q.\n", args[0])
+			fmt.Fprintf(cmd.OutOrStdout(), "Destroyed sandbox %q.\n", args[0])
 			return nil
 		},
 	}
@@ -147,13 +148,13 @@ func newSandboxShellCmd() *cobra.Command {
 			}
 
 			c := exec.Command(shell)
-			c.Env = sandboxShellEnv(sb.Dir)
+			c.Env = sb.Env()
 			c.Stdin = os.Stdin
 			c.Stdout = os.Stdout
 			c.Stderr = os.Stderr
 
-			fmt.Printf("Entering sandbox %q (H2_DIR=%s)\n", sb.Name, sb.Dir)
-			fmt.Println("Type 'exit' to leave the sandbox shell.")
+			fmt.Fprintf(cmd.OutOrStdout(), "Entering sandbox %q (H2_DIR=%s)\n", sb.Name, sb.Dir)
+			fmt.Fprintln(cmd.OutOrStdout(), "Type 'exit' to leave the sandbox shell.")
 			return c.Run()
 		},
 	}
@@ -185,7 +186,7 @@ Use -- to separate sandbox arguments from the command:
 			}
 
 			c := exec.Command(cmdArgs[0], cmdArgs[1:]...)
-			c.Env = sandboxShellEnv(sb.Dir)
+			c.Env = sb.Env()
 			c.Stdin = os.Stdin
 			c.Stdout = cmd.OutOrStdout()
 			c.Stderr = cmd.ErrOrStderr()
@@ -208,21 +209,4 @@ func parseSandboxExecArgs(args []string) (name string, cmdArgs []string) {
 		rest = rest[1:]
 	}
 	return name, rest
-}
-
-// sandboxShellEnv returns the current environment with H2_DIR set to the sandbox.
-func sandboxShellEnv(dir string) []string {
-	env := os.Environ()
-	found := false
-	for i, e := range env {
-		if strings.HasPrefix(e, "H2_DIR=") {
-			env[i] = "H2_DIR=" + dir
-			found = true
-			break
-		}
-	}
-	if !found {
-		env = append(env, "H2_DIR="+dir)
-	}
-	return env
 }

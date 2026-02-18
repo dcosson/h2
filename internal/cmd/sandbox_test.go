@@ -440,8 +440,8 @@ func TestParseSandboxExecArgs(t *testing.T) {
 	}
 }
 
-func TestSandboxShellEnv(t *testing.T) {
-	env := sandboxShellEnv("/test/sandbox/dir")
+func TestSandboxEnvForDir(t *testing.T) {
+	env := sandbox.EnvForDir("/test/sandbox/dir")
 
 	found := false
 	for _, e := range env {
@@ -451,7 +451,7 @@ func TestSandboxShellEnv(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("H2_DIR not found in sandbox shell env")
+		t.Error("H2_DIR not found in sandbox env")
 	}
 }
 

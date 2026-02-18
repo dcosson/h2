@@ -588,7 +588,7 @@ func TestValidateName(t *testing.T) {
 }
 
 func TestSandboxEnv(t *testing.T) {
-	env := sandboxEnv("/test/dir")
+	env := EnvForDir("/test/dir")
 
 	found := false
 	for _, e := range env {

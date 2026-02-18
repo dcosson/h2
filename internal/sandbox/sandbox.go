@@ -278,7 +278,7 @@ func Exec(name, baseDir string, args []string) ([]byte, error) {
 	}
 
 	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Env = sandboxEnv(dir)
+	cmd.Env = EnvForDir(dir)
 	return cmd.CombinedOutput()
 }
 
@@ -287,8 +287,13 @@ func (s *Sandbox) ClaudeConfigDir() string {
 	return filepath.Join(s.Dir, "claude-config", "default")
 }
 
-// sandboxEnv returns an environment with H2_DIR set to the sandbox.
-func sandboxEnv(dir string) []string {
+// Env returns an environment with H2_DIR set to the sandbox directory.
+func (s *Sandbox) Env() []string {
+	return EnvForDir(s.Dir)
+}
+
+// EnvForDir returns an environment with H2_DIR set to the given directory.
+func EnvForDir(dir string) []string {
 	env := os.Environ()
 	// Replace or add H2_DIR.
 	found := false
