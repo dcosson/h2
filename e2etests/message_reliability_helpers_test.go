@@ -118,7 +118,9 @@ func trySendToken(h2Dir, agentName, token, priority string) sendTokenResult {
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	cmd.Env = append(os.Environ(), "H2_DIR="+h2Dir, "H2_ACTOR=test-harness")
+	// Clear any inherited H2_DIR before setting the test value (matches runH2Opts pattern).
+	cmd.Env = append(os.Environ(), "H2_DIR=")
+	cmd.Env = append(cmd.Env, "H2_DIR="+h2Dir, "H2_ACTOR=test-harness")
 
 	err := cmd.Run()
 	if err != nil {
