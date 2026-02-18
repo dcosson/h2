@@ -71,6 +71,22 @@ func TestInstance_ParseEmptyString(t *testing.T) {
 	}
 }
 
+func TestInstance_ParsePythonSingleQuotes(t *testing.T) {
+	inst := Instance{
+		FailToPass: `['tests/unit/utils/test_qtlog.py::TestHideQtWarning::test_unfiltered', 'tests/unit/utils/test_qtlog.py::TestHideQtWarning::test_filtered']`,
+	}
+	tests, err := inst.ParseFailToPass()
+	if err != nil {
+		t.Fatalf("ParseFailToPass with single quotes: %v", err)
+	}
+	if len(tests) != 2 {
+		t.Fatalf("expected 2 tests, got %d", len(tests))
+	}
+	if tests[0] != "tests/unit/utils/test_qtlog.py::TestHideQtWarning::test_unfiltered" {
+		t.Errorf("tests[0] = %q", tests[0])
+	}
+}
+
 func TestInstance_ParseSelectedTestFiles(t *testing.T) {
 	inst := Instance{
 		SelectedTestFilesToRun: `["tests/test_foo.py", "tests/test_bar.py"]`,

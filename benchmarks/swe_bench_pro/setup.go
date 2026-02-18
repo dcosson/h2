@@ -64,8 +64,9 @@ func (inst *Instance) ParseSelectedTestFiles() ([]string, error) {
 	return parseTestList(inst.SelectedTestFilesToRun)
 }
 
-// parseTestList parses a JSON string that contains a list of test identifiers.
-// SWE-bench stores these as JSON-encoded arrays within string fields.
+// parseTestList parses a test list string that may be JSON (double quotes) or
+// Python repr() format (single quotes). The HuggingFace SWE-bench datasets
+// use both formats depending on the instance.
 func parseTestList(s string) ([]string, error) {
 	s = strings.TrimSpace(s)
 	if s == "" || s == "[]" {
@@ -74,9 +75,36 @@ func parseTestList(s string) ([]string, error) {
 
 	var tests []string
 	if err := json.Unmarshal([]byte(s), &tests); err != nil {
-		return nil, fmt.Errorf("parse test list: %w", err)
+		// Try converting Python single-quote format to JSON double quotes.
+		converted := pythonListToJSON(s)
+		if err2 := json.Unmarshal([]byte(converted), &tests); err2 != nil {
+			return nil, fmt.Errorf("parse test list: %w", err)
+		}
 	}
 	return tests, nil
+}
+
+// pythonListToJSON converts a Python repr() list with single quotes to valid JSON.
+// e.g. "['foo', 'bar']" → '["foo", "bar"]'
+func pythonListToJSON(s string) string {
+	// Replace single-quoted strings with double-quoted.
+	// This handles the common case where test IDs don't contain quotes.
+	var b strings.Builder
+	b.Grow(len(s))
+	inString := false
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if ch == '\'' && !inString {
+			b.WriteByte('"')
+			inString = true
+		} else if ch == '\'' && inString {
+			b.WriteByte('"')
+			inString = false
+		} else {
+			b.WriteByte(ch)
+		}
+	}
+	return b.String()
 }
 
 // LoadDataset loads SWE-bench Pro instances from a JSON file.
