@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
@@ -24,12 +24,27 @@ type reliabilitySandbox struct {
 	AgentName  string // agent name in this sandbox
 }
 
+// sandboxOpts configures the reliability sandbox.
+type sandboxOpts struct {
+	agentType        string // agent type for the role (default "claude")
+	model            string // model to use (default "haiku")
+	permissionScript string // path to permission script (empty = no custom script)
+}
+
 // createReliabilitySandbox creates a fully isolated h2 environment for a
-// reliability test. It initializes h2, creates a role with the given permission
-// script path (empty = no custom permission script), writes CLAUDE.md
+// reliability test. It initializes h2, creates a role, writes CLAUDE.md
 // instructions, and creates the project working directory.
-func createReliabilitySandbox(t *testing.T, agentName string, permissionScriptPath string) reliabilitySandbox {
+func createReliabilitySandbox(t *testing.T, agentName string, opts sandboxOpts) reliabilitySandbox {
 	t.Helper()
+
+	agentType := opts.agentType
+	if agentType == "" {
+		agentType = "claude"
+	}
+	model := opts.model
+	if model == "" {
+		model = "haiku"
+	}
 
 	h2Dir := createTestH2Dir(t)
 
@@ -55,8 +70,8 @@ seeing, one per line, with the exact token string.`
 
 	// Build role YAML.
 	roleYAML := fmt.Sprintf(`name: %s
-agent_type: "true"
-model: haiku
+agent_type: %s
+model: %s
 working_dir: %s
 instructions: |
   You are a test agent for message receipt reliability testing.
@@ -64,10 +79,10 @@ instructions: |
   silently and continue your current work.
   When asked to list all RECEIPT- messages, list every one you
   remember seeing, one per line.
-`, agentName, projectDir)
+`, agentName, agentType, model, projectDir)
 
 	// If a permission script is provided, configure the PermissionRequest hook.
-	if permissionScriptPath != "" {
+	if opts.permissionScript != "" {
 		roleYAML += fmt.Sprintf(`hooks:
   PermissionRequest:
     - matcher: ""
@@ -75,7 +90,7 @@ instructions: |
         - type: command
           command: "%s"
           timeout: 60
-`, permissionScriptPath)
+`, opts.permissionScript)
 	}
 
 	createRole(t, h2Dir, agentName, roleYAML)
@@ -89,15 +104,35 @@ instructions: |
 
 // --- Token Sending ---
 
+// sendTokenResult holds the outcome of a single token send attempt.
+type sendTokenResult struct {
+	Token string
+	OK    bool
+	Error string
+}
+
+// trySendToken sends a single RECEIPT token via h2 send without calling t.Fatal.
+// Safe to call from any goroutine.
+func trySendToken(h2Dir, agentName, token, priority string) sendTokenResult {
+	cmd := exec.Command(h2Binary, "send", "--priority="+priority, agentName, token)
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	cmd.Env = append(os.Environ(), "H2_DIR="+h2Dir, "H2_ACTOR=test-harness")
+
+	err := cmd.Run()
+	if err != nil {
+		return sendTokenResult{Token: token, OK: false, Error: stderr.String()}
+	}
+	return sendTokenResult{Token: token, OK: true}
+}
+
 // sendTokens sends RECEIPT tokens at the given interval until stop is closed.
-// Returns the list of tokens that were sent. The tokens are sent via `h2 send`
-// with the specified priority. Each token has format:
-// RECEIPT-<testName>-<seqNum>-<timestamp>
+// Returns the list of tokens that were successfully sent. Safe to call from
+// any goroutine (does not call t.Fatal).
+// Token format: RECEIPT-<testName>-<seqNum>-<timestamp>
 func sendTokens(t *testing.T, h2Dir, agentName, testName string,
 	interval time.Duration, priority string, stop <-chan struct{}) []string {
-	t.Helper()
-
-	var mu sync.Mutex
 	var tokens []string
 	seq := 0
 
@@ -107,26 +142,15 @@ func sendTokens(t *testing.T, h2Dir, agentName, testName string,
 	for {
 		select {
 		case <-stop:
-			mu.Lock()
-			result := make([]string, len(tokens))
-			copy(result, tokens)
-			mu.Unlock()
-			return result
+			return tokens
 		case <-ticker.C:
 			token := fmt.Sprintf("%s%s-%d-%d", tokenPrefix, testName, seq, time.Now().UnixMilli())
-
-			result := runH2WithEnv(t, h2Dir,
-				[]string{"H2_ACTOR=test-harness"},
-				"send", "--priority="+priority, agentName, token)
-
-			if result.ExitCode != 0 {
-				t.Logf("sendTokens: failed to send token %s: exit=%d stderr=%s",
-					token, result.ExitCode, result.Stderr)
+			result := trySendToken(h2Dir, agentName, token, priority)
+			if !result.OK {
+				t.Logf("sendTokens: failed to send token %s: %s", token, result.Error)
 			} else {
-				mu.Lock()
 				tokens = append(tokens, token)
-				mu.Unlock()
-				t.Logf("sendTokens: sent token %s (msgID=%s)", token, strings.TrimSpace(result.Stdout))
+				t.Logf("sendTokens: sent token %s", token)
 			}
 			seq++
 		}
@@ -273,41 +297,61 @@ func readActivityLog(t *testing.T, h2Dir, agentName string) []activityLogEntry {
 	return entries
 }
 
-// collectReceivedTokens scans session-activity.jsonl for UserPromptSubmit
-// hook events. Since each delivered message triggers a UserPromptSubmit hook,
-// we look at the raw JSONL lines for RECEIPT tokens.
+// collectReceivedTokens counts how many RECEIPT tokens were delivered to the
+// agent by counting UserPromptSubmit hook events in session-activity.jsonl.
 //
-// This approach reads the raw lines because the hook event payload doesn't
-// contain the message body — instead we look at the delivery log. As a
-// fallback, we also scan the messages directory for delivered message files.
+// Each delivered message triggers a UserPromptSubmit hook when the text is
+// typed into the PTY. We count these events to determine delivery. Since the
+// hook payload doesn't contain the message body, we also scan the raw JSONL
+// lines for any RECEIPT token strings that may appear in surrounding context.
+//
+// As a complementary strategy, we also scan the raw lines of the activity log
+// for RECEIPT tokens — they sometimes appear in hook payloads or other events.
 func collectReceivedTokens(t *testing.T, h2Dir, agentName string) []string {
 	t.Helper()
 
+	logPath := filepath.Join(h2Dir, "sessions", agentName, "session-activity.jsonl")
+	f, err := os.Open(logPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			t.Logf("collectReceivedTokens: no activity log at %s", logPath)
+			return nil
+		}
+		t.Fatalf("collectReceivedTokens: open %s: %v", logPath, err)
+	}
+	defer f.Close()
+
 	var tokens []string
 
-	// Strategy 1: Scan message files in the messages directory.
-	// Messages are stored as files under h2Dir/../ or ~/.h2/messages/<agent>/.
-	// The h2 message directory is at the h2Dir level.
-	msgDir := filepath.Join(h2Dir, "messages", agentName)
-	entries, err := os.ReadDir(msgDir)
-	if err == nil {
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			data, readErr := os.ReadFile(filepath.Join(msgDir, entry.Name()))
-			if readErr != nil {
-				continue
-			}
-			body := string(data)
-			// Extract any RECEIPT tokens from the message body.
-			for _, token := range extractTokensFromText(body) {
-				tokens = append(tokens, token)
-			}
+	// Scan raw JSONL lines for RECEIPT tokens. This catches tokens that
+	// appear anywhere in the log (hook payloads, tool output, etc.).
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		for _, token := range extractTokensFromText(line) {
+			tokens = append(tokens, token)
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("collectReceivedTokens: scan error: %v", err)
 	}
 
 	return uniqueStrings(tokens)
+}
+
+// countUserPromptSubmits counts UserPromptSubmit hook events in the activity
+// log. This gives the total number of messages that were submitted to the
+// agent's context, regardless of content.
+func countUserPromptSubmits(t *testing.T, h2Dir, agentName string) int {
+	t.Helper()
+	entries := readActivityLog(t, h2Dir, agentName)
+	count := 0
+	for _, e := range entries {
+		if e.Event == "hook" && e.HookEvent == "UserPromptSubmit" {
+			count++
+		}
+	}
+	return count
 }
 
 // collectReceivedTokensFromAgentQuery sends a message asking the agent to
@@ -338,14 +382,33 @@ func collectReceivedTokensFromAgentQuery(t *testing.T, h2Dir, agentName string, 
 // --- Token Extraction ---
 
 // extractTokensFromText finds all RECEIPT-* tokens in a block of text.
+// Works with both plain text and JSON-encoded strings (where tokens may
+// appear as values like "body":"RECEIPT-test-0-111").
 func extractTokensFromText(text string) []string {
 	var tokens []string
-	for _, word := range strings.Fields(text) {
-		// Clean surrounding punctuation.
-		cleaned := strings.Trim(word, "\"',;:()[]{}.")
-		if strings.HasPrefix(cleaned, tokenPrefix) {
-			tokens = append(tokens, cleaned)
+	// Search for the RECEIPT- prefix at any position in the text, then
+	// extract the full token (contiguous non-delimiter characters).
+	for i := 0; i < len(text); i++ {
+		if !strings.HasPrefix(text[i:], tokenPrefix) {
+			continue
 		}
+		// Found a RECEIPT- prefix. Scan forward to find end of token.
+		j := i + len(tokenPrefix)
+		for j < len(text) {
+			c := text[j]
+			// Token characters: alphanumeric, dash, underscore, dot
+			if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+				(c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' {
+				j++
+			} else {
+				break
+			}
+		}
+		token := text[i:j]
+		if len(token) > len(tokenPrefix) { // Must have content after prefix
+			tokens = append(tokens, token)
+		}
+		i = j - 1 // Skip past this token
 	}
 	return tokens
 }
