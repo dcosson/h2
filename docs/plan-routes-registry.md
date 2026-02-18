@@ -147,18 +147,18 @@ Only the current h2 dir's agents are shown without prefixes. All other dirs — 
 ```
 h2home ~/h2home (current)
   Agents
-    ● concierge (concierge) claude — Active (thinking) 5s, up 2h, 30k in / 15k out $3.20
-    ● coder-1 (coding) claude — Active (tool use: Bash) 1m, up 4h, 80k in / 20k out $8.50
+    ● concierge (concierge) claude — Active (thinking) 5s, up 2h, 30k/15k $3.20
+    ● coder-1 (coding) claude — Active (tool use: Bash) 1m, up 4h, 80k/20k $8.50
   Bridges
     ● dcosson (telegram) — up 6h
 
 root ~/.h2
   Agents
-    ○ root/solo (default) claude — Idle 30m, up 1h, 5k in / 2k out $0.50
+    ○ root/solo (default) claude — Idle 30m, up 1h, 5k/2k $0.50
 
 project-a ~/work/project-a
   Agents
-    ● project-a/worker-1 (coding) claude — Active 10s, up 30m, 10k in / 5k out $1.20
+    ● project-a/worker-1 (coding) claude — Active 10s, up 30m, 10k/5k $1.20
 ```
 
 ### h2 send Cross-Directory (Future)

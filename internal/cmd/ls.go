@@ -239,7 +239,7 @@ func printAgentLine(info *message.AgentInfo) {
 	if info.TotalTokens > 0 || info.TotalCostUSD > 0 {
 		parts := []string{}
 		if info.InputTokens > 0 || info.OutputTokens > 0 {
-			parts = append(parts, agent.FormatTokens(info.InputTokens)+" in / "+agent.FormatTokens(info.OutputTokens)+" out")
+			parts = append(parts, agent.FormatTokens(info.InputTokens)+"/"+agent.FormatTokens(info.OutputTokens))
 		}
 		if info.TotalCostUSD > 0 {
 			parts = append(parts, agent.FormatCost(info.TotalCostUSD))
