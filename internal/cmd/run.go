@@ -16,6 +16,8 @@ import (
 func newRunCmd() *cobra.Command {
 	var name string
 	var detach bool
+	var printMode bool
+	var metricsFile string
 	var dryRun bool
 	var roleName string
 	var agentType string
@@ -34,12 +36,18 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
   h2 run                        Use the default role
   h2 run --role concierge       Use a specific role
   h2 run --agent-type claude    Run an agent type without a role
-  h2 run --command "vim"        Run an explicit command`,
+  h2 run --command "vim"        Run an explicit command
+  h2 run --print                Run claude --print headlessly (no PTY/daemon)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Safety check: when running inside a Claude Code session,
-			// require --detach to prevent hijacking the parent's terminal.
-			if os.Getenv("CLAUDECODE") != "" && !detach {
-				return fmt.Errorf("running inside a Claude Code session (CLAUDECODE is set); use --detach to avoid hijacking the parent terminal")
+			// require --detach, --print, or --dry-run to prevent hijacking the parent's terminal.
+			if os.Getenv("CLAUDECODE") != "" && !detach && !printMode && !dryRun {
+				return fmt.Errorf("running inside a Claude Code session (CLAUDECODE is set); use --detach or --print to avoid hijacking the parent terminal")
+			}
+
+			// --print mode: run headlessly without PTY/daemon/socket.
+			if printMode {
+				return runPrintMode(cmd, roleName, agentType, command, metricsFile, pod, overrides, varFlags, args)
 			}
 
 			// Validate pod name if provided.
@@ -171,6 +179,8 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 
 	cmd.Flags().StringVar(&name, "name", "", "Agent name (auto-generated if omitted)")
 	cmd.Flags().BoolVar(&detach, "detach", false, "Don't auto-attach after starting")
+	cmd.Flags().BoolVar(&printMode, "print", false, "Run headlessly with --print (no PTY, no daemon)")
+	cmd.Flags().StringVar(&metricsFile, "metrics-file", "", "Write token/cost metrics JSON to this file (requires --print)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show resolved config without launching")
 	cmd.Flags().StringVar(&roleName, "role", "", "Role to use (defaults to 'default')")
 	cmd.Flags().StringVar(&agentType, "agent-type", "", "Agent type to run without a role (e.g. claude)")
@@ -180,4 +190,68 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 	cmd.Flags().StringArrayVar(&varFlags, "var", nil, "Set template variable (key=value, repeatable)")
 
 	return cmd
+}
+
+// runPrintMode handles the --print execution path.
+func runPrintMode(cmd *cobra.Command, roleName, agentTypeFlag, commandFlag, metricsFile, pod string, overrides, varFlags, args []string) error {
+	opts := session.PrintOpts{
+		MetricsFile: metricsFile,
+	}
+
+	// Determine command and role-based settings.
+	if cmd.Flags().Changed("agent-type") {
+		opts.Command = agentTypeFlag
+		opts.Args = append([]string{"--print"}, args...)
+	} else if cmd.Flags().Changed("command") {
+		opts.Command = commandFlag
+		opts.Args = args
+	} else {
+		// Role-based: resolve the role for settings.
+		if roleName == "" {
+			roleName = "default"
+		}
+		vars, err := parseVarFlags(varFlags)
+		if err != nil {
+			return err
+		}
+		ctx := &tmpl.Context{
+			AgentName: "print",
+			RoleName:  roleName,
+			PodName:   pod,
+			H2Dir:     config.ConfigDir(),
+			Var:       vars,
+		}
+
+		var role *config.Role
+		if pod != "" {
+			role, err = config.LoadPodRoleRendered(roleName, ctx)
+		} else {
+			role, err = config.LoadRoleRendered(roleName, ctx)
+		}
+		if err != nil {
+			return fmt.Errorf("load role %q: %w", roleName, err)
+		}
+		if len(overrides) > 0 {
+			if err := config.ApplyOverrides(role, overrides); err != nil {
+				return fmt.Errorf("apply overrides: %w", err)
+			}
+		}
+
+		opts.Command = role.GetAgentType()
+		opts.Args = []string{"--print"}
+		opts.ClaudeConfigDir = role.GetClaudeConfigDir()
+		opts.Instructions = role.Instructions
+		opts.SystemPrompt = role.SystemPrompt
+		opts.Model = role.Model
+		opts.PermissionMode = role.PermissionMode
+		opts.AllowedTools = role.Permissions.Allow
+		opts.DisallowedTools = role.Permissions.Deny
+
+		cwd, _ := os.Getwd()
+		if resolved, err := role.ResolveWorkingDir(cwd); err == nil {
+			opts.CWD = resolved
+		}
+	}
+
+	return session.RunPrint(opts)
 }
