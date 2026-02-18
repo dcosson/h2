@@ -62,6 +62,18 @@ A dashboard view showing running pods, agent statuses, open beads, token usage, 
 
 **TUI library options:** [Bubbletea](https://github.com/charmbracelet/bubbletea) (Go-native, Elm architecture, large ecosystem, easiest integration) or [FrankenTUI](https://github.com/Dicklesworthstone/frankentui) (Rust, more powerful rendering with diff-based updates and scrollback preservation, but would need embedding via CGo/FFI or subprocess IPC).
 
+### Split token display into input/output
+
+The status bar and `h2 list` currently show a single total token count (e.g., `45k`). Split this into input/output tokens (e.g., `30k in / 15k out`) for better cost visibility, since input and output tokens have different pricing.
+
+### Remove redraw from menu mode
+
+The redraw option in menu mode doesn't seem to work reliably. Remove it to reduce clutter.
+
+### Menu mode history scrolling
+
+Add Ctrl+N / Ctrl+P keybindings to scroll through command/input history in menu mode, similar to shell readline behavior.
+
 ### Fancy status bar theme
 
 Add an alternate status bar style with powerline/nerd font symbols (arrows, rounded separators, icons for agent state). Make it a configurable theme option so users with compatible fonts can opt in to a richer visual style.
