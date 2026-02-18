@@ -112,8 +112,8 @@ Examples:
 			gains := runner.ModeGain(runs)
 			if len(gains) > 0 {
 				fmt.Fprintf(w, "Baseline → H2 Gains\n")
-				for label, gain := range gains {
-					fmt.Fprintf(w, "  %s: %+.1f%%\n", label, gain*100)
+				for _, g := range gains {
+					fmt.Fprintf(w, "  %s: %+.1f%%\n", g.Label, g.Gain*100)
 				}
 				fmt.Fprintln(w)
 			}

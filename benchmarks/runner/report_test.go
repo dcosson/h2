@@ -399,14 +399,16 @@ func TestModeGain_BasicComparison(t *testing.T) {
 	}
 
 	gains := ModeGain(runs)
-	gain, ok := gains["swe_bench_pro/opus"]
-	if !ok {
-		t.Fatal("expected gain for swe_bench_pro/opus")
+	if len(gains) != 1 {
+		t.Fatalf("expected 1 gain entry, got %d", len(gains))
+	}
+	if gains[0].Label != "swe_bench_pro/opus" {
+		t.Errorf("label = %q, want %q", gains[0].Label, "swe_bench_pro/opus")
 	}
 
 	expected := (0.35 - 0.23) / 0.23
-	if math.Abs(gain-expected) > 0.01 {
-		t.Errorf("gain = %f, want ~%f", gain, expected)
+	if math.Abs(gains[0].Gain-expected) > 0.01 {
+		t.Errorf("gain = %f, want ~%f", gains[0].Gain, expected)
 	}
 }
 
@@ -428,9 +430,38 @@ func TestModeGain_ZeroBaseline(t *testing.T) {
 	}
 
 	gains := ModeGain(runs)
-	gain := gains["bench/opus"]
-	if !math.IsInf(gain, 1) {
-		t.Errorf("expected +Inf gain from zero baseline, got %f", gain)
+	if len(gains) != 1 {
+		t.Fatalf("expected 1 gain entry, got %d", len(gains))
+	}
+	if !math.IsInf(gains[0].Gain, 1) {
+		t.Errorf("expected +Inf gain from zero baseline, got %f", gains[0].Gain)
+	}
+}
+
+func TestModeGain_SortedOutput(t *testing.T) {
+	runs := []RunReport{
+		makeRunReport("zebra", ModeBaseline, "opus", 10, 100, 10.0, 100000, nil),
+		makeRunReport("zebra", ModeH2, "opus", 20, 100, 20.0, 200000, nil),
+		makeRunReport("alpha", ModeBaseline, "opus", 10, 100, 10.0, 100000, nil),
+		makeRunReport("alpha", ModeH2, "opus", 30, 100, 30.0, 300000, nil),
+		makeRunReport("middle", ModeBaseline, "haiku", 10, 100, 5.0, 50000, nil),
+		makeRunReport("middle", ModeH2, "haiku", 15, 100, 10.0, 100000, nil),
+	}
+
+	gains := ModeGain(runs)
+	if len(gains) != 3 {
+		t.Fatalf("expected 3 gain entries, got %d", len(gains))
+	}
+
+	// Verify sorted order.
+	if gains[0].Label != "alpha/opus" {
+		t.Errorf("gains[0].Label = %q, want %q", gains[0].Label, "alpha/opus")
+	}
+	if gains[1].Label != "middle/haiku" {
+		t.Errorf("gains[1].Label = %q, want %q", gains[1].Label, "middle/haiku")
+	}
+	if gains[2].Label != "zebra/opus" {
+		t.Errorf("gains[2].Label = %q, want %q", gains[2].Label, "zebra/opus")
 	}
 }
 

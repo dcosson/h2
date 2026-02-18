@@ -422,9 +422,16 @@ func formatTokens(n int64) string {
 	}
 }
 
+// GainEntry represents the improvement (or regression) from baseline to h2 mode
+// for a specific benchmark/preset pair.
+type GainEntry struct {
+	Label string  `json:"label"` // "benchmark/preset".
+	Gain  float64 `json:"gain"`  // Relative gain (e.g. 0.52 = +52%).
+}
+
 // ModeGain computes the improvement (or regression) from baseline to h2 mode
-// for the same benchmark and preset. Returns a map of "benchmark/preset" -> gain %.
-func ModeGain(runs []RunReport) map[string]float64 {
+// for the same benchmark and preset. Returns entries sorted by label for stable output.
+func ModeGain(runs []RunReport) []GainEntry {
 	type key struct {
 		benchmark string
 		preset    string
@@ -442,17 +449,23 @@ func ModeGain(runs []RunReport) map[string]float64 {
 		}
 	}
 
-	gains := make(map[string]float64)
+	var gains []GainEntry
 	for k, baseRate := range baselineRates {
 		if h2Rate, ok := h2Rates[k]; ok {
 			label := k.benchmark + "/" + k.preset
+			var gain float64
 			if baseRate > 0 {
-				gains[label] = (h2Rate - baseRate) / baseRate
+				gain = (h2Rate - baseRate) / baseRate
 			} else if h2Rate > 0 {
-				gains[label] = math.Inf(1)
+				gain = math.Inf(1)
 			}
+			gains = append(gains, GainEntry{Label: label, Gain: gain})
 		}
 	}
+
+	sort.Slice(gains, func(i, j int) bool {
+		return gains[i].Label < gains[j].Label
+	})
 
 	return gains
 }
