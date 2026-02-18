@@ -217,9 +217,9 @@ func (s *Session) NewClient() *client.Client {
 	cl.QueueStatus = func() (int, bool) {
 		return s.Queue.PendingCount(), s.Queue.IsPaused()
 	}
-	cl.OtelMetrics = func() (int64, float64, bool, int) {
+	cl.OtelMetrics = func() (int64, int64, float64, bool, int) {
 		m := s.Agent.Metrics()
-		return m.TotalTokens, m.TotalCostUSD, m.EventsReceived, s.Agent.OtelPort()
+		return m.InputTokens, m.OutputTokens, m.TotalCostUSD, m.EventsReceived, s.Agent.OtelPort()
 	}
 	cl.AgentState = func() (string, string, string) {
 		st, sub := s.State()

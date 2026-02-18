@@ -156,6 +156,8 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 	// Pull from OTEL collector if active.
 	m := s.Agent.Metrics()
 	if m.EventsReceived {
+		info.InputTokens = m.InputTokens
+		info.OutputTokens = m.OutputTokens
 		info.TotalTokens = m.TotalTokens
 		info.TotalCostUSD = m.TotalCostUSD
 		info.LinesAdded = m.LinesAdded
