@@ -2,6 +2,10 @@
 
 A harness for your harnesses. An agent runner, messaging, and orchestration layer for AI coding Agents.
 
+<p align="center">
+  <img src="docs/images/h2-hero.jpg" alt="Ox with a harness pulling a payload">
+</p>
+
 h2 manages AI coding agents as background processes, lets them message each other and you, and coordinates teams of agents working on projects together. It's a 3-tier system — use as much or as little as you need.
 
 h2 is not a custom harness — it wraps existing agent tools (Claude Code, Codex, etc.) by communicating through their TTY interface. It works with Claude Max and ChatGPT Pro plans out of the box. No API keys or `setup-token` required.
@@ -19,6 +23,16 @@ h2 peek coder-1                 # check what an agent is working on
 h2 attach coder-1               # take over an agent's terminal
 h2 stop coder-1                 # stop an agent
 ```
+
+When you run an agent (or attach to one already running) you'll see the h2 status bar and input bar at the bottom of the window, with the regular agent TUI app running above it. H2 is in its default Normal mode - in this mode, almost all control sequences, arrows, enter, escape, mouse scroll wheel, etc. pass through to the underlying app so you can navigate & respond to most menu options. Your cursor is active in the h2 input bar at the bottom of the screen, so you can type messages and send them as if you were typing into the agent's input directly.
+
+<p align="center">
+  <img src="docs/images/h2-normal-mode.png" alt="h2 UI example">
+</p>
+
+The benefit of having separate h2 input bar is that while you're typing out a manual message, the agent can be receive messages from other agents and it won't conflict with what you're writing (which was a problem I ran into using tmux and send-keys for messaging).
+
+Hit ctrl+\ to get to Menu mode. You'll see keyboard shortcut options to detach or stop the agent process, as well as get to Passthrough mode (p). In Passthrough mode, you're using the agent TUI like normal, typing directly into it, just like using it without h2. In this mode, any messages sent to your agent are being queued and will be sent when you exit Passthrough mode. Passthrough mode is exclusive so if multiple windows are attached to the same session, only one of them can be using it at a time. Use ctrl+\ again to exit back to normal mode.
 
 `h2 list` shows each agent's real-time state — active, idle, thinking, in tool use, waiting on permission, compacting — along with usage stats (tokens, cost) tracked automatically for every agent:
 
@@ -54,14 +68,21 @@ h2 send reviewer "Please review coder-1's branch"
 ```
 
 Messages have priority levels:
+
 - **interrupt** — breaks through immediately (even mid-tool-use)
 - **normal** — delivered at the next natural pause
 - **idle-first** — queued and delivered when the agent goes idle (LIFO)
 - **idle** — queued and delivered when idle (FIFO)
 
+This can be set with the --priority flag in h2 send, and you can use tab in the h2 input bar to change the priority of manually typed messages.
+
 ### Telegram Bridge
 
-Connect a Telegram bot so you can message agents from your phone:
+This is, in my opinion, the best way to work with h2. It's a transformative coding experience. You don't need to attach to every agent session, and you don't even need to be sitting at your computer. You chat with one concierge agent who can message other running agents and check in on the status of everything going on across all your sessions, giving you just the updates you care about. Even when I'm sitting at my computer, I now often check in on things via the telegram web app so that I don't need to e.g. remember which agent is working on what and scroll through the details of the claude code sessions.
+
+Note that message delivery to the telegram bot works via long-polling, so you can run it anywhere (local machine or dev server) without needing to expose a publicly addressable port.
+
+To connect a Telegram bot:
 
 ```bash
 h2 bridge    # starts the bridge + a concierge agent
@@ -223,19 +244,19 @@ h2 peek coder-1
 
 ## Commands Reference
 
-| Command | Description |
-|---------|-------------|
-| `h2 run` | Start a new agent |
-| `h2 list` | List running agents with state |
-| `h2 attach <name>` | Attach to an agent's terminal |
-| `h2 peek <name>` | View recent agent activity |
-| `h2 stop <name>` | Stop an agent |
-| `h2 send <name> <msg>` | Send a message to an agent |
-| `h2 pod launch <template>` | Launch a team of agents |
-| `h2 pod stop <name>` | Stop all agents in a pod |
-| `h2 bridge` | Start Telegram bridge + concierge |
-| `h2 role list` | List available roles |
-| `h2 status <name>` | Show detailed agent status |
-| `h2 auth claude` | Authenticate with Claude |
-| `h2 init` | Initialize h2 directory |
-| `h2 whoami` | Show your identity (for agents) |
+| Command                    | Description                       |
+| -------------------------- | --------------------------------- |
+| `h2 run`                   | Start a new agent                 |
+| `h2 list`                  | List running agents with state    |
+| `h2 attach <name>`         | Attach to an agent's terminal     |
+| `h2 peek <name>`           | View recent agent activity        |
+| `h2 stop <name>`           | Stop an agent                     |
+| `h2 send <name> <msg>`     | Send a message to an agent        |
+| `h2 pod launch <template>` | Launch a team of agents           |
+| `h2 pod stop <name>`       | Stop all agents in a pod          |
+| `h2 bridge`                | Start Telegram bridge + concierge |
+| `h2 role list`             | List available roles              |
+| `h2 status <name>`         | Show detailed agent status        |
+| `h2 auth claude`           | Authenticate with Claude          |
+| `h2 init`                  | Initialize h2 directory           |
+| `h2 whoami`                | Show your identity (for agents)   |
