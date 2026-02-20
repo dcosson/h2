@@ -1,0 +1,19 @@
+{
+  "id": "h2-5qi",
+  "title": "Fix eventstore Tail partial line handling",
+  "description": "Reviewer found that eventstore Tail can lose partial lines: ReadBytes discards partial data on EOF, losing the start of events that were partially written. Fix by accumulating partial data across poll ticks. Also change Open from O_RDWR to O_WRONLY since reads use separate handles. Low practical risk but a correctness issue.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "h2-meo",
+  "dependencies": [
+    {
+      "id": "h2-meo",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-19T16:51:29.247359-08:00",
+  "updated_at": "2026-02-19T16:51:29.247359-08:00"
+}
