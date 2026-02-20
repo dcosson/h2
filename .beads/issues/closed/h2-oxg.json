@@ -2,7 +2,7 @@
   "id": "h2-oxg",
   "title": "Create CodexType struct and ResolveAgentType('codex')",
   "description": "Add CodexType struct implementing AgentType interface. Register in ResolveAgentType so agent_type: codex works in role configs. Command() returns 'codex'. NewAdapter() creates CodexAdapter. RoleArgs maps model, instructions, and permission mode to Codex CLI flags (--model, --full-auto/--suggest/--ask). Unit tests.",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 1,
   "type": "task",
   "parent": "h2-9gb",
@@ -21,5 +21,7 @@
   "created_by": "Danny Cosson",
   "owner": "dcosson@gmail.com",
   "created_at": "2026-02-19T16:04:30.26235-08:00",
-  "updated_at": "2026-02-19T17:07:15.396696-08:00"
+  "updated_at": "2026-02-19T17:12:42.648896-08:00",
+  "closed_at": "2026-02-19T17:12:42.648896-08:00",
+  "close_reason": "Closed"
 }
