@@ -14,6 +14,20 @@ import (
 	"h2/internal/session/agent/monitor"
 )
 
+// HarnessFactory creates a Harness from a config and logger.
+type HarnessFactory func(HarnessConfig, *activitylog.Logger) Harness
+
+// registry holds registered harness factories keyed by type name.
+var registry = map[string]HarnessFactory{}
+
+// Register adds a harness factory for the given type name(s).
+// Called from init() in each harness sub-package.
+func Register(factory HarnessFactory, names ...string) {
+	for _, name := range names {
+		registry[name] = factory
+	}
+}
+
 // Harness defines how h2 launches, monitors, and interacts with a specific
 // kind of agent. Each supported agent (Claude Code, Codex, generic shell)
 // implements this interface, merging the old AgentType + AgentAdapter split.
@@ -107,8 +121,10 @@ func (s *PTYInputSender) SendInterrupt() error {
 func Resolve(cfg HarnessConfig, log *activitylog.Logger) (Harness, error) {
 	switch cfg.HarnessType {
 	case "claude_code", "claude":
-		// placeholder: will be claude.New(cfg, log)
-		return nil, fmt.Errorf("claude_code harness not yet implemented")
+		if f, ok := registry[cfg.HarnessType]; ok {
+			return f(cfg, log), nil
+		}
+		return nil, fmt.Errorf("claude_code harness not registered (import harness/claude)")
 	case "codex":
 		// placeholder: will be codex.New(cfg, log)
 		return nil, fmt.Errorf("codex harness not yet implemented")
