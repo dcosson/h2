@@ -25,8 +25,9 @@ type Service struct {
 	user            string   // "from" field for inbound messages
 	lastSender      string   // tracks last agent who sent outbound
 	lastRoutedAgent string   // tracks last agent an inbound message was delivered to
-	allowedCommands []string // slash commands allowed on this bridge
-	cancel          context.CancelFunc
+	allowedCommands  []string      // slash commands allowed on this bridge
+	typingTickInterval time.Duration // interval between typing indicator ticks; 0 uses default
+	cancel           context.CancelFunc
 
 	// Status tracking.
 	startTime        time.Time
@@ -331,15 +332,19 @@ func (s *Service) sendToAgent(name, from, body string) error {
 	return nil
 }
 
-// typingTickInterval is the interval between typing indicator refreshes.
-// Telegram's typing indicator lasts ~5s, so 4s keeps it alive.
-var typingTickInterval = 4 * time.Second
+// defaultTypingTickInterval is the default interval between typing indicator
+// refreshes. Telegram's typing indicator lasts ~5s, so 4s keeps it alive.
+const defaultTypingTickInterval = 4 * time.Second
 
 // runTypingLoop periodically checks agent state and sends typing indicators
 // to all TypingIndicator bridges while the target agent is active. It also
 // monitors concierge liveness and sends a status message if the concierge stops.
 func (s *Service) runTypingLoop(ctx context.Context) {
-	ticker := time.NewTicker(typingTickInterval)
+	interval := s.typingTickInterval
+	if interval == 0 {
+		interval = defaultTypingTickInterval
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	conciergeWasAlive := false
