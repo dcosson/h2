@@ -32,12 +32,13 @@ type Request struct {
 
 // Response is the JSON response sent back over the Unix socket.
 type Response struct {
-	OK        bool         `json:"ok"`
-	Error     string       `json:"error,omitempty"`
-	MessageID string       `json:"message_id,omitempty"`
-	Message   *MessageInfo `json:"message,omitempty"`
-	Agent     *AgentInfo   `json:"agent,omitempty"`
-	Bridge    *BridgeInfo  `json:"bridge,omitempty"`
+	OK           bool         `json:"ok"`
+	Error        string       `json:"error,omitempty"`
+	MessageID    string       `json:"message_id,omitempty"`
+	OldConcierge string       `json:"old_concierge,omitempty"`
+	Message      *MessageInfo `json:"message,omitempty"`
+	Agent        *AgentInfo   `json:"agent,omitempty"`
+	Bridge       *BridgeInfo  `json:"bridge,omitempty"`
 }
 
 // BridgeInfo is the public representation of bridge status.

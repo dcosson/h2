@@ -37,7 +37,12 @@ func newBridgeDaemonCmd() *cobra.Command {
 				return fmt.Errorf("no bridges configured for user %q", user)
 			}
 
-			svc := bridgeservice.New(bridges, concierge, socketdir.Dir(), user)
+			var allowedCommands []string
+			if userCfg.Bridges.Telegram != nil {
+				allowedCommands = userCfg.Bridges.Telegram.AllowedCommands
+			}
+
+			svc := bridgeservice.New(bridges, concierge, socketdir.Dir(), user, allowedCommands)
 
 			ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer cancel()
