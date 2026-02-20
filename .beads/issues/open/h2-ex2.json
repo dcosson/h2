@@ -1,0 +1,18 @@
+{
+  "id": "h2-ex2",
+  "title": "Phase 3: Polish \u0026 Codex session logs",
+  "description": "Add session log collector for Codex adapter. Implement Codex peek using unified event store. Polish cross-agent features: cost tracking normalization, permission handling UX for Codex, role system integration for Codex agent type. Performance tuning and test coverage.",
+  "status": "open",
+  "priority": 2,
+  "type": "epic",
+  "dependencies": [
+    {
+      "id": "h2-9gb",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-19T16:00:27.410352-08:00",
+  "updated_at": "2026-02-19T16:00:27.410352-08:00"
+}

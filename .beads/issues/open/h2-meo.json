@@ -1,0 +1,18 @@
+{
+  "id": "h2-meo",
+  "title": "Phase 1: Adapter infrastructure (Claude Code refactor)",
+  "description": "Refactor existing Claude Code agent observation into the adapter pattern. Define AgentAdapter interface, AgentEvent schema, InputSender interface. Extract shared packages (otelserver, outputcollector, eventstore). Refactor Claude Code agent to use claude/ adapter with OtelServer + HookHandler + SessionLogCollector. Wire AgentMonitor to consume normalized events. Add unified event store (JSONL per session).",
+  "status": "open",
+  "priority": 1,
+  "type": "epic",
+  "dependents": [
+    {
+      "id": "h2-9gb",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-19T16:00:02.190992-08:00",
+  "updated_at": "2026-02-19T16:00:02.190992-08:00"
+}
