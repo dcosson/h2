@@ -1,0 +1,19 @@
+{
+  "id": "h2-9gb.1",
+  "title": "Fix message delivery path to use resolved H2_DIR",
+  "description": "message/delivery.go:64 hardcodes filepath.Join(os.Getenv(\"HOME\"), \".h2\", \"messages\", agentName). Should use config.ConfigDir() instead, same fix pattern as h2-67d (activity log path). Standalone one-liner fix.",
+  "status": "open",
+  "priority": 1,
+  "type": "bug",
+  "parent": "h2-9gb",
+  "dependencies": [
+    {
+      "id": "h2-9gb",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-20T08:26:13.65111-08:00",
+  "updated_at": "2026-02-20T08:26:13.65111-08:00"
+}
