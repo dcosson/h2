@@ -2,7 +2,7 @@
   "id": "h2-cxf",
   "title": "Build adapter/codex/ with OTEL trace parser",
   "description": "Build CodexAdapter in adapter/codex/. Implements AgentAdapter interface. OtelServer collector with Codex-specific trace event parsing. Maps codex.conversation_starts -\u003e EventSessionStarted (discovers thread ID), codex.user_prompt -\u003e EventTurnStarted, codex.sse_event(completed) -\u003e EventTurnCompleted (token counts), codex.tool_result -\u003e EventToolCompleted, codex.tool_decision(ask_user) -\u003e EventApprovalRequested. HandleHookEvent returns false (Codex doesn't use h2 hooks).",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 1,
   "type": "task",
   "parent": "h2-9gb",
@@ -25,5 +25,7 @@
   "created_by": "Danny Cosson",
   "owner": "dcosson@gmail.com",
   "created_at": "2026-02-19T16:04:43.367236-08:00",
-  "updated_at": "2026-02-19T17:13:28.245217-08:00"
+  "updated_at": "2026-02-19T17:43:34.920952-08:00",
+  "closed_at": "2026-02-19T17:43:34.920952-08:00",
+  "close_reason": "Closed"
 }
