@@ -66,6 +66,7 @@ func (m *mockTypingBridge) TypingCalls() int {
 type mockReceiver struct {
 	name    string
 	handler bridge.InboundHandler
+	mu      sync.Mutex
 	started bool
 	stopped bool
 }
@@ -73,11 +74,32 @@ type mockReceiver struct {
 func (m *mockReceiver) Name() string { return m.name }
 func (m *mockReceiver) Close() error { return nil }
 func (m *mockReceiver) Start(_ context.Context, h bridge.InboundHandler) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.handler = h
 	m.started = true
 	return nil
 }
-func (m *mockReceiver) Stop() { m.stopped = true }
+func (m *mockReceiver) Stop() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.stopped = true
+}
+func (m *mockReceiver) Started() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.started
+}
+func (m *mockReceiver) Stopped() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.stopped
+}
+func (m *mockReceiver) Handler() bridge.InboundHandler {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.handler
+}
 
 // --- Mock agent socket ---
 
@@ -545,7 +567,7 @@ func TestRunStartsAndStopsReceivers(t *testing.T) {
 	sockPath := filepath.Join(tmpDir, socketdir.Format(socketdir.TypeBridge, "alice"))
 	waitForSocket(t, sockPath)
 
-	if !recv.started {
+	if !recv.Started() {
 		t.Error("receiver was not started")
 	}
 
@@ -554,7 +576,7 @@ func TestRunStartsAndStopsReceivers(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	if !recv.stopped {
+	if !recv.Stopped() {
 		t.Error("receiver was not stopped")
 	}
 }
@@ -599,14 +621,12 @@ func TestResolveDefaultTarget_NoAgents(t *testing.T) {
 // --- Typing loop tests ---
 
 func TestTypingLoop_SendsWhenActive(t *testing.T) {
-	typingTickInterval = 50 * time.Millisecond
-	defer func() { typingTickInterval = 4 * time.Second }()
-
 	tmpDir := shortTempDir(t)
 	_ = newMockStatusAgent(t, tmpDir, "concierge", "active")
 
 	tb := &mockTypingBridge{name: "telegram"}
 	svc := New([]bridge.Bridge{tb}, "concierge", tmpDir, "alice", nil)
+	svc.typingTickInterval = 50 * time.Millisecond
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go svc.runTypingLoop(ctx)
@@ -621,14 +641,12 @@ func TestTypingLoop_SendsWhenActive(t *testing.T) {
 }
 
 func TestTypingLoop_SkipsWhenIdle(t *testing.T) {
-	typingTickInterval = 50 * time.Millisecond
-	defer func() { typingTickInterval = 4 * time.Second }()
-
 	tmpDir := shortTempDir(t)
 	_ = newMockStatusAgent(t, tmpDir, "concierge", "idle")
 
 	tb := &mockTypingBridge{name: "telegram"}
 	svc := New([]bridge.Bridge{tb}, "concierge", tmpDir, "alice", nil)
+	svc.typingTickInterval = 50 * time.Millisecond
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go svc.runTypingLoop(ctx)
@@ -643,14 +661,12 @@ func TestTypingLoop_SkipsWhenIdle(t *testing.T) {
 }
 
 func TestTypingLoop_SkipsWhenNoAgent(t *testing.T) {
-	typingTickInterval = 50 * time.Millisecond
-	defer func() { typingTickInterval = 4 * time.Second }()
-
 	tmpDir := shortTempDir(t)
 	// No agent socket exists.
 
 	tb := &mockTypingBridge{name: "telegram"}
 	svc := New([]bridge.Bridge{tb}, "concierge", tmpDir, "alice", nil)
+	svc.typingTickInterval = 50 * time.Millisecond
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go svc.runTypingLoop(ctx)
@@ -665,15 +681,13 @@ func TestTypingLoop_SkipsWhenNoAgent(t *testing.T) {
 }
 
 func TestTypingLoop_WorksWithoutConcierge(t *testing.T) {
-	typingTickInterval = 50 * time.Millisecond
-	defer func() { typingTickInterval = 4 * time.Second }()
-
 	tmpDir := shortTempDir(t)
 	_ = newMockStatusAgent(t, tmpDir, "myagent", "active")
 
 	tb := &mockTypingBridge{name: "telegram"}
 	svc := New([]bridge.Bridge{tb}, "", tmpDir, "alice", nil) // no concierge
-	svc.lastSender = "myagent"                           // fallback target
+	svc.typingTickInterval = 50 * time.Millisecond
+	svc.lastSender = "myagent" // fallback target
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go svc.runTypingLoop(ctx)
@@ -817,8 +831,8 @@ func TestStatusRequest_CountsInbound(t *testing.T) {
 	waitForSocket(t, sockPath)
 
 	// Simulate inbound messages.
-	recv.handler("concierge", "hello")
-	recv.handler("concierge", "world")
+	recv.Handler()("concierge", "hello")
+	recv.Handler()("concierge", "world")
 
 	// Wait for messages to be delivered.
 	time.Sleep(100 * time.Millisecond)
@@ -845,14 +859,12 @@ func TestStatusRequest_CountsInbound(t *testing.T) {
 }
 
 func TestTypingLoop_RespondsToStateChange(t *testing.T) {
-	typingTickInterval = 50 * time.Millisecond
-	defer func() { typingTickInterval = 4 * time.Second }()
-
 	tmpDir := shortTempDir(t)
 	agent := newMockStatusAgent(t, tmpDir, "concierge", "idle")
 
 	tb := &mockTypingBridge{name: "telegram"}
 	svc := New([]bridge.Bridge{tb}, "concierge", tmpDir, "alice", nil)
+	svc.typingTickInterval = 50 * time.Millisecond
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go svc.runTypingLoop(ctx)
@@ -1261,14 +1273,12 @@ func TestStartupMessage_NoConciergeWithAgents(t *testing.T) {
 // --- Concierge monitoring in typing loop test ---
 
 func TestTypingLoop_DetectsConciergeDown(t *testing.T) {
-	typingTickInterval = 50 * time.Millisecond
-	defer func() { typingTickInterval = 4 * time.Second }()
-
 	tmpDir := shortTempDir(t)
 	agent := newMockStatusAgent(t, tmpDir, "sage", "active")
 
 	sender := &mockSender{name: "telegram"}
 	svc := New([]bridge.Bridge{sender}, "sage", tmpDir, "alice", nil)
+	svc.typingTickInterval = 50 * time.Millisecond
 
 	ctx, cancel := context.WithCancel(context.Background())
 
