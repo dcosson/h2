@@ -17,6 +17,7 @@ import (
 	"h2/internal/activitylog"
 	"h2/internal/session/agent"
 	"h2/internal/session/agent/monitor"
+	"h2/internal/session/agent/shared/eventstore"
 	"h2/internal/session/client"
 	"h2/internal/session/message"
 	"h2/internal/session/virtualterminal"
@@ -50,6 +51,9 @@ type Session struct {
 	// prependArgs holds CLI args from the adapter's launch config
 	// (e.g. --session-id for Claude Code). Set by setupAgent().
 	prependArgs []string
+
+	// eventStore persists AgentEvents to events.jsonl for peek/replay.
+	eventStore *eventstore.EventStore
 
 	// ExtraEnv holds additional environment variables to pass to the child process.
 	ExtraEnv map[string]string
@@ -152,6 +156,14 @@ func (s *Session) setupAgent() error {
 
 	// Store prepend args for childArgs().
 	s.prependArgs = launchCfg.PrependArgs
+
+	// Wire event store for event persistence (best-effort).
+	if s.SessionDir != "" {
+		if es, err := eventstore.Open(s.SessionDir); err == nil {
+			s.eventStore = es
+			s.Agent.SetEventWriter(es.Append)
+		}
+	}
 
 	return nil
 }
@@ -661,6 +673,10 @@ func (s *Session) Stop() {
 	s.Agent.ActivityLog().SessionSummary(summary)
 
 	s.Agent.Stop()
+
+	if s.eventStore != nil {
+		s.eventStore.Close()
+	}
 }
 
 // buildSessionSummary collects metrics from all available sources.

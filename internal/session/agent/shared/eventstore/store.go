@@ -121,6 +121,17 @@ func (s *EventStore) Close() error {
 	return s.file.Close()
 }
 
+// ReadEventsFile reads all events from events.jsonl in the given session directory.
+// This is a standalone function that does not require an open EventStore.
+func ReadEventsFile(sessionDir string) ([]monitor.AgentEvent, error) {
+	f, err := os.Open(filepath.Join(sessionDir, eventsFileName))
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return readEvents(f)
+}
+
 // --- Wire format ---
 
 // eventEnvelope is the JSON representation of an AgentEvent on disk.

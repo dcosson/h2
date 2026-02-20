@@ -218,6 +218,12 @@ func (m *AgentMonitor) Metrics() MetricsSnapshot {
 	}
 }
 
+// SetEventWriter sets the callback invoked for every event. Must be called
+// before Run. Typically used to wire an EventStore for persistence.
+func (m *AgentMonitor) SetEventWriter(fn func(AgentEvent) error) {
+	m.writeEvent = fn
+}
+
 // SetExited transitions to the Exited state. Called externally when
 // the child process exits.
 func (m *AgentMonitor) SetExited() {

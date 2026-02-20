@@ -79,7 +79,18 @@ func (a *Agent) ActivityLog() *activitylog.Logger {
 
 // SetOtelLogFiles opens the raw OTEL log files for appending.
 // Must be called before PrepareForLaunch.
+// Skipped for adapted agents (Claude Code, Codex) which handle OTEL
+// through their adapter's parser rather than raw log files.
 func (a *Agent) SetOtelLogFiles(dir string) error {
+	// Adapted agents (claude, codex) don't use raw OTEL log files — their
+	// adapters parse OTEL payloads and emit AgentEvents directly.
+	if a.agentType != nil {
+		switch a.agentType.Name() {
+		case "claude", "codex":
+			return nil
+		}
+	}
+
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create otel log dir: %w", err)
 	}
@@ -108,8 +119,11 @@ func (a *Agent) PrepareForLaunch(agentName, sessionID string) (adapter.LaunchCon
 		return adapter.LaunchConfig{}, nil
 	}
 
-	// Create hook collector for backward compat Snapshot() data.
-	a.hooksCollector = collector.NewHookCollector(a.ActivityLog())
+	// Create hook collector for agents that use hooks (Claude Code).
+	// Codex doesn't use hooks, so skip to avoid wasted resources.
+	if a.adapter.Name() == "claude-code" {
+		a.hooksCollector = collector.NewHookCollector(a.ActivityLog())
+	}
 
 	return a.adapter.PrepareForLaunch(agentName, sessionID)
 }
@@ -171,6 +185,12 @@ func (a *Agent) HandleHookEvent(eventName string, payload json.RawMessage) bool 
 	return a.hooksCollector != nil
 }
 
+// SetEventWriter sets the callback for persisting events. Must be called
+// before Start. Typically used by session to wire an EventStore.
+func (a *Agent) SetEventWriter(fn func(monitor.AgentEvent) error) {
+	a.agentMonitor.SetEventWriter(fn)
+}
+
 // --- State accessors (delegate to monitor) ---
 
 // State returns the current derived state and sub-state.
@@ -225,7 +245,23 @@ func (a *Agent) AgentType() AgentType {
 }
 
 // Metrics returns a snapshot of the current OTEL metrics.
+// For adapted agents (Claude Code, Codex), metrics come from the AgentMonitor
+// which accumulates them from AgentEvents. For legacy/generic agents, metrics
+// come from the OtelMetrics struct populated directly by the OTEL parser.
 func (a *Agent) Metrics() OtelMetricsSnapshot {
+	if a.adapter != nil {
+		// Adapted agent: bridge from monitor's MetricsSnapshot.
+		ms := a.agentMonitor.Metrics()
+		hasData := ms.InputTokens > 0 || ms.OutputTokens > 0 || ms.TurnCount > 0
+		return OtelMetricsSnapshot{
+			InputTokens:    ms.InputTokens,
+			OutputTokens:   ms.OutputTokens,
+			TotalTokens:    ms.InputTokens + ms.OutputTokens,
+			TotalCostUSD:   ms.TotalCostUSD,
+			ToolCounts:     ms.ToolCounts,
+			EventsReceived: hasData,
+		}
+	}
 	if a.metrics == nil {
 		return OtelMetricsSnapshot{}
 	}
