@@ -418,8 +418,8 @@ func TestPrintDryRun_InstructionsArgTruncated(t *testing.T) {
 	output := capturePrintDryRun(rc)
 
 	// The Args line should show a truncated placeholder, not the full instructions.
-	if !strings.Contains(output, "<instructions: 3 lines>") {
-		t.Errorf("Args should show truncated instructions placeholder, got:\n%s", output)
+	if !strings.Contains(output, "<3 lines>") {
+		t.Errorf("Args should show truncated multiline placeholder, got:\n%s", output)
 	}
 }
 
@@ -561,8 +561,8 @@ func TestPrintDryRun_SystemPromptArgTruncated(t *testing.T) {
 
 	output := capturePrintDryRun(rc)
 
-	if !strings.Contains(output, "<system-prompt: 3 lines>") {
-		t.Errorf("Args should show truncated system-prompt placeholder, got:\n%s", output)
+	if !strings.Contains(output, "<3 lines>") {
+		t.Errorf("Args should show truncated multiline placeholder, got:\n%s", output)
 	}
 }
 

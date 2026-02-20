@@ -9,25 +9,25 @@ import (
 
 	"h2/internal/config"
 	"h2/internal/session"
+	"h2/internal/session/agent"
 )
 
 // ResolvedAgentConfig holds all resolved values for an agent launch,
 // computed without any side effects. Used by --dry-run display.
 type ResolvedAgentConfig struct {
-	Name            string
-	Role            *config.Role
-	Command         string
-	SessionDir      string
-	ClaudeConfigDir string
-	WorkingDir      string
-	IsWorktree      bool
-	Heartbeat       session.DaemonHeartbeat
-	Pod             string
-	Overrides       []string
-	EnvVars         map[string]string
-	ChildArgs       []string
-	RoleScope       string            // "pod" or "global" — set by pod dry-run
-	MergedVars      map[string]string // final merged vars — set by pod dry-run
+	Name       string
+	Role       *config.Role
+	Command    string
+	SessionDir string
+	WorkingDir string
+	IsWorktree bool
+	Heartbeat  session.DaemonHeartbeat
+	Pod        string
+	Overrides  []string
+	EnvVars    map[string]string
+	ChildArgs  []string
+	RoleScope  string            // "pod" or "global" — set by pod dry-run
+	MergedVars map[string]string // final merged vars — set by pod dry-run
 }
 
 // resolveAgentConfig computes all values needed to launch an agent without
@@ -37,8 +37,8 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 		name = session.GenerateName()
 	}
 
-	claudeConfigDir := role.GetClaudeConfigDir()
 	cmdCommand := role.GetAgentType()
+	agentType := agent.ResolveAgentType(cmdCommand)
 
 	var heartbeat session.DaemonHeartbeat
 	if role.Heartbeat != nil {
@@ -84,49 +84,39 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 	if sessionDir != "" {
 		envVars["H2_SESSION_DIR"] = sessionDir
 	}
-	if claudeConfigDir != "" {
-		envVars["CLAUDE_CONFIG_DIR"] = claudeConfigDir
+	// Merge agent-type-specific env vars (e.g. CLAUDE_CONFIG_DIR).
+	for k, v := range agentType.BuildCommandEnvVars(config.ConfigDir(), role.Name) {
+		envVars[k] = v
 	}
 	if pod != "" {
 		envVars["H2_POD"] = pod
 	}
 
-	// Build child args: what the claude command would receive.
-	// Mirrors Session.childArgs() in session.go.
+	// Build child args: what the agent command would receive.
+	// Uses AgentType.BuildCommandArgs for agent-specific flags.
 	var childArgs []string
 	childArgs = append(childArgs, "--session-id", "<generated-uuid>")
-	if role.SystemPrompt != "" {
-		childArgs = append(childArgs, "--system-prompt", role.SystemPrompt)
-	}
-	if role.Instructions != "" {
-		childArgs = append(childArgs, "--append-system-prompt", role.Instructions)
-	}
-	if role.Model != "" {
-		childArgs = append(childArgs, "--model", role.Model)
-	}
-	if role.PermissionMode != "" {
-		childArgs = append(childArgs, "--permission-mode", role.PermissionMode)
-	}
-	if len(role.Permissions.Allow) > 0 {
-		childArgs = append(childArgs, "--allowedTools", strings.Join(role.Permissions.Allow, ","))
-	}
-	if len(role.Permissions.Deny) > 0 {
-		childArgs = append(childArgs, "--disallowedTools", strings.Join(role.Permissions.Deny, ","))
-	}
+	childArgs = append(childArgs, agentType.BuildCommandArgs(agent.CommandArgsConfig{
+		Instructions:    role.Instructions,
+		SystemPrompt:    role.SystemPrompt,
+		Model:           role.Model,
+		PermissionMode:  role.PermissionMode,
+		AllowedTools:    role.Permissions.Allow,
+		DisallowedTools: role.Permissions.Deny,
+	})...)
 
 	return &ResolvedAgentConfig{
-		Name:            name,
-		Role:            role,
-		Command:         cmdCommand,
-		SessionDir:      sessionDir,
-		ClaudeConfigDir: claudeConfigDir,
-		WorkingDir:      agentCWD,
-		IsWorktree:      isWorktree,
-		Heartbeat:       heartbeat,
-		Pod:             pod,
-		Overrides:       overrides,
-		EnvVars:         envVars,
-		ChildArgs:       childArgs,
+		Name:       name,
+		Role:       role,
+		Command:    cmdCommand,
+		SessionDir: sessionDir,
+		WorkingDir: agentCWD,
+		IsWorktree: isWorktree,
+		Heartbeat:  heartbeat,
+		Pod:        pod,
+		Overrides:  overrides,
+		EnvVars:    envVars,
+		ChildArgs:  childArgs,
 	}, nil
 }
 
@@ -179,21 +169,14 @@ func printDryRun(rc *ResolvedAgentConfig) {
 	fmt.Println()
 	fmt.Printf("Command: %s\n", rc.Command)
 	if len(rc.ChildArgs) > 0 {
-		// Show args with long values truncated for readability.
+		// Show args with multiline values truncated for readability.
 		var displayArgs []string
-		for i := 0; i < len(rc.ChildArgs); i++ {
-			if rc.ChildArgs[i] == "--system-prompt" && i+1 < len(rc.ChildArgs) {
-				displayArgs = append(displayArgs, rc.ChildArgs[i])
-				lines := strings.Count(rc.ChildArgs[i+1], "\n") + 1
-				displayArgs = append(displayArgs, fmt.Sprintf("<system-prompt: %d lines>", lines))
-				i++ // skip the value
-			} else if rc.ChildArgs[i] == "--append-system-prompt" && i+1 < len(rc.ChildArgs) {
-				displayArgs = append(displayArgs, rc.ChildArgs[i])
-				lines := strings.Count(rc.ChildArgs[i+1], "\n") + 1
-				displayArgs = append(displayArgs, fmt.Sprintf("<instructions: %d lines>", lines))
-				i++ // skip the value
+		for _, arg := range rc.ChildArgs {
+			if strings.Contains(arg, "\n") {
+				lines := strings.Count(arg, "\n") + 1
+				displayArgs = append(displayArgs, fmt.Sprintf("<%d lines>", lines))
 			} else {
-				displayArgs = append(displayArgs, rc.ChildArgs[i])
+				displayArgs = append(displayArgs, arg)
 			}
 		}
 		fmt.Printf("Args: %s\n", strings.Join(displayArgs, " "))
@@ -204,9 +187,6 @@ func printDryRun(rc *ResolvedAgentConfig) {
 		fmt.Printf("Working Dir: %s (worktree)\n", rc.WorkingDir)
 	} else {
 		fmt.Printf("Working Dir: %s\n", rc.WorkingDir)
-	}
-	if rc.ClaudeConfigDir != "" {
-		fmt.Printf("Claude Config Dir: %s\n", rc.ClaudeConfigDir)
 	}
 	fmt.Printf("Session Dir: %s\n", rc.SessionDir)
 
