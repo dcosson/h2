@@ -1,0 +1,29 @@
+{
+  "id": "h2-b0c.4",
+  "title": "Create agent/harness/codex/ package",
+  "description": "Merge CodexType + CodexAdapter into CodexHarness. Constructor takes HarnessConfig + activitylog.Logger. Name() returns 'codex'. HandleOutput() is no-op. Move launch.go, otel_parser.go from adapter/codex/. Merge tests from adapter/codex/ + agent_type_test.go Codex tests.",
+  "status": "open",
+  "priority": 1,
+  "type": "task",
+  "parent": "h2-b0c",
+  "dependencies": [
+    {
+      "id": "h2-b0c",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-b0c.1",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "h2-b0c.6",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-20T12:15:26.438373-08:00",
+  "updated_at": "2026-02-20T12:15:26.438373-08:00"
+}

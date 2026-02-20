@@ -1,0 +1,29 @@
+{
+  "id": "h2-b0c.7",
+  "title": "Update callers to use Harness API",
+  "description": "Update session.go (ResolveAgentType-\u003eharness.Resolve, AgentType()-\u003eHarness(), s.Model-\u003eharness config), daemon.go (AgentType()-\u003eHarness(), opts.Model via HarnessConfig), cmd/agent_setup.go (role.GetAgentType-\u003eGetHarnessConfig, ResolveAgentType-\u003eharness.Resolve, role.Model-\u003erole.GetModel()), cmd/dry_run.go (same), cmd/run.go (--agent-type flag-\u003e--agent-harness), cmd/role.go (template strings, display). session_test.go and heartbeat_test.go use generic.New() instead of ResolveAgentType.",
+  "status": "open",
+  "priority": 1,
+  "type": "task",
+  "parent": "h2-b0c",
+  "dependencies": [
+    {
+      "id": "h2-b0c",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-b0c.6",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "h2-b0c.8",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-20T12:16:09.945548-08:00",
+  "updated_at": "2026-02-20T12:16:09.945548-08:00"
+}

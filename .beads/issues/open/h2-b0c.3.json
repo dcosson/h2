@@ -1,0 +1,29 @@
+{
+  "id": "h2-b0c.3",
+  "title": "Create agent/harness/claude/ package",
+  "description": "Merge ClaudeCodeType + ClaudeCodeAdapter into ClaudeCodeHarness. Constructor takes HarnessConfig + activitylog.Logger. Name() returns 'claude_code'. HandleOutput() is no-op. BuildCommandEnvVars(h2Dir) uses config dir from HarnessConfig. Move hook_handler.go, otel_parser.go, sessionlog.go from adapter/claude/. Merge tests from adapter/claude/adapter_test.go + agent_type_test.go Claude tests.",
+  "status": "open",
+  "priority": 1,
+  "type": "task",
+  "parent": "h2-b0c",
+  "dependencies": [
+    {
+      "id": "h2-b0c",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-b0c.1",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "h2-b0c.6",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-20T12:15:14.891481-08:00",
+  "updated_at": "2026-02-20T12:15:14.891481-08:00"
+}

@@ -1,0 +1,29 @@
+{
+  "id": "h2-b0c.2",
+  "title": "Create agent/harness/ package with Harness interface",
+  "description": "Define Harness interface (Name, Command, DisplayCommand, BuildCommandArgs, BuildCommandEnvVars, EnsureConfigDir, PrepareForLaunch, Start, HandleHookEvent, HandleOutput, Stop). Define HarnessConfig, move LaunchConfig, CommandArgsConfig, InputSender, PTYInputSender from adapter/ package. Add Resolve(cfg, log) function that maps harness_type to constructor. Start() blocks until ctx cancelled for all harnesses.",
+  "status": "open",
+  "priority": 1,
+  "type": "task",
+  "parent": "h2-b0c",
+  "dependencies": [
+    {
+      "id": "h2-b0c",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-b0c.1",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "h2-b0c.6",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-20T12:15:00.970868-08:00",
+  "updated_at": "2026-02-20T12:15:00.970868-08:00"
+}
