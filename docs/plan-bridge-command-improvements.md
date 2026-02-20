@@ -177,11 +177,6 @@ import (
     "strings"
 )
 
-// bridgeTag returns the "[bridge <name>]" prefix.
-func bridgeTag(bridgeName string) string {
-    return fmt.Sprintf("[bridge %s]", bridgeName)
-}
-
 // conciergeRouting returns the routing explanation when a concierge is set.
 func conciergeRouting(agentName string) string {
     return fmt.Sprintf("The concierge agent %s will reply to all messages.", agentName)
@@ -216,52 +211,59 @@ func allowedCommandsHint(commands []string) string {
 
 ### Message Scenarios
 
+All messages below show the body text passed to `sendBridgeStatus()`. The `[bridge <name>]` tag is prepended automatically by `sendBridgeStatus` via `bridge.FormatAgentTag`.
+
 **Bridge startup:**
 ```
-[bridge <name>] Bridge is up and running. <routing> <direct-hint> <commands-hint>
+Bridge is up and running. <routing> <direct-hint> <commands-hint>
 ```
 
 Where `<routing>` is either `conciergeRouting(name)` or `noConciergeRouting(firstAgent)`.
 
 If no agents exist at all:
 ```
-[bridge <name>] Bridge is up and running, but no agents are running to message. Create agents with h2 run. <commands-hint>
+Bridge is up and running, but no agents are running to message. Create agents with h2 run. <commands-hint>
 ```
 
 **Bridge shutdown** (stop or SIGTERM):
 ```
-[bridge <name>] Bridge is shutting down.
+Bridge is shutting down.
 ```
 
 **Concierge set** (`set-concierge`):
-- If replacing: `[bridge <name>] Concierge changed. The concierge agent <agent> will reply to all messages.`
-- If new (none before): `[bridge <name>] Concierge added. The concierge agent <agent> will reply to all messages.`
+- If replacing: `Concierge changed. The concierge agent <agent> will reply to all messages.`
+- If new (none before): `Concierge added. The concierge agent <agent> will reply to all messages.`
 
 **Concierge removed** (`remove-concierge`):
 ```
-[bridge <name>] Concierge removed. <noConciergeRouting>
+Concierge removed. <noConciergeRouting>
 ```
 
 **Concierge agent stopped** (detected by monitoring — see Section 5):
 ```
-[bridge <name>] Concierge agent <agent> stopped. <noConciergeRouting>
+Concierge agent <agent> stopped. <noConciergeRouting>
 ```
 
 ### Sending Status Messages
 
-Add a `sendStatus(ctx, text)` method to `Service` that sends to all `Sender` bridges:
+Add a `sendBridgeStatus(ctx, text)` method to `Service` that prepends the bridge tag and sends to all `Sender` bridges. This follows the same pattern as `handleOutbound`, which uses `bridge.FormatAgentTag(from, body)` to tag messages before broadcasting — the tag is prepended once in the send method, not at each call site.
+
+The tag name is `"bridge " + s.user` (e.g. `"bridge dcosson-sand"`), so the tag renders as `[bridge dcosson-sand]`.
 
 ```go
-func (s *Service) sendStatus(ctx context.Context, text string) {
+func (s *Service) sendBridgeStatus(ctx context.Context, text string) {
+    tagged := bridge.FormatAgentTag("bridge "+s.user, text)
     for _, b := range s.bridges {
         if sender, ok := b.(bridge.Sender); ok {
-            if err := sender.Send(ctx, text); err != nil {
+            if err := sender.Send(ctx, tagged); err != nil {
                 log.Printf("bridge: send status via %s: %v", b.Name(), err)
             }
         }
     }
 }
 ```
+
+Callers pass just the body text without the tag prefix.
 
 ### File Changes
 
@@ -325,9 +327,9 @@ func (s *Service) handleConciergeDown(ctx context.Context, agentName string) {
     s.mu.Unlock()
 
     firstAgent := s.firstAvailableAgent()
-    msg := fmt.Sprintf("%s Concierge agent %s stopped. %s",
-        bridgeTag(s.user), agentName, noConciergeRouting(firstAgent))
-    s.sendStatus(ctx, msg)
+    msg := fmt.Sprintf("Concierge agent %s stopped. %s",
+        agentName, noConciergeRouting(firstAgent))
+    s.sendBridgeStatus(ctx, msg)
 }
 ```
 
@@ -423,7 +425,7 @@ In `Service.Run()`, after `<-ctx.Done()`:
 // Send shutdown message before cleanup.
 shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 defer cancel()
-s.sendStatus(shutdownCtx, fmt.Sprintf("%s Bridge is shutting down.", bridgeTag(s.user)))
+s.sendBridgeStatus(shutdownCtx, "Bridge is shutting down.")
 
 // Stop receivers...
 ```
@@ -451,7 +453,6 @@ s.sendStartupMessage(ctx)
 
 ```go
 func (s *Service) sendStartupMessage(ctx context.Context) {
-    tag := bridgeTag(s.user)
     var routing string
 
     s.mu.Lock()
@@ -463,17 +464,17 @@ func (s *Service) sendStartupMessage(ctx context.Context) {
     } else {
         firstAgent := s.firstAvailableAgent()
         if firstAgent == "" {
-            msg := fmt.Sprintf("%s Bridge is up and running, but no agents are running to message. "+
-                "Create agents with h2 run. %s", tag, allowedCommandsHint(s.allowedCommands))
-            s.sendStatus(ctx, msg)
+            msg := fmt.Sprintf("Bridge is up and running, but no agents are running to message. "+
+                "Create agents with h2 run. %s", allowedCommandsHint(s.allowedCommands))
+            s.sendBridgeStatus(ctx, msg)
             return
         }
         routing = noConciergeRouting(firstAgent)
     }
 
-    msg := fmt.Sprintf("%s Bridge is up and running. %s %s %s",
-        tag, routing, directMessagingHint(), allowedCommandsHint(s.allowedCommands))
-    s.sendStatus(ctx, msg)
+    msg := fmt.Sprintf("Bridge is up and running. %s %s %s",
+        routing, directMessagingHint(), allowedCommandsHint(s.allowedCommands))
+    s.sendBridgeStatus(ctx, msg)
 }
 ```
 
@@ -498,8 +499,8 @@ svc := bridgeservice.New(bridges, concierge, socketdir.Dir(), user,
 |------|--------|
 | `internal/cmd/bridge.go` | Refactor into parent + subcommands: `create`, `stop`, `set-concierge`, `remove-concierge`. Add `bridgeRequest()` helper. Parent command delegates to create for backward compat |
 | `internal/cmd/bridge_daemon.go` | Pass `AllowedCommands` from config to `bridgeservice.New()` |
-| `internal/bridgeservice/service.go` | Add `handleSetConcierge`, `handleRemoveConcierge`, `sendStatus`, `sendStartupMessage`, `handleConciergeDown`, `firstAvailableAgent`. Update `handleConn` switch, `handleInbound`, `runTypingLoop`, `Run` (shutdown msg). Add `lastRoutedAgent` and `allowedCommands` fields. **Add locking to all `s.concierge` read sites**: `resolveDefaultTarget()`, `handleOutbound()`, `buildBridgeInfo()` |
-| `internal/bridgeservice/status.go` | New: composable message string builders (`bridgeTag`, `conciergeRouting`, `noConciergeRouting`, `directMessagingHint`, `allowedCommandsHint`) |
+| `internal/bridgeservice/service.go` | Add `handleSetConcierge`, `handleRemoveConcierge`, `sendBridgeStatus`, `sendStartupMessage`, `handleConciergeDown`, `firstAvailableAgent`. Update `handleConn` switch, `handleInbound`, `runTypingLoop`, `Run` (shutdown msg). Add `lastRoutedAgent` and `allowedCommands` fields. **Add locking to all `s.concierge` read sites**: `resolveDefaultTarget()`, `handleOutbound()`, `buildBridgeInfo()` |
+| `internal/bridgeservice/status.go` | New: composable message string builders (`conciergeRouting`, `noConciergeRouting`, `directMessagingHint`, `allowedCommandsHint`) |
 | `internal/bridgeservice/status_test.go` | New: tests for message composition |
 | `internal/session/message/protocol.go` | Add `OldConcierge string` field to `Response` |
 
@@ -527,7 +528,7 @@ svc := bridgeservice.New(bridges, concierge, socketdir.Dir(), user,
 ## Implementation Order
 
 1. Composable message strings (`status.go` + tests) — no dependencies
-2. `Service` changes: new fields, `sendStatus`, socket handlers, startup/shutdown messages
+2. `Service` changes: new fields, `sendBridgeStatus`, socket handlers, startup/shutdown messages
 3. CLI subcommand refactor (`bridge.go`)
 4. Concierge monitoring in typing loop
 5. Typing indicator last-routed-agent tracking
