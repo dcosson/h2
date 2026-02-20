@@ -349,13 +349,7 @@ The typing indicator only tracks the concierge agent's state (or falls back via 
 
 ### New Behavior
 
-Track whoever the last inbound message was routed to. The typing indicator follows that agent's active/idle state.
-
-**Full typing target fallback chain** (in priority order):
-1. `lastRoutedAgent` — the agent the most recent inbound message was delivered to
-2. `concierge` — the assigned concierge (via `resolveDefaultTarget`)
-3. `lastSender` — the last agent that sent an outbound message
-4. First available agent socket
+Track whoever the last inbound message was routed to. The typing indicator checks `lastRoutedAgent` first, then falls back to `resolveDefaultTarget()` (which already handles the full chain: `concierge → lastSender → first agent`). This works the same whether the bridge is in concierge mode or not.
 
 **Reset rules:** `lastRoutedAgent` is reset to `""` when:
 - The concierge is changed via `set-concierge` (avoids tracking a stale target after a concierge swap)
