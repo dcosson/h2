@@ -112,3 +112,92 @@ func TestGenericType_DisplayCommand(t *testing.T) {
 		t.Fatalf("expected display command '/usr/bin/python3', got %q", gt.DisplayCommand())
 	}
 }
+
+func TestResolveAgentType_Codex(t *testing.T) {
+	at := ResolveAgentType("codex")
+	if at.Name() != "codex" {
+		t.Fatalf("expected name 'codex', got %q", at.Name())
+	}
+	if at.Command() != "codex" {
+		t.Fatalf("expected command 'codex', got %q", at.Command())
+	}
+	if !at.Collectors().Otel {
+		t.Fatal("expected Otel collector for codex")
+	}
+	if at.Collectors().Hooks {
+		t.Fatal("expected no Hooks collector for codex")
+	}
+	if at.OtelParser() != nil {
+		t.Fatal("expected nil OtelParser for codex (parser in adapter)")
+	}
+}
+
+func TestResolveAgentType_CodexFullPath(t *testing.T) {
+	at := ResolveAgentType("/usr/local/bin/codex")
+	if at.Name() != "codex" {
+		t.Fatalf("expected name 'codex' for full path, got %q", at.Name())
+	}
+}
+
+func TestCodexType_PrependArgs_Ignored(t *testing.T) {
+	ct := NewCodexType()
+	args := ct.PrependArgs("some-uuid")
+	if args != nil {
+		t.Fatalf("expected nil prepend args for codex, got %v", args)
+	}
+}
+
+func TestCodexType_ChildEnv_Nil(t *testing.T) {
+	ct := NewCodexType()
+	env := ct.ChildEnv(&CollectorPorts{OtelPort: 12345})
+	if env != nil {
+		t.Fatalf("expected nil child env for codex, got %v", env)
+	}
+}
+
+func TestCodexType_RoleArgs_Model(t *testing.T) {
+	ct := NewCodexType()
+	args := ct.RoleArgs("gpt-4o", "")
+	if len(args) != 3 || args[0] != "--model" || args[1] != "gpt-4o" || args[2] != "--full-auto" {
+		t.Fatalf("expected [--model gpt-4o --full-auto], got %v", args)
+	}
+}
+
+func TestCodexType_RoleArgs_FullAuto(t *testing.T) {
+	ct := NewCodexType()
+	args := ct.RoleArgs("", "full-auto")
+	if len(args) != 1 || args[0] != "--full-auto" {
+		t.Fatalf("expected [--full-auto], got %v", args)
+	}
+}
+
+func TestCodexType_RoleArgs_Suggest(t *testing.T) {
+	ct := NewCodexType()
+	args := ct.RoleArgs("", "suggest")
+	if len(args) != 1 || args[0] != "--suggest" {
+		t.Fatalf("expected [--suggest], got %v", args)
+	}
+}
+
+func TestCodexType_RoleArgs_Ask(t *testing.T) {
+	ct := NewCodexType()
+	args := ct.RoleArgs("", "ask")
+	if len(args) != 0 {
+		t.Fatalf("expected empty args for ask mode (default), got %v", args)
+	}
+}
+
+func TestCodexType_RoleArgs_DefaultFullAuto(t *testing.T) {
+	ct := NewCodexType()
+	args := ct.RoleArgs("", "")
+	if len(args) != 1 || args[0] != "--full-auto" {
+		t.Fatalf("expected [--full-auto] for empty permission mode, got %v", args)
+	}
+}
+
+func TestCodexType_DisplayCommand(t *testing.T) {
+	ct := NewCodexType()
+	if ct.DisplayCommand() != "codex" {
+		t.Fatalf("expected display command 'codex', got %q", ct.DisplayCommand())
+	}
+}

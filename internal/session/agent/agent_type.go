@@ -86,6 +86,51 @@ func (t *ClaudeCodeType) ChildEnv(cp *CollectorPorts) map[string]string {
 	}
 }
 
+// CodexType provides integration for OpenAI Codex CLI: OTEL traces, no hooks.
+type CodexType struct{}
+
+// NewCodexType creates a CodexType agent.
+func NewCodexType() *CodexType {
+	return &CodexType{}
+}
+
+func (t *CodexType) Name() string           { return "codex" }
+func (t *CodexType) Command() string         { return "codex" }
+func (t *CodexType) DisplayCommand() string   { return "codex" }
+func (t *CodexType) Collectors() CollectorSet { return CollectorSet{Otel: true, Hooks: false} }
+func (t *CodexType) OtelParser() OtelParser   { return nil } // Codex OTEL parser in adapter
+
+func (t *CodexType) PrependArgs(sessionID string) []string {
+	// Codex doesn't use --session-id; OTEL config is via the adapter.
+	return nil
+}
+
+func (t *CodexType) ChildEnv(cp *CollectorPorts) map[string]string {
+	// Codex OTEL trace exporter config is via -c CLI arg in the adapter,
+	// not environment variables.
+	return nil
+}
+
+// RoleArgs maps role configuration to Codex CLI flags.
+func (t *CodexType) RoleArgs(model, permissionMode string) []string {
+	var args []string
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	switch permissionMode {
+	case "full-auto":
+		args = append(args, "--full-auto")
+	case "suggest":
+		args = append(args, "--suggest")
+	case "ask":
+		// --ask is the default for Codex, no flag needed.
+	default:
+		// Default to full-auto for h2-managed agents.
+		args = append(args, "--full-auto")
+	}
+	return args
+}
+
 // GenericType is a fallback for unknown agents — no collectors, no special config.
 type GenericType struct {
 	command string
@@ -110,6 +155,8 @@ func ResolveAgentType(command string) AgentType {
 	switch filepath.Base(command) {
 	case "claude":
 		return NewClaudeCodeType()
+	case "codex":
+		return NewCodexType()
 	default:
 		return NewGenericType(command)
 	}
