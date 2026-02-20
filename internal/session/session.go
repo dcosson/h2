@@ -14,6 +14,7 @@ import (
 	"golang.org/x/term"
 
 	"h2/internal/activitylog"
+	"h2/internal/config"
 	"h2/internal/session/agent"
 	"h2/internal/session/agent/monitor"
 	"h2/internal/session/agent/shared/eventstore"
@@ -136,7 +137,8 @@ func (s *Session) initVT(rows, cols int) {
 // and merges them into the session's ExtraEnv and prependArgs.
 func (s *Session) setupAgent() error {
 	// Set up activity logger and raw OTEL log files.
-	logDir := filepath.Join(os.Getenv("HOME"), ".h2", "logs")
+	logDir := filepath.Join(config.ConfigDir(), "logs")
+	os.MkdirAll(logDir, 0o755)
 	logPath := filepath.Join(logDir, "session-activity.jsonl")
 	s.Agent.SetActivityLog(activitylog.New(true, logPath, s.Name, s.SessionID))
 	s.Agent.SetOtelLogFiles(logDir)

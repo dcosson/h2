@@ -3,11 +3,14 @@ package session
 import (
 	"context"
 	"io"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/vito/midterm"
 
+	"h2/internal/config"
 	"h2/internal/session/agent/monitor"
 	"h2/internal/session/client"
 	"h2/internal/session/message"
@@ -761,5 +764,34 @@ func TestChildArgs_AllFieldsCombined(t *testing.T) {
 		if args[i] != want {
 			t.Fatalf("args[%d] = %q, want %q\nfull args: %v", i, args[i], want, args)
 		}
+	}
+}
+
+func TestSetupAgent_LogDirUsesH2Dir(t *testing.T) {
+	// Create a custom h2 dir (not ~/.h2).
+	customH2Dir := filepath.Join(t.TempDir(), "custom-h2")
+	if err := os.MkdirAll(customH2Dir, 0o755); err != nil {
+		t.Fatalf("create custom h2 dir: %v", err)
+	}
+	if err := config.WriteMarker(customH2Dir); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	// Point H2_DIR at the custom dir and reset the resolve cache.
+	t.Setenv("H2_DIR", customH2Dir)
+	config.ResetResolveCache()
+	t.Cleanup(config.ResetResolveCache)
+
+	s := New("test-agent", "true", nil)
+	defer s.Stop()
+
+	if err := s.setupAgent(); err != nil {
+		t.Fatalf("setupAgent: %v", err)
+	}
+
+	// Activity log should have been created under the custom h2 dir.
+	logPath := filepath.Join(customH2Dir, "logs", "session-activity.jsonl")
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		t.Fatalf("activity log not created at expected path %s", logPath)
 	}
 }
