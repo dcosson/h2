@@ -418,7 +418,8 @@ instructions: |
 
 # Optional (all have defaults)
 description: "Builds features"          # human description
-agent_type: claude                       # default: "claude"
+agent_harness:
+  harness_type: claude_code                # default: "claude_code"
 model: ""                                # model override
 working_dir: "."                            # CWD for agent (default: invocation CWD)
 claude_config_dir: ""                    # custom claude config dir
@@ -557,7 +558,7 @@ The override mechanism maps dot-notation keys to struct fields via YAML tags:
 | Override Key | Struct Path | Type |
 |-------------|------------|------|
 | `working_dir` | `Role.WorkingDir` | `string` |
-| `agent_type` | `Role.AgentType` | `string` |
+| `agent_harness.harness_type` | `Role.AgentHarness.HarnessType` | `string` |
 | `model` | `Role.Model` | `string` |
 | `claude_config_dir` | `Role.ClaudeConfigDir` | `string` |
 | `worktree.project_dir` | `Role.Worktree.ProjectDir` | `string` |

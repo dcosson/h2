@@ -16,9 +16,9 @@ The Ctrl+Enter submit path never fires — always falls back to Ctrl+\. Needs in
 
 ## Agent Support
 
-### Codex and Gemini CLI agent types
+### Codex and Gemini CLI agent harnesses
 
-Add new agent types for OpenAI Codex CLI and Google Gemini CLI alongside the existing Claude Code type. Each needs: AgentType implementation (command, args, env, collectors), state detection, and OTEL/hook integration where supported.
+Add new agent harnesses for OpenAI Codex CLI and Google Gemini CLI alongside the existing Claude Code type. Each needs: Harness implementation (command, args, env, collectors), state detection, and OTEL/hook integration where supported.
 
 ## Permissions
 
@@ -42,7 +42,7 @@ Add `sandbox.compose` and `sandbox.service` fields to `h2-qa.yaml` as an alterna
 
 ### Messaging fuzz/chaos tests
 
-Stress test the message delivery system across all priority modes (normal, interrupt, idle, idle-first). Verify all messages are received regardless of agent state and concurrent activity. Run against all supported agent types (Claude, Codex, Gemini). May need to tune timeouts and delivery retry logic to ensure reliability under load.
+Stress test the message delivery system across all priority modes (normal, interrupt, idle, idle-first). Verify all messages are received regardless of agent state and concurrent activity. Run against all supported agent harnesses (Claude, Codex, Gemini). May need to tune timeouts and delivery retry logic to ensure reliability under load.
 
 ## Discovery & Routing
 

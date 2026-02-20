@@ -20,7 +20,9 @@ func TestIntegration_FullWorkflow(t *testing.T) {
 	// 3. Create roles (builder with branch worktree, reviewer with detached head).
 	createRole(t, h2Dir, "builder", `
 name: builder
-agent_type: "true"
+agent_harness:
+  harness_type: generic
+  command: "true"
 instructions: Build features.
 worktree:
   project_dir: projects/webapp
@@ -29,7 +31,9 @@ worktree:
 `)
 	createRole(t, h2Dir, "reviewer", `
 name: reviewer
-agent_type: "true"
+agent_harness:
+  harness_type: generic
+  command: "true"
 instructions: Review code.
 worktree:
   project_dir: projects/webapp
@@ -157,7 +161,9 @@ func TestBackwardCompat_LegacyRole(t *testing.T) {
 	// A role YAML with no working_dir, no worktree block — legacy format.
 	createRole(t, h2Dir, "legacy", `
 name: legacy
-agent_type: "true"
+agent_harness:
+  harness_type: generic
+  command: "true"
 instructions: I am a legacy role.
 `)
 
@@ -191,7 +197,9 @@ func TestBackwardCompat_RunWithoutPod(t *testing.T) {
 
 	createRole(t, h2Dir, "nopod", `
 name: nopod
-agent_type: "true"
+agent_harness:
+  harness_type: generic
+  command: "true"
 instructions: No pod agent.
 `)
 

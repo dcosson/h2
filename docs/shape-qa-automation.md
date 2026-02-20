@@ -202,7 +202,8 @@ Built-in QA protocol instructions plus the user's `extra_instructions`:
 
 ```yaml
 name: qa-orchestrator
-agent_type: claude
+agent_harness:
+  harness_type: claude_code
 model: {{ orchestrator.model }}
 permission_mode: bypassPermissions
 instructions: |
@@ -250,7 +251,7 @@ Plain markdown. No special syntax — the agent interprets it:
 # Test Plan: Messaging Priority
 
 ## Setup
-- Create two roles: sender and receiver (agent_type: claude, model: haiku)
+- Create two roles: sender and receiver (harness_type: claude_code, model: haiku)
 - Launch both agents
 
 ## TC-1: Normal message delivery

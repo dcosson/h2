@@ -68,10 +68,20 @@ seeing, one per line, with the exact token string.`
 		t.Fatalf("write CLAUDE.md: %v", err)
 	}
 
+	// Build agent_harness section based on agent type.
+	var harnessBlock string
+	switch agentType {
+	case "claude", "":
+		harnessBlock = fmt.Sprintf("agent_harness:\n  harness_type: claude_code\nmodel: %s", model)
+	case "codex":
+		harnessBlock = fmt.Sprintf("agent_harness:\n  harness_type: codex\nmodel: %s", model)
+	default:
+		harnessBlock = fmt.Sprintf("agent_harness:\n  harness_type: generic\n  command: %s", agentType)
+	}
+
 	// Build role YAML.
 	roleYAML := fmt.Sprintf(`name: %s
-agent_type: %s
-model: %s
+%s
 working_dir: %s
 instructions: |
   You are a test agent for message receipt reliability testing.
@@ -79,7 +89,7 @@ instructions: |
   silently and continue your current work.
   When asked to list all RECEIPT- messages, list every one you
   remember seeing, one per line.
-`, agentName, agentType, model, projectDir)
+`, agentName, harnessBlock, projectDir)
 
 	// If a permission script is provided, configure the PermissionRequest hook.
 	if opts.permissionScript != "" {

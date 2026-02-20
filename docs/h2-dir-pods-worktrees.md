@@ -113,7 +113,8 @@ Top-level role field that sets the working directory for the agent.
 
 ```yaml
 name: feature-builder
-agent_type: claude
+agent_harness:
+  harness_type: claude_code
 working_dir: "."             # default: CWD where `h2 run` was invoked
 instructions: |
   You build features.
@@ -134,7 +135,8 @@ Agents can run in their own git worktree so they don't conflict with each other 
 
 ```yaml
 name: feature-builder
-agent_type: claude
+agent_harness:
+  harness_type: claude_code
 instructions: |
   You build features.
 

@@ -30,7 +30,7 @@ func Register(factory HarnessFactory, names ...string) {
 
 // Harness defines how h2 launches, monitors, and interacts with a specific
 // kind of agent. Each supported agent (Claude Code, Codex, generic shell)
-// implements this interface, merging the old AgentType + AgentAdapter split.
+// implements this interface.
 type Harness interface {
 	// Identity
 	Name() string           // "claude_code", "codex", or "generic"
@@ -117,7 +117,6 @@ func (s *PTYInputSender) SendInterrupt() error {
 
 // Resolve maps a HarnessConfig to a concrete Harness implementation.
 // Returns an error for unknown harness types or invalid configs.
-// Placeholder: actual harness constructors will be wired in tasks .3-.5.
 func Resolve(cfg HarnessConfig, log *activitylog.Logger) (Harness, error) {
 	switch cfg.HarnessType {
 	case "claude_code", "claude":
