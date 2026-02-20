@@ -29,7 +29,7 @@ func Open(sessionDir string) (*EventStore, error) {
 	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create eventstore dir: %w", err)
 	}
-	f, err := os.OpenFile(filepath.Join(sessionDir, eventsFileName), os.O_CREATE|os.O_APPEND|os.O_RDWR, 0o644)
+	f, err := os.OpenFile(filepath.Join(sessionDir, eventsFileName), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("open events file: %w", err)
 	}
@@ -81,12 +81,19 @@ func (s *EventStore) Tail(ctx context.Context) (<-chan monitor.AgentEvent, error
 		reader := bufio.NewReader(f)
 		ticker := time.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()
+		var partial []byte
 		for {
 			// Try to read all available lines.
 			for {
 				line, err := reader.ReadBytes('\n')
 				if err != nil {
-					break // no more data right now
+					// Partial data (no trailing newline yet) — accumulate.
+					partial = append(partial, line...)
+					break
+				}
+				if len(partial) > 0 {
+					line = append(partial, line...)
+					partial = nil
 				}
 				ev, err := parseEvent(line)
 				if err != nil {

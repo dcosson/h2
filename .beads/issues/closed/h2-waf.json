@@ -2,7 +2,7 @@
   "id": "h2-waf",
   "title": "Remove State/SubState re-exports from agent/ and collector/",
   "description": "Reviewer found that agent/agent.go and collector/collector.go re-export State, SubState, constants, StateUpdate, and FormatStateLabel from monitor via type aliases. CLAUDE.md says not to leave shims/re-exports. Update all ~30 callers across session.go, heartbeat.go, daemon.go, client/render.go, tests, etc. to import from monitor directly. Also add String() to AgentEventType for consistency, and remove duplicate FormatStateLabel tests from collector_test.go.",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 1,
   "type": "task",
   "parent": "h2-meo",
@@ -15,5 +15,7 @@
   "created_by": "Danny Cosson",
   "owner": "dcosson@gmail.com",
   "created_at": "2026-02-19T16:42:15.016706-08:00",
-  "updated_at": "2026-02-19T16:47:28.660915-08:00"
+  "updated_at": "2026-02-19T17:00:22.21812-08:00",
+  "closed_at": "2026-02-19T17:00:22.21812-08:00",
+  "close_reason": "Closed"
 }

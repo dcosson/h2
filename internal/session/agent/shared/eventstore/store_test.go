@@ -2,6 +2,8 @@ package eventstore
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"testing"
 	"time"
 
@@ -251,6 +253,76 @@ func TestTail_CancelStopsImmediately(t *testing.T) {
 		// ok, closed
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for channel close after cancel")
+	}
+}
+
+func TestTail_PartialLineHandling(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ch, err := s.Tail(ctx)
+	if err != nil {
+		t.Fatalf("Tail: %v", err)
+	}
+
+	// Build a complete JSON line, then split it to simulate partial writes.
+	ev := monitor.AgentEvent{
+		Type:      monitor.EventTurnStarted,
+		Timestamp: time.Now().Truncate(time.Millisecond),
+	}
+	env := toEnvelope(ev)
+	data, err := json.Marshal(env)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	full := append(data, '\n')
+
+	// Write the first half without a newline.
+	half := len(full) / 2
+	f, err := os.OpenFile(s.file.Name(), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("open for partial write: %v", err)
+	}
+	if _, err := f.Write(full[:half]); err != nil {
+		t.Fatalf("write first half: %v", err)
+	}
+	f.Close()
+
+	// Let the tail goroutine poll and see the partial data.
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify nothing arrived yet (partial line, no newline).
+	select {
+	case got := <-ch:
+		t.Fatalf("expected no event from partial line, got %v", got.Type)
+	default:
+	}
+
+	// Write the second half (includes the newline).
+	f, err = os.OpenFile(s.file.Name(), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("open for rest write: %v", err)
+	}
+	if _, err := f.Write(full[half:]); err != nil {
+		t.Fatalf("write second half: %v", err)
+	}
+	f.Close()
+
+	// Should now receive the complete event.
+	select {
+	case got := <-ch:
+		if got.Type != monitor.EventTurnStarted {
+			t.Errorf("type = %v, want EventTurnStarted", got.Type)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for event from reassembled partial line")
 	}
 }
 
