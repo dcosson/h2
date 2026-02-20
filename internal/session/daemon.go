@@ -97,7 +97,6 @@ func RunDaemon(opts RunDaemonOpts) error {
 			SessionID:       opts.SessionID,
 			ClaudeConfigDir: agentEnvVars["CLAUDE_CONFIG_DIR"],
 			CWD:             cwd,
-			ClaudeCodeSessionLogPath: config.ClaudeCodeSessionLogPath(agentEnvVars["CLAUDE_CONFIG_DIR"], cwd, opts.SessionID),
 			Command:         opts.Command,
 			Role:            opts.RoleName,
 			Overrides:       opts.Overrides,
