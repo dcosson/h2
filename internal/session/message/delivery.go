@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"h2/internal/config"
 )
 
 // IdleFunc returns true if the child process is considered idle.
@@ -61,7 +63,7 @@ func PrepareMessage(q *MessageQueue, agentName, from, body string, priority Prio
 	id := uuid.New().String()
 	now := time.Now()
 
-	dir := filepath.Join(os.Getenv("HOME"), ".h2", "messages", agentName)
+	dir := filepath.Join(config.ConfigDir(), "messages", agentName)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create message dir: %w", err)
 	}
