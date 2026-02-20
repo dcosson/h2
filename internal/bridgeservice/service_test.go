@@ -1316,3 +1316,213 @@ func TestTypingLoop_DetectsConciergeDown(t *testing.T) {
 		t.Errorf("expected 'sage stopped' status message, got %v", msgs)
 	}
 }
+
+// --- Integration tests ---
+
+// TestIntegration_FullLifecycle exercises the complete bridge lifecycle:
+// start → startup message → set-concierge → change message → stop → shutdown message.
+func TestIntegration_FullLifecycle(t *testing.T) {
+	tmpDir := shortTempDir(t)
+	sender := &mockSender{name: "telegram"}
+	_ = newMockStatusAgent(t, tmpDir, "sage", "idle")
+	svc := New([]bridge.Bridge{sender}, "", tmpDir, "alice", []string{"status"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- svc.Run(ctx) }()
+
+	sockPath := filepath.Join(tmpDir, socketdir.Format(socketdir.TypeBridge, "alice"))
+	waitForSocket(t, sockPath)
+
+	// 1. Verify startup message was sent.
+	msgs := sender.Messages()
+	if len(msgs) == 0 {
+		t.Fatal("expected startup message")
+	}
+	startup := msgs[0]
+	if !strings.Contains(startup, "Bridge is up and running") {
+		t.Errorf("startup message missing expected text: %q", startup)
+	}
+	if !strings.Contains(startup, "status") {
+		t.Errorf("startup message missing allowed commands: %q", startup)
+	}
+
+	// 2. Set concierge via socket.
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message.SendRequest(conn, &message.Request{Type: "set-concierge", Body: "sage"})
+	resp, err := message.ReadResponse(conn)
+	conn.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.OK {
+		t.Fatalf("set-concierge failed: %s", resp.Error)
+	}
+
+	// Verify concierge change message.
+	msgs = sender.Messages()
+	foundChange := false
+	for _, m := range msgs {
+		if strings.Contains(m, "Concierge added") && strings.Contains(m, "sage") {
+			foundChange = true
+			break
+		}
+	}
+	if !foundChange {
+		t.Errorf("expected concierge change message, got %v", msgs)
+	}
+
+	// 3. Stop service.
+	conn2, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message.SendRequest(conn2, &message.Request{Type: "stop"})
+	resp2, _ := message.ReadResponse(conn2)
+	conn2.Close()
+	if !resp2.OK {
+		t.Fatalf("stop failed: %s", resp2.Error)
+	}
+
+	// Wait for Run to return.
+	if err := <-errCh; err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+
+	// 4. Verify shutdown message.
+	msgs = sender.Messages()
+	foundShutdown := false
+	for _, m := range msgs {
+		if strings.Contains(m, "shutting down") {
+			foundShutdown = true
+			break
+		}
+	}
+	if !foundShutdown {
+		t.Errorf("expected shutdown message, got %v", msgs)
+	}
+}
+
+// TestIntegration_ConciergeDownFallthrough tests that when the concierge agent
+// stops, inbound messages fall through to the next available agent.
+func TestIntegration_ConciergeDownFallthrough(t *testing.T) {
+	tmpDir := shortTempDir(t)
+	sender := &mockSender{name: "telegram"}
+	recv := &mockReceiver{name: "telegram-recv"}
+
+	// Create concierge and fallback agents.
+	conciergeAgent := newMockStatusAgent(t, tmpDir, "concierge", "active")
+	fallback := newMockAgent(t, tmpDir, "fallback")
+
+	svc := New([]bridge.Bridge{sender, recv}, "concierge", tmpDir, "alice", nil)
+	svc.typingTickInterval = 50 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- svc.Run(ctx) }()
+
+	sockPath := filepath.Join(tmpDir, socketdir.Format(socketdir.TypeBridge, "alice"))
+	waitForSocket(t, sockPath)
+
+	// Let the typing loop see the concierge as alive.
+	time.Sleep(150 * time.Millisecond)
+
+	// Kill the concierge agent.
+	conciergeAgent.listener.Close()
+	conciergeAgent.wg.Wait()
+	// Remove the socket file so sendToAgent doesn't try to connect.
+	os.Remove(filepath.Join(tmpDir, socketdir.Format(socketdir.TypeAgent, "concierge")))
+
+	// Wait for detection.
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify concierge-down status message was sent.
+	msgs := sender.Messages()
+	foundDown := false
+	for _, m := range msgs {
+		if strings.Contains(m, "concierge stopped") {
+			foundDown = true
+			break
+		}
+	}
+	if !foundDown {
+		t.Errorf("expected concierge-down status message, got %v", msgs)
+	}
+
+	// Send an inbound message — should route to fallback agent (first agent socket).
+	recv.Handler()("", "hello after concierge down")
+
+	time.Sleep(50 * time.Millisecond)
+
+	reqs := fallback.Received()
+	var sendReqs []message.Request
+	for _, r := range reqs {
+		if r.Type == "send" {
+			sendReqs = append(sendReqs, r)
+		}
+	}
+	if len(sendReqs) == 0 {
+		t.Fatal("expected inbound message to route to fallback agent after concierge down")
+	}
+	if sendReqs[len(sendReqs)-1].Body != "hello after concierge down" {
+		t.Errorf("unexpected body: %q", sendReqs[len(sendReqs)-1].Body)
+	}
+
+	cancel()
+	<-errCh
+}
+
+// TestIntegration_TypingRoutingChain verifies that lastRoutedAgent is tracked
+// and reset correctly through concierge changes.
+func TestIntegration_TypingRoutingChain(t *testing.T) {
+	tmpDir := shortTempDir(t)
+	_ = newMockStatusAgent(t, tmpDir, "concierge", "idle")
+	_ = newMockAgent(t, tmpDir, "coder-1")
+	_ = newMockStatusAgent(t, tmpDir, "new-concierge", "idle")
+
+	svc := New(nil, "concierge", tmpDir, "alice", nil)
+
+	// Route an inbound message to coder-1 (explicit target).
+	svc.handleInbound("coder-1", "build this")
+
+	svc.mu.Lock()
+	got := svc.lastRoutedAgent
+	svc.mu.Unlock()
+	if got != "coder-1" {
+		t.Fatalf("expected lastRoutedAgent=coder-1, got %q", got)
+	}
+
+	// Set a new concierge — should reset lastRoutedAgent.
+	resp := svc.handleSetConcierge("new-concierge")
+	if !resp.OK {
+		t.Fatalf("set-concierge failed: %s", resp.Error)
+	}
+
+	svc.mu.Lock()
+	got = svc.lastRoutedAgent
+	concierge := svc.concierge
+	svc.mu.Unlock()
+	if got != "" {
+		t.Errorf("expected lastRoutedAgent cleared after set-concierge, got %q", got)
+	}
+	if concierge != "new-concierge" {
+		t.Errorf("expected concierge=new-concierge, got %q", concierge)
+	}
+
+	// Route another message — lastRoutedAgent should update again.
+	svc.handleInbound("coder-1", "build that too")
+
+	svc.mu.Lock()
+	got = svc.lastRoutedAgent
+	svc.mu.Unlock()
+	if got != "coder-1" {
+		t.Errorf("expected lastRoutedAgent=coder-1 after second route, got %q", got)
+	}
+}
