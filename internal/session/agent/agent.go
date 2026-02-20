@@ -13,6 +13,7 @@ import (
 	"h2/internal/session/agent/collector"
 	"h2/internal/session/agent/monitor"
 	"h2/internal/session/agent/shared/otelserver"
+	"h2/internal/session/agent/shared/outputcollector"
 )
 
 // Re-export State type, constants, and IdleThreshold from monitor package
@@ -53,7 +54,7 @@ type Agent struct {
 	otelMetricsReceived atomic.Bool // true after first /v1/metrics POST
 
 	// Collectors
-	outputCollector  *collector.OutputCollector
+	outputCollector  *outputcollector.Collector
 	otelCollector    *collector.OtelCollector
 	hooksCollector   *collector.HookCollector
 	primaryCollector collector.StateCollector
@@ -127,7 +128,7 @@ func (a *Agent) SetOtelLogFiles(dir string) error {
 // launches the internal watchState goroutine.
 func (a *Agent) StartCollectors() error {
 	cfg := a.agentType.Collectors()
-	a.outputCollector = collector.NewOutputCollector()
+	a.outputCollector = outputcollector.New(monitor.IdleThreshold)
 	var primary collector.StateCollector = a.outputCollector
 
 	if cfg.Otel {

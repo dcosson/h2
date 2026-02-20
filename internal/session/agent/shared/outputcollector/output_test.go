@@ -1,4 +1,4 @@
-package collector
+package outputcollector
 
 import (
 	"testing"
@@ -7,23 +7,17 @@ import (
 	"h2/internal/session/agent/monitor"
 )
 
-func setFastIdle(t *testing.T) {
-	t.Helper()
-	old := monitor.IdleThreshold
-	monitor.IdleThreshold = 10 * time.Millisecond
-	t.Cleanup(func() { monitor.IdleThreshold = old })
-}
+const testIdleThreshold = 10 * time.Millisecond
 
-func TestOutputCollector_ActiveOnOutput(t *testing.T) {
-	setFastIdle(t)
-	c := NewOutputCollector()
+func TestCollector_ActiveOnOutput(t *testing.T) {
+	c := New(testIdleThreshold)
 	defer c.Stop()
 
 	c.NoteOutput()
 
 	select {
 	case su := <-c.StateCh():
-		if su.State != StateActive {
+		if su.State != monitor.StateActive {
 			t.Fatalf("expected StateActive, got %v", su.State)
 		}
 	case <-time.After(time.Second):
@@ -31,9 +25,8 @@ func TestOutputCollector_ActiveOnOutput(t *testing.T) {
 	}
 }
 
-func TestOutputCollector_IdleAfterThreshold(t *testing.T) {
-	setFastIdle(t)
-	c := NewOutputCollector()
+func TestCollector_IdleAfterThreshold(t *testing.T) {
+	c := New(testIdleThreshold)
 	defer c.Stop()
 
 	c.NoteOutput()
@@ -42,29 +35,28 @@ func TestOutputCollector_IdleAfterThreshold(t *testing.T) {
 
 	select {
 	case su := <-c.StateCh():
-		if su.State != StateIdle {
+		if su.State != monitor.StateIdle {
 			t.Fatalf("expected StateIdle, got %v", su.State)
 		}
-	case <-time.After(monitor.IdleThreshold + time.Second):
+	case <-time.After(testIdleThreshold + time.Second):
 		t.Fatal("timed out waiting for StateIdle")
 	}
 }
 
-func TestOutputCollector_ResetTimerOnOutput(t *testing.T) {
-	setFastIdle(t)
-	c := NewOutputCollector()
+func TestCollector_ResetTimerOnOutput(t *testing.T) {
+	c := New(testIdleThreshold)
 	defer c.Stop()
 
 	c.NoteOutput()
 	<-c.StateCh() // drain active
 
 	// Send another output before idle fires — should reset the timer.
-	time.Sleep(monitor.IdleThreshold / 2)
+	time.Sleep(testIdleThreshold / 2)
 	c.NoteOutput()
 
 	select {
 	case su := <-c.StateCh():
-		if su.State != StateActive {
+		if su.State != monitor.StateActive {
 			t.Fatalf("expected StateActive from second output, got %v", su.State)
 		}
 	case <-time.After(time.Second):
@@ -72,8 +64,8 @@ func TestOutputCollector_ResetTimerOnOutput(t *testing.T) {
 	}
 }
 
-func TestOutputCollector_Stop(t *testing.T) {
-	c := NewOutputCollector()
+func TestCollector_Stop(t *testing.T) {
+	c := New(testIdleThreshold)
 	c.Stop()
 
 	// After stop, NoteOutput should not panic.

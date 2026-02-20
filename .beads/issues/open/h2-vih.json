@@ -2,7 +2,7 @@
   "id": "h2-vih",
   "title": "Build adapter/claude/ - Claude Code adapter implementation",
   "description": "Build ClaudeCodeAdapter in adapter/claude/. Wraps existing hook handler (hook_handler.go), OTEL parser (otel_parser.go), and new session log collector (sessionlog.go). PrepareForLaunch returns session ID, OTEL env vars. HandleHookEvent translates Claude hook events to AgentEvents. Start runs session log tailer. Tails Claude's session JSONL for full message text for peek.",
-  "status": "open",
+  "status": "in_progress",
   "priority": 1,
   "type": "task",
   "parent": "h2-meo",
@@ -29,5 +29,5 @@
   "created_by": "Danny Cosson",
   "owner": "dcosson@gmail.com",
   "created_at": "2026-02-19T16:03:14.661227-08:00",
-  "updated_at": "2026-02-19T16:03:14.661227-08:00"
+  "updated_at": "2026-02-19T16:47:54.40041-08:00"
 }
