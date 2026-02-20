@@ -43,11 +43,8 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 
 	// Ensure agent-type-specific config directories exist.
 	agentType := agent.ResolveAgentType(cmdCommand)
-	claudeConfigDir := agentType.BuildCommandEnvVars(config.ConfigDir(), role.Name)["CLAUDE_CONFIG_DIR"]
-	if claudeConfigDir != "" {
-		if err := config.EnsureClaudeConfigDir(claudeConfigDir); err != nil {
-			return fmt.Errorf("ensure claude config dir: %w", err)
-		}
+	if err := agentType.EnsureConfigDir(config.ConfigDir(), role.Name); err != nil {
+		return fmt.Errorf("ensure config dir: %w", err)
 	}
 	var heartbeat session.DaemonHeartbeat
 	if role.Heartbeat != nil {

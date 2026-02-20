@@ -1,6 +1,10 @@
 package agent
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestResolveAgentType_Claude(t *testing.T) {
 	at := ResolveAgentType("claude")
@@ -259,5 +263,61 @@ func TestGenericType_BuildCommandEnvVars_ReturnsNil(t *testing.T) {
 	envVars := gt.BuildCommandEnvVars("/home/user/.h2", "my-role")
 	if envVars != nil {
 		t.Fatalf("expected nil env vars for generic, got %v", envVars)
+	}
+}
+
+// --- EnsureConfigDir tests ---
+
+func TestClaudeCodeType_EnsureConfigDir_CreatesDir(t *testing.T) {
+	h2Dir := t.TempDir()
+	ct := NewClaudeCodeType()
+	if err := ct.EnsureConfigDir(h2Dir, "test-role"); err != nil {
+		t.Fatalf("EnsureConfigDir: %v", err)
+	}
+	configDir := filepath.Join(h2Dir, "claude-config", "test-role")
+	if _, err := os.Stat(configDir); os.IsNotExist(err) {
+		t.Fatalf("expected config dir to exist: %s", configDir)
+	}
+	// Should have created settings.json.
+	settingsPath := filepath.Join(configDir, "settings.json")
+	if _, err := os.Stat(settingsPath); os.IsNotExist(err) {
+		t.Fatalf("expected settings.json to exist: %s", settingsPath)
+	}
+}
+
+func TestClaudeCodeType_EnsureConfigDir_EmptyRole(t *testing.T) {
+	h2Dir := t.TempDir()
+	ct := NewClaudeCodeType()
+	if err := ct.EnsureConfigDir(h2Dir, ""); err != nil {
+		t.Fatalf("EnsureConfigDir: %v", err)
+	}
+	configDir := filepath.Join(h2Dir, "claude-config", "default")
+	if _, err := os.Stat(configDir); os.IsNotExist(err) {
+		t.Fatalf("expected default config dir to exist: %s", configDir)
+	}
+}
+
+func TestCodexType_EnsureConfigDir_Noop(t *testing.T) {
+	h2Dir := t.TempDir()
+	ct := NewCodexType()
+	if err := ct.EnsureConfigDir(h2Dir, "my-role"); err != nil {
+		t.Fatalf("EnsureConfigDir: %v", err)
+	}
+	// Should not have created anything.
+	entries, _ := os.ReadDir(h2Dir)
+	if len(entries) != 0 {
+		t.Fatalf("expected no dirs created for codex, got %d entries", len(entries))
+	}
+}
+
+func TestGenericType_EnsureConfigDir_Noop(t *testing.T) {
+	h2Dir := t.TempDir()
+	gt := NewGenericType("bash")
+	if err := gt.EnsureConfigDir(h2Dir, "my-role"); err != nil {
+		t.Fatalf("EnsureConfigDir: %v", err)
+	}
+	entries, _ := os.ReadDir(h2Dir)
+	if len(entries) != 0 {
+		t.Fatalf("expected no dirs created for generic, got %d entries", len(entries))
 	}
 }

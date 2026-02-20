@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"h2/internal/activitylog"
+	"h2/internal/config"
 	"h2/internal/session/agent/adapter"
 	"h2/internal/session/agent/adapter/claude"
 	"h2/internal/session/agent/adapter/codex"
@@ -48,6 +49,10 @@ type AgentType interface {
 	// process. h2Dir is the resolved h2 config directory; roleName is the
 	// role name (empty means "default").
 	BuildCommandEnvVars(h2Dir, roleName string) map[string]string
+
+	// EnsureConfigDir creates any agent-type-specific config directories
+	// needed before launching. Returns nil if no setup is needed.
+	EnsureConfigDir(h2Dir, roleName string) error
 }
 
 // ClaudeCodeType provides full integration: OTEL, hooks, session ID, env vars.
@@ -101,6 +106,12 @@ func (t *ClaudeCodeType) BuildCommandEnvVars(h2Dir, roleName string) map[string]
 	}
 }
 
+// EnsureConfigDir creates the Claude config directory and writes default settings.
+func (t *ClaudeCodeType) EnsureConfigDir(h2Dir, roleName string) error {
+	configDir := t.BuildCommandEnvVars(h2Dir, roleName)["CLAUDE_CONFIG_DIR"]
+	return config.EnsureClaudeConfigDir(configDir)
+}
+
 // CodexType provides integration for OpenAI Codex CLI: OTEL traces, no hooks.
 type CodexType struct{}
 
@@ -148,6 +159,9 @@ func (t *CodexType) BuildCommandEnvVars(h2Dir, roleName string) map[string]strin
 	return nil
 }
 
+// EnsureConfigDir is a no-op for Codex.
+func (t *CodexType) EnsureConfigDir(h2Dir, roleName string) error { return nil }
+
 // GenericType is a fallback for unknown agents — no adapter, output-based state detection.
 type GenericType struct {
 	command string
@@ -177,6 +191,9 @@ func (t *GenericType) BuildCommandArgs(cfg CommandArgsConfig) []string {
 func (t *GenericType) BuildCommandEnvVars(h2Dir, roleName string) map[string]string {
 	return nil
 }
+
+// EnsureConfigDir is a no-op for generic agents.
+func (t *GenericType) EnsureConfigDir(h2Dir, roleName string) error { return nil }
 
 // ResolveAgentType maps a command name to a known agent type,
 // falling back to GenericType for unknown commands.
