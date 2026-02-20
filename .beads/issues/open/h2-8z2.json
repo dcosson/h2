@@ -1,0 +1,19 @@
+{
+  "id": "h2-8z2",
+  "title": "Add BuildCommandArgs to AgentType, remove hardcoded Claude flags from childArgs",
+  "description": "Session.childArgs() unconditionally appends Claude Code-specific flags (--system-prompt, --append-system-prompt, --model, --permission-mode, --allowedTools, --disallowedTools) to all agent types. This will break Codex.\n\nFix: Add BuildCommandArgs(cfg CommandArgsConfig) []string to the AgentType interface. Each agent type maps role config fields to its own CLI flags:\n\nClaude Code:\n- instructions → --append-system-prompt\n- system_prompt → --system-prompt\n- model → --model\n- permission_mode → --permission-mode\n- allowed_tools → --allowedTools (comma-joined)\n- disallowed_tools → --disallowedTools (comma-joined)\n\nCodex:\n- instructions → -c 'instructions=\"...\"'\n- model → --model\n- permission_mode → --full-auto / --suggest / --ask mapping\n- working_dir → --cd (if not already handled by process CWD)\n- No system_prompt, allowedTools, disallowedTools equivalents (warn if set)\n\nGeneric: no role args.\n\nRefactor Session.childArgs() to call agentType.BuildCommandArgs() instead of hardcoding Claude flags. Delete the unused CodexType.RoleArgs() method.",
+  "status": "in_progress",
+  "priority": 1,
+  "type": "task",
+  "parent": "h2-9gb",
+  "dependencies": [
+    {
+      "id": "h2-9gb",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-19T20:20:31.4137-08:00",
+  "updated_at": "2026-02-19T20:21:19.894072-08:00"
+}

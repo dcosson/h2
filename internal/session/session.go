@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -169,7 +168,8 @@ func (s *Session) setupAgent() error {
 }
 
 // childArgs returns the command args, prepending any adapter-supplied args
-// (e.g. --session-id for Claude Code) and appending role-derived CLI flags.
+// (e.g. --session-id for Claude Code) and appending agent-type-specific
+// role flags via BuildCommandArgs.
 func (s *Session) childArgs() []string {
 	var args []string
 	if len(s.prependArgs) > 0 {
@@ -177,24 +177,17 @@ func (s *Session) childArgs() []string {
 	} else {
 		args = s.Args
 	}
-	if s.SystemPrompt != "" {
-		args = append(args, "--system-prompt", s.SystemPrompt)
-	}
-	if s.Instructions != "" {
-		args = append(args, "--append-system-prompt", s.Instructions)
-	}
-	if s.Model != "" {
-		args = append(args, "--model", s.Model)
-	}
-	if s.PermissionMode != "" {
-		args = append(args, "--permission-mode", s.PermissionMode)
-	}
-	if len(s.AllowedTools) > 0 {
-		args = append(args, "--allowedTools", strings.Join(s.AllowedTools, ","))
-	}
-	if len(s.DisallowedTools) > 0 {
-		args = append(args, "--disallowedTools", strings.Join(s.DisallowedTools, ","))
-	}
+
+	roleArgs := s.Agent.AgentType().BuildCommandArgs(agent.CommandArgsConfig{
+		Instructions:    s.Instructions,
+		SystemPrompt:    s.SystemPrompt,
+		Model:           s.Model,
+		PermissionMode:  s.PermissionMode,
+		AllowedTools:    s.AllowedTools,
+		DisallowedTools: s.DisallowedTools,
+	})
+	args = append(args, roleArgs...)
+
 	return args
 }
 

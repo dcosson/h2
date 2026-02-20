@@ -571,18 +571,12 @@ func TestChildArgs_InstructionsNonClaude(t *testing.T) {
 
 	args := s.childArgs()
 
-	// Non-claude has no prepend args, but should still get --append-system-prompt
-	if len(args) != 4 {
-		t.Fatalf("expected 4 args, got %d: %v", len(args), args)
+	// Generic agents don't support role flags — only base args.
+	if len(args) != 2 {
+		t.Fatalf("expected 2 args (generic ignores role config), got %d: %v", len(args), args)
 	}
 	if args[0] != "-c" || args[1] != "echo hi" {
-		t.Fatalf("expected original args first, got %v", args[:2])
-	}
-	if args[2] != "--append-system-prompt" {
-		t.Fatalf("expected '--append-system-prompt', got %q", args[2])
-	}
-	if args[3] != "Some instructions" {
-		t.Fatalf("expected 'Some instructions', got %q", args[3])
+		t.Fatalf("expected original args, got %v", args)
 	}
 }
 

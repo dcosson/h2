@@ -2,12 +2,24 @@ package agent
 
 import (
 	"path/filepath"
+	"strings"
 
 	"h2/internal/activitylog"
 	"h2/internal/session/agent/adapter"
 	"h2/internal/session/agent/adapter/claude"
 	"h2/internal/session/agent/adapter/codex"
 )
+
+// CommandArgsConfig holds role configuration fields to be mapped to CLI flags.
+// Each AgentType maps these to its own flag conventions.
+type CommandArgsConfig struct {
+	Instructions    string
+	SystemPrompt    string
+	Model           string
+	PermissionMode  string
+	AllowedTools    []string
+	DisallowedTools []string
+}
 
 // AgentType defines how h2 launches, monitors, and interacts with a specific
 // kind of agent. Each supported agent (Claude Code, Codex, generic shell)
@@ -27,6 +39,10 @@ type AgentType interface {
 	// The adapter handles telemetry collection, hook events, and emits
 	// normalized AgentEvents to the monitor.
 	NewAdapter(log *activitylog.Logger) adapter.AgentAdapter
+
+	// BuildCommandArgs maps role configuration fields to CLI flags for this
+	// agent type. Returns nil if no flags are applicable (e.g. generic).
+	BuildCommandArgs(cfg CommandArgsConfig) []string
 }
 
 // ClaudeCodeType provides full integration: OTEL, hooks, session ID, env vars.
@@ -46,6 +62,30 @@ func (t *ClaudeCodeType) NewAdapter(log *activitylog.Logger) adapter.AgentAdapte
 	return claude.New(log)
 }
 
+// BuildCommandArgs maps role config to Claude Code CLI flags.
+func (t *ClaudeCodeType) BuildCommandArgs(cfg CommandArgsConfig) []string {
+	var args []string
+	if cfg.SystemPrompt != "" {
+		args = append(args, "--system-prompt", cfg.SystemPrompt)
+	}
+	if cfg.Instructions != "" {
+		args = append(args, "--append-system-prompt", cfg.Instructions)
+	}
+	if cfg.Model != "" {
+		args = append(args, "--model", cfg.Model)
+	}
+	if cfg.PermissionMode != "" {
+		args = append(args, "--permission-mode", cfg.PermissionMode)
+	}
+	if len(cfg.AllowedTools) > 0 {
+		args = append(args, "--allowedTools", strings.Join(cfg.AllowedTools, ","))
+	}
+	if len(cfg.DisallowedTools) > 0 {
+		args = append(args, "--disallowedTools", strings.Join(cfg.DisallowedTools, ","))
+	}
+	return args
+}
+
 // CodexType provides integration for OpenAI Codex CLI: OTEL traces, no hooks.
 type CodexType struct{}
 
@@ -63,13 +103,18 @@ func (t *CodexType) NewAdapter(log *activitylog.Logger) adapter.AgentAdapter {
 	return codex.New(log)
 }
 
-// RoleArgs maps role configuration to Codex CLI flags.
-func (t *CodexType) RoleArgs(model, permissionMode string) []string {
+// BuildCommandArgs maps role config to Codex CLI flags.
+// SystemPrompt, AllowedTools, and DisallowedTools have no Codex equivalent
+// and are silently ignored.
+func (t *CodexType) BuildCommandArgs(cfg CommandArgsConfig) []string {
 	var args []string
-	if model != "" {
-		args = append(args, "--model", model)
+	if cfg.Instructions != "" {
+		args = append(args, "-c", `instructions="`+cfg.Instructions+`"`)
 	}
-	switch permissionMode {
+	if cfg.Model != "" {
+		args = append(args, "--model", cfg.Model)
+	}
+	switch cfg.PermissionMode {
 	case "full-auto":
 		args = append(args, "--full-auto")
 	case "suggest":
@@ -100,6 +145,11 @@ func (t *GenericType) DisplayCommand() string { return t.command }
 // NewAdapter returns nil — generic agents use output-based state detection
 // instead of an adapter.
 func (t *GenericType) NewAdapter(log *activitylog.Logger) adapter.AgentAdapter {
+	return nil
+}
+
+// BuildCommandArgs returns nil — generic agents don't use role flags.
+func (t *GenericType) BuildCommandArgs(cfg CommandArgsConfig) []string {
 	return nil
 }
 

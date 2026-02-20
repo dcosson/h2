@@ -62,43 +62,128 @@ func TestResolveAgentType_CodexFullPath(t *testing.T) {
 	}
 }
 
-func TestCodexType_RoleArgs_Model(t *testing.T) {
+// --- ClaudeCodeType.BuildCommandArgs tests ---
+
+func TestClaudeCodeType_BuildCommandArgs_AllFields(t *testing.T) {
+	ct := NewClaudeCodeType()
+	args := ct.BuildCommandArgs(CommandArgsConfig{
+		SystemPrompt:    "Custom prompt",
+		Instructions:    "Extra instructions",
+		Model:           "claude-opus-4-6",
+		PermissionMode:  "plan",
+		AllowedTools:    []string{"Bash", "Read"},
+		DisallowedTools: []string{"Write"},
+	})
+	expected := []string{
+		"--system-prompt", "Custom prompt",
+		"--append-system-prompt", "Extra instructions",
+		"--model", "claude-opus-4-6",
+		"--permission-mode", "plan",
+		"--allowedTools", "Bash,Read",
+		"--disallowedTools", "Write",
+	}
+	if len(args) != len(expected) {
+		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
+	}
+	for i, want := range expected {
+		if args[i] != want {
+			t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
+		}
+	}
+}
+
+func TestClaudeCodeType_BuildCommandArgs_Empty(t *testing.T) {
+	ct := NewClaudeCodeType()
+	args := ct.BuildCommandArgs(CommandArgsConfig{})
+	if len(args) != 0 {
+		t.Fatalf("expected no args for empty config, got %v", args)
+	}
+}
+
+func TestClaudeCodeType_BuildCommandArgs_InstructionsOnly(t *testing.T) {
+	ct := NewClaudeCodeType()
+	args := ct.BuildCommandArgs(CommandArgsConfig{Instructions: "Do stuff"})
+	if len(args) != 2 || args[0] != "--append-system-prompt" || args[1] != "Do stuff" {
+		t.Fatalf("expected [--append-system-prompt 'Do stuff'], got %v", args)
+	}
+}
+
+// --- CodexType.BuildCommandArgs tests ---
+
+func TestCodexType_BuildCommandArgs_Model(t *testing.T) {
 	ct := NewCodexType()
-	args := ct.RoleArgs("gpt-4o", "")
+	args := ct.BuildCommandArgs(CommandArgsConfig{Model: "gpt-4o"})
+	// Model + default full-auto
 	if len(args) != 3 || args[0] != "--model" || args[1] != "gpt-4o" || args[2] != "--full-auto" {
 		t.Fatalf("expected [--model gpt-4o --full-auto], got %v", args)
 	}
 }
 
-func TestCodexType_RoleArgs_FullAuto(t *testing.T) {
+func TestCodexType_BuildCommandArgs_FullAuto(t *testing.T) {
 	ct := NewCodexType()
-	args := ct.RoleArgs("", "full-auto")
+	args := ct.BuildCommandArgs(CommandArgsConfig{PermissionMode: "full-auto"})
 	if len(args) != 1 || args[0] != "--full-auto" {
 		t.Fatalf("expected [--full-auto], got %v", args)
 	}
 }
 
-func TestCodexType_RoleArgs_Suggest(t *testing.T) {
+func TestCodexType_BuildCommandArgs_Suggest(t *testing.T) {
 	ct := NewCodexType()
-	args := ct.RoleArgs("", "suggest")
+	args := ct.BuildCommandArgs(CommandArgsConfig{PermissionMode: "suggest"})
 	if len(args) != 1 || args[0] != "--suggest" {
 		t.Fatalf("expected [--suggest], got %v", args)
 	}
 }
 
-func TestCodexType_RoleArgs_Ask(t *testing.T) {
+func TestCodexType_BuildCommandArgs_Ask(t *testing.T) {
 	ct := NewCodexType()
-	args := ct.RoleArgs("", "ask")
+	args := ct.BuildCommandArgs(CommandArgsConfig{PermissionMode: "ask"})
 	if len(args) != 0 {
 		t.Fatalf("expected empty args for ask mode (default), got %v", args)
 	}
 }
 
-func TestCodexType_RoleArgs_DefaultFullAuto(t *testing.T) {
+func TestCodexType_BuildCommandArgs_DefaultFullAuto(t *testing.T) {
 	ct := NewCodexType()
-	args := ct.RoleArgs("", "")
+	args := ct.BuildCommandArgs(CommandArgsConfig{})
 	if len(args) != 1 || args[0] != "--full-auto" {
-		t.Fatalf("expected [--full-auto] for empty permission mode, got %v", args)
+		t.Fatalf("expected [--full-auto] for empty config, got %v", args)
+	}
+}
+
+func TestCodexType_BuildCommandArgs_Instructions(t *testing.T) {
+	ct := NewCodexType()
+	args := ct.BuildCommandArgs(CommandArgsConfig{Instructions: "Do testing"})
+	// -c, instructions="Do testing", --full-auto
+	if len(args) != 3 || args[0] != "-c" || args[1] != `instructions="Do testing"` || args[2] != "--full-auto" {
+		t.Fatalf(`expected [-c instructions="Do testing" --full-auto], got %v`, args)
+	}
+}
+
+func TestCodexType_BuildCommandArgs_IgnoresUnsupported(t *testing.T) {
+	ct := NewCodexType()
+	args := ct.BuildCommandArgs(CommandArgsConfig{
+		SystemPrompt:    "Should be ignored",
+		AllowedTools:    []string{"Bash"},
+		DisallowedTools: []string{"Write"},
+		PermissionMode:  "ask",
+	})
+	// Only ask mode → no args (unsupported fields silently ignored)
+	if len(args) != 0 {
+		t.Fatalf("expected no args (unsupported fields ignored, ask=default), got %v", args)
+	}
+}
+
+// --- GenericType.BuildCommandArgs tests ---
+
+func TestGenericType_BuildCommandArgs_ReturnsNil(t *testing.T) {
+	gt := NewGenericType("bash")
+	args := gt.BuildCommandArgs(CommandArgsConfig{
+		Instructions: "Should be ignored",
+		Model:        "something",
+	})
+	if args != nil {
+		t.Fatalf("expected nil for generic type, got %v", args)
 	}
 }
 
