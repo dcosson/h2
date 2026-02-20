@@ -365,7 +365,7 @@ func TestHandleOutbound(t *testing.T) {
 		"", t.TempDir(), "alice",
 	)
 
-	svc.handleOutbound("myagent", "build complete")
+	svc.sendOutbound("myagent", "build complete")
 
 	// Both senders should have received the tagged message (non-concierge agent).
 	want := "[myagent] build complete"
@@ -391,7 +391,7 @@ func TestHandleOutbound_TagsNonConcierge(t *testing.T) {
 	sender := &mockSender{name: "telegram"}
 	svc := New([]bridge.Bridge{sender}, "concierge", t.TempDir(), "alice")
 
-	svc.handleOutbound("researcher", "here are the results")
+	svc.sendOutbound("researcher", "here are the results")
 
 	msgs := sender.Messages()
 	if len(msgs) != 1 {
@@ -407,7 +407,7 @@ func TestHandleOutbound_NoConciergeTag(t *testing.T) {
 	sender := &mockSender{name: "telegram"}
 	svc := New([]bridge.Bridge{sender}, "concierge", t.TempDir(), "alice")
 
-	svc.handleOutbound("concierge", "build complete")
+	svc.sendOutbound("concierge", "build complete")
 
 	msgs := sender.Messages()
 	if len(msgs) != 1 {
@@ -458,8 +458,8 @@ func TestSocketListener(t *testing.T) {
 		t.Errorf("expected OK response, got error: %s", resp.Error)
 	}
 
-	// Give handleOutbound a moment to complete (it runs synchronously in handleConn,
-	// but the response is sent after handleOutbound returns, so by now it's done).
+	// Give sendOutbound a moment to complete (it runs synchronously in handleConn,
+	// but the response is sent after sendOutbound returns, so by now it's done).
 	// Non-concierge agents get tagged with [agent-name].
 	msgs := sender.Messages()
 	wantMsg := "[agent1] hello human"

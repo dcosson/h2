@@ -119,7 +119,7 @@ Making `s.concierge` mutable at runtime (via `set-concierge` / `remove-concierge
 
 **Affected existing read sites:**
 - `resolveDefaultTarget()` — reads `s.concierge` without lock
-- `handleOutbound()` — reads `s.concierge` without lock (for agent tag formatting)
+- `sendOutbound()` — reads `s.concierge` without lock (for agent tag formatting)
 - `buildBridgeInfo()` — may read `s.concierge`
 
 **Fix:** In each of these methods, lock `s.mu`, copy `s.concierge` to a local variable, unlock, then use the local:
@@ -136,7 +136,7 @@ func (s *Service) resolveDefaultTarget() string {
 }
 ```
 
-Same pattern for `handleOutbound()` and any other reader.
+Same pattern for `sendOutbound()` and any other reader.
 
 **Testing:** All tests for this package should be run with `-race` to validate.
 
@@ -246,7 +246,7 @@ Concierge agent <agent> stopped. <noConciergeRouting>
 
 ### Sending Status Messages
 
-Add a `sendBridgeStatus(ctx, text)` method to `Service` that prepends the bridge tag and sends to all `Sender` bridges. This follows the same pattern as `handleOutbound`, which uses `bridge.FormatAgentTag(from, body)` to tag messages before broadcasting — the tag is prepended once in the send method, not at each call site.
+Add a `sendBridgeStatus(ctx, text)` method to `Service` that prepends the bridge tag and sends to all `Sender` bridges. This follows the same pattern as `sendOutbound`, which uses `bridge.FormatAgentTag(from, body)` to tag messages before broadcasting — the tag is prepended once in the send method, not at each call site.
 
 The tag name is `"bridge " + s.user` (e.g. `"bridge dcosson-sand"`), so the tag renders as `[bridge dcosson-sand]`.
 
@@ -493,7 +493,7 @@ svc := bridgeservice.New(bridges, concierge, socketdir.Dir(), user,
 |------|--------|
 | `internal/cmd/bridge.go` | Refactor into parent + subcommands: `create`, `stop`, `set-concierge`, `remove-concierge`. Add `bridgeRequest()` helper. Parent command delegates to create for backward compat |
 | `internal/cmd/bridge_daemon.go` | Pass `AllowedCommands` from config to `bridgeservice.New()` |
-| `internal/bridgeservice/service.go` | Add `handleSetConcierge`, `handleRemoveConcierge`, `sendBridgeStatus`, `sendStartupMessage`, `handleConciergeDown`, `firstAvailableAgent`. Update `handleConn` switch, `handleInbound`, `runTypingLoop`, `Run` (shutdown msg). Add `lastRoutedAgent` and `allowedCommands` fields. **Add locking to all `s.concierge` read sites**: `resolveDefaultTarget()`, `handleOutbound()`, `buildBridgeInfo()` |
+| `internal/bridgeservice/service.go` | Add `handleSetConcierge`, `handleRemoveConcierge`, `sendBridgeStatus`, `sendStartupMessage`, `handleConciergeDown`, `firstAvailableAgent`. Update `handleConn` switch, `handleInbound`, `runTypingLoop`, `Run` (shutdown msg). Add `lastRoutedAgent` and `allowedCommands` fields. **Add locking to all `s.concierge` read sites**: `resolveDefaultTarget()`, `sendOutbound()`, `buildBridgeInfo()` |
 | `internal/bridgeservice/status.go` | New: composable message string builders (`conciergeRouting`, `noConciergeRouting`, `directMessagingHint`, `allowedCommandsHint`) |
 | `internal/bridgeservice/status_test.go` | New: tests for message composition |
 | `internal/session/message/protocol.go` | Add `OldConcierge string` field to `Response` |

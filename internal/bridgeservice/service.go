@@ -128,7 +128,7 @@ func (s *Service) handleConn(conn net.Conn) {
 
 	switch req.Type {
 	case "send":
-		if err := s.handleOutbound(req.From, req.Body); err != nil {
+		if err := s.sendOutbound(req.From, req.Body); err != nil {
 			message.SendResponse(conn, &message.Response{Error: err.Error()})
 		} else {
 			message.SendResponse(conn, &message.Response{OK: true})
@@ -183,11 +183,11 @@ func (s *Service) replyError(msg string) {
 	}
 }
 
-// handleOutbound sends a message from an agent to all Sender bridges.
+// sendOutbound sends a message from an agent to all Sender bridges.
 // Messages from non-concierge agents are tagged with [agent-name] so that
 // replies can be routed back to the correct agent.
 // Returns an error if any bridge fails to deliver the message.
-func (s *Service) handleOutbound(from, body string) error {
+func (s *Service) sendOutbound(from, body string) error {
 	s.mu.Lock()
 	s.lastSender = from
 	s.messagesSent++
