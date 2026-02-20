@@ -180,6 +180,7 @@ func (s *Session) childArgs() []string {
 	}
 
 	roleArgs := s.Agent.AgentType().BuildCommandArgs(agent.CommandArgsConfig{
+		SessionID:       s.SessionID,
 		Instructions:    s.Instructions,
 		SystemPrompt:    s.SystemPrompt,
 		Model:           s.Model,

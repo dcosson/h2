@@ -73,7 +73,6 @@ func (a *ClaudeCodeAdapter) PrepareForLaunch(agentName, sessionID string) (adapt
 
 	endpoint := fmt.Sprintf("http://127.0.0.1:%d", s.Port)
 	return adapter.LaunchConfig{
-		PrependArgs: []string{"--session-id", a.sessionID},
 		Env: map[string]string{
 			"CLAUDE_CODE_ENABLE_TELEMETRY": "1",
 			"OTEL_METRICS_EXPORTER":        "otlp",

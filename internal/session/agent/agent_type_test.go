@@ -71,6 +71,7 @@ func TestResolveAgentType_CodexFullPath(t *testing.T) {
 func TestClaudeCodeType_BuildCommandArgs_AllFields(t *testing.T) {
 	ct := NewClaudeCodeType()
 	args := ct.BuildCommandArgs(CommandArgsConfig{
+		SessionID:       "test-uuid-123",
 		SystemPrompt:    "Custom prompt",
 		Instructions:    "Extra instructions",
 		Model:           "claude-opus-4-6",
@@ -79,6 +80,7 @@ func TestClaudeCodeType_BuildCommandArgs_AllFields(t *testing.T) {
 		DisallowedTools: []string{"Write"},
 	})
 	expected := []string{
+		"--session-id", "test-uuid-123",
 		"--system-prompt", "Custom prompt",
 		"--append-system-prompt", "Extra instructions",
 		"--model", "claude-opus-4-6",
@@ -92,6 +94,27 @@ func TestClaudeCodeType_BuildCommandArgs_AllFields(t *testing.T) {
 	for i, want := range expected {
 		if args[i] != want {
 			t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
+		}
+	}
+}
+
+func TestClaudeCodeType_BuildCommandArgs_SessionIDFirst(t *testing.T) {
+	ct := NewClaudeCodeType()
+	args := ct.BuildCommandArgs(CommandArgsConfig{
+		SessionID:    "my-session",
+		Instructions: "Do stuff",
+	})
+	if len(args) < 2 || args[0] != "--session-id" || args[1] != "my-session" {
+		t.Fatalf("expected --session-id first, got %v", args)
+	}
+}
+
+func TestClaudeCodeType_BuildCommandArgs_NoSessionID(t *testing.T) {
+	ct := NewClaudeCodeType()
+	args := ct.BuildCommandArgs(CommandArgsConfig{Instructions: "Do stuff"})
+	for _, arg := range args {
+		if arg == "--session-id" {
+			t.Fatal("--session-id should not appear when SessionID is empty")
 		}
 	}
 }
@@ -113,6 +136,24 @@ func TestClaudeCodeType_BuildCommandArgs_InstructionsOnly(t *testing.T) {
 }
 
 // --- CodexType.BuildCommandArgs tests ---
+
+func TestCodexType_BuildCommandArgs_IgnoresSessionID(t *testing.T) {
+	ct := NewCodexType()
+	args := ct.BuildCommandArgs(CommandArgsConfig{SessionID: "some-uuid", PermissionMode: "ask"})
+	for _, arg := range args {
+		if arg == "--session-id" {
+			t.Fatal("Codex should not include --session-id")
+		}
+	}
+}
+
+func TestGenericType_BuildCommandArgs_IgnoresSessionID(t *testing.T) {
+	gt := NewGenericType("bash")
+	args := gt.BuildCommandArgs(CommandArgsConfig{SessionID: "some-uuid"})
+	if args != nil {
+		t.Fatalf("Generic should return nil, got %v", args)
+	}
+}
 
 func TestCodexType_BuildCommandArgs_Model(t *testing.T) {
 	ct := NewCodexType()

@@ -33,12 +33,9 @@ func TestPrepareForLaunch(t *testing.T) {
 		t.Error("expected non-empty session ID")
 	}
 
-	// Should have --session-id in prepend args.
-	if len(cfg.PrependArgs) < 2 || cfg.PrependArgs[0] != "--session-id" {
-		t.Errorf("PrependArgs = %v, want [--session-id, ...]", cfg.PrependArgs)
-	}
-	if cfg.PrependArgs[1] != a.SessionID() {
-		t.Errorf("PrependArgs[1] = %q, want session ID %q", cfg.PrependArgs[1], a.SessionID())
+	// PrependArgs should be empty (--session-id is now in BuildCommandArgs).
+	if len(cfg.PrependArgs) != 0 {
+		t.Errorf("PrependArgs = %v, want empty", cfg.PrependArgs)
 	}
 
 	// Should have OTEL env vars.

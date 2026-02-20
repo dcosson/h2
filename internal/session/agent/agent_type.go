@@ -14,6 +14,7 @@ import (
 // CommandArgsConfig holds role configuration fields to be mapped to CLI flags.
 // Each AgentType maps these to its own flag conventions.
 type CommandArgsConfig struct {
+	SessionID       string
 	Instructions    string
 	SystemPrompt    string
 	Model           string
@@ -75,6 +76,9 @@ func (t *ClaudeCodeType) NewAdapter(log *activitylog.Logger) adapter.AgentAdapte
 // BuildCommandArgs maps role config to Claude Code CLI flags.
 func (t *ClaudeCodeType) BuildCommandArgs(cfg CommandArgsConfig) []string {
 	var args []string
+	if cfg.SessionID != "" {
+		args = append(args, "--session-id", cfg.SessionID)
+	}
 	if cfg.SystemPrompt != "" {
 		args = append(args, "--system-prompt", cfg.SystemPrompt)
 	}

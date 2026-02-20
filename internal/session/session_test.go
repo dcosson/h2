@@ -449,27 +449,28 @@ func containsSubstring(s, sub string) bool {
 	return false
 }
 
-func TestChildArgs_WithPrependArgs(t *testing.T) {
+func TestChildArgs_WithSessionID(t *testing.T) {
 	s := New("test", "claude", []string{"--verbose"})
-	s.prependArgs = []string{"--session-id", "550e8400-e29b-41d4-a716-446655440000"}
+	s.SessionID = "550e8400-e29b-41d4-a716-446655440000"
 
 	args := s.childArgs()
 
+	// --verbose (base args), then --session-id, <uuid> (from BuildCommandArgs)
 	if len(args) != 3 {
 		t.Fatalf("expected 3 args, got %d: %v", len(args), args)
 	}
-	if args[0] != "--session-id" {
-		t.Fatalf("expected first arg '--session-id', got %q", args[0])
+	if args[0] != "--verbose" {
+		t.Fatalf("expected first arg '--verbose', got %q", args[0])
 	}
-	if args[1] != "550e8400-e29b-41d4-a716-446655440000" {
-		t.Fatalf("expected session ID as second arg, got %q", args[1])
+	if args[1] != "--session-id" {
+		t.Fatalf("expected '--session-id' as second arg, got %q", args[1])
 	}
-	if args[2] != "--verbose" {
-		t.Fatalf("expected '--verbose' as third arg, got %q", args[2])
+	if args[2] != "550e8400-e29b-41d4-a716-446655440000" {
+		t.Fatalf("expected session ID as third arg, got %q", args[2])
 	}
 }
 
-func TestChildArgs_NoPrependArgs(t *testing.T) {
+func TestChildArgs_NoSessionID(t *testing.T) {
 	s := New("test", "claude", []string{"--verbose"})
 
 	args := s.childArgs()
@@ -498,7 +499,7 @@ func TestChildArgs_GenericNoPrepend(t *testing.T) {
 func TestChildArgs_DoesNotMutateOriginal(t *testing.T) {
 	original := []string{"--verbose"}
 	s := New("test", "claude", original)
-	s.prependArgs = []string{"--session-id", "some-uuid"}
+	s.SessionID = "some-uuid"
 
 	_ = s.childArgs()
 
@@ -509,20 +510,20 @@ func TestChildArgs_DoesNotMutateOriginal(t *testing.T) {
 
 func TestChildArgs_WithInstructions(t *testing.T) {
 	s := New("test", "claude", []string{"--verbose"})
-	s.prependArgs = []string{"--session-id", "550e8400-e29b-41d4-a716-446655440000"}
+	s.SessionID = "550e8400-e29b-41d4-a716-446655440000"
 	s.Instructions = "You are a coding agent.\nWrite tests."
 
 	args := s.childArgs()
 
-	// Should have: --session-id, <uuid>, --verbose, --append-system-prompt, <instructions>
+	// Should have: --verbose, --session-id, <uuid>, --append-system-prompt, <instructions>
 	if len(args) != 5 {
 		t.Fatalf("expected 5 args, got %d: %v", len(args), args)
 	}
-	if args[0] != "--session-id" {
-		t.Fatalf("expected first arg '--session-id', got %q", args[0])
+	if args[0] != "--verbose" {
+		t.Fatalf("expected first arg '--verbose', got %q", args[0])
 	}
-	if args[2] != "--verbose" {
-		t.Fatalf("expected third arg '--verbose', got %q", args[2])
+	if args[1] != "--session-id" {
+		t.Fatalf("expected second arg '--session-id', got %q", args[1])
 	}
 	if args[3] != "--append-system-prompt" {
 		t.Fatalf("expected fourth arg '--append-system-prompt', got %q", args[3])
@@ -534,12 +535,12 @@ func TestChildArgs_WithInstructions(t *testing.T) {
 
 func TestChildArgs_EmptyInstructionsNoFlag(t *testing.T) {
 	s := New("test", "claude", []string{"--verbose"})
-	s.prependArgs = []string{"--session-id", "550e8400-e29b-41d4-a716-446655440000"}
+	s.SessionID = "550e8400-e29b-41d4-a716-446655440000"
 	s.Instructions = ""
 
 	args := s.childArgs()
 
-	// Should only have: --session-id, <uuid>, --verbose
+	// Should only have: --verbose, --session-id, <uuid>
 	if len(args) != 3 {
 		t.Fatalf("expected 3 args, got %d: %v", len(args), args)
 	}
@@ -585,7 +586,7 @@ func TestChildArgs_InstructionsNonClaude(t *testing.T) {
 
 func TestChildArgs_InstructionsWithSpecialCharacters(t *testing.T) {
 	s := New("test", "claude", nil)
-	s.prependArgs = []string{"--session-id", "test-uuid"}
+	s.SessionID = "test-uuid"
 	instructions := "Use `backticks` and \"quotes\" and $VARS and\nnewlines\tand\ttabs"
 	s.Instructions = instructions
 
@@ -609,7 +610,7 @@ func TestChildArgs_InstructionsWithSpecialCharacters(t *testing.T) {
 func TestChildArgs_InstructionsDoNotMutateOriginalArgs(t *testing.T) {
 	original := []string{"--verbose"}
 	s := New("test", "claude", original)
-	s.prependArgs = []string{"--session-id", "some-uuid"}
+	s.SessionID = "some-uuid"
 	s.Instructions = "Test instructions"
 
 	_ = s.childArgs()
@@ -621,7 +622,7 @@ func TestChildArgs_InstructionsDoNotMutateOriginalArgs(t *testing.T) {
 
 func TestChildArgs_SystemPrompt(t *testing.T) {
 	s := New("test", "claude", nil)
-	s.prependArgs = []string{"--session-id", "test-uuid"}
+	s.SessionID = "test-uuid"
 	s.SystemPrompt = "You are a custom agent."
 
 	args := s.childArgs()
@@ -630,6 +631,9 @@ func TestChildArgs_SystemPrompt(t *testing.T) {
 	if len(args) != 4 {
 		t.Fatalf("expected 4 args, got %d: %v", len(args), args)
 	}
+	if args[0] != "--session-id" || args[1] != "test-uuid" {
+		t.Fatalf("expected --session-id first, got %v", args[:2])
+	}
 	if args[2] != "--system-prompt" || args[3] != "You are a custom agent." {
 		t.Fatalf("expected --system-prompt flag, got %v", args[2:])
 	}
@@ -637,7 +641,7 @@ func TestChildArgs_SystemPrompt(t *testing.T) {
 
 func TestChildArgs_SystemPromptAndInstructions(t *testing.T) {
 	s := New("test", "claude", nil)
-	s.prependArgs = []string{"--session-id", "test-uuid"}
+	s.SessionID = "test-uuid"
 	s.SystemPrompt = "Custom system prompt"
 	s.Instructions = "Additional instructions"
 
@@ -646,6 +650,9 @@ func TestChildArgs_SystemPromptAndInstructions(t *testing.T) {
 	// --session-id, <uuid>, --system-prompt, <prompt>, --append-system-prompt, <instructions>
 	if len(args) != 6 {
 		t.Fatalf("expected 6 args, got %d: %v", len(args), args)
+	}
+	if args[0] != "--session-id" || args[1] != "test-uuid" {
+		t.Fatalf("expected --session-id first, got %v", args[:2])
 	}
 	if args[2] != "--system-prompt" || args[3] != "Custom system prompt" {
 		t.Fatalf("expected --system-prompt, got %v", args[2:4])
@@ -657,7 +664,7 @@ func TestChildArgs_SystemPromptAndInstructions(t *testing.T) {
 
 func TestChildArgs_Model(t *testing.T) {
 	s := New("test", "claude", nil)
-	s.prependArgs = []string{"--session-id", "test-uuid"}
+	s.SessionID = "test-uuid"
 	s.Model = "claude-sonnet-4-5-20250929"
 
 	args := s.childArgs()
@@ -672,7 +679,7 @@ func TestChildArgs_Model(t *testing.T) {
 
 func TestChildArgs_PermissionMode(t *testing.T) {
 	s := New("test", "claude", nil)
-	s.prependArgs = []string{"--session-id", "test-uuid"}
+	s.SessionID = "test-uuid"
 	s.PermissionMode = "bypassPermissions"
 
 	args := s.childArgs()
@@ -687,7 +694,7 @@ func TestChildArgs_PermissionMode(t *testing.T) {
 
 func TestChildArgs_AllowedTools(t *testing.T) {
 	s := New("test", "claude", nil)
-	s.prependArgs = []string{"--session-id", "test-uuid"}
+	s.SessionID = "test-uuid"
 	s.AllowedTools = []string{"Bash", "Read", "Write"}
 
 	args := s.childArgs()
@@ -702,7 +709,7 @@ func TestChildArgs_AllowedTools(t *testing.T) {
 
 func TestChildArgs_DisallowedTools(t *testing.T) {
 	s := New("test", "claude", nil)
-	s.prependArgs = []string{"--session-id", "test-uuid"}
+	s.SessionID = "test-uuid"
 	s.DisallowedTools = []string{"Bash", "Edit"}
 
 	args := s.childArgs()
@@ -717,7 +724,7 @@ func TestChildArgs_DisallowedTools(t *testing.T) {
 
 func TestChildArgs_EmptyToolListsOmitted(t *testing.T) {
 	s := New("test", "claude", nil)
-	s.prependArgs = []string{"--session-id", "test-uuid"}
+	s.SessionID = "test-uuid"
 	s.AllowedTools = []string{}
 	s.DisallowedTools = nil
 
@@ -736,7 +743,7 @@ func TestChildArgs_EmptyToolListsOmitted(t *testing.T) {
 
 func TestChildArgs_AllFieldsCombined(t *testing.T) {
 	s := New("test", "claude", []string{"--verbose"})
-	s.prependArgs = []string{"--session-id", "test-uuid"}
+	s.SessionID = "test-uuid"
 	s.SystemPrompt = "Custom prompt"
 	s.Instructions = "Extra instructions"
 	s.Model = "claude-opus-4-6"
@@ -746,10 +753,12 @@ func TestChildArgs_AllFieldsCombined(t *testing.T) {
 
 	args := s.childArgs()
 
-	// --session-id, <uuid>, --verbose, --system-prompt, <p>, --append-system-prompt, <i>,
+	// --verbose (base args), then all role args from BuildCommandArgs:
+	// --session-id, <uuid>, --system-prompt, <p>, --append-system-prompt, <i>,
 	// --model, <m>, --permission-mode, <pm>, --allowedTools, <at>, --disallowedTools, <dt>
 	expected := []string{
-		"--session-id", "test-uuid", "--verbose",
+		"--verbose",
+		"--session-id", "test-uuid",
 		"--system-prompt", "Custom prompt",
 		"--append-system-prompt", "Extra instructions",
 		"--model", "claude-opus-4-6",

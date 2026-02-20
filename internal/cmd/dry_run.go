@@ -94,16 +94,15 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 
 	// Build child args: what the agent command would receive.
 	// Uses AgentType.BuildCommandArgs for agent-specific flags.
-	var childArgs []string
-	childArgs = append(childArgs, "--session-id", "<generated-uuid>")
-	childArgs = append(childArgs, agentType.BuildCommandArgs(agent.CommandArgsConfig{
+	childArgs := agentType.BuildCommandArgs(agent.CommandArgsConfig{
+		SessionID:       "<generated-uuid>",
 		Instructions:    role.Instructions,
 		SystemPrompt:    role.SystemPrompt,
 		Model:           role.Model,
 		PermissionMode:  role.PermissionMode,
 		AllowedTools:    role.Permissions.Allow,
 		DisallowedTools: role.Permissions.Deny,
-	})...)
+	})
 
 	return &ResolvedAgentConfig{
 		Name:       name,
