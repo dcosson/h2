@@ -1,9 +1,13 @@
 package collector
 
-import "time"
+import (
+	"time"
+
+	"h2/internal/session/agent/monitor"
+)
 
 // OtelCollector derives state from OTEL log events.
-// It goes active on each NoteEvent signal and idle after IdleThreshold
+// It goes active on each NoteEvent signal and idle after monitor.IdleThreshold
 // with no further events.
 type OtelCollector struct {
 	notifyCh chan struct{}
@@ -45,14 +49,14 @@ func (c *OtelCollector) Stop() {
 }
 
 func (c *OtelCollector) run() {
-	idleTimer := time.NewTimer(IdleThreshold)
+	idleTimer := time.NewTimer(monitor.IdleThreshold)
 	defer idleTimer.Stop()
 
 	for {
 		select {
 		case <-c.notifyCh:
 			c.send(StateActive)
-			resetTimer(idleTimer, IdleThreshold)
+			resetTimer(idleTimer, monitor.IdleThreshold)
 		case <-idleTimer.C:
 			c.send(StateIdle)
 		case <-c.stopCh:

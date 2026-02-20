@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"h2/internal/session/agent"
-	"h2/internal/session/agent/collector"
+	"h2/internal/session/agent/monitor"
 )
 
 // waitForSessionState polls StateChanged until the target state is reached.
@@ -173,9 +173,9 @@ func (t otelOnlyAgentType) PrependArgs(sessionID string) []string              {
 func (t otelOnlyAgentType) ChildEnv(cp *agent.CollectorPorts) map[string]string { return nil }
 
 func TestOtelCollector_StateTransitionOnEvent(t *testing.T) {
-	old := collector.IdleThreshold
-	collector.IdleThreshold = 10 * time.Millisecond
-	t.Cleanup(func() { collector.IdleThreshold = old })
+	old := monitor.IdleThreshold
+	monitor.IdleThreshold = 10 * time.Millisecond
+	t.Cleanup(func() { monitor.IdleThreshold = old })
 
 	// Use an otel-only agent type so the OtelCollector is the primary
 	// state source (not hooks).

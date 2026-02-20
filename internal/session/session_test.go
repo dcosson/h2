@@ -9,7 +9,7 @@ import (
 	"github.com/vito/midterm"
 
 	"h2/internal/session/agent"
-	"h2/internal/session/agent/collector"
+	"h2/internal/session/agent/monitor"
 	"h2/internal/session/client"
 	"h2/internal/session/message"
 	"h2/internal/session/virtualterminal"
@@ -17,9 +17,9 @@ import (
 
 func setFastIdle(t *testing.T) {
 	t.Helper()
-	old := collector.IdleThreshold
-	collector.IdleThreshold = 10 * time.Millisecond
-	t.Cleanup(func() { collector.IdleThreshold = old })
+	old := monitor.IdleThreshold
+	monitor.IdleThreshold = 10 * time.Millisecond
+	t.Cleanup(func() { monitor.IdleThreshold = old })
 }
 
 // waitForState polls StateChanged until the target state is reached.

@@ -1,9 +1,13 @@
 package collector
 
-import "time"
+import (
+	"time"
+
+	"h2/internal/session/agent/monitor"
+)
 
 // OutputCollector derives state from child PTY output.
-// It goes active on each NoteOutput signal and idle after IdleThreshold
+// It goes active on each NoteOutput signal and idle after monitor.IdleThreshold
 // with no further output.
 type OutputCollector struct {
 	notifyCh chan struct{}
@@ -45,14 +49,14 @@ func (c *OutputCollector) Stop() {
 }
 
 func (c *OutputCollector) run() {
-	idleTimer := time.NewTimer(IdleThreshold)
+	idleTimer := time.NewTimer(monitor.IdleThreshold)
 	defer idleTimer.Stop()
 
 	for {
 		select {
 		case <-c.notifyCh:
 			c.send(StateActive)
-			resetTimer(idleTimer, IdleThreshold)
+			resetTimer(idleTimer, monitor.IdleThreshold)
 		case <-idleTimer.C:
 			c.send(StateIdle)
 		case <-c.stopCh:

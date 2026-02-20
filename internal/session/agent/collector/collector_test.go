@@ -1,6 +1,10 @@
 package collector
 
-import "testing"
+import (
+	"testing"
+
+	"h2/internal/session/agent/monitor"
+)
 
 func TestFormatStateLabel(t *testing.T) {
 	tests := []struct {
@@ -28,7 +32,7 @@ func TestFormatStateLabel(t *testing.T) {
 		{"idle", "thinking", "Idle (thinking)"},
 	}
 	for _, tt := range tests {
-		got := FormatStateLabel(tt.state, tt.subState)
+		got := monitor.FormatStateLabel(tt.state, tt.subState)
 		if got != tt.want {
 			t.Errorf("FormatStateLabel(%q, %q) = %q, want %q", tt.state, tt.subState, got, tt.want)
 		}
@@ -37,19 +41,19 @@ func TestFormatStateLabel(t *testing.T) {
 
 func TestFormatStateLabel_WithToolName(t *testing.T) {
 	// Tool name only appears for tool_use sub-state.
-	got := FormatStateLabel("active", "tool_use", "Bash")
+	got := monitor.FormatStateLabel("active", "tool_use", "Bash")
 	if got != "Active (tool use: Bash)" {
 		t.Errorf("got %q, want %q", got, "Active (tool use: Bash)")
 	}
 
 	// Empty tool name — no suffix.
-	got = FormatStateLabel("active", "tool_use", "")
+	got = monitor.FormatStateLabel("active", "tool_use", "")
 	if got != "Active (tool use)" {
 		t.Errorf("got %q, want %q", got, "Active (tool use)")
 	}
 
 	// Tool name ignored for non-tool_use sub-states.
-	got = FormatStateLabel("active", "thinking", "Bash")
+	got = monitor.FormatStateLabel("active", "thinking", "Bash")
 	if got != "Active (thinking)" {
 		t.Errorf("got %q, want %q", got, "Active (thinking)")
 	}

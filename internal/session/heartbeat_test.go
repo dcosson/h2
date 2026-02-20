@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"h2/internal/session/agent"
-	"h2/internal/session/agent/collector"
+	"h2/internal/session/agent/monitor"
 	"h2/internal/session/message"
 )
 
@@ -17,9 +17,9 @@ func newTestAgent() *agent.Agent {
 
 func setFastIdleHeartbeat(t *testing.T) {
 	t.Helper()
-	old := collector.IdleThreshold
-	collector.IdleThreshold = 10 * time.Millisecond
-	t.Cleanup(func() { collector.IdleThreshold = old })
+	old := monitor.IdleThreshold
+	monitor.IdleThreshold = 10 * time.Millisecond
+	t.Cleanup(func() { monitor.IdleThreshold = old })
 }
 
 func TestHeartbeat_NudgeAfterIdleTimeout(t *testing.T) {

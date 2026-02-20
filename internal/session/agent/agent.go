@@ -13,39 +13,36 @@ import (
 
 	"h2/internal/activitylog"
 	"h2/internal/session/agent/collector"
+	"h2/internal/session/agent/monitor"
 )
 
-// Re-export State type, constants, and IdleThreshold from collector package
+// Re-export State type, constants, and IdleThreshold from monitor package
 // so existing callers (agent.StateActive, agent.IdleThreshold, etc.)
 // continue to work with zero changes.
-type State = collector.State
+type State = monitor.State
 
 const (
-	StateInitialized = collector.StateInitialized
-	StateActive      = collector.StateActive
-	StateIdle        = collector.StateIdle
-	StateExited      = collector.StateExited
+	StateInitialized = monitor.StateInitialized
+	StateActive      = monitor.StateActive
+	StateIdle        = monitor.StateIdle
+	StateExited      = monitor.StateExited
 )
 
-// IdleThreshold re-exports collector.IdleThreshold for convenience.
-// Tests can set collector.IdleThreshold directly to override.
-var IdleThreshold = collector.IdleThreshold
-
-// Re-export SubState type, constants, and StateUpdate from collector package.
-type SubState = collector.SubState
+// Re-export SubState type, constants, and StateUpdate from monitor package.
+type SubState = monitor.SubState
 
 const (
-	SubStateNone                 = collector.SubStateNone
-	SubStateThinking             = collector.SubStateThinking
-	SubStateToolUse              = collector.SubStateToolUse
-	SubStateWaitingForPermission = collector.SubStateWaitingForPermission
-	SubStateCompacting           = collector.SubStateCompacting
+	SubStateNone                 = monitor.SubStateNone
+	SubStateThinking             = monitor.SubStateThinking
+	SubStateToolUse              = monitor.SubStateToolUse
+	SubStateWaitingForPermission = monitor.SubStateWaitingForPermission
+	SubStateCompacting           = monitor.SubStateCompacting
 )
 
-type StateUpdate = collector.StateUpdate
+type StateUpdate = monitor.StateUpdate
 
-// FormatStateLabel re-exports collector.FormatStateLabel.
-var FormatStateLabel = collector.FormatStateLabel
+// FormatStateLabel re-exports monitor.FormatStateLabel.
+var FormatStateLabel = monitor.FormatStateLabel
 
 // Agent manages collectors, state derivation, and metrics for a session.
 type Agent struct {
