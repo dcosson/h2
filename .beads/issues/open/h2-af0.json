@@ -1,0 +1,33 @@
+{
+  "id": "h2-af0",
+  "title": "Refactor Agent struct to use AgentMonitor + adapter",
+  "description": "Refactor Agent struct to own AgentMonitor instead of directly managing collectors. Wire AgentType.NewAdapter() to create adapter. Wire message delivery through InputSender instead of direct PTY writes. Simplify AgentType interface: remove Collectors(), OtelParser(), ChildEnv(), PrependArgs(); add NewAdapter(), RoleArgs(). Verify all existing tests pass.",
+  "status": "open",
+  "priority": 1,
+  "type": "task",
+  "parent": "h2-meo",
+  "dependencies": [
+    {
+      "id": "h2-meo",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-6sp",
+      "type": "blocks"
+    },
+    {
+      "id": "h2-vih",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "h2-p8o",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-19T16:03:39.099407-08:00",
+  "updated_at": "2026-02-19T16:03:39.099407-08:00"
+}

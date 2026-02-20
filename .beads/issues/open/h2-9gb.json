@@ -15,6 +15,22 @@
     {
       "id": "h2-ex2",
       "type": "blocks"
+    },
+    {
+      "id": "h2-oxg",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-cxf",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-j5w",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-azf",
+      "type": "parent-child"
     }
   ],
   "created_by": "Danny Cosson",

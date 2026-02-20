@@ -1,0 +1,33 @@
+{
+  "id": "h2-6sp",
+  "title": "Build AgentMonitor - event consumer with state/metrics/store",
+  "description": "Build AgentMonitor in monitor/monitor.go. Consumes AgentEvents from adapter channel. Updates State/SubState, tracks metrics (tokens, cost), writes threadID. Writes every event to EventStore. Replaces the current pattern of Agent directly managing collector state. Agent struct refactored to own AgentMonitor + OutputCollector.",
+  "status": "open",
+  "priority": 1,
+  "type": "task",
+  "parent": "h2-meo",
+  "dependencies": [
+    {
+      "id": "h2-meo",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-hbe",
+      "type": "blocks"
+    },
+    {
+      "id": "h2-ok3",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "h2-af0",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-19T16:03:26.285552-08:00",
+  "updated_at": "2026-02-19T16:03:26.285552-08:00"
+}

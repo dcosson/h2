@@ -1,0 +1,33 @@
+{
+  "id": "h2-hbe",
+  "title": "Create adapter/ package with AgentAdapter, InputSender, LaunchConfig",
+  "description": "Create internal/session/agent/adapter/ package. Define AgentAdapter interface (Name, PrepareForLaunch, Start, HandleHookEvent, Stop). Define InputSender interface (SendInput, SendInterrupt). Define LaunchConfig struct (Env map, PrependArgs). Create PTYInputSender default implementation that writes to VT PTY stdin.",
+  "status": "open",
+  "priority": 1,
+  "type": "task",
+  "parent": "h2-meo",
+  "dependencies": [
+    {
+      "id": "h2-meo",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-3ce",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "h2-vih",
+      "type": "blocks"
+    },
+    {
+      "id": "h2-6sp",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-19T16:02:24.788312-08:00",
+  "updated_at": "2026-02-19T16:02:24.788312-08:00"
+}

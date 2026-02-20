@@ -1,0 +1,19 @@
+{
+  "id": "h2-mzc",
+  "title": "Role validation warnings for cross-agent-type field misuse",
+  "description": "When a role has agent_type: codex but uses Claude-specific fields (claude_config_dir, hooks, settings, permission_mode), emit a warning. Similarly if a Claude role uses codex-specific fields. Helps users catch config mistakes.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "h2-ex2",
+  "dependencies": [
+    {
+      "id": "h2-ex2",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-19T16:05:37.819912-08:00",
+  "updated_at": "2026-02-19T16:05:37.819912-08:00"
+}

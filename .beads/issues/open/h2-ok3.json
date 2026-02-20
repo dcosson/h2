@@ -1,0 +1,29 @@
+{
+  "id": "h2-ok3",
+  "title": "Create shared/eventstore/ for unified AgentEvent JSONL",
+  "description": "Create shared/eventstore/ package. EventStore struct with Open(sessionDir), Append(AgentEvent), Read() []AgentEvent, Tail(ctx) \u003c-chan AgentEvent, Close(). One JSONL file per session in h2's session directory. AgentMonitor will write every event here. Peek will read from here instead of agent-native logs.",
+  "status": "open",
+  "priority": 1,
+  "type": "task",
+  "parent": "h2-meo",
+  "dependencies": [
+    {
+      "id": "h2-meo",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-3ce",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "h2-6sp",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-19T16:02:59.878123-08:00",
+  "updated_at": "2026-02-19T16:02:59.878123-08:00"
+}

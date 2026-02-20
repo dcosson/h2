@@ -1,0 +1,29 @@
+{
+  "id": "h2-j5w",
+  "title": "Codex PrepareForLaunch with -c OTEL config",
+  "description": "CodexAdapter.PrepareForLaunch generates -c flag for OTEL trace exporter config: -c 'otel.trace_exporter={type=\"otlp-http\",endpoint=\"http://127.0.0.1:PORT\"}'. Verify exact TOML syntax works with Codex CLI. Auth credentials in CODEX_HOME/.credentials.json are unaffected.",
+  "status": "open",
+  "priority": 1,
+  "type": "task",
+  "parent": "h2-9gb",
+  "dependencies": [
+    {
+      "id": "h2-9gb",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-cxf",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "h2-azf",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-19T16:04:56.374299-08:00",
+  "updated_at": "2026-02-19T16:04:56.374299-08:00"
+}

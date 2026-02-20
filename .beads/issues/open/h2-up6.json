@@ -1,0 +1,19 @@
+{
+  "id": "h2-up6",
+  "title": "Codex session log collector for rich peek",
+  "description": "Investigate Codex's native session log format and location. Build a session log collector for the Codex adapter that tails Codex's logs for full assistant message text. Emit EventAgentMessage events so peek shows full conversation. This is the main gap between Claude and Codex peek quality.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "h2-ex2",
+  "dependencies": [
+    {
+      "id": "h2-ex2",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-19T16:05:52.878623-08:00",
+  "updated_at": "2026-02-19T16:05:52.878623-08:00"
+}
