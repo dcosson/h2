@@ -9,7 +9,7 @@ import (
 
 	"h2/internal/config"
 	"h2/internal/session"
-	"h2/internal/session/agent"
+	"h2/internal/session/agent/harness"
 )
 
 // ResolvedAgentConfig holds all resolved values for an agent launch,
@@ -37,8 +37,10 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 		name = session.GenerateName()
 	}
 
-	cmdCommand := role.GetAgentType()
-	agentType := agent.ResolveAgentType(cmdCommand)
+	h, err := harness.Resolve(roleHarnessConfig(role), nil)
+	if err != nil {
+		return nil, fmt.Errorf("resolve harness: %w", err)
+	}
 
 	var heartbeat session.DaemonHeartbeat
 	if role.Heartbeat != nil {
@@ -84,8 +86,8 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 	if sessionDir != "" {
 		envVars["H2_SESSION_DIR"] = sessionDir
 	}
-	// Merge agent-type-specific env vars (e.g. CLAUDE_CONFIG_DIR).
-	for k, v := range agentType.BuildCommandEnvVars(config.ConfigDir(), role.Name) {
+	// Merge harness-specific env vars (e.g. CLAUDE_CONFIG_DIR).
+	for k, v := range h.BuildCommandEnvVars(config.ConfigDir()) {
 		envVars[k] = v
 	}
 	if pod != "" {
@@ -93,8 +95,8 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 	}
 
 	// Build child args: what the agent command would receive.
-	// Uses AgentType.BuildCommandArgs for agent-specific flags.
-	childArgs := agentType.BuildCommandArgs(agent.CommandArgsConfig{
+	// Uses Harness.BuildCommandArgs for agent-specific flags.
+	childArgs := h.BuildCommandArgs(harness.CommandArgsConfig{
 		SessionID:       "<generated-uuid>",
 		Instructions:    role.Instructions,
 		SystemPrompt:    role.SystemPrompt,
@@ -107,7 +109,7 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 	return &ResolvedAgentConfig{
 		Name:       name,
 		Role:       role,
-		Command:    cmdCommand,
+		Command:    h.Command(),
 		SessionDir: sessionDir,
 		WorkingDir: agentCWD,
 		IsWorktree: isWorktree,

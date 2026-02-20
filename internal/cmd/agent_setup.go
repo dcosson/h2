@@ -9,12 +9,28 @@ import (
 	"h2/internal/config"
 	"h2/internal/git"
 	"h2/internal/session"
-	"h2/internal/session/agent"
+	"h2/internal/session/agent/harness"
 )
 
 // forkDaemonFunc is the function used to fork daemon processes.
 // Tests override this to avoid spawning real processes.
 var forkDaemonFunc = session.ForkDaemon
+
+// roleHarnessConfig builds a harness.HarnessConfig from a Role.
+// Used by agent setup and dry-run to resolve the harness.
+func roleHarnessConfig(role *config.Role) harness.HarnessConfig {
+	ht := role.GetHarnessType()
+	cfg := harness.HarnessConfig{
+		HarnessType: ht,
+		Command:     role.GetAgentType(),
+		Model:       role.GetModel(),
+	}
+	switch ht {
+	case "claude_code", "claude":
+		cfg.ConfigDir = role.GetClaudeConfigDir()
+	}
+	return cfg
+}
 
 // setupAndForkAgent sets up the agent session, forks the daemon,
 // and optionally attaches to it. This is shared by both 'h2 run' and 'h2 bridge'.
@@ -39,13 +55,15 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 		return fmt.Errorf("setup session dir: %w", err)
 	}
 
-	cmdCommand := role.GetAgentType()
-
-	// Ensure agent-type-specific config directories exist.
-	agentType := agent.ResolveAgentType(cmdCommand)
-	if err := agentType.EnsureConfigDir(config.ConfigDir(), role.Name); err != nil {
+	// Resolve harness and ensure config directories exist.
+	h, err := harness.Resolve(roleHarnessConfig(role), nil)
+	if err != nil {
+		return fmt.Errorf("resolve harness: %w", err)
+	}
+	if err := h.EnsureConfigDir(config.ConfigDir()); err != nil {
 		return fmt.Errorf("ensure config dir: %w", err)
 	}
+
 	var heartbeat session.DaemonHeartbeat
 	if role.Heartbeat != nil {
 		d, err := role.Heartbeat.ParseIdleTimeout()
@@ -86,7 +104,7 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 	if err := forkDaemonFunc(session.ForkDaemonOpts{
 		Name:            name,
 		SessionID:       sessionID,
-		Command:         cmdCommand,
+		Command:         h.Command(),
 		RoleName:        role.Name,
 		SessionDir:      sessionDir,
 		Instructions:    role.Instructions,
