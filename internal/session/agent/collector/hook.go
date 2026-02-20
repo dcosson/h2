@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"h2/internal/activitylog"
+	"h2/internal/session/agent/monitor"
 )
 
 // HookCollector accumulates lifecycle data from Claude Code hooks and
@@ -25,7 +26,7 @@ type HookCollector struct {
 	compacting          bool
 
 	activityCh  chan string // internal: event names for state derivation
-	stateCh     chan StateUpdate
+	stateCh     chan monitor.StateUpdate
 	stopCh      chan struct{}
 	activityLog *activitylog.Logger
 }
@@ -37,7 +38,7 @@ func NewHookCollector(log *activitylog.Logger) *HookCollector {
 	}
 	c := &HookCollector{
 		activityCh:  make(chan string, 8),
-		stateCh:     make(chan StateUpdate, 1),
+		stateCh:     make(chan monitor.StateUpdate, 1),
 		stopCh:      make(chan struct{}),
 		activityLog: log,
 	}
@@ -46,7 +47,7 @@ func NewHookCollector(log *activitylog.Logger) *HookCollector {
 }
 
 // StateCh returns the channel that receives state updates.
-func (c *HookCollector) StateCh() <-chan StateUpdate {
+func (c *HookCollector) StateCh() <-chan monitor.StateUpdate {
 	return c.stateCh
 }
 
@@ -170,22 +171,22 @@ type HookState struct {
 }
 
 // SubState derives the agent sub-state from this snapshot.
-func (hs HookState) SubState() SubState {
+func (hs HookState) SubState() monitor.SubState {
 	if hs.Compacting {
-		return SubStateCompacting
+		return monitor.SubStateCompacting
 	}
 	if hs.BlockedOnPermission {
-		return SubStateWaitingForPermission
+		return monitor.SubStateWaitingForPermission
 	}
 	switch hs.LastEvent {
 	case "UserPromptSubmit", "PostToolUse":
-		return SubStateThinking
+		return monitor.SubStateThinking
 	case "PreToolUse":
-		return SubStateToolUse
+		return monitor.SubStateToolUse
 	case "PermissionRequest":
-		return SubStateWaitingForPermission
+		return monitor.SubStateWaitingForPermission
 	default:
-		return SubStateNone
+		return monitor.SubStateNone
 	}
 }
 
@@ -194,21 +195,21 @@ func (hs HookState) SubState() SubState {
 // Emits on every event because sub-state can change without state changing
 // (e.g. permission_decision → WaitingForPermission).
 func (c *HookCollector) runStateLoop() {
-	currentState := StateInitialized
+	currentState := monitor.StateInitialized
 	for {
 		select {
 		case eventName := <-c.activityCh:
 			switch eventName {
 			case "UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "permission_allow", "PreCompact":
-				currentState = StateActive
+				currentState = monitor.StateActive
 			case "SessionStart", "Stop", "Interrupt":
-				currentState = StateIdle
+				currentState = monitor.StateIdle
 			case "SessionEnd":
-				currentState = StateExited
+				currentState = monitor.StateExited
 			}
 			// Always emit: sub-state may have changed even if state didn't.
 			subState := c.Snapshot().SubState()
-			c.send(StateUpdate{State: currentState, SubState: subState})
+			c.send(monitor.StateUpdate{State: currentState, SubState: subState})
 		case <-c.stopCh:
 			return
 		}
@@ -217,7 +218,7 @@ func (c *HookCollector) runStateLoop() {
 
 // send delivers the latest StateUpdate using drain-and-replace to ensure
 // the consumer always sees the most recent state.
-func (c *HookCollector) send(su StateUpdate) {
+func (c *HookCollector) send(su monitor.StateUpdate) {
 	select {
 	case <-c.stateCh:
 	default:

@@ -16,34 +16,6 @@ import (
 	"h2/internal/session/agent/shared/outputcollector"
 )
 
-// Re-export State type, constants, and IdleThreshold from monitor package
-// so existing callers (agent.StateActive, agent.IdleThreshold, etc.)
-// continue to work with zero changes.
-type State = monitor.State
-
-const (
-	StateInitialized = monitor.StateInitialized
-	StateActive      = monitor.StateActive
-	StateIdle        = monitor.StateIdle
-	StateExited      = monitor.StateExited
-)
-
-// Re-export SubState type, constants, and StateUpdate from monitor package.
-type SubState = monitor.SubState
-
-const (
-	SubStateNone                 = monitor.SubStateNone
-	SubStateThinking             = monitor.SubStateThinking
-	SubStateToolUse              = monitor.SubStateToolUse
-	SubStateWaitingForPermission = monitor.SubStateWaitingForPermission
-	SubStateCompacting           = monitor.SubStateCompacting
-)
-
-type StateUpdate = monitor.StateUpdate
-
-// FormatStateLabel re-exports monitor.FormatStateLabel.
-var FormatStateLabel = monitor.FormatStateLabel
-
 // Agent manages collectors, state derivation, and metrics for a session.
 type Agent struct {
 	agentType AgentType
@@ -69,8 +41,8 @@ type Agent struct {
 
 	// Layer 2: Derived state
 	mu             sync.Mutex
-	state          State
-	subState       SubState
+	state          monitor.State
+	subState       monitor.SubState
 	stateChangedAt time.Time
 	stateCh        chan struct{} // closed on state change
 
@@ -83,7 +55,7 @@ func New(agentType AgentType) *Agent {
 	return &Agent{
 		agentType:      agentType,
 		metrics:        &OtelMetrics{},
-		state:          StateInitialized,
+		state:          monitor.StateInitialized,
 		stateChangedAt: time.Now(),
 		stateCh:        make(chan struct{}),
 		stopCh:         make(chan struct{}),
@@ -150,7 +122,7 @@ func (a *Agent) StartCollectors() error {
 // --- State accessors ---
 
 // State returns the current derived state and sub-state atomically.
-func (a *Agent) State() (State, SubState) {
+func (a *Agent) State() (monitor.State, monitor.SubState) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.state, a.subState
@@ -164,7 +136,7 @@ func (a *Agent) StateChanged() <-chan struct{} {
 }
 
 // WaitForState blocks until the agent reaches the target state or ctx is cancelled.
-func (a *Agent) WaitForState(ctx context.Context, target State) bool {
+func (a *Agent) WaitForState(ctx context.Context, target monitor.State) bool {
 	for {
 		st, _ := a.State()
 		if st == target {
@@ -191,7 +163,7 @@ func (a *Agent) StateDuration() time.Duration {
 }
 
 // setState updates the state and notifies waiters. Caller must NOT hold mu.
-func (a *Agent) setState(newState State, newSubState SubState) {
+func (a *Agent) setState(newState monitor.State, newSubState monitor.SubState) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.setStateLocked(newState, newSubState)
@@ -199,7 +171,7 @@ func (a *Agent) setState(newState State, newSubState SubState) {
 
 // setStateLocked updates state and sub-state while mu is already held.
 // State-change notifications only fire when State changes (not sub-state alone).
-func (a *Agent) setStateLocked(newState State, newSubState SubState) {
+func (a *Agent) setStateLocked(newState monitor.State, newSubState monitor.SubState) {
 	stateChanged := a.state != newState
 	prev := a.state
 	a.state = newState
@@ -233,7 +205,7 @@ func (a *Agent) NoteInterrupt() {
 // SetExited transitions the agent to the Exited state.
 // Called by Session when the child process exits.
 func (a *Agent) SetExited() {
-	a.setState(StateExited, SubStateNone)
+	a.setState(monitor.StateExited, monitor.SubStateNone)
 }
 
 // --- Internal watchState goroutine ---
@@ -244,7 +216,7 @@ func (a *Agent) watchState() {
 		select {
 		case su := <-a.primaryCollector.StateCh():
 			a.mu.Lock()
-			if a.state != StateExited {
+			if a.state != monitor.StateExited {
 				a.setStateLocked(su.State, su.SubState)
 			}
 			a.mu.Unlock()

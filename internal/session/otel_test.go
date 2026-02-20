@@ -12,7 +12,7 @@ import (
 )
 
 // waitForSessionState polls StateChanged until the target state is reached.
-func waitForSessionState(t *testing.T, s *Session, target agent.State, timeout time.Duration) {
+func waitForSessionState(t *testing.T, s *Session, target monitor.State, timeout time.Duration) {
 	t.Helper()
 	deadline := time.After(timeout)
 	for {
@@ -188,7 +188,7 @@ func TestOtelCollector_StateTransitionOnEvent(t *testing.T) {
 	}
 
 	// Let it go idle.
-	waitForSessionState(t, s, agent.StateIdle, 2*time.Second)
+	waitForSessionState(t, s, monitor.StateIdle, 2*time.Second)
 
 	// Send an OTEL event to wake it up.
 	payload := `{
@@ -211,7 +211,7 @@ func TestOtelCollector_StateTransitionOnEvent(t *testing.T) {
 	resp.Body.Close()
 
 	// Wait for state to become active via channel.
-	waitForSessionState(t, s, agent.StateActive, 2*time.Second)
+	waitForSessionState(t, s, monitor.StateActive, 2*time.Second)
 }
 
 func TestOtelMetrics_AccumulatesTokensAndCost(t *testing.T) {

@@ -109,3 +109,26 @@ func TestAgentEvent_PayloadTypes(t *testing.T) {
 		t.Errorf("unexpected state change: %+v", sc)
 	}
 }
+
+func TestAgentEventType_String(t *testing.T) {
+	tests := []struct {
+		typ  AgentEventType
+		want string
+	}{
+		{EventSessionStarted, "session_started"},
+		{EventTurnStarted, "turn_started"},
+		{EventTurnCompleted, "turn_completed"},
+		{EventToolStarted, "tool_started"},
+		{EventToolCompleted, "tool_completed"},
+		{EventApprovalRequested, "approval_requested"},
+		{EventAgentMessage, "agent_message"},
+		{EventStateChange, "state_change"},
+		{EventSessionEnded, "session_ended"},
+		{AgentEventType(99), "unknown"},
+	}
+	for _, tt := range tests {
+		if got := tt.typ.String(); got != tt.want {
+			t.Errorf("AgentEventType(%d).String() = %q, want %q", tt.typ, got, tt.want)
+		}
+	}
+}

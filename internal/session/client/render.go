@@ -13,6 +13,7 @@ import (
 	"github.com/vito/midterm"
 
 	"h2/internal/session/agent"
+	"h2/internal/session/agent/monitor"
 	"h2/internal/session/message"
 	"h2/internal/session/virtualterminal"
 )
@@ -335,7 +336,7 @@ func (c *Client) StatusLabel() string {
 		if c.HookState != nil && state == "active" {
 			toolName = c.HookState()
 		}
-		label := agent.FormatStateLabel(state, subState, toolName)
+		label := monitor.FormatStateLabel(state, subState, toolName)
 		if state == "idle" && dur != "" {
 			label += " " + dur
 		}

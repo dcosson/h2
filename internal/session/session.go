@@ -16,6 +16,7 @@ import (
 
 	"h2/internal/activitylog"
 	"h2/internal/session/agent"
+	"h2/internal/session/agent/monitor"
 	"h2/internal/session/client"
 	"h2/internal/session/message"
 	"h2/internal/session/virtualterminal"
@@ -571,7 +572,7 @@ func (s *Session) Metrics() agent.OtelMetricsSnapshot {
 }
 
 // State returns the current agent state and sub-state.
-func (s *Session) State() (agent.State, agent.SubState) {
+func (s *Session) State() (monitor.State, monitor.SubState) {
 	return s.Agent.State()
 }
 
@@ -581,7 +582,7 @@ func (s *Session) StateChanged() <-chan struct{} {
 }
 
 // WaitForState blocks until the agent reaches the target state or ctx is cancelled.
-func (s *Session) WaitForState(ctx context.Context, target agent.State) bool {
+func (s *Session) WaitForState(ctx context.Context, target monitor.State) bool {
 	return s.Agent.WaitForState(ctx, target)
 }
 
@@ -622,14 +623,14 @@ func (s *Session) StartServices() {
 		PtyWriter: s.PtyWriter(),
 		IsIdle: func() bool {
 			st, _ := s.Agent.State()
-			return st == agent.StateIdle
+			return st == monitor.StateIdle
 		},
 		IsBlocked: func() bool {
 			st, sub := s.Agent.State()
-			return st == agent.StateActive && sub == agent.SubStateWaitingForPermission
+			return st == monitor.StateActive && sub == monitor.SubStateWaitingForPermission
 		},
 		WaitForIdle: func(ctx context.Context) bool {
-			return s.Agent.WaitForState(ctx, agent.StateIdle)
+			return s.Agent.WaitForState(ctx, monitor.StateIdle)
 		},
 		NoteInterrupt: func() {
 			s.Agent.NoteInterrupt()

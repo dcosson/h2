@@ -11,7 +11,7 @@ import (
 // with no further events.
 type OtelCollector struct {
 	notifyCh chan struct{}
-	stateCh  chan StateUpdate
+	stateCh  chan monitor.StateUpdate
 	stopCh   chan struct{}
 }
 
@@ -19,7 +19,7 @@ type OtelCollector struct {
 func NewOtelCollector() *OtelCollector {
 	c := &OtelCollector{
 		notifyCh: make(chan struct{}, 1),
-		stateCh:  make(chan StateUpdate, 1),
+		stateCh:  make(chan monitor.StateUpdate, 1),
 		stopCh:   make(chan struct{}),
 	}
 	go c.run()
@@ -35,7 +35,7 @@ func (c *OtelCollector) NoteEvent() {
 }
 
 // StateCh returns the channel that receives state updates.
-func (c *OtelCollector) StateCh() <-chan StateUpdate {
+func (c *OtelCollector) StateCh() <-chan monitor.StateUpdate {
 	return c.stateCh
 }
 
@@ -55,18 +55,18 @@ func (c *OtelCollector) run() {
 	for {
 		select {
 		case <-c.notifyCh:
-			c.send(StateActive)
+			c.send(monitor.StateActive)
 			resetTimer(idleTimer, monitor.IdleThreshold)
 		case <-idleTimer.C:
-			c.send(StateIdle)
+			c.send(monitor.StateIdle)
 		case <-c.stopCh:
 			return
 		}
 	}
 }
 
-func (c *OtelCollector) send(s State) {
-	su := StateUpdate{State: s, SubState: SubStateNone}
+func (c *OtelCollector) send(s monitor.State) {
+	su := monitor.StateUpdate{State: s, SubState: monitor.SubStateNone}
 	select {
 	case <-c.stateCh:
 	default:

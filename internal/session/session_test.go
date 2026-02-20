@@ -8,7 +8,6 @@ import (
 
 	"github.com/vito/midterm"
 
-	"h2/internal/session/agent"
 	"h2/internal/session/agent/monitor"
 	"h2/internal/session/client"
 	"h2/internal/session/message"
@@ -23,7 +22,7 @@ func setFastIdle(t *testing.T) {
 }
 
 // waitForState polls StateChanged until the target state is reached.
-func waitForState(t *testing.T, s *Session, target agent.State, timeout time.Duration) {
+func waitForState(t *testing.T, s *Session, target monitor.State, timeout time.Duration) {
 	t.Helper()
 	deadline := time.After(timeout)
 	for {
@@ -59,10 +58,10 @@ func TestStateTransitions_ActiveToIdle(t *testing.T) {
 	// Signal output to ensure we start Active.
 	s.NoteOutput()
 	// Wait for state to become active via channel (not sleep, which risks overshooting the threshold).
-	waitForState(t, s, agent.StateActive, 2*time.Second)
+	waitForState(t, s, monitor.StateActive, 2*time.Second)
 
 	// Wait for idle threshold to pass.
-	waitForState(t, s, agent.StateIdle, 2*time.Second)
+	waitForState(t, s, monitor.StateIdle, 2*time.Second)
 }
 
 func TestStateTransitions_IdleToActive(t *testing.T) {
@@ -73,11 +72,11 @@ func TestStateTransitions_IdleToActive(t *testing.T) {
 	startWatchState(t, s)
 
 	// Let it go idle.
-	waitForState(t, s, agent.StateIdle, 2*time.Second)
+	waitForState(t, s, monitor.StateIdle, 2*time.Second)
 
 	// Signal output — should go back to Active.
 	s.NoteOutput()
-	waitForState(t, s, agent.StateActive, 2*time.Second)
+	waitForState(t, s, monitor.StateActive, 2*time.Second)
 }
 
 func TestStateTransitions_Exited(t *testing.T) {
@@ -89,14 +88,14 @@ func TestStateTransitions_Exited(t *testing.T) {
 
 	s.NoteExit()
 	time.Sleep(50 * time.Millisecond)
-	if got, _ := s.State(); got != agent.StateExited {
+	if got, _ := s.State(); got != monitor.StateExited {
 		t.Fatalf("expected StateExited, got %v", got)
 	}
 
 	// Output after exit should NOT change state back — exited is sticky.
 	s.NoteOutput()
 	time.Sleep(50 * time.Millisecond)
-	if got, _ := s.State(); got != agent.StateExited {
+	if got, _ := s.State(); got != monitor.StateExited {
 		t.Fatalf("expected StateExited to be sticky after output, got %v", got)
 	}
 }
@@ -115,7 +114,7 @@ func TestWaitForState_ReachesTarget(t *testing.T) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		done <- s.WaitForState(ctx, agent.StateIdle)
+		done <- s.WaitForState(ctx, monitor.StateIdle)
 	}()
 
 	// Should eventually reach idle.
@@ -151,7 +150,7 @@ func TestWaitForState_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	result := s.WaitForState(ctx, agent.StateIdle)
+	result := s.WaitForState(ctx, monitor.StateIdle)
 	if result {
 		t.Fatal("WaitForState should have returned false when context was cancelled")
 	}
@@ -239,14 +238,14 @@ func TestNoteOutput_NonBlocking(t *testing.T) {
 
 func TestStateString(t *testing.T) {
 	tests := []struct {
-		state agent.State
+		state monitor.State
 		want  string
 	}{
-		{agent.StateInitialized, "initialized"},
-		{agent.StateActive, "active"},
-		{agent.StateIdle, "idle"},
-		{agent.StateExited, "exited"},
-		{agent.State(99), "unknown"},
+		{monitor.StateInitialized, "initialized"},
+		{monitor.StateActive, "active"},
+		{monitor.StateIdle, "idle"},
+		{monitor.StateExited, "exited"},
+		{monitor.State(99), "unknown"},
 	}
 	for _, tt := range tests {
 		if got := tt.state.String(); got != tt.want {

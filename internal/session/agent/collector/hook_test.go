@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	"h2/internal/session/agent/monitor"
 )
 
 func TestHookCollector_ProcessEvent_Basic(t *testing.T) {
@@ -87,10 +89,10 @@ func TestHookCollector_StateCh_ActiveOnToolUse(t *testing.T) {
 
 	select {
 	case su := <-hc.StateCh():
-		if su.State != StateActive {
+		if su.State != monitor.StateActive {
 			t.Fatalf("expected StateActive, got %v", su.State)
 		}
-		if su.SubState != SubStateToolUse {
+		if su.SubState != monitor.SubStateToolUse {
 			t.Fatalf("expected SubStateToolUse, got %v", su.SubState)
 		}
 	case <-time.After(time.Second):
@@ -106,10 +108,10 @@ func TestHookCollector_StateCh_IdleOnStop(t *testing.T) {
 
 	select {
 	case su := <-hc.StateCh():
-		if su.State != StateIdle {
+		if su.State != monitor.StateIdle {
 			t.Fatalf("expected StateIdle, got %v", su.State)
 		}
-		if su.SubState != SubStateNone {
+		if su.SubState != monitor.SubStateNone {
 			t.Fatalf("expected SubStateNone, got %v", su.SubState)
 		}
 	case <-time.After(time.Second):
@@ -125,7 +127,7 @@ func TestHookCollector_StateCh_ExitedOnSessionEnd(t *testing.T) {
 
 	select {
 	case su := <-hc.StateCh():
-		if su.State != StateExited {
+		if su.State != monitor.StateExited {
 			t.Fatalf("expected StateExited, got %v", su.State)
 		}
 	case <-time.After(time.Second):
@@ -141,7 +143,7 @@ func TestHookCollector_StateCh_IdleOnSessionStart(t *testing.T) {
 
 	select {
 	case su := <-hc.StateCh():
-		if su.State != StateIdle {
+		if su.State != monitor.StateIdle {
 			t.Fatalf("expected StateIdle, got %v", su.State)
 		}
 	case <-time.After(time.Second):
@@ -280,7 +282,7 @@ func TestHookCollector_BlockedPermission_NotClearedByPermissionRequest(t *testin
 func TestHookState_SubState_Thinking(t *testing.T) {
 	for _, event := range []string{"UserPromptSubmit", "PostToolUse"} {
 		hs := HookState{LastEvent: event}
-		if got := hs.SubState(); got != SubStateThinking {
+		if got := hs.SubState(); got != monitor.SubStateThinking {
 			t.Errorf("SubState() for %q = %v, want SubStateThinking", event, got)
 		}
 	}
@@ -288,14 +290,14 @@ func TestHookState_SubState_Thinking(t *testing.T) {
 
 func TestHookState_SubState_ToolUse(t *testing.T) {
 	hs := HookState{LastEvent: "PreToolUse"}
-	if got := hs.SubState(); got != SubStateToolUse {
+	if got := hs.SubState(); got != monitor.SubStateToolUse {
 		t.Fatalf("SubState() for PreToolUse = %v, want SubStateToolUse", got)
 	}
 }
 
 func TestHookState_SubState_WaitingForPermission_FromEvent(t *testing.T) {
 	hs := HookState{LastEvent: "PermissionRequest"}
-	if got := hs.SubState(); got != SubStateWaitingForPermission {
+	if got := hs.SubState(); got != monitor.SubStateWaitingForPermission {
 		t.Fatalf("SubState() for PermissionRequest = %v, want SubStateWaitingForPermission", got)
 	}
 }
@@ -303,29 +305,29 @@ func TestHookState_SubState_WaitingForPermission_FromEvent(t *testing.T) {
 func TestHookState_SubState_WaitingForPermission_BlockedFlag(t *testing.T) {
 	// BlockedOnPermission takes priority over lastEvent-based classification.
 	hs := HookState{LastEvent: "PreToolUse", BlockedOnPermission: true}
-	if got := hs.SubState(); got != SubStateWaitingForPermission {
+	if got := hs.SubState(); got != monitor.SubStateWaitingForPermission {
 		t.Fatalf("SubState() with BlockedOnPermission = %v, want SubStateWaitingForPermission", got)
 	}
 }
 
 func TestHookState_SubState_None_UnknownEvent(t *testing.T) {
 	hs := HookState{LastEvent: "SessionStart"}
-	if got := hs.SubState(); got != SubStateNone {
+	if got := hs.SubState(); got != monitor.SubStateNone {
 		t.Fatalf("SubState() for SessionStart = %v, want SubStateNone", got)
 	}
 }
 
 func TestSubState_String(t *testing.T) {
 	tests := []struct {
-		ss   SubState
+		ss   monitor.SubState
 		want string
 	}{
-		{SubStateNone, ""},
-		{SubStateThinking, "thinking"},
-		{SubStateToolUse, "tool_use"},
-		{SubStateWaitingForPermission, "waiting_for_permission"},
-		{SubStateCompacting, "compacting"},
-		{SubState(99), ""},
+		{monitor.SubStateNone, ""},
+		{monitor.SubStateThinking, "thinking"},
+		{monitor.SubStateToolUse, "tool_use"},
+		{monitor.SubStateWaitingForPermission, "waiting_for_permission"},
+		{monitor.SubStateCompacting, "compacting"},
+		{monitor.SubState(99), ""},
 	}
 	for _, tt := range tests {
 		if got := tt.ss.String(); got != tt.want {
@@ -346,7 +348,7 @@ func TestHookCollector_StateCh_PermissionDecisionEmitsSubState(t *testing.T) {
 	case su := <-hc.StateCh():
 		// State stays Initialized (permission_decision doesn't change State),
 		// but SubState should be WaitingForPermission.
-		if su.SubState != SubStateWaitingForPermission {
+		if su.SubState != monitor.SubStateWaitingForPermission {
 			t.Fatalf("expected SubStateWaitingForPermission, got %v", su.SubState)
 		}
 	case <-time.After(time.Second):
@@ -373,13 +375,13 @@ func TestHookCollector_PermissionAllow_TransitionsToActive(t *testing.T) {
 
 	hc.ProcessEvent("SessionStart", nil)
 	su := <-hc.StateCh()
-	if su.State != StateIdle {
+	if su.State != monitor.StateIdle {
 		t.Fatalf("after SessionStart: expected StateIdle, got %v", su.State)
 	}
 
 	hc.ProcessEvent("Stop", nil)
 	su = <-hc.StateCh()
-	if su.State != StateIdle {
+	if su.State != monitor.StateIdle {
 		t.Fatalf("after Stop: expected StateIdle, got %v", su.State)
 	}
 
@@ -387,7 +389,7 @@ func TestHookCollector_PermissionAllow_TransitionsToActive(t *testing.T) {
 	hc.ProcessEvent("permission_decision", json.RawMessage(`{"tool_name": "Bash", "decision": "allow"}`))
 	select {
 	case su = <-hc.StateCh():
-		if su.State != StateActive {
+		if su.State != monitor.StateActive {
 			t.Fatalf("after permission_decision allow: expected StateActive, got %v", su.State)
 		}
 	case <-time.After(time.Second):
@@ -413,10 +415,10 @@ func TestHookCollector_PermissionAskUser_StaysIdle(t *testing.T) {
 	select {
 	case su := <-hc.StateCh():
 		// ask_user: state should NOT transition to Active.
-		if su.State != StateIdle {
+		if su.State != monitor.StateIdle {
 			t.Fatalf("after permission_decision ask_user: expected StateIdle, got %v", su.State)
 		}
-		if su.SubState != SubStateWaitingForPermission {
+		if su.SubState != monitor.SubStateWaitingForPermission {
 			t.Fatalf("expected SubStateWaitingForPermission, got %v", su.SubState)
 		}
 	case <-time.After(time.Second):
@@ -435,10 +437,10 @@ func TestHookCollector_PreCompact_SetsCompactingSubState(t *testing.T) {
 	hc.ProcessEvent("PreCompact", nil)
 	select {
 	case su := <-hc.StateCh():
-		if su.State != StateActive {
+		if su.State != monitor.StateActive {
 			t.Fatalf("expected StateActive during compaction, got %v", su.State)
 		}
-		if su.SubState != SubStateCompacting {
+		if su.SubState != monitor.SubStateCompacting {
 			t.Fatalf("expected SubStateCompacting, got %v", su.SubState)
 		}
 	case <-time.After(time.Second):
@@ -464,10 +466,10 @@ func TestHookCollector_CompactionCleared_BySessionStart(t *testing.T) {
 	hc.ProcessEvent("SessionStart", nil)
 	select {
 	case su := <-hc.StateCh():
-		if su.State != StateIdle {
+		if su.State != monitor.StateIdle {
 			t.Fatalf("expected StateIdle after compaction SessionStart, got %v", su.State)
 		}
-		if su.SubState != SubStateNone {
+		if su.SubState != monitor.SubStateNone {
 			t.Fatalf("expected SubStateNone after compaction, got %v", su.SubState)
 		}
 	case <-time.After(time.Second):
@@ -491,25 +493,25 @@ func TestHookCollector_CompactionFullSequence(t *testing.T) {
 
 	hc.ProcessEvent("PostToolUse", json.RawMessage(`{"tool_name": "Bash"}`))
 	su := <-hc.StateCh()
-	if su.SubState != SubStateThinking {
+	if su.SubState != monitor.SubStateThinking {
 		t.Fatalf("step 1: expected Thinking, got %v", su.SubState)
 	}
 
 	hc.ProcessEvent("PreCompact", nil)
 	su = <-hc.StateCh()
-	if su.State != StateActive || su.SubState != SubStateCompacting {
+	if su.State != monitor.StateActive || su.SubState != monitor.SubStateCompacting {
 		t.Fatalf("step 2: expected Active/Compacting, got %v/%v", su.State, su.SubState)
 	}
 
 	hc.ProcessEvent("SessionStart", nil)
 	su = <-hc.StateCh()
-	if su.State != StateIdle || su.SubState != SubStateNone {
+	if su.State != monitor.StateIdle || su.SubState != monitor.SubStateNone {
 		t.Fatalf("step 3: expected Idle/None, got %v/%v", su.State, su.SubState)
 	}
 
 	hc.ProcessEvent("PreToolUse", json.RawMessage(`{"tool_name": "Read"}`))
 	su = <-hc.StateCh()
-	if su.State != StateActive || su.SubState != SubStateToolUse {
+	if su.State != monitor.StateActive || su.SubState != monitor.SubStateToolUse {
 		t.Fatalf("step 4: expected Active/ToolUse, got %v/%v", su.State, su.SubState)
 	}
 }
@@ -522,7 +524,7 @@ func TestHookCollector_NoteInterrupt_TransitionsToIdle(t *testing.T) {
 	hc.ProcessEvent("PreToolUse", json.RawMessage(`{"tool_name": "Bash"}`))
 	select {
 	case su := <-hc.StateCh():
-		if su.State != StateActive {
+		if su.State != monitor.StateActive {
 			t.Fatalf("expected StateActive, got %v", su.State)
 		}
 	case <-time.After(time.Second):
@@ -533,10 +535,10 @@ func TestHookCollector_NoteInterrupt_TransitionsToIdle(t *testing.T) {
 	hc.NoteInterrupt()
 	select {
 	case su := <-hc.StateCh():
-		if su.State != StateIdle {
+		if su.State != monitor.StateIdle {
 			t.Fatalf("expected StateIdle after NoteInterrupt, got %v", su.State)
 		}
-		if su.SubState != SubStateNone {
+		if su.SubState != monitor.SubStateNone {
 			t.Fatalf("expected SubStateNone after NoteInterrupt, got %v", su.SubState)
 		}
 	case <-time.After(time.Second):
@@ -600,13 +602,13 @@ func TestHookCollector_StateCh_EventSequence(t *testing.T) {
 	type expected struct {
 		event    string
 		payload  json.RawMessage
-		state    State
-		subState SubState
+		state    monitor.State
+		subState monitor.SubState
 	}
 	steps := []expected{
-		{"UserPromptSubmit", nil, StateActive, SubStateThinking},
-		{"PreToolUse", json.RawMessage(`{"tool_name": "Bash"}`), StateActive, SubStateToolUse},
-		{"PostToolUse", json.RawMessage(`{"tool_name": "Bash"}`), StateActive, SubStateThinking},
+		{"UserPromptSubmit", nil, monitor.StateActive, monitor.SubStateThinking},
+		{"PreToolUse", json.RawMessage(`{"tool_name": "Bash"}`), monitor.StateActive, monitor.SubStateToolUse},
+		{"PostToolUse", json.RawMessage(`{"tool_name": "Bash"}`), monitor.StateActive, monitor.SubStateThinking},
 	}
 	for _, step := range steps {
 		hc.ProcessEvent(step.event, step.payload)

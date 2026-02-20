@@ -11,6 +11,7 @@ import (
 
 	"h2/internal/config"
 	"h2/internal/session/agent"
+	"h2/internal/session/agent/monitor"
 	"h2/internal/session/message"
 	"h2/internal/session/virtualterminal"
 	"h2/internal/socketdir"
@@ -134,7 +135,7 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 	uptime := time.Since(d.StartTime)
 	st, sub := s.State()
 	var toolName string
-	if st == agent.StateActive {
+	if st == monitor.StateActive {
 		if hc := s.Agent.HookCollector(); hc != nil {
 			toolName = hc.Snapshot().LastToolName
 		}
@@ -148,7 +149,7 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 		Uptime:           virtualterminal.FormatIdleDuration(uptime),
 		State:            st.String(),
 		SubState:         sub.String(),
-		StateDisplayText: agent.FormatStateLabel(st.String(), sub.String(), toolName),
+		StateDisplayText: monitor.FormatStateLabel(st.String(), sub.String(), toolName),
 		StateDuration:    virtualterminal.FormatIdleDuration(s.StateDuration()),
 		QueuedCount:      s.Queue.PendingCount(),
 	}
