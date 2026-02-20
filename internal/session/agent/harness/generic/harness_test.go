@@ -123,6 +123,9 @@ func TestStart_BridgesOutputToEvents(t *testing.T) {
 	defer func() { monitor.IdleThreshold = origThreshold }()
 
 	g := New(harness.HarnessConfig{Command: "bash"})
+	if _, err := g.PrepareForLaunch("test", ""); err != nil {
+		t.Fatalf("PrepareForLaunch: %v", err)
+	}
 	events := make(chan monitor.AgentEvent, 64)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -132,9 +135,6 @@ func TestStart_BridgesOutputToEvents(t *testing.T) {
 		g.Start(ctx, events)
 		close(done)
 	}()
-
-	// Give Start time to create the collector.
-	time.Sleep(10 * time.Millisecond)
 
 	// Simulate output → should get active state.
 	g.HandleOutput()
@@ -182,6 +182,9 @@ func TestStart_BridgesOutputToEvents(t *testing.T) {
 
 func TestStart_CancelReturns(t *testing.T) {
 	g := New(harness.HarnessConfig{Command: "bash"})
+	if _, err := g.PrepareForLaunch("test", ""); err != nil {
+		t.Fatalf("PrepareForLaunch: %v", err)
+	}
 	events := make(chan monitor.AgentEvent, 64)
 	ctx, cancel := context.WithCancel(context.Background())
 

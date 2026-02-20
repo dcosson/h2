@@ -16,11 +16,17 @@ import (
 	"h2/internal/activitylog"
 	"h2/internal/config"
 	"h2/internal/session/agent"
+	"h2/internal/session/agent/harness"
 	"h2/internal/session/agent/monitor"
 	"h2/internal/session/agent/shared/eventstore"
 	"h2/internal/session/client"
 	"h2/internal/session/message"
 	"h2/internal/session/virtualterminal"
+
+	// Register harness implementations via init().
+	_ "h2/internal/session/agent/harness/claude"
+	_ "h2/internal/session/agent/harness/codex"
+	_ "h2/internal/session/agent/harness/generic"
 )
 
 // Session manages the message queue, delivery loop, observable state,
@@ -81,19 +87,44 @@ type Session struct {
 
 // New creates a new Session with the given name and command.
 func New(name string, command string, args []string) *Session {
-	agentType := agent.ResolveAgentType(command)
+	h := resolveMinimalHarness(command)
 	return &Session{
 		Name:       name,
 		Command:    command,
 		Args:       args,
 		AgentName:  name,
 		Queue:      message.NewMessageQueue(),
-		Agent:      agent.New(agentType),
+		Agent:      agent.New(h),
 		exitNotify: make(chan struct{}, 1),
 		stopCh:     make(chan struct{}),
 		relaunchCh: make(chan struct{}, 1),
 		quitCh:     make(chan struct{}, 1),
 	}
+}
+
+// resolveMinimalHarness maps a command name to a harness with minimal config.
+// Used by New() before full config (logger, configDir) is available.
+// setupAgent() replaces this with a properly configured harness.
+func resolveMinimalHarness(command string) harness.Harness {
+	harnessType := "generic"
+	switch filepath.Base(command) {
+	case "claude":
+		harnessType = "claude_code"
+	case "codex":
+		harnessType = "codex"
+	}
+	h, err := harness.Resolve(harness.HarnessConfig{
+		HarnessType: harnessType,
+		Command:     command,
+	}, nil)
+	if err != nil {
+		// Fallback to generic if specific harness not available.
+		h, _ = harness.Resolve(harness.HarnessConfig{
+			HarnessType: "generic",
+			Command:     command,
+		}, nil)
+	}
+	return h
 }
 
 // PtyWriter returns a writer that writes to the child PTY under VT.Mu.
@@ -131,24 +162,33 @@ func (s *Session) initVT(rows, cols int) {
 	s.VT.Cols = cols
 }
 
-// setupAgent configures the agent adapter and launch config. Sets up
-// activity logger, calls PrepareForLaunch to get env vars and CLI args,
-// and merges them into the session's ExtraEnv and prependArgs.
+// setupAgent configures the agent harness and launch config. Sets up
+// activity logger, re-resolves the harness with proper config, calls
+// PrepareForLaunch to get env vars and CLI args, and merges them into
+// the session's ExtraEnv and prependArgs.
 func (s *Session) setupAgent() error {
-	// Set up activity logger and raw OTEL log files.
+	// Set up activity logger.
 	logDir := filepath.Join(config.ConfigDir(), "logs")
 	os.MkdirAll(logDir, 0o755)
 	logPath := filepath.Join(logDir, "session-activity.jsonl")
-	s.Agent.SetActivityLog(activitylog.New(true, logPath, s.Name, s.SessionID))
-	s.Agent.SetOtelLogFiles(logDir)
+	actLog := activitylog.New(true, logPath, s.Name, s.SessionID)
+	s.Agent.SetActivityLog(actLog)
 
-	// Create adapter and get launch config (env vars, prepend args).
+	// Re-resolve harness with proper config (logger, configDir).
+	// The minimal harness from session.New() lacks these.
+	h, err := resolveFullHarness(s.Command, s.RoleName, actLog)
+	if err != nil {
+		return fmt.Errorf("resolve harness: %w", err)
+	}
+	s.Agent.SetHarness(h)
+
+	// Prepare harness and get launch config (env vars, prepend args).
 	launchCfg, err := s.Agent.PrepareForLaunch(s.Name, s.SessionID)
 	if err != nil {
 		return fmt.Errorf("prepare agent for launch: %w", err)
 	}
 
-	// Merge adapter env with session env.
+	// Merge harness env with session env.
 	s.ExtraEnv = launchCfg.Env
 	if s.ExtraEnv == nil {
 		s.ExtraEnv = make(map[string]string)
@@ -168,6 +208,30 @@ func (s *Session) setupAgent() error {
 	return nil
 }
 
+// resolveFullHarness creates a properly-configured harness with logger and
+// configDir resolved from roleName. Called from setupAgent() when all config
+// is available.
+func resolveFullHarness(command, roleName string, log *activitylog.Logger) (harness.Harness, error) {
+	harnessType := "generic"
+	var configDir string
+	switch filepath.Base(command) {
+	case "claude":
+		harnessType = "claude_code"
+		rn := roleName
+		if rn == "" {
+			rn = "default"
+		}
+		configDir = filepath.Join(config.ConfigDir(), "claude-config", rn)
+	case "codex":
+		harnessType = "codex"
+	}
+	return harness.Resolve(harness.HarnessConfig{
+		HarnessType: harnessType,
+		Command:     command,
+		ConfigDir:   configDir,
+	}, log)
+}
+
 // childArgs returns the command args, prepending any adapter-supplied args
 // (e.g. --session-id for Claude Code) and appending agent-type-specific
 // role flags via BuildCommandArgs.
@@ -179,7 +243,7 @@ func (s *Session) childArgs() []string {
 		args = s.Args
 	}
 
-	roleArgs := s.Agent.AgentType().BuildCommandArgs(agent.CommandArgsConfig{
+	roleArgs := s.Agent.Harness().BuildCommandArgs(harness.CommandArgsConfig{
 		SessionID:       s.SessionID,
 		Instructions:    s.Instructions,
 		SystemPrompt:    s.SystemPrompt,
@@ -314,8 +378,8 @@ func (s *Session) ForEachClient(fn func(cl *client.Client)) {
 // all connected clients. Called with VT.Mu held.
 func (s *Session) pipeOutputCallback() func() {
 	return func() {
-		// NoteOutput for the session (only need to call once).
-		s.NoteOutput()
+		// HandleOutput for the session (only need to call once).
+		s.HandleOutput()
 		s.ForEachClient(func(cl *client.Client) {
 			if !cl.IsScrollMode() {
 				cl.RenderScreen()
@@ -363,8 +427,8 @@ func (s *Session) RunDaemon() error {
 	if s.SessionDir != "" {
 		s.ExtraEnv["H2_SESSION_DIR"] = s.SessionDir
 	}
-	// Merge agent-type-specific env vars (e.g. CLAUDE_CONFIG_DIR for Claude Code).
-	for k, v := range s.Agent.AgentType().BuildCommandEnvVars(config.ConfigDir(), s.RoleName) {
+	// Merge harness-specific env vars (e.g. CLAUDE_CONFIG_DIR for Claude Code).
+	for k, v := range s.Agent.Harness().BuildCommandEnvVars(config.ConfigDir()) {
 		s.ExtraEnv[k] = v
 	}
 
@@ -606,10 +670,10 @@ func (s *Session) StateDuration() time.Duration {
 	return s.Agent.StateDuration()
 }
 
-// NoteOutput signals that the child process has produced output.
-// Feeds through to the Agent's output collector.
-func (s *Session) NoteOutput() {
-	s.Agent.NoteOutput()
+// HandleOutput signals that the child process has produced output.
+// Delegates to the Agent's harness (e.g. generic harness feeds output collector).
+func (s *Session) HandleOutput() {
+	s.Agent.HandleOutput()
 }
 
 // NoteExit signals that the child process has exited or hung.

@@ -13,7 +13,8 @@ import (
 // newTestAgent creates a minimal Agent with the output collector bridge
 // started, ready for heartbeat testing.
 func newTestAgent() *agent.Agent {
-	a := agent.New(agent.ResolveAgentType("generic"))
+	h := resolveMinimalHarness("generic-test")
+	a := agent.New(h)
 	a.PrepareForLaunch("test", "")
 	a.Start(context.Background())
 	return a
@@ -112,7 +113,7 @@ func TestHeartbeat_CancelledWhenAgentGoesActive(t *testing.T) {
 		for {
 			select {
 			case <-ticker.C:
-				a.NoteOutput()
+				a.HandleOutput()
 			case <-stopOutput:
 				return
 			}

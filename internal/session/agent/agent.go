@@ -3,64 +3,48 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
-	"sync"
 	"time"
 
 	"h2/internal/activitylog"
-	"h2/internal/session/agent/adapter"
 	"h2/internal/session/agent/collector"
+	"h2/internal/session/agent/harness"
 	"h2/internal/session/agent/monitor"
-	"h2/internal/session/agent/shared/outputcollector"
 )
 
 // Agent manages state, metrics, and lifecycle for a session's agent process.
-// It delegates telemetry and state derivation to an AgentAdapter + AgentMonitor
-// pipeline for supported agents (Claude Code, Codex). Generic agents use an
-// output collector bridged to the monitor for output-based state detection.
+// It delegates all agent-type-specific behavior to a Harness, and uses an
+// AgentMonitor for derived state + metrics.
 type Agent struct {
-	agentType AgentType
+	harness harness.Harness
 
-	// Adapter pattern: adapter translates agent-specific telemetry into
-	// normalized AgentEvents; monitor consumes those events and maintains
-	// derived state + metrics.
-	adapter      adapter.AgentAdapter
 	agentMonitor *monitor.AgentMonitor
 	cancel       context.CancelFunc
 
-	// Output collector: always present for NoteOutput signal.
-	// For generic agents (no adapter), this is the primary state source.
-	outputCollector *outputcollector.Collector
-
 	// Hook collector: kept for backward compat Snapshot() data.
-	// Hook events are forwarded to both adapter and hooksCollector.
+	// Hook events are forwarded to both harness and hooksCollector.
 	hooksCollector *collector.HookCollector
-
-	// Legacy OTEL metrics (populated on legacy path when no adapter).
-	metrics *OtelMetrics
 
 	// Activity logger (nil-safe; Nop logger when not set).
 	activityLog *activitylog.Logger
-
-	// Raw OTEL payload log files (legacy path).
-	otelLogsFile    *os.File
-	otelMetricsFile *os.File
-	otelFileMu      sync.Mutex
 
 	// Signals
 	stopCh chan struct{}
 }
 
-// New creates a new Agent with the given agent type.
-func New(agentType AgentType) *Agent {
+// New creates a new Agent with the given harness.
+func New(h harness.Harness) *Agent {
 	return &Agent{
-		agentType:    agentType,
+		harness:      h,
 		agentMonitor: monitor.New(),
-		metrics:      &OtelMetrics{},
 		stopCh:       make(chan struct{}),
 	}
+}
+
+// SetHarness replaces the agent's harness. Used by setupAgent() to upgrade
+// from a minimal harness (created in session.New) to a fully-configured one
+// with proper logger and config dir.
+func (a *Agent) SetHarness(h harness.Harness) {
+	a.harness = h
 }
 
 // SetActivityLog sets the activity logger for this agent.
@@ -77,99 +61,34 @@ func (a *Agent) ActivityLog() *activitylog.Logger {
 	return activitylog.Nop()
 }
 
-// SetOtelLogFiles opens the raw OTEL log files for appending.
-// Must be called before PrepareForLaunch.
-// Skipped for adapted agents (Claude Code, Codex) which handle OTEL
-// through their adapter's parser rather than raw log files.
-func (a *Agent) SetOtelLogFiles(dir string) error {
-	// Adapted agents (claude, codex) don't use raw OTEL log files — their
-	// adapters parse OTEL payloads and emit AgentEvents directly.
-	if a.agentType != nil {
-		switch a.agentType.Name() {
-		case "claude", "codex":
-			return nil
-		}
-	}
-
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("create otel log dir: %w", err)
-	}
-	logsFile, err := os.OpenFile(filepath.Join(dir, "otel-logs.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("open otel-logs.jsonl: %w", err)
-	}
-	metricsFile, err := os.OpenFile(filepath.Join(dir, "otel-metrics.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		logsFile.Close()
-		return fmt.Errorf("open otel-metrics.jsonl: %w", err)
-	}
-	a.otelLogsFile = logsFile
-	a.otelMetricsFile = metricsFile
-	return nil
-}
-
-// PrepareForLaunch creates the adapter (if applicable) and returns env vars
-// and CLI args to inject into the child process. Must be called after
-// SetActivityLog and before Start.
-func (a *Agent) PrepareForLaunch(agentName, sessionID string) (adapter.LaunchConfig, error) {
-	a.adapter = a.agentType.NewAdapter(a.ActivityLog())
-
-	if a.adapter == nil {
-		// Generic agent: no adapter, no special env/args.
-		return adapter.LaunchConfig{}, nil
+// PrepareForLaunch prepares the harness and returns env vars and CLI args
+// to inject into the child process. Must be called after SetActivityLog
+// and before Start.
+func (a *Agent) PrepareForLaunch(agentName, sessionID string) (harness.LaunchConfig, error) {
+	if a.harness == nil {
+		return harness.LaunchConfig{}, nil
 	}
 
 	// Create hook collector for agents that use hooks (Claude Code).
-	// Codex doesn't use hooks, so skip to avoid wasted resources.
-	if a.adapter.Name() == "claude-code" {
+	if a.harness.Name() == "claude_code" {
 		a.hooksCollector = collector.NewHookCollector(a.ActivityLog())
 	}
 
-	return a.adapter.PrepareForLaunch(agentName, sessionID)
+	return a.harness.PrepareForLaunch(agentName, sessionID)
 }
 
-// Start begins the adapter+monitor pipeline (for adapted agents) or the
-// output collector bridge (for generic agents). Must be called after
+// Start begins the harness+monitor pipeline. Must be called after
 // PrepareForLaunch and after the child process starts.
 func (a *Agent) Start(ctx context.Context) {
 	ctx, a.cancel = context.WithCancel(ctx)
 
-	// Always create output collector for NoteOutput.
-	a.outputCollector = outputcollector.New(monitor.IdleThreshold)
-
-	if a.adapter != nil {
-		// Adapted agent: adapter → monitor pipeline.
-		go a.adapter.Start(ctx, a.agentMonitor.Events())
-		go a.agentMonitor.Run(ctx)
-	} else {
-		// Generic agent: bridge output collector state to monitor.
-		go a.agentMonitor.Run(ctx)
-		go a.bridgeOutputToMonitor(ctx)
+	if a.harness != nil {
+		go a.harness.Start(ctx, a.agentMonitor.Events())
 	}
+	go a.agentMonitor.Run(ctx)
 }
 
-// bridgeOutputToMonitor forwards output collector state changes to the
-// monitor as AgentEvents. Used for generic agents.
-func (a *Agent) bridgeOutputToMonitor(ctx context.Context) {
-	for {
-		select {
-		case su := <-a.outputCollector.StateCh():
-			select {
-			case a.agentMonitor.Events() <- monitor.AgentEvent{
-				Type:      monitor.EventStateChange,
-				Timestamp: time.Now(),
-				Data:      monitor.StateChangeData{State: su.State, SubState: su.SubState},
-			}:
-			case <-ctx.Done():
-				return
-			}
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-// HandleHookEvent processes a hook event, forwarding to both the adapter
+// HandleHookEvent processes a hook event, forwarding to both the harness
 // (for event emission) and the hook collector (for backward compat Snapshot data).
 func (a *Agent) HandleHookEvent(eventName string, payload json.RawMessage) bool {
 	// Forward to hook collector for Snapshot() data.
@@ -177,9 +96,9 @@ func (a *Agent) HandleHookEvent(eventName string, payload json.RawMessage) bool 
 		a.hooksCollector.ProcessEvent(eventName, payload)
 	}
 
-	// Forward to adapter for AgentEvent emission.
-	if a.adapter != nil {
-		return a.adapter.HandleHookEvent(eventName, payload)
+	// Forward to harness for AgentEvent emission.
+	if a.harness != nil {
+		return a.harness.HandleHookEvent(eventName, payload)
 	}
 
 	return a.hooksCollector != nil
@@ -221,11 +140,11 @@ func (a *Agent) SetExited() {
 
 // --- Signals from Session ---
 
-// NoteOutput signals that the child process produced output.
-// Called by Session from the PTY output callback.
-func (a *Agent) NoteOutput() {
-	if a.outputCollector != nil {
-		a.outputCollector.NoteOutput()
+// HandleOutput signals that the child process produced output.
+// Delegates to the harness (e.g. generic harness feeds output collector).
+func (a *Agent) HandleOutput() {
+	if a.harness != nil {
+		a.harness.HandleOutput()
 	}
 }
 
@@ -239,43 +158,34 @@ func (a *Agent) NoteInterrupt() {
 
 // --- Delegators ---
 
-// AgentType returns the agent type.
-func (a *Agent) AgentType() AgentType {
-	return a.agentType
+// Harness returns the agent's harness.
+func (a *Agent) Harness() harness.Harness {
+	return a.harness
 }
 
 // Metrics returns a snapshot of the current OTEL metrics.
-// For adapted agents (Claude Code, Codex), metrics come from the AgentMonitor
-// which accumulates them from AgentEvents. For legacy/generic agents, metrics
-// come from the OtelMetrics struct populated directly by the OTEL parser.
+// Metrics are accumulated by the AgentMonitor from AgentEvents emitted by
+// the harness.
 func (a *Agent) Metrics() OtelMetricsSnapshot {
-	if a.adapter != nil {
-		// Adapted agent: bridge from monitor's MetricsSnapshot.
-		ms := a.agentMonitor.Metrics()
-		hasData := ms.InputTokens > 0 || ms.OutputTokens > 0 || ms.TurnCount > 0
-		return OtelMetricsSnapshot{
-			InputTokens:    ms.InputTokens,
-			OutputTokens:   ms.OutputTokens,
-			TotalTokens:    ms.InputTokens + ms.OutputTokens,
-			TotalCostUSD:   ms.TotalCostUSD,
-			ToolCounts:     ms.ToolCounts,
-			EventsReceived: hasData,
-		}
+	ms := a.agentMonitor.Metrics()
+	hasData := ms.InputTokens > 0 || ms.OutputTokens > 0 || ms.TurnCount > 0
+	return OtelMetricsSnapshot{
+		InputTokens:    ms.InputTokens,
+		OutputTokens:   ms.OutputTokens,
+		TotalTokens:    ms.InputTokens + ms.OutputTokens,
+		TotalCostUSD:   ms.TotalCostUSD,
+		ToolCounts:     ms.ToolCounts,
+		EventsReceived: hasData,
 	}
-	if a.metrics == nil {
-		return OtelMetricsSnapshot{}
-	}
-	return a.metrics.Snapshot()
 }
 
 // OtelPort returns the port the OTEL collector is listening on.
 func (a *Agent) OtelPort() int {
-	// Check adapter for OTEL port (type-assert for OtelPort method).
 	type otelPorter interface {
 		OtelPort() int
 	}
-	if a.adapter != nil {
-		if op, ok := a.adapter.(otelPorter); ok {
+	if a.harness != nil {
+		if op, ok := a.harness.(otelPorter); ok {
 			return op.OtelPort()
 		}
 	}
@@ -297,33 +207,18 @@ func (a *Agent) Stop() {
 		close(a.stopCh)
 	}
 
-	// Cancel adapter/monitor context.
+	// Cancel harness/monitor context.
 	if a.cancel != nil {
 		a.cancel()
 	}
 
-	// Stop adapter.
-	if a.adapter != nil {
-		a.adapter.Stop()
+	// Stop harness.
+	if a.harness != nil {
+		a.harness.Stop()
 	}
 
 	// Stop collectors.
-	if a.outputCollector != nil {
-		a.outputCollector.Stop()
-	}
 	if a.hooksCollector != nil {
 		a.hooksCollector.Stop()
 	}
-
-	// Close raw OTEL log files.
-	a.otelFileMu.Lock()
-	if a.otelLogsFile != nil {
-		a.otelLogsFile.Close()
-		a.otelLogsFile = nil
-	}
-	if a.otelMetricsFile != nil {
-		a.otelMetricsFile.Close()
-		a.otelMetricsFile = nil
-	}
-	a.otelFileMu.Unlock()
 }

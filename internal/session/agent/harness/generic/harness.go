@@ -24,7 +24,7 @@ func init() {
 // GenericHarness implements harness.Harness for arbitrary shell commands.
 type GenericHarness struct {
 	command   string
-	collector *outputcollector.Collector // created in Start()
+	collector *outputcollector.Collector // created in PrepareForLaunch()
 }
 
 // New creates a GenericHarness for the given command.
@@ -46,21 +46,24 @@ func (g *GenericHarness) EnsureConfigDir(h2Dir string) error                    
 
 // --- Launch ---
 
-// PrepareForLaunch returns an empty LaunchConfig — generic agents don't
-// need OTEL servers or special env vars.
+// PrepareForLaunch creates the output collector and returns an empty
+// LaunchConfig — generic agents don't need OTEL servers or special env vars.
+// The collector is created here (not in Start) so that HandleOutput() works
+// immediately after the child process starts without a race.
 func (g *GenericHarness) PrepareForLaunch(agentName, sessionID string) (harness.LaunchConfig, error) {
 	if g.command == "" {
 		return harness.LaunchConfig{}, fmt.Errorf("generic harness: command is empty")
 	}
+	g.collector = outputcollector.New(monitor.IdleThreshold)
 	return harness.LaunchConfig{}, nil
 }
 
 // --- Runtime ---
 
-// Start creates an output collector and bridges its state updates to the
-// events channel. Blocks until ctx is cancelled.
+// Start bridges the output collector's state updates to the events channel.
+// The collector must have been created by PrepareForLaunch.
+// Blocks until ctx is cancelled.
 func (g *GenericHarness) Start(ctx context.Context, events chan<- monitor.AgentEvent) error {
-	g.collector = outputcollector.New(monitor.IdleThreshold)
 	for {
 		select {
 		case su := <-g.collector.StateCh():

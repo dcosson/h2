@@ -90,7 +90,7 @@ func RunDaemon(opts RunDaemonOpts) error {
 
 	// Write session metadata for h2 peek and other tools.
 	if s.SessionDir != "" {
-		agentEnvVars := s.Agent.AgentType().BuildCommandEnvVars(config.ConfigDir(), opts.RoleName)
+		agentEnvVars := s.Agent.Harness().BuildCommandEnvVars(config.ConfigDir())
 		cwd, _ := os.Getwd()
 		meta := config.SessionMetadata{
 			AgentName:       opts.Name,

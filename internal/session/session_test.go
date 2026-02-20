@@ -59,7 +59,7 @@ func TestStateTransitions_ActiveToIdle(t *testing.T) {
 	startAgent(t, s)
 
 	// Signal output to ensure we start Active.
-	s.NoteOutput()
+	s.HandleOutput()
 	// Wait for state to become active via channel (not sleep, which risks overshooting the threshold).
 	waitForState(t, s, monitor.StateActive, 2*time.Second)
 
@@ -78,7 +78,7 @@ func TestStateTransitions_IdleToActive(t *testing.T) {
 	waitForState(t, s, monitor.StateIdle, 2*time.Second)
 
 	// Signal output — should go back to Active.
-	s.NoteOutput()
+	s.HandleOutput()
 	waitForState(t, s, monitor.StateActive, 2*time.Second)
 }
 
@@ -96,7 +96,7 @@ func TestStateTransitions_Exited(t *testing.T) {
 	}
 
 	// Output after exit should NOT change state back — exited is sticky.
-	s.NoteOutput()
+	s.HandleOutput()
 	time.Sleep(50 * time.Millisecond)
 	if got, _ := s.State(); got != monitor.StateExited {
 		t.Fatalf("expected StateExited to be sticky after output, got %v", got)
@@ -111,7 +111,7 @@ func TestWaitForState_ReachesTarget(t *testing.T) {
 	startAgent(t, s)
 
 	// Signal output to keep active, then wait for idle.
-	s.NoteOutput()
+	s.HandleOutput()
 
 	done := make(chan bool, 1)
 	go func() {
@@ -142,7 +142,7 @@ func TestWaitForState_ContextCancelled(t *testing.T) {
 		for {
 			select {
 			case <-ticker.C:
-				s.NoteOutput()
+				s.HandleOutput()
 			case <-stopOutput:
 				return
 			}
@@ -219,15 +219,14 @@ func TestSubmitInput_Interrupt(t *testing.T) {
 	}
 }
 
-func TestNoteOutput_NonBlocking(t *testing.T) {
+func TestHandleOutput_NonBlocking(t *testing.T) {
 	s := New("test", "true", nil)
 
-	// Fill the channel.
-	s.NoteOutput()
-	// Second call should not block.
+	// HandleOutput should not block even when called repeatedly.
 	done := make(chan struct{})
 	go func() {
-		s.NoteOutput()
+		s.HandleOutput()
+		s.HandleOutput()
 		close(done)
 	}()
 
@@ -235,7 +234,7 @@ func TestNoteOutput_NonBlocking(t *testing.T) {
 	case <-done:
 		// Good.
 	case <-time.After(1 * time.Second):
-		t.Fatal("NoteOutput blocked when channel was full")
+		t.Fatal("HandleOutput blocked")
 	}
 }
 
