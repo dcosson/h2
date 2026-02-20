@@ -38,14 +38,14 @@ func waitForState(t *testing.T, s *Session, target monitor.State, timeout time.D
 	}
 }
 
-// startWatchState starts the Agent's watchState goroutine via StartCollectors.
-// For GenericType agents (command != "claude"), this starts watchState without
-// any collectors.
-func startWatchState(t *testing.T, s *Session) {
+// startAgent sets up the agent adapter/monitor pipeline for testing.
+// For GenericType agents, this starts the output collector bridge to the monitor.
+func startAgent(t *testing.T, s *Session) {
 	t.Helper()
-	if err := s.Agent.StartCollectors(); err != nil {
-		t.Fatalf("StartCollectors: %v", err)
+	if _, err := s.Agent.PrepareForLaunch(s.Name, s.SessionID); err != nil {
+		t.Fatalf("PrepareForLaunch: %v", err)
 	}
+	s.Agent.Start(context.Background())
 }
 
 func TestStateTransitions_ActiveToIdle(t *testing.T) {
@@ -53,7 +53,7 @@ func TestStateTransitions_ActiveToIdle(t *testing.T) {
 	s := New("test", "true", nil)
 	defer s.Stop()
 
-	startWatchState(t, s)
+	startAgent(t, s)
 
 	// Signal output to ensure we start Active.
 	s.NoteOutput()
@@ -69,7 +69,7 @@ func TestStateTransitions_IdleToActive(t *testing.T) {
 	s := New("test", "true", nil)
 	defer s.Stop()
 
-	startWatchState(t, s)
+	startAgent(t, s)
 
 	// Let it go idle.
 	waitForState(t, s, monitor.StateIdle, 2*time.Second)
@@ -84,7 +84,7 @@ func TestStateTransitions_Exited(t *testing.T) {
 	s := New("test", "true", nil)
 	defer s.Stop()
 
-	startWatchState(t, s)
+	startAgent(t, s)
 
 	s.NoteExit()
 	time.Sleep(50 * time.Millisecond)
@@ -105,7 +105,7 @@ func TestWaitForState_ReachesTarget(t *testing.T) {
 	s := New("test", "true", nil)
 	defer s.Stop()
 
-	startWatchState(t, s)
+	startAgent(t, s)
 
 	// Signal output to keep active, then wait for idle.
 	s.NoteOutput()
@@ -129,7 +129,7 @@ func TestWaitForState_ContextCancelled(t *testing.T) {
 	s := New("test", "true", nil)
 	defer s.Stop()
 
-	startWatchState(t, s)
+	startAgent(t, s)
 
 	// Keep sending output so it never goes idle.
 	stopOutput := make(chan struct{})
@@ -163,7 +163,7 @@ func TestStateChanged_ClosesOnTransition(t *testing.T) {
 
 	ch := s.StateChanged()
 
-	startWatchState(t, s)
+	startAgent(t, s)
 
 	// Wait for any state change (Active→Idle after threshold).
 	select {
@@ -446,9 +446,9 @@ func containsSubstring(s, sub string) bool {
 	return false
 }
 
-func TestChildArgs_ClaudeWithSessionID(t *testing.T) {
+func TestChildArgs_WithPrependArgs(t *testing.T) {
 	s := New("test", "claude", []string{"--verbose"})
-	s.SessionID = "550e8400-e29b-41d4-a716-446655440000"
+	s.prependArgs = []string{"--session-id", "550e8400-e29b-41d4-a716-446655440000"}
 
 	args := s.childArgs()
 
@@ -466,7 +466,7 @@ func TestChildArgs_ClaudeWithSessionID(t *testing.T) {
 	}
 }
 
-func TestChildArgs_ClaudeNoSessionID(t *testing.T) {
+func TestChildArgs_NoPrependArgs(t *testing.T) {
 	s := New("test", "claude", []string{"--verbose"})
 
 	args := s.childArgs()
@@ -479,9 +479,8 @@ func TestChildArgs_ClaudeNoSessionID(t *testing.T) {
 	}
 }
 
-func TestChildArgs_NonClaude(t *testing.T) {
+func TestChildArgs_GenericNoPrepend(t *testing.T) {
 	s := New("test", "bash", []string{"-c", "echo hi"})
-	s.SessionID = "550e8400-e29b-41d4-a716-446655440000"
 
 	args := s.childArgs()
 
@@ -496,7 +495,7 @@ func TestChildArgs_NonClaude(t *testing.T) {
 func TestChildArgs_DoesNotMutateOriginal(t *testing.T) {
 	original := []string{"--verbose"}
 	s := New("test", "claude", original)
-	s.SessionID = "some-uuid"
+	s.prependArgs = []string{"--session-id", "some-uuid"}
 
 	_ = s.childArgs()
 
@@ -507,7 +506,7 @@ func TestChildArgs_DoesNotMutateOriginal(t *testing.T) {
 
 func TestChildArgs_WithInstructions(t *testing.T) {
 	s := New("test", "claude", []string{"--verbose"})
-	s.SessionID = "550e8400-e29b-41d4-a716-446655440000"
+	s.prependArgs = []string{"--session-id", "550e8400-e29b-41d4-a716-446655440000"}
 	s.Instructions = "You are a coding agent.\nWrite tests."
 
 	args := s.childArgs()
@@ -532,7 +531,7 @@ func TestChildArgs_WithInstructions(t *testing.T) {
 
 func TestChildArgs_EmptyInstructionsNoFlag(t *testing.T) {
 	s := New("test", "claude", []string{"--verbose"})
-	s.SessionID = "550e8400-e29b-41d4-a716-446655440000"
+	s.prependArgs = []string{"--session-id", "550e8400-e29b-41d4-a716-446655440000"}
 	s.Instructions = ""
 
 	args := s.childArgs()
@@ -589,7 +588,7 @@ func TestChildArgs_InstructionsNonClaude(t *testing.T) {
 
 func TestChildArgs_InstructionsWithSpecialCharacters(t *testing.T) {
 	s := New("test", "claude", nil)
-	s.SessionID = "test-uuid"
+	s.prependArgs = []string{"--session-id", "test-uuid"}
 	instructions := "Use `backticks` and \"quotes\" and $VARS and\nnewlines\tand\ttabs"
 	s.Instructions = instructions
 
@@ -613,7 +612,7 @@ func TestChildArgs_InstructionsWithSpecialCharacters(t *testing.T) {
 func TestChildArgs_InstructionsDoNotMutateOriginalArgs(t *testing.T) {
 	original := []string{"--verbose"}
 	s := New("test", "claude", original)
-	s.SessionID = "some-uuid"
+	s.prependArgs = []string{"--session-id", "some-uuid"}
 	s.Instructions = "Test instructions"
 
 	_ = s.childArgs()
@@ -625,7 +624,7 @@ func TestChildArgs_InstructionsDoNotMutateOriginalArgs(t *testing.T) {
 
 func TestChildArgs_SystemPrompt(t *testing.T) {
 	s := New("test", "claude", nil)
-	s.SessionID = "test-uuid"
+	s.prependArgs = []string{"--session-id", "test-uuid"}
 	s.SystemPrompt = "You are a custom agent."
 
 	args := s.childArgs()
@@ -641,7 +640,7 @@ func TestChildArgs_SystemPrompt(t *testing.T) {
 
 func TestChildArgs_SystemPromptAndInstructions(t *testing.T) {
 	s := New("test", "claude", nil)
-	s.SessionID = "test-uuid"
+	s.prependArgs = []string{"--session-id", "test-uuid"}
 	s.SystemPrompt = "Custom system prompt"
 	s.Instructions = "Additional instructions"
 
@@ -661,7 +660,7 @@ func TestChildArgs_SystemPromptAndInstructions(t *testing.T) {
 
 func TestChildArgs_Model(t *testing.T) {
 	s := New("test", "claude", nil)
-	s.SessionID = "test-uuid"
+	s.prependArgs = []string{"--session-id", "test-uuid"}
 	s.Model = "claude-sonnet-4-5-20250929"
 
 	args := s.childArgs()
@@ -676,7 +675,7 @@ func TestChildArgs_Model(t *testing.T) {
 
 func TestChildArgs_PermissionMode(t *testing.T) {
 	s := New("test", "claude", nil)
-	s.SessionID = "test-uuid"
+	s.prependArgs = []string{"--session-id", "test-uuid"}
 	s.PermissionMode = "bypassPermissions"
 
 	args := s.childArgs()
@@ -691,7 +690,7 @@ func TestChildArgs_PermissionMode(t *testing.T) {
 
 func TestChildArgs_AllowedTools(t *testing.T) {
 	s := New("test", "claude", nil)
-	s.SessionID = "test-uuid"
+	s.prependArgs = []string{"--session-id", "test-uuid"}
 	s.AllowedTools = []string{"Bash", "Read", "Write"}
 
 	args := s.childArgs()
@@ -706,7 +705,7 @@ func TestChildArgs_AllowedTools(t *testing.T) {
 
 func TestChildArgs_DisallowedTools(t *testing.T) {
 	s := New("test", "claude", nil)
-	s.SessionID = "test-uuid"
+	s.prependArgs = []string{"--session-id", "test-uuid"}
 	s.DisallowedTools = []string{"Bash", "Edit"}
 
 	args := s.childArgs()
@@ -721,7 +720,7 @@ func TestChildArgs_DisallowedTools(t *testing.T) {
 
 func TestChildArgs_EmptyToolListsOmitted(t *testing.T) {
 	s := New("test", "claude", nil)
-	s.SessionID = "test-uuid"
+	s.prependArgs = []string{"--session-id", "test-uuid"}
 	s.AllowedTools = []string{}
 	s.DisallowedTools = nil
 
@@ -740,7 +739,7 @@ func TestChildArgs_EmptyToolListsOmitted(t *testing.T) {
 
 func TestChildArgs_AllFieldsCombined(t *testing.T) {
 	s := New("test", "claude", []string{"--verbose"})
-	s.SessionID = "test-uuid"
+	s.prependArgs = []string{"--session-id", "test-uuid"}
 	s.SystemPrompt = "Custom prompt"
 	s.Instructions = "Extra instructions"
 	s.Model = "claude-opus-4-6"

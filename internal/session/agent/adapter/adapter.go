@@ -15,8 +15,9 @@ type AgentAdapter interface {
 
 	// PrepareForLaunch returns env vars and CLI args to inject into the
 	// child process so the adapter can receive telemetry from it.
-	// Called before the agent process starts.
-	PrepareForLaunch(agentName string) (LaunchConfig, error)
+	// Called before the agent process starts. sessionID is the h2 session
+	// ID (may be empty); adapters that need it include it in PrependArgs.
+	PrepareForLaunch(agentName, sessionID string) (LaunchConfig, error)
 
 	// Start begins consuming agent-specific events and emitting AgentEvents.
 	// Blocks until ctx is cancelled or the adapter encounters a fatal error.

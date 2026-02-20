@@ -51,11 +51,15 @@ func (a *ClaudeCodeAdapter) Name() string {
 	return "claude-code"
 }
 
-// PrepareForLaunch generates a session ID, creates the OTEL server, and
-// returns the env vars and CLI args needed to launch Claude Code with
-// telemetry enabled.
-func (a *ClaudeCodeAdapter) PrepareForLaunch(agentName string) (adapter.LaunchConfig, error) {
-	a.sessionID = uuid.New().String()
+// PrepareForLaunch creates the OTEL server and returns the env vars and
+// CLI args needed to launch Claude Code with telemetry enabled. If
+// sessionID is empty, a new UUID is generated.
+func (a *ClaudeCodeAdapter) PrepareForLaunch(agentName, sessionID string) (adapter.LaunchConfig, error) {
+	if sessionID != "" {
+		a.sessionID = sessionID
+	} else {
+		a.sessionID = uuid.New().String()
+	}
 
 	// Create OTEL server with callbacks that parse and emit events.
 	s, err := otelserver.New(otelserver.Callbacks{

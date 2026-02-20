@@ -117,7 +117,10 @@ func (m *AgentMonitor) processEvent(ev AgentEvent) {
 
 	case EventStateChange:
 		if data, ok := ev.Data.(StateChangeData); ok {
-			m.setStateLocked(data.State, data.SubState)
+			// Exited is sticky — don't allow state changes once exited.
+			if m.state != StateExited {
+				m.setStateLocked(data.State, data.SubState)
+			}
 		}
 
 	case EventSessionEnded:

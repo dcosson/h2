@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -9,10 +10,13 @@ import (
 	"h2/internal/session/message"
 )
 
-// newTestAgent creates a minimal Agent for testing heartbeat.
-// It uses a generic agent type so no collectors are started.
+// newTestAgent creates a minimal Agent with the output collector bridge
+// started, ready for heartbeat testing.
 func newTestAgent() *agent.Agent {
-	return agent.New(agent.ResolveAgentType("generic"))
+	a := agent.New(agent.ResolveAgentType("generic"))
+	a.PrepareForLaunch("test", "")
+	a.Start(context.Background())
+	return a
 }
 
 func setFastIdleHeartbeat(t *testing.T) {
@@ -27,7 +31,7 @@ func TestHeartbeat_NudgeAfterIdleTimeout(t *testing.T) {
 	a := newTestAgent()
 	defer a.Stop()
 	// Start the watchState goroutine so agent can transition to idle.
-	a.StartCollectors()
+	// Agent already initialized in newTestAgent().
 	q := message.NewMessageQueue()
 	stop := make(chan struct{})
 
@@ -75,7 +79,7 @@ func TestHeartbeat_CancelledWhenAgentGoesActive(t *testing.T) {
 	setFastIdleHeartbeat(t)
 	a := newTestAgent()
 	defer a.Stop()
-	a.StartCollectors()
+	// Agent already initialized in newTestAgent().
 	q := message.NewMessageQueue()
 	stop := make(chan struct{})
 
@@ -130,7 +134,7 @@ func TestHeartbeat_ConditionGates(t *testing.T) {
 	setFastIdleHeartbeat(t)
 	a := newTestAgent()
 	defer a.Stop()
-	a.StartCollectors()
+	// Agent already initialized in newTestAgent().
 	q := message.NewMessageQueue()
 	stop := make(chan struct{})
 
@@ -169,7 +173,7 @@ func TestHeartbeat_ConditionTrue(t *testing.T) {
 	setFastIdleHeartbeat(t)
 	a := newTestAgent()
 	defer a.Stop()
-	a.StartCollectors()
+	// Agent already initialized in newTestAgent().
 	q := message.NewMessageQueue()
 	stop := make(chan struct{})
 
@@ -212,7 +216,7 @@ func TestHeartbeat_StopTerminatesLoop(t *testing.T) {
 	setFastIdleHeartbeat(t)
 	a := newTestAgent()
 	defer a.Stop()
-	a.StartCollectors()
+	// Agent already initialized in newTestAgent().
 	q := message.NewMessageQueue()
 	stop := make(chan struct{})
 

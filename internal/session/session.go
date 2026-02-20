@@ -47,6 +47,10 @@ type Session struct {
 	clientsMu        sync.Mutex
 	PassthroughOwner *client.Client // which client owns passthrough mode (nil = none)
 
+	// prependArgs holds CLI args from the adapter's launch config
+	// (e.g. --session-id for Claude Code). Set by setupAgent().
+	prependArgs []string
+
 	// ExtraEnv holds additional environment variables to pass to the child process.
 	ExtraEnv map[string]string
 
@@ -124,13 +128,40 @@ func (s *Session) initVT(rows, cols int) {
 	s.VT.Cols = cols
 }
 
-// childArgs returns the command args, prepending any agent-type-specific args
-// (e.g. --session-id for Claude Code) and appending role-derived Claude CLI flags.
+// setupAgent configures the agent adapter and launch config. Sets up
+// activity logger, calls PrepareForLaunch to get env vars and CLI args,
+// and merges them into the session's ExtraEnv and prependArgs.
+func (s *Session) setupAgent() error {
+	// Set up activity logger and raw OTEL log files.
+	logDir := filepath.Join(os.Getenv("HOME"), ".h2", "logs")
+	logPath := filepath.Join(logDir, "session-activity.jsonl")
+	s.Agent.SetActivityLog(activitylog.New(true, logPath, s.Name, s.SessionID))
+	s.Agent.SetOtelLogFiles(logDir)
+
+	// Create adapter and get launch config (env vars, prepend args).
+	launchCfg, err := s.Agent.PrepareForLaunch(s.Name, s.SessionID)
+	if err != nil {
+		return fmt.Errorf("prepare agent for launch: %w", err)
+	}
+
+	// Merge adapter env with session env.
+	s.ExtraEnv = launchCfg.Env
+	if s.ExtraEnv == nil {
+		s.ExtraEnv = make(map[string]string)
+	}
+
+	// Store prepend args for childArgs().
+	s.prependArgs = launchCfg.PrependArgs
+
+	return nil
+}
+
+// childArgs returns the command args, prepending any adapter-supplied args
+// (e.g. --session-id for Claude Code) and appending role-derived CLI flags.
 func (s *Session) childArgs() []string {
-	prepend := s.Agent.PrependArgs(s.SessionID)
 	var args []string
-	if len(prepend) > 0 {
-		args = append(prepend, s.Args...)
+	if len(s.prependArgs) > 0 {
+		args = append(s.prependArgs, s.Args...)
 	} else {
 		args = s.Args
 	}
@@ -288,7 +319,7 @@ func (s *Session) pipeOutputCallback() func() {
 }
 
 // RunDaemon runs the session in daemon mode: creates VT, client, PTY,
-// starts collectors, socket listener, and manages the child process lifecycle.
+// starts adapter+monitor, socket listener, and manages the child process lifecycle.
 // Blocks until the child exits and the user quits.
 func (s *Session) RunDaemon() error {
 	// Initialize VT with default daemon dimensions.
@@ -314,19 +345,9 @@ func (s *Session) RunDaemon() error {
 		s.VT.Mu.Unlock()
 	}
 
-	// Set up activity logger and raw OTEL log files.
-	logDir := filepath.Join(os.Getenv("HOME"), ".h2", "logs")
-	logPath := filepath.Join(logDir, "session-activity.jsonl")
-	s.Agent.SetActivityLog(activitylog.New(true, logPath, s.Name, s.SessionID))
-	s.Agent.SetOtelLogFiles(logDir)
-
-	// Start collectors (OTEL, hooks) and Agent watchState goroutine.
-	if err := s.Agent.StartCollectors(); err != nil {
-		return fmt.Errorf("start collectors: %w", err)
-	}
-	s.ExtraEnv = s.Agent.ChildEnv()
-	if s.ExtraEnv == nil {
-		s.ExtraEnv = make(map[string]string)
+	// Set up agent: activity logger, adapter, launch config.
+	if err := s.setupAgent(); err != nil {
+		return err
 	}
 	s.ExtraEnv["H2_ACTOR"] = s.Name
 	if s.RoleName != "" {
@@ -345,6 +366,9 @@ func (s *Session) RunDaemon() error {
 	}
 	// Don't forward requests to stdout in daemon mode - there's no terminal.
 	s.VT.Vt.ForwardResponses = s.VT.Ptm
+
+	// Start adapter+monitor pipeline (after child process is running).
+	s.Agent.Start(context.Background())
 
 	// Start delivery loop.
 	go s.StartServices()
@@ -420,19 +444,9 @@ func (s *Session) RunInteractive() error {
 		s.VT.Mu.Unlock()
 	}
 
-	// Set up activity logger and raw OTEL log files.
-	logDir := filepath.Join(os.Getenv("HOME"), ".h2", "logs")
-	logPath := filepath.Join(logDir, "session-activity.jsonl")
-	s.Agent.SetActivityLog(activitylog.New(true, logPath, s.Name, s.SessionID))
-	s.Agent.SetOtelLogFiles(logDir)
-
-	// Start collectors (OTEL, hooks) and Agent watchState goroutine.
-	if err := s.Agent.StartCollectors(); err != nil {
-		return fmt.Errorf("start collectors: %w", err)
-	}
-	s.ExtraEnv = s.Agent.ChildEnv()
-	if s.ExtraEnv == nil {
-		s.ExtraEnv = make(map[string]string)
+	// Set up agent: activity logger, adapter, launch config.
+	if err := s.setupAgent(); err != nil {
+		return err
 	}
 	s.ExtraEnv["H2_ACTOR"] = s.Name
 
@@ -442,6 +456,9 @@ func (s *Session) RunInteractive() error {
 	}
 	s.VT.Vt.ForwardRequests = os.Stdout
 	s.VT.Vt.ForwardResponses = s.VT.Ptm
+
+	// Start adapter+monitor pipeline (after child process is running).
+	s.Agent.Start(context.Background())
 
 	// Set up interactive terminal (raw mode, mouse, SIGWINCH, input reading).
 	cleanup, stopStatus, err := s.Client.SetupInteractiveTerminal()
@@ -551,19 +568,9 @@ func (s *Session) TickStatus(stop <-chan struct{}) {
 
 // --- Delegators to Agent ---
 
-// StartOtelCollector delegates to the Agent.
-func (s *Session) StartOtelCollector() error {
-	return s.Agent.StartOtelCollector()
-}
-
 // OtelPort delegates to the Agent.
 func (s *Session) OtelPort() int {
 	return s.Agent.OtelPort()
-}
-
-// ChildEnv delegates to the Agent.
-func (s *Session) ChildEnv() map[string]string {
-	return s.Agent.ChildEnv()
 }
 
 // Metrics delegates to the Agent.
@@ -592,7 +599,7 @@ func (s *Session) StateDuration() time.Duration {
 }
 
 // NoteOutput signals that the child process has produced output.
-// Feeds through to the Agent's state watcher.
+// Feeds through to the Agent's output collector.
 func (s *Session) NoteOutput() {
 	s.Agent.NoteOutput()
 }

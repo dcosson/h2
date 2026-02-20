@@ -2,49 +2,52 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"h2/internal/activitylog"
+	"h2/internal/session/agent/adapter"
 	"h2/internal/session/agent/collector"
 	"h2/internal/session/agent/monitor"
-	"h2/internal/session/agent/shared/otelserver"
 	"h2/internal/session/agent/shared/outputcollector"
 )
 
-// Agent manages collectors, state derivation, and metrics for a session.
+// Agent manages state, metrics, and lifecycle for a session's agent process.
+// It delegates telemetry and state derivation to an AgentAdapter + AgentMonitor
+// pipeline for supported agents (Claude Code, Codex). Generic agents use an
+// output collector bridged to the monitor for output-based state detection.
 type Agent struct {
 	agentType AgentType
 
-	// OTEL collector fields (active if AgentType.Collectors().Otel)
-	metrics             *OtelMetrics
-	otelServer          *otelserver.OtelServer
-	otelMetricsReceived atomic.Bool // true after first /v1/metrics POST
+	// Adapter pattern: adapter translates agent-specific telemetry into
+	// normalized AgentEvents; monitor consumes those events and maintains
+	// derived state + metrics.
+	adapter      adapter.AgentAdapter
+	agentMonitor *monitor.AgentMonitor
+	cancel       context.CancelFunc
 
-	// Collectors
-	outputCollector  *outputcollector.Collector
-	otelCollector    *collector.OtelCollector
-	hooksCollector   *collector.HookCollector
-	primaryCollector collector.StateCollector
+	// Output collector: always present for NoteOutput signal.
+	// For generic agents (no adapter), this is the primary state source.
+	outputCollector *outputcollector.Collector
 
-	// Activity logger (nil-safe; Nop logger when not set)
+	// Hook collector: kept for backward compat Snapshot() data.
+	// Hook events are forwarded to both adapter and hooksCollector.
+	hooksCollector *collector.HookCollector
+
+	// Legacy OTEL metrics (populated on legacy path when no adapter).
+	metrics *OtelMetrics
+
+	// Activity logger (nil-safe; Nop logger when not set).
 	activityLog *activitylog.Logger
 
-	// Raw OTEL payload log files
+	// Raw OTEL payload log files (legacy path).
 	otelLogsFile    *os.File
 	otelMetricsFile *os.File
 	otelFileMu      sync.Mutex
-
-	// Layer 2: Derived state
-	mu             sync.Mutex
-	state          monitor.State
-	subState       monitor.SubState
-	stateChangedAt time.Time
-	stateCh        chan struct{} // closed on state change
 
 	// Signals
 	stopCh chan struct{}
@@ -53,17 +56,15 @@ type Agent struct {
 // New creates a new Agent with the given agent type.
 func New(agentType AgentType) *Agent {
 	return &Agent{
-		agentType:      agentType,
-		metrics:        &OtelMetrics{},
-		state:          monitor.StateInitialized,
-		stateChangedAt: time.Now(),
-		stateCh:        make(chan struct{}),
-		stopCh:         make(chan struct{}),
+		agentType:    agentType,
+		agentMonitor: monitor.New(),
+		metrics:      &OtelMetrics{},
+		stopCh:       make(chan struct{}),
 	}
 }
 
 // SetActivityLog sets the activity logger for this agent.
-// Must be called before StartCollectors.
+// Must be called before PrepareForLaunch.
 func (a *Agent) SetActivityLog(l *activitylog.Logger) {
 	a.activityLog = l
 }
@@ -77,7 +78,7 @@ func (a *Agent) ActivityLog() *activitylog.Logger {
 }
 
 // SetOtelLogFiles opens the raw OTEL log files for appending.
-// Must be called before StartCollectors.
+// Must be called before PrepareForLaunch.
 func (a *Agent) SetOtelLogFiles(dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create otel log dir: %w", err)
@@ -96,92 +97,106 @@ func (a *Agent) SetOtelLogFiles(dir string) error {
 	return nil
 }
 
-// StartCollectors starts the collectors enabled by the agent type and
-// launches the internal watchState goroutine.
-func (a *Agent) StartCollectors() error {
-	cfg := a.agentType.Collectors()
-	a.outputCollector = outputcollector.New(monitor.IdleThreshold)
-	var primary collector.StateCollector = a.outputCollector
+// PrepareForLaunch creates the adapter (if applicable) and returns env vars
+// and CLI args to inject into the child process. Must be called after
+// SetActivityLog and before Start.
+func (a *Agent) PrepareForLaunch(agentName, sessionID string) (adapter.LaunchConfig, error) {
+	a.adapter = a.agentType.NewAdapter(a.ActivityLog())
 
-	if cfg.Otel {
-		if err := a.StartOtelCollector(); err != nil {
-			return err
-		}
-		a.otelCollector = collector.NewOtelCollector()
-		primary = a.otelCollector
+	if a.adapter == nil {
+		// Generic agent: no adapter, no special env/args.
+		return adapter.LaunchConfig{}, nil
 	}
-	if cfg.Hooks {
-		a.hooksCollector = collector.NewHookCollector(a.activityLog)
-		primary = a.hooksCollector
-	}
-	a.primaryCollector = primary
-	go a.watchState()
-	return nil
+
+	// Create hook collector for backward compat Snapshot() data.
+	a.hooksCollector = collector.NewHookCollector(a.ActivityLog())
+
+	return a.adapter.PrepareForLaunch(agentName, sessionID)
 }
 
-// --- State accessors ---
+// Start begins the adapter+monitor pipeline (for adapted agents) or the
+// output collector bridge (for generic agents). Must be called after
+// PrepareForLaunch and after the child process starts.
+func (a *Agent) Start(ctx context.Context) {
+	ctx, a.cancel = context.WithCancel(ctx)
 
-// State returns the current derived state and sub-state atomically.
+	// Always create output collector for NoteOutput.
+	a.outputCollector = outputcollector.New(monitor.IdleThreshold)
+
+	if a.adapter != nil {
+		// Adapted agent: adapter → monitor pipeline.
+		go a.adapter.Start(ctx, a.agentMonitor.Events())
+		go a.agentMonitor.Run(ctx)
+	} else {
+		// Generic agent: bridge output collector state to monitor.
+		go a.agentMonitor.Run(ctx)
+		go a.bridgeOutputToMonitor(ctx)
+	}
+}
+
+// bridgeOutputToMonitor forwards output collector state changes to the
+// monitor as AgentEvents. Used for generic agents.
+func (a *Agent) bridgeOutputToMonitor(ctx context.Context) {
+	for {
+		select {
+		case su := <-a.outputCollector.StateCh():
+			select {
+			case a.agentMonitor.Events() <- monitor.AgentEvent{
+				Type:      monitor.EventStateChange,
+				Timestamp: time.Now(),
+				Data:      monitor.StateChangeData{State: su.State, SubState: su.SubState},
+			}:
+			case <-ctx.Done():
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// HandleHookEvent processes a hook event, forwarding to both the adapter
+// (for event emission) and the hook collector (for backward compat Snapshot data).
+func (a *Agent) HandleHookEvent(eventName string, payload json.RawMessage) bool {
+	// Forward to hook collector for Snapshot() data.
+	if a.hooksCollector != nil {
+		a.hooksCollector.ProcessEvent(eventName, payload)
+	}
+
+	// Forward to adapter for AgentEvent emission.
+	if a.adapter != nil {
+		return a.adapter.HandleHookEvent(eventName, payload)
+	}
+
+	return a.hooksCollector != nil
+}
+
+// --- State accessors (delegate to monitor) ---
+
+// State returns the current derived state and sub-state.
 func (a *Agent) State() (monitor.State, monitor.SubState) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.state, a.subState
+	return a.agentMonitor.State()
 }
 
 // StateChanged returns a channel that is closed when the state changes.
 func (a *Agent) StateChanged() <-chan struct{} {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.stateCh
+	return a.agentMonitor.StateChanged()
 }
 
 // WaitForState blocks until the agent reaches the target state or ctx is cancelled.
 func (a *Agent) WaitForState(ctx context.Context, target monitor.State) bool {
-	for {
-		st, _ := a.State()
-		if st == target {
-			return true
-		}
-		a.mu.Lock()
-		ch := a.stateCh
-		a.mu.Unlock()
-
-		select {
-		case <-ch:
-			continue
-		case <-ctx.Done():
-			return false
-		}
-	}
+	return a.agentMonitor.WaitForState(ctx, target)
 }
 
 // StateDuration returns how long the agent has been in its current state.
 func (a *Agent) StateDuration() time.Duration {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return time.Since(a.stateChangedAt)
+	return a.agentMonitor.StateDuration()
 }
 
-// setState updates the state and notifies waiters. Caller must NOT hold mu.
-func (a *Agent) setState(newState monitor.State, newSubState monitor.SubState) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.setStateLocked(newState, newSubState)
-}
-
-// setStateLocked updates state and sub-state while mu is already held.
-// State-change notifications only fire when State changes (not sub-state alone).
-func (a *Agent) setStateLocked(newState monitor.State, newSubState monitor.SubState) {
-	stateChanged := a.state != newState
-	prev := a.state
-	a.state = newState
-	a.subState = newSubState
-	if stateChanged {
-		a.stateChangedAt = time.Now()
-		close(a.stateCh)
-		a.stateCh = make(chan struct{})
-		a.ActivityLog().StateChange(prev.String(), newState.String())
-	}
+// SetExited transitions the agent to the Exited state.
+// Called by Session when the child process exits.
+func (a *Agent) SetExited() {
+	a.agentMonitor.SetExited()
 }
 
 // --- Signals from Session ---
@@ -202,55 +217,11 @@ func (a *Agent) NoteInterrupt() {
 	}
 }
 
-// SetExited transitions the agent to the Exited state.
-// Called by Session when the child process exits.
-func (a *Agent) SetExited() {
-	a.setState(monitor.StateExited, monitor.SubStateNone)
-}
-
-// --- Internal watchState goroutine ---
-
-// watchState forwards state from the primary collector to the Agent.
-func (a *Agent) watchState() {
-	for {
-		select {
-		case su := <-a.primaryCollector.StateCh():
-			a.mu.Lock()
-			if a.state != monitor.StateExited {
-				a.setStateLocked(su.State, su.SubState)
-			}
-			a.mu.Unlock()
-		case <-a.stopCh:
-			return
-		}
-	}
-}
-
 // --- Delegators ---
 
 // AgentType returns the agent type.
 func (a *Agent) AgentType() AgentType {
 	return a.agentType
-}
-
-// PrependArgs returns extra args to inject before the user's args.
-func (a *Agent) PrependArgs(sessionID string) []string {
-	if a.agentType == nil {
-		return nil
-	}
-	return a.agentType.PrependArgs(sessionID)
-}
-
-// ChildEnv returns environment variables to inject into the child process.
-func (a *Agent) ChildEnv() map[string]string {
-	if a.agentType == nil {
-		return nil
-	}
-	port := 0
-	if a.otelServer != nil {
-		port = a.otelServer.Port
-	}
-	return a.agentType.ChildEnv(&CollectorPorts{OtelPort: port})
 }
 
 // Metrics returns a snapshot of the current OTEL metrics.
@@ -263,8 +234,14 @@ func (a *Agent) Metrics() OtelMetricsSnapshot {
 
 // OtelPort returns the port the OTEL collector is listening on.
 func (a *Agent) OtelPort() int {
-	if a.otelServer != nil {
-		return a.otelServer.Port
+	// Check adapter for OTEL port (type-assert for OtelPort method).
+	type otelPorter interface {
+		OtelPort() int
+	}
+	if a.adapter != nil {
+		if op, ok := a.adapter.(otelPorter); ok {
+			return op.OtelPort()
+		}
 	}
 	return 0
 }
@@ -279,22 +256,30 @@ func (a *Agent) Stop() {
 	select {
 	case <-a.stopCh:
 		// already stopped
+		return
 	default:
 		close(a.stopCh)
 	}
+
+	// Cancel adapter/monitor context.
+	if a.cancel != nil {
+		a.cancel()
+	}
+
+	// Stop adapter.
+	if a.adapter != nil {
+		a.adapter.Stop()
+	}
+
+	// Stop collectors.
 	if a.outputCollector != nil {
 		a.outputCollector.Stop()
-	}
-	if a.otelCollector != nil {
-		a.otelCollector.Stop()
 	}
 	if a.hooksCollector != nil {
 		a.hooksCollector.Stop()
 	}
-	if a.otelServer != nil {
-		a.otelServer.Stop()
-	}
 
+	// Close raw OTEL log files.
 	a.otelFileMu.Lock()
 	if a.otelLogsFile != nil {
 		a.otelLogsFile.Close()

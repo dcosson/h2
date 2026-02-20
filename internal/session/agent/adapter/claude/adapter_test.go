@@ -22,7 +22,7 @@ func TestName(t *testing.T) {
 
 func TestPrepareForLaunch(t *testing.T) {
 	a := New(nil)
-	cfg, err := a.PrepareForLaunch("test-agent")
+	cfg, err := a.PrepareForLaunch("test-agent", "")
 	if err != nil {
 		t.Fatalf("PrepareForLaunch: %v", err)
 	}
