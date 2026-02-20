@@ -41,18 +41,20 @@ type Harness interface {
     // Runtime (called after child process starts)
     Start(ctx context.Context, events chan<- monitor.AgentEvent) error
     HandleHookEvent(eventName string, payload json.RawMessage) bool
-    NoteOutput()  // signal that child process produced output
+    HandleOutput()  // signal that child process produced output
     Stop()
 }
 ```
 
 Note: `BuildCommandEnvVars` and `EnsureConfigDir` signatures simplify from `(h2Dir, roleName string)` to `(h2Dir string)`. The harness receives its config at construction time (via `HarnessConfig`), so it no longer needs to re-load the role to find its config dir.
 
-**NoteOutput()** is called by Agent whenever the PTY produces output. Each harness decides what to do:
+**HandleOutput()** is called by Agent whenever the PTY produces output. Each harness decides what to do:
 - **ClaudeCodeHarness / CodexHarness**: No-op. State detection comes from OTEL/hooks.
 - **GenericHarness**: Feeds an internal `outputcollector.Collector`. The collector detects idle/active state and GenericHarness.Start() bridges those state changes to the events channel.
 
 This means the output collector moves entirely inside GenericHarness. Agent no longer owns an output collector or runs `bridgeOutputToMonitor`.
+
+**Start() semantics**: All harnesses block until ctx is cancelled. Claude blocks reading from OTEL server, Codex blocks reading from OTEL traces, Generic blocks reading from its output collector's StateCh. The caller always wraps in `go a.harness.Start(...)`.
 
 ### HarnessConfig (passed to constructors)
 
@@ -98,15 +100,30 @@ func (g *GenericHarness) HandleHookEvent(eventName string, payload json.RawMessa
     return false
 }
 
-// Start creates the output collector and bridges state changes to the events channel.
+// Start creates the output collector and blocks, bridging state changes to
+// events until ctx is cancelled. Same blocking semantics as Claude/Codex.
 func (g *GenericHarness) Start(ctx context.Context, events chan<- monitor.AgentEvent) error {
     g.collector = outputcollector.New(monitor.IdleThreshold)
-    go g.bridgeOutputToMonitor(ctx, events)
-    return nil
+    for {
+        select {
+        case su := <-g.collector.StateCh():
+            select {
+            case events <- monitor.AgentEvent{
+                Type:      monitor.EventStateChange,
+                Timestamp: time.Now(),
+                Data:      monitor.StateChangeData{State: su.State, SubState: su.SubState},
+            }:
+            case <-ctx.Done():
+                return ctx.Err()
+            }
+        case <-ctx.Done():
+            return ctx.Err()
+        }
+    }
 }
 
-// NoteOutput feeds the internal output collector.
-func (g *GenericHarness) NoteOutput() {
+// HandleOutput feeds the internal output collector.
+func (g *GenericHarness) HandleOutput() {
     if g.collector != nil {
         g.collector.NoteOutput()
     }
@@ -119,25 +136,6 @@ func (g *GenericHarness) Stop() {
     }
 }
 
-func (g *GenericHarness) bridgeOutputToMonitor(ctx context.Context, events chan<- monitor.AgentEvent) {
-    // Same logic as current agent.bridgeOutputToMonitor, moved here
-    for {
-        select {
-        case su := <-g.collector.StateCh():
-            select {
-            case events <- monitor.AgentEvent{
-                Type:      monitor.EventStateChange,
-                Timestamp: time.Now(),
-                Data:      monitor.StateChangeData{State: su.State, SubState: su.SubState},
-            }:
-            case <-ctx.Done():
-                return
-            }
-        case <-ctx.Done():
-            return
-        }
-    }
-}
 ```
 
 ### Package layout
@@ -233,8 +231,8 @@ func (a *Agent) HandleHookEvent(eventName string, payload json.RawMessage) bool 
     return a.harness.HandleHookEvent(eventName, payload)
 }
 
-func (a *Agent) NoteOutput() {
-    a.harness.NoteOutput()
+func (a *Agent) HandleOutput() {
+    a.harness.HandleOutput()
 }
 
 func (a *Agent) Stop() {
@@ -450,15 +448,15 @@ Unknown harness types return an error instead of silently falling through.
 
 1. **Restructure Role YAML config** — Add `AgentHarnessConfig` struct, nested `agent_harness` YAML section, accessor methods with backward compat fallback, update role template. Update all callers of `role.Model`, `role.GetAgentType()`, `role.GetClaudeConfigDir()`.
 
-2. **Create `agent/harness/` package with Harness interface** — Define Harness interface (with NoteOutput), HarnessConfig, move LaunchConfig, CommandArgsConfig, InputSender, PTYInputSender from current locations. Add `Resolve()` function.
+2. **Create `agent/harness/` package with Harness interface** — Define Harness interface (with HandleOutput), HarnessConfig, move LaunchConfig, CommandArgsConfig, InputSender, PTYInputSender from current locations. Add `Resolve()` function.
 
-3. **Create `agent/harness/claude/` package** — Merge ClaudeCodeType + ClaudeCodeAdapter into ClaudeCodeHarness. Constructor takes `HarnessConfig`. NoteOutput is no-op. Move hook_handler, otel_parser, sessionlog from adapter/claude/.
+3. **Create `agent/harness/claude/` package** — Merge ClaudeCodeType + ClaudeCodeAdapter into ClaudeCodeHarness. Constructor takes `HarnessConfig`. HandleOutput is no-op. Move hook_handler, otel_parser, sessionlog from adapter/claude/.
 
-4. **Create `agent/harness/codex/` package** — Merge CodexType + CodexAdapter into CodexHarness. Constructor takes `HarnessConfig`. NoteOutput is no-op. Move launch, otel_parser from adapter/codex/.
+4. **Create `agent/harness/codex/` package** — Merge CodexType + CodexAdapter into CodexHarness. Constructor takes `HarnessConfig`. HandleOutput is no-op. Move launch, otel_parser from adapter/codex/.
 
-5. **Create `agent/harness/generic/` package** — GenericHarness with internal output collector. NoteOutput feeds collector. Start() bridges collector state to events channel. No-op config/launch methods.
+5. **Create `agent/harness/generic/` package** — GenericHarness with internal output collector. HandleOutput feeds collector. Start() bridges collector state to events channel. No-op config/launch methods.
 
-6. **Update Agent struct** — Replace `agentType + adapter` with single `harness` field. Remove `NewAdapter()`, all nil-adapter branches, `bridgeOutputToMonitor`, `OtelMetrics`, `SetOtelLogFiles`, `outputCollector`. Agent.NoteOutput() delegates to harness.NoteOutput().
+6. **Update Agent struct** — Replace `agentType + adapter` with single `harness` field. Remove `NewAdapter()`, all nil-adapter branches, `bridgeOutputToMonitor`, `OtelMetrics`, `SetOtelLogFiles`, `outputCollector`. Agent.HandleOutput() delegates to harness.HandleOutput().
 
 7. **Update callers** — session.go, daemon.go, agent_setup.go, dry_run.go, run.go, role.go (cmd).
 
