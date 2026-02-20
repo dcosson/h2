@@ -1,0 +1,12 @@
+{
+  "id": "h2-jf6",
+  "title": "Fix pre-existing TestSetupSessionDir_NoAgent failure",
+  "description": "TestSetupSessionDir_NoAgent in internal/config/role_test.go fails: 'permission-reviewer.md should not exist when no agent configured'. Pre-existing issue not related to the adapter pattern work. Needs investigation and fix.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-19T16:32:00.545985-08:00",
+  "updated_at": "2026-02-19T16:32:00.545985-08:00"
+}
