@@ -3,8 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -14,6 +12,7 @@ import (
 	"h2/internal/activitylog"
 	"h2/internal/session/agent/collector"
 	"h2/internal/session/agent/monitor"
+	"h2/internal/session/agent/shared/otelserver"
 )
 
 // Re-export State type, constants, and IdleThreshold from monitor package
@@ -50,9 +49,7 @@ type Agent struct {
 
 	// OTEL collector fields (active if AgentType.Collectors().Otel)
 	metrics             *OtelMetrics
-	listener            net.Listener
-	server              *http.Server
-	port                int
+	otelServer          *otelserver.OtelServer
 	otelMetricsReceived atomic.Bool // true after first /v1/metrics POST
 
 	// Collectors
@@ -276,7 +273,11 @@ func (a *Agent) ChildEnv() map[string]string {
 	if a.agentType == nil {
 		return nil
 	}
-	return a.agentType.ChildEnv(&CollectorPorts{OtelPort: a.port})
+	port := 0
+	if a.otelServer != nil {
+		port = a.otelServer.Port
+	}
+	return a.agentType.ChildEnv(&CollectorPorts{OtelPort: port})
 }
 
 // Metrics returns a snapshot of the current OTEL metrics.
@@ -289,7 +290,10 @@ func (a *Agent) Metrics() OtelMetricsSnapshot {
 
 // OtelPort returns the port the OTEL collector is listening on.
 func (a *Agent) OtelPort() int {
-	return a.port
+	if a.otelServer != nil {
+		return a.otelServer.Port
+	}
+	return 0
 }
 
 // HookCollector returns the hook collector, or nil if not active.
@@ -314,7 +318,9 @@ func (a *Agent) Stop() {
 	if a.hooksCollector != nil {
 		a.hooksCollector.Stop()
 	}
-	a.StopOtelCollector()
+	if a.otelServer != nil {
+		a.otelServer.Stop()
+	}
 
 	a.otelFileMu.Lock()
 	if a.otelLogsFile != nil {

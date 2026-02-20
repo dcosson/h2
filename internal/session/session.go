@@ -555,11 +555,6 @@ func (s *Session) StartOtelCollector() error {
 	return s.Agent.StartOtelCollector()
 }
 
-// StopOtelCollector delegates to the Agent.
-func (s *Session) StopOtelCollector() {
-	s.Agent.StopOtelCollector()
-}
-
 // OtelPort delegates to the Agent.
 func (s *Session) OtelPort() int {
 	return s.Agent.OtelPort()

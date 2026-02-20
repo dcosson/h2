@@ -2,14 +2,10 @@ package agent
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
-	"fmt"
-	"io"
-	"net"
-	"net/http"
 	"os"
-	"sync"
+
+	"h2/internal/session/agent/shared/otelserver"
 )
 
 // --- OTEL types ---
@@ -48,40 +44,17 @@ type OtelScopeLogs struct {
 
 // --- OTEL collector methods on Agent ---
 
-// StartOtelCollector starts the OTEL HTTP server on a random port.
+// StartOtelCollector starts the shared OTEL HTTP server on a random port.
 func (a *Agent) StartOtelCollector() error {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	s, err := otelserver.New(otelserver.Callbacks{
+		OnLogs:    a.onOtelLogs,
+		OnMetrics: a.onOtelMetrics,
+	})
 	if err != nil {
-		return fmt.Errorf("listen for otel: %w", err)
+		return err
 	}
-	a.listener = ln
-	a.port = ln.Addr().(*net.TCPAddr).Port
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/logs", a.handleOtelLogs)
-	mux.HandleFunc("/v1/metrics", a.handleOtelMetrics)
-
-	a.server = &http.Server{Handler: mux}
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		wg.Done()
-		a.server.Serve(ln)
-	}()
-	wg.Wait() // wait for goroutine to start
-
+	a.otelServer = s
 	return nil
-}
-
-// StopOtelCollector shuts down the OTEL HTTP server.
-func (a *Agent) StopOtelCollector() {
-	if a.server != nil {
-		a.server.Shutdown(context.Background())
-	}
-	if a.listener != nil {
-		a.listener.Close()
-	}
 }
 
 // processLogs extracts events from an OTLP logs payload.
@@ -129,46 +102,22 @@ func (a *Agent) writeOtelRawLog(f *os.File, body []byte) {
 	a.otelFileMu.Unlock()
 }
 
-// handleOtelLogs handles POST /v1/logs from OTLP exporters.
-func (a *Agent) handleOtelLogs(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "read body failed", http.StatusBadRequest)
-		return
-	}
-	r.Body.Close()
-
+// onOtelLogs is the callback for /v1/logs payloads from the shared OTEL server.
+func (a *Agent) onOtelLogs(body []byte) {
 	a.writeOtelRawLog(a.otelLogsFile, body)
 
 	var payload OtelLogsPayload
 	if err := json.Unmarshal(body, &payload); err != nil {
 		// Could be protobuf — just signal activity anyway
 		a.noteOtelEvent()
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("{}"))
 		return
 	}
 
 	a.processLogs(payload)
-
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("{}"))
 }
 
-// handleOtelMetrics handles POST /v1/metrics from OTLP exporters.
-func (a *Agent) handleOtelMetrics(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	body, _ := io.ReadAll(r.Body)
-	r.Body.Close()
-
+// onOtelMetrics is the callback for /v1/metrics payloads from the shared OTEL server.
+func (a *Agent) onOtelMetrics(body []byte) {
 	a.writeOtelRawLog(a.otelMetricsFile, body)
 
 	// Log first connection to /v1/metrics.
@@ -182,13 +131,10 @@ func (a *Agent) handleOtelMetrics(w http.ResponseWriter, r *http.Request) {
 			a.metrics.UpdateFromMetricsEndpoint(parsed)
 		}
 	}
-
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("{}"))
 }
 
 // noteOtelEvent signals that an OTEL event was received.
-// Safe to call from HTTP handlers.
+// Safe to call from callbacks.
 func (a *Agent) noteOtelEvent() {
 	if a.otelCollector != nil {
 		a.otelCollector.NoteEvent()

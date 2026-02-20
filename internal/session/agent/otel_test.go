@@ -1,8 +1,6 @@
 package agent
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,7 +38,7 @@ func TestSetOtelLogFiles_CreatesDir(t *testing.T) {
 	}
 }
 
-func TestHandleOtelLogs_WritesRawPayload(t *testing.T) {
+func TestOnOtelLogs_WritesRawPayload(t *testing.T) {
 	dir := t.TempDir()
 	a := New(nil)
 	a.metrics = &OtelMetrics{}
@@ -50,13 +48,7 @@ func TestHandleOtelLogs_WritesRawPayload(t *testing.T) {
 	defer a.Stop()
 
 	payload := `{"resourceLogs":[{"scopeLogs":[{"logRecords":[]}]}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/logs", strings.NewReader(payload))
-	w := httptest.NewRecorder()
-	a.handleOtelLogs(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
+	a.onOtelLogs([]byte(payload))
 
 	data, err := os.ReadFile(filepath.Join(dir, "otel-logs.jsonl"))
 	if err != nil {
@@ -68,7 +60,7 @@ func TestHandleOtelLogs_WritesRawPayload(t *testing.T) {
 	}
 }
 
-func TestHandleOtelMetrics_WritesRawPayload(t *testing.T) {
+func TestOnOtelMetrics_WritesRawPayload(t *testing.T) {
 	dir := t.TempDir()
 	a := New(nil)
 	a.metrics = &OtelMetrics{}
@@ -78,13 +70,7 @@ func TestHandleOtelMetrics_WritesRawPayload(t *testing.T) {
 	defer a.Stop()
 
 	payload := `{"resourceMetrics":[{"scopeMetrics":[]}]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/metrics", strings.NewReader(payload))
-	w := httptest.NewRecorder()
-	a.handleOtelMetrics(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
+	a.onOtelMetrics([]byte(payload))
 
 	data, err := os.ReadFile(filepath.Join(dir, "otel-metrics.jsonl"))
 	if err != nil {
@@ -96,7 +82,7 @@ func TestHandleOtelMetrics_WritesRawPayload(t *testing.T) {
 	}
 }
 
-func TestHandleOtelLogs_MultiplePayloads_Appended(t *testing.T) {
+func TestOnOtelLogs_MultiplePayloads_Appended(t *testing.T) {
 	dir := t.TempDir()
 	a := New(nil)
 	a.metrics = &OtelMetrics{}
@@ -111,9 +97,7 @@ func TestHandleOtelLogs_MultiplePayloads_Appended(t *testing.T) {
 	}
 
 	for _, p := range payloads {
-		req := httptest.NewRequest(http.MethodPost, "/v1/logs", strings.NewReader(p))
-		w := httptest.NewRecorder()
-		a.handleOtelLogs(w, req)
+		a.onOtelLogs([]byte(p))
 	}
 
 	data, err := os.ReadFile(filepath.Join(dir, "otel-logs.jsonl"))
@@ -131,20 +115,15 @@ func TestHandleOtelLogs_MultiplePayloads_Appended(t *testing.T) {
 	}
 }
 
-func TestHandleOtelLogs_NoFiles_NoError(t *testing.T) {
-	// When otel log files are not set, handlers should still work fine.
+func TestOnOtelLogs_NoFiles_NoError(t *testing.T) {
+	// When otel log files are not set, callbacks should still work fine.
 	a := New(nil)
 	a.metrics = &OtelMetrics{}
 	defer a.Stop()
 
 	payload := `{"resourceLogs":[]}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/logs", strings.NewReader(payload))
-	w := httptest.NewRecorder()
-	a.handleOtelLogs(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
+	// Should not panic or error.
+	a.onOtelLogs([]byte(payload))
 }
 
 func TestStopClosesOtelFiles(t *testing.T) {
@@ -161,5 +140,20 @@ func TestStopClosesOtelFiles(t *testing.T) {
 	}
 	if a.otelMetricsFile != nil {
 		t.Error("expected otelMetricsFile to be nil after Stop")
+	}
+}
+
+func TestStartOtelCollector_UsesSharedServer(t *testing.T) {
+	a := New(nil)
+	if err := a.StartOtelCollector(); err != nil {
+		t.Fatalf("StartOtelCollector: %v", err)
+	}
+	defer a.Stop()
+
+	if a.otelServer == nil {
+		t.Fatal("expected otelServer to be set")
+	}
+	if a.OtelPort() == 0 {
+		t.Fatal("expected non-zero OtelPort")
 	}
 }
