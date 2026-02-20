@@ -16,6 +16,7 @@ import (
 	"h2/internal/activitylog"
 	"h2/internal/config"
 	"h2/internal/session/agent"
+	"h2/internal/tmpl"
 	"h2/internal/session/agent/harness"
 	"h2/internal/session/agent/monitor"
 	"h2/internal/session/agent/shared/eventstore"
@@ -209,9 +210,33 @@ func (s *Session) setupAgent() error {
 }
 
 // resolveFullHarness creates a properly-configured harness with logger and
-// configDir resolved from roleName. Called from setupAgent() when all config
+// config resolved from the role. Called from setupAgent() when all config
 // is available.
 func resolveFullHarness(command, roleName string, log *activitylog.Logger) (harness.Harness, error) {
+	// If we have a role name, load the role to get proper config
+	// (claude_config_dir, harness_type, model, etc.).
+	if roleName != "" {
+		ctx := &tmpl.Context{
+			RoleName: roleName,
+			H2Dir:    config.ConfigDir(),
+		}
+		if role, err := config.LoadRoleRendered(roleName, ctx); err == nil {
+			ht := role.GetHarnessType()
+			cfg := harness.HarnessConfig{
+				HarnessType: ht,
+				Command:     role.GetAgentType(),
+				Model:       role.GetModel(),
+			}
+			switch ht {
+			case "claude_code", "claude":
+				cfg.ConfigDir = role.GetClaudeConfigDir()
+			}
+			return harness.Resolve(cfg, log)
+		}
+		// Fall through to command-based resolution if role load fails.
+	}
+
+	// Fallback: resolve from command name alone (no role available).
 	harnessType := "generic"
 	var configDir string
 	switch filepath.Base(command) {
