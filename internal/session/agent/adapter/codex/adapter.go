@@ -5,7 +5,6 @@ package codex
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
 	"h2/internal/activitylog"
 	"h2/internal/session/agent/adapter"
@@ -46,21 +45,15 @@ func (a *CodexAdapter) Name() string {
 
 // PrepareForLaunch creates the OTEL server and returns the -c flag
 // that configures Codex's trace exporter to send to h2's collector.
-func (a *CodexAdapter) PrepareForLaunch(agentName string) (adapter.LaunchConfig, error) {
-	s, err := otelserver.New(otelserver.Callbacks{
+func (a *CodexAdapter) PrepareForLaunch(agentName, sessionID string) (adapter.LaunchConfig, error) {
+	cfg, s, err := BuildLaunchConfig(otelserver.Callbacks{
 		OnTraces: a.otelParser.OnTraces,
 	})
 	if err != nil {
-		return adapter.LaunchConfig{}, fmt.Errorf("create otel server: %w", err)
+		return adapter.LaunchConfig{}, err
 	}
 	a.otelServer = s
-
-	endpoint := fmt.Sprintf("http://127.0.0.1:%d", s.Port)
-	return adapter.LaunchConfig{
-		PrependArgs: []string{
-			"-c", fmt.Sprintf(`otel.trace_exporter={type="otlp-http",endpoint="%s"}`, endpoint),
-		},
-	}, nil
+	return cfg, nil
 }
 
 // Start forwards internal events to the external channel and blocks

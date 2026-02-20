@@ -1,0 +1,19 @@
+{
+  "id": "h2-s3d",
+  "title": "Fix Codex adapter: wire BuildLaunchConfig and add interface check",
+  "description": "Reviewer found: (1) BuildLaunchConfig in launch.go is unused dead code — PrepareForLaunch builds the -c flag inline instead of calling it. Wire PrepareForLaunch to use BuildLaunchConfig, or merge them. (2) Missing compile-time interface check: add 'var _ adapter.AgentAdapter = (*CodexAdapter)(nil)' to codex adapter test.",
+  "status": "in_progress",
+  "priority": 1,
+  "type": "task",
+  "parent": "h2-9gb",
+  "dependencies": [
+    {
+      "id": "h2-9gb",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-19T17:25:37.420641-08:00",
+  "updated_at": "2026-02-19T17:26:16.174551-08:00"
+}

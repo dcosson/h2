@@ -6,8 +6,12 @@ import (
 	"testing"
 	"time"
 
+	"h2/internal/session/agent/adapter"
 	"h2/internal/session/agent/monitor"
 )
+
+// Verify CodexAdapter implements AgentAdapter.
+var _ adapter.AgentAdapter = (*CodexAdapter)(nil)
 
 func TestCodexAdapter_Name(t *testing.T) {
 	a := New(nil)
@@ -25,7 +29,7 @@ func TestCodexAdapter_HandleHookEvent_ReturnsFalse(t *testing.T) {
 
 func TestCodexAdapter_PrepareForLaunch(t *testing.T) {
 	a := New(nil)
-	cfg, err := a.PrepareForLaunch("test-agent")
+	cfg, err := a.PrepareForLaunch("test-agent", "")
 	if err != nil {
 		t.Fatalf("PrepareForLaunch error: %v", err)
 	}
