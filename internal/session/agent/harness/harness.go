@@ -126,8 +126,10 @@ func Resolve(cfg HarnessConfig, log *activitylog.Logger) (Harness, error) {
 		}
 		return nil, fmt.Errorf("claude_code harness not registered (import harness/claude)")
 	case "codex":
-		// placeholder: will be codex.New(cfg, log)
-		return nil, fmt.Errorf("codex harness not yet implemented")
+		if f, ok := registry[cfg.HarnessType]; ok {
+			return f(cfg, log), nil
+		}
+		return nil, fmt.Errorf("codex harness not registered (import harness/codex)")
 	case "generic":
 		if cfg.Command == "" {
 			return nil, fmt.Errorf("generic harness requires a command")

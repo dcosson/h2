@@ -70,13 +70,18 @@ func TestResolve_ClaudeLegacy_NotRegistered(t *testing.T) {
 	}
 }
 
-func TestResolve_Codex_Placeholder(t *testing.T) {
-	_, err := Resolve(HarnessConfig{HarnessType: "codex"}, nil)
-	if err == nil {
-		t.Fatal("expected placeholder error for codex harness")
+func TestResolve_Codex_NotRegistered(t *testing.T) {
+	// Without importing harness/codex, the factory is not registered.
+	// Skip if already registered.
+	h, err := Resolve(HarnessConfig{HarnessType: "codex"}, nil)
+	if h != nil {
+		t.Skip("codex harness already registered")
 	}
-	if !strings.Contains(err.Error(), "not yet implemented") {
-		t.Errorf("error = %q, want placeholder error", err.Error())
+	if err == nil {
+		t.Fatal("expected error for unregistered codex harness")
+	}
+	if !strings.Contains(err.Error(), "not registered") {
+		t.Errorf("error = %q, want it to contain 'not registered'", err.Error())
 	}
 }
 
