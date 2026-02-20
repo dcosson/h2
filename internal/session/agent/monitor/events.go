@@ -73,6 +73,33 @@ type ToolCompletedData struct {
 	Success    bool
 }
 
+// TurnStartedData is the payload for EventTurnStarted.
+type TurnStartedData struct {
+	TurnID string
+}
+
+// ToolStartedData is the payload for EventToolStarted.
+type ToolStartedData struct {
+	ToolName string
+	CallID   string
+}
+
+// ApprovalRequestedData is the payload for EventApprovalRequested.
+type ApprovalRequestedData struct {
+	ToolName string
+	CallID   string
+}
+
+// AgentMessageData is the payload for EventAgentMessage.
+type AgentMessageData struct {
+	Content string
+}
+
+// SessionEndedData is the payload for EventSessionEnded.
+type SessionEndedData struct {
+	Reason string
+}
+
 // StateChangeData is the payload for EventStateChange.
 type StateChangeData struct {
 	State    State

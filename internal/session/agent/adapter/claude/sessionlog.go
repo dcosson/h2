@@ -48,12 +48,19 @@ func (c *SessionLogCollector) Run(ctx context.Context, events chan<- monitor.Age
 	defer f.Close()
 
 	reader := bufio.NewReader(f)
+	var partial []byte
 	for {
 		// Try to read all available lines.
 		for {
 			line, err := reader.ReadBytes('\n')
 			if err != nil {
+				// Partial data (no trailing newline yet) — accumulate.
+				partial = append(partial, line...)
 				break
+			}
+			if len(partial) > 0 {
+				line = append(partial, line...)
+				partial = nil
 			}
 			if ev, ok := parseSessionLine(line); ok {
 				select {
@@ -110,6 +117,6 @@ func parseSessionLine(line []byte) (monitor.AgentEvent, bool) {
 	return monitor.AgentEvent{
 		Type:      monitor.EventAgentMessage,
 		Timestamp: time.Now(),
-		Data:      msg.Content,
+		Data:      monitor.AgentMessageData{Content: msg.Content},
 	}, true
 }

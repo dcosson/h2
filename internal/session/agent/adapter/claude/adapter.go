@@ -110,8 +110,7 @@ func (a *ClaudeCodeAdapter) Start(ctx context.Context, events chan<- monitor.Age
 // HandleHookEvent delegates hook events to the HookHandler, which
 // translates them into AgentEvents.
 func (a *ClaudeCodeAdapter) HandleHookEvent(eventName string, payload json.RawMessage) bool {
-	a.hookHandler.ProcessEvent(eventName, payload)
-	return true
+	return a.hookHandler.ProcessEvent(eventName, payload)
 }
 
 // Stop cleans up the OTEL server and other resources.

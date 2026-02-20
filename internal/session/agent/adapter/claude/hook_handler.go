@@ -28,8 +28,9 @@ func NewHookHandler(events chan<- monitor.AgentEvent, log *activitylog.Logger) *
 }
 
 // ProcessEvent translates a Claude Code hook event into AgentEvent(s)
-// and emits them on the events channel.
-func (h *HookHandler) ProcessEvent(eventName string, payload json.RawMessage) {
+// and emits them on the events channel. Returns true if the event was
+// recognized, false for unknown events.
+func (h *HookHandler) ProcessEvent(eventName string, payload json.RawMessage) bool {
 	toolName := extractToolName(payload)
 	sessionID := extractSessionID(payload)
 	now := time.Now()
@@ -56,7 +57,7 @@ func (h *HookHandler) ProcessEvent(eventName string, payload json.RawMessage) {
 		h.emit(monitor.AgentEvent{
 			Type:      monitor.EventToolStarted,
 			Timestamp: now,
-			Data: monitor.ToolCompletedData{
+			Data: monitor.ToolStartedData{
 				ToolName: toolName,
 			},
 		})
@@ -77,6 +78,9 @@ func (h *HookHandler) ProcessEvent(eventName string, payload json.RawMessage) {
 		h.emit(monitor.AgentEvent{
 			Type:      monitor.EventApprovalRequested,
 			Timestamp: now,
+			Data: monitor.ApprovalRequestedData{
+				ToolName: toolName,
+			},
 		})
 		h.emitStateChange(now, monitor.StateActive, monitor.SubStateWaitingForPermission)
 
@@ -103,7 +107,11 @@ func (h *HookHandler) ProcessEvent(eventName string, payload json.RawMessage) {
 			Type:      monitor.EventSessionEnded,
 			Timestamp: now,
 		})
+
+	default:
+		return false
 	}
+	return true
 }
 
 // NoteInterrupt signals that a Ctrl+C was sent. Treated as an idle transition.

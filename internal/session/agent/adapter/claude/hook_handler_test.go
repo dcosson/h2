@@ -26,7 +26,7 @@ func TestHookHandler_PreToolUse(t *testing.T) {
 	if got[0].Type != monitor.EventToolStarted {
 		t.Errorf("event[0].Type = %v, want EventToolStarted", got[0].Type)
 	}
-	td := got[0].Data.(monitor.ToolCompletedData)
+	td := got[0].Data.(monitor.ToolStartedData)
 	if td.ToolName != "Bash" {
 		t.Errorf("ToolName = %q, want Bash", td.ToolName)
 	}

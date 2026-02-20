@@ -55,10 +55,10 @@ func TestSessionLogCollector_EmitsAssistantMessages(t *testing.T) {
 	if got[0].Type != monitor.EventAgentMessage {
 		t.Errorf("event[0].Type = %v, want EventAgentMessage", got[0].Type)
 	}
-	if got[0].Data.(string) != "Hi there!" {
+	if got[0].Data.(monitor.AgentMessageData).Content != "Hi there!" {
 		t.Errorf("event[0].Data = %v, want 'Hi there!'", got[0].Data)
 	}
-	if got[1].Data.(string) != "How can I help?" {
+	if got[1].Data.(monitor.AgentMessageData).Content != "How can I help?" {
 		t.Errorf("event[1].Data = %v, want 'How can I help?'", got[1].Data)
 	}
 }
@@ -92,7 +92,7 @@ func TestSessionLogCollector_WaitsForFile(t *testing.T) {
 	// Should receive the event.
 	select {
 	case ev := <-events:
-		if ev.Data.(string) != "Found it!" {
+		if ev.Data.(monitor.AgentMessageData).Content != "Found it!" {
 			t.Errorf("Data = %v, want 'Found it!'", ev.Data)
 		}
 	case <-time.After(2 * time.Second):

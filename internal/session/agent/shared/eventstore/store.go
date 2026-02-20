@@ -197,14 +197,29 @@ func unmarshalData(evType monitor.AgentEventType, raw json.RawMessage) (any, err
 	case monitor.EventSessionStarted:
 		var d monitor.SessionStartedData
 		return d, json.Unmarshal(raw, &d)
+	case monitor.EventTurnStarted:
+		var d monitor.TurnStartedData
+		return d, json.Unmarshal(raw, &d)
 	case monitor.EventTurnCompleted:
 		var d monitor.TurnCompletedData
+		return d, json.Unmarshal(raw, &d)
+	case monitor.EventToolStarted:
+		var d monitor.ToolStartedData
 		return d, json.Unmarshal(raw, &d)
 	case monitor.EventToolCompleted:
 		var d monitor.ToolCompletedData
 		return d, json.Unmarshal(raw, &d)
+	case monitor.EventApprovalRequested:
+		var d monitor.ApprovalRequestedData
+		return d, json.Unmarshal(raw, &d)
+	case monitor.EventAgentMessage:
+		var d monitor.AgentMessageData
+		return d, json.Unmarshal(raw, &d)
 	case monitor.EventStateChange:
 		var d monitor.StateChangeData
+		return d, json.Unmarshal(raw, &d)
+	case monitor.EventSessionEnded:
+		var d monitor.SessionEndedData
 		return d, json.Unmarshal(raw, &d)
 	default:
 		// For event types without a known payload struct, preserve raw JSON.
