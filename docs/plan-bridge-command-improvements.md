@@ -23,10 +23,10 @@ h2 bridge set-concierge <agent-name> [--for <user>]
 h2 bridge remove-concierge [--for <user>]
 ```
 
-**`h2 bridge create`** — Same behavior as current `h2 bridge`. The parent `h2 bridge` command (with no subcommand) should print help/usage.
+**`h2 bridge create`** — Same behavior as current `h2 bridge`. For backward compatibility, `h2 bridge` with no subcommand (but with flags like `--for`) should remain an alias for `h2 bridge create` — set `RunE` on the parent command to delegate to create logic. `h2 bridge` with no flags and no subcommand prints help/usage.
 
 **`h2 bridge stop [name]`** — Wrapper around `h2 stop` that:
-- Only targets bridge sockets (not agent sockets)
+- Only targets bridge sockets (not agent sockets). Uses `socketdir.ListByTypeIn(dir, socketdir.TypeBridge)` to filter to bridge sockets only
 - If `name` is omitted and exactly one bridge is running, stops it
 - If `name` is omitted and multiple bridges are running, returns an error listing them
 
@@ -72,9 +72,9 @@ case "set-concierge":
 **`handleSetConcierge(agentName string) *message.Response`:**
 1. Validate agent name is non-empty
 2. Probe the agent socket to confirm it exists (non-fatal if unreachable — just warn, since the agent might start later)
-3. Lock, read `s.concierge` (old value), set `s.concierge = agentName`, unlock
+3. Lock, read `s.concierge` (old value), set `s.concierge = agentName`, reset `s.lastRoutedAgent = ""`, unlock
 4. Send Telegram status message (see Section 4)
-5. Return `Response{OK: true, Body: oldConcierge}` (Body carries the old concierge name for CLI output)
+5. Return `Response{OK: true, OldConcierge: oldConcierge}` (typed field for CLI output)
 
 ### Add: `"remove-concierge"`
 
@@ -99,11 +99,11 @@ case "remove-concierge":
 
 ### Protocol Update
 
-Add `Body` field to `Response` if not already present (for returning old concierge name):
+Add a typed `OldConcierge` field to `Response` (consistent with existing pattern of typed sub-fields like `Agent`, `Bridge`, `Message`):
 
 ```go
 // message/protocol.go — add to Response struct
-Body string `json:"body,omitempty"`
+OldConcierge string `json:"old_concierge,omitempty"`
 ```
 
 ### File Changes
@@ -111,7 +111,34 @@ Body string `json:"body,omitempty"`
 | File | Change |
 |------|--------|
 | `internal/bridgeservice/service.go` | Add `handleSetConcierge()`, `handleRemoveConcierge()`, update `handleConn` switch |
-| `internal/session/message/protocol.go` | Add `Body` field to `Response` if needed |
+| `internal/session/message/protocol.go` | Add `OldConcierge` field to `Response` |
+
+## 2a. Concierge Field Locking (Data Race Fix)
+
+Making `s.concierge` mutable at runtime (via `set-concierge` / `remove-concierge`) introduces a data race: the new handlers write `s.concierge` under `s.mu`, but existing code reads it **without** the lock. All existing read sites must be updated to acquire `s.mu` first.
+
+**Affected existing read sites:**
+- `resolveDefaultTarget()` — reads `s.concierge` without lock
+- `handleOutbound()` — reads `s.concierge` without lock (for agent tag formatting)
+- `buildBridgeInfo()` — may read `s.concierge`
+
+**Fix:** In each of these methods, lock `s.mu`, copy `s.concierge` to a local variable, unlock, then use the local:
+
+```go
+func (s *Service) resolveDefaultTarget() string {
+    s.mu.Lock()
+    concierge := s.concierge
+    s.mu.Unlock()
+    if concierge != "" {
+        return concierge
+    }
+    // ... existing fallback logic ...
+}
+```
+
+Same pattern for `handleOutbound()` and any other reader.
+
+**Testing:** All tests for this package should be run with `-race` to validate.
 
 ## 3. CLI Commands: Socket Communication
 
@@ -289,6 +316,14 @@ func (s *Service) runTypingLoop(ctx context.Context) {
 }
 
 func (s *Service) handleConciergeDown(ctx context.Context, agentName string) {
+    // Clear the concierge so routing falls through to the next agent.
+    // Without this, resolveDefaultTarget() would keep returning the dead
+    // concierge name, causing all inbound messages to fail delivery.
+    s.mu.Lock()
+    s.concierge = ""
+    s.lastRoutedAgent = "" // reset so typing indicator doesn't track stale target
+    s.mu.Unlock()
+
     firstAgent := s.firstAvailableAgent()
     msg := fmt.Sprintf("%s Concierge agent %s stopped. %s",
         bridgeTag(s.user), agentName, noConciergeRouting(firstAgent))
@@ -313,6 +348,16 @@ The typing indicator only tracks the concierge agent's state (or falls back via 
 ### New Behavior
 
 Track whoever the last inbound message was routed to. The typing indicator follows that agent's active/idle state.
+
+**Full typing target fallback chain** (in priority order):
+1. `lastRoutedAgent` — the agent the most recent inbound message was delivered to
+2. `concierge` — the assigned concierge (via `resolveDefaultTarget`)
+3. `lastSender` — the last agent that sent an outbound message
+4. First available agent socket
+
+**Reset rules:** `lastRoutedAgent` is reset to `""` when:
+- The concierge is changed via `set-concierge` (avoids tracking a stale target after a concierge swap)
+- The concierge goes down (`handleConciergeDown`)
 
 Add a `lastRoutedAgent` field to `Service`:
 
@@ -432,45 +477,52 @@ func (s *Service) sendStartupMessage(ctx context.Context) {
 }
 ```
 
-The `allowedCommands` field needs to be threaded through to the `Service` struct (currently only lives on the `Telegram` bridge struct). Options:
+The `allowedCommands` field needs to be threaded through to the `Service` struct (currently only lives on the `Telegram` bridge struct). Pass `AllowedCommands` as a separate parameter to `New()` from the caller in `bridge_daemon.go`, which already has access to the full config. This is cleaner than having `FromConfig` return it alongside bridges — the service doesn't need to know which bridge provides the commands.
 
-- **Simple**: Pass `AllowedCommands` from config into `Service` at construction time (alongside existing params)
-- The `Service` only needs the names for the status message, not the execution logic (that stays in the telegram bridge)
+```go
+// bridge_daemon.go (caller):
+svc := bridgeservice.New(bridges, concierge, socketdir.Dir(), user,
+    userCfg.Bridges.Telegram.AllowedCommands)
+```
 
 ### File Changes
 
 | File | Change |
 |------|--------|
-| `internal/bridgeservice/service.go` | Add `allowedCommands` field, `sendStartupMessage()` |
-| `internal/bridgeservice/factory.go` | Thread `AllowedCommands` through to `Service` (or return them alongside bridges) |
+| `internal/bridgeservice/service.go` | Add `allowedCommands` field to `Service`, add param to `New()`, `sendStartupMessage()` |
+| `internal/cmd/bridge_daemon.go` | Pass `AllowedCommands` from config to `New()` |
 
 ## Summary: All File Changes
 
 | File | Change |
 |------|--------|
-| `internal/cmd/bridge.go` | Refactor into parent + subcommands: `create`, `stop`, `set-concierge`, `remove-concierge`. Add `bridgeRequest()` helper |
-| `internal/bridgeservice/service.go` | Add `handleSetConcierge`, `handleRemoveConcierge`, `sendStatus`, `sendStartupMessage`, `handleConciergeDown`, `firstAvailableAgent`. Update `handleConn` switch, `handleInbound`, `runTypingLoop`, `Run` (shutdown msg). Add `lastRoutedAgent` and `allowedCommands` fields |
+| `internal/cmd/bridge.go` | Refactor into parent + subcommands: `create`, `stop`, `set-concierge`, `remove-concierge`. Add `bridgeRequest()` helper. Parent command delegates to create for backward compat |
+| `internal/cmd/bridge_daemon.go` | Pass `AllowedCommands` from config to `bridgeservice.New()` |
+| `internal/bridgeservice/service.go` | Add `handleSetConcierge`, `handleRemoveConcierge`, `sendStatus`, `sendStartupMessage`, `handleConciergeDown`, `firstAvailableAgent`. Update `handleConn` switch, `handleInbound`, `runTypingLoop`, `Run` (shutdown msg). Add `lastRoutedAgent` and `allowedCommands` fields. **Add locking to all `s.concierge` read sites**: `resolveDefaultTarget()`, `handleOutbound()`, `buildBridgeInfo()` |
 | `internal/bridgeservice/status.go` | New: composable message string builders (`bridgeTag`, `conciergeRouting`, `noConciergeRouting`, `directMessagingHint`, `allowedCommandsHint`) |
 | `internal/bridgeservice/status_test.go` | New: tests for message composition |
-| `internal/bridgeservice/factory.go` | Thread `AllowedCommands` to `Service` |
-| `internal/session/message/protocol.go` | Add `Body` field to `Response` (if not already present) |
+| `internal/session/message/protocol.go` | Add `OldConcierge string` field to `Response` |
 
 ## Testing Plan
 
 ### Unit Tests
 
 1. **status.go**: Test each composable string builder with various inputs (empty commands list, single agent, no agents)
-2. **handleSetConcierge**: Test replacing existing concierge, setting first concierge, empty name error
+2. **handleSetConcierge**: Test replacing existing concierge, setting first concierge, empty name error. Verify `lastRoutedAgent` is reset
 3. **handleRemoveConcierge**: Test removing existing, removing when none set
-4. **handleInbound + lastRoutedAgent**: Verify typing target updates after message routing
-5. **Startup message variants**: With concierge, without concierge, no agents, with/without allowed commands
-6. **Bridge stop subcommand**: Single bridge auto-select, multiple bridges error, explicit name
+4. **handleConciergeDown**: Test that `s.concierge` is cleared, status message sent, and subsequent inbound messages fall through to next agent
+5. **handleInbound + lastRoutedAgent**: Verify typing target updates after message routing
+6. **Startup message variants**: With concierge, without concierge, no agents, with/without allowed commands
+7. **Bridge stop subcommand**: Single bridge auto-select, multiple bridges error, explicit name
+8. **CLI backward compat**: Verify `h2 bridge --for alice` still works as alias for `h2 bridge create --for alice`. Verify flag validation (mutual exclusivity of `--no-concierge`/`--set-concierge`, `--role` restrictions) works after subcommand refactor
+
+**All tests should be run with `-race` to validate the concierge locking changes.**
 
 ### Integration Tests
 
 1. **Full lifecycle**: Create bridge → startup message sent → set-concierge → change message → stop bridge → shutdown message
-2. **Concierge monitoring**: Start bridge with concierge → stop concierge agent → detect and send status message
-3. **Typing indicator**: Route message to non-concierge agent → verify typing tracks that agent
+2. **Concierge monitoring**: Start bridge with concierge → stop concierge agent → detect and send status message → verify inbound messages now route to fallback agent (not dead concierge)
+3. **Typing indicator**: Route message to non-concierge agent → verify typing tracks that agent. Change concierge → verify lastRoutedAgent resets
 
 ## Implementation Order
 
