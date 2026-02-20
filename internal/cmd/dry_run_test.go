@@ -237,7 +237,7 @@ func TestPrintDryRun_BasicOutput(t *testing.T) {
 	role := &config.Role{
 		Name:         "test-role",
 		Description:  "A test role",
-		Model:        "opus",
+		ModelLegacy:  "opus",
 		Instructions: "Do testing things\nWith multiple lines",
 	}
 
@@ -456,7 +456,7 @@ func TestResolveAgentConfig_ChildArgsIncludeNewFields(t *testing.T) {
 	role := &config.Role{
 		Name:           "test-role",
 		Instructions:   "Do work",
-		Model:          "opus",
+		ModelLegacy:    "opus",
 		PermissionMode: "plan",
 		Permissions: config.Permissions{
 			Allow: []string{"Read", "Write"},

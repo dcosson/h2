@@ -45,8 +45,8 @@ permissions:
 	if role.Description != "Designs systems" {
 		t.Errorf("Description = %q, want %q", role.Description, "Designs systems")
 	}
-	if role.Model != "opus" {
-		t.Errorf("Model = %q, want %q", role.Model, "opus")
+	if role.GetModel() != "opus" {
+		t.Errorf("GetModel() = %q, want %q", role.GetModel(), "opus")
 	}
 	if len(role.Permissions.Allow) != 3 {
 		t.Errorf("Allow len = %d, want 3", len(role.Permissions.Allow))
@@ -85,8 +85,8 @@ permissions:
 	if role.Name != "coder" {
 		t.Errorf("Name = %q, want %q", role.Name, "coder")
 	}
-	if role.Model != "" {
-		t.Errorf("Model = %q, want empty", role.Model)
+	if role.GetModel() != "" {
+		t.Errorf("GetModel() = %q, want empty", role.GetModel())
 	}
 	if role.Permissions.Agent != nil {
 		t.Error("Agent should be nil for minimal role")
@@ -190,8 +190,8 @@ func TestSetupSessionDir(t *testing.T) {
 	setupFakeHome(t)
 
 	role := &Role{
-		Name:  "architect",
-		Model: "opus",
+		Name:        "architect",
+		ModelLegacy: "opus",
 		Instructions: "You are an architect agent.\nDesign systems.\n",
 		Permissions: Permissions{
 			Allow: []string{"Read", "Glob", "Write(docs/**)"},
@@ -421,9 +421,9 @@ func TestRole_GetClaudeConfigDir(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			role := &Role{
-				Name:            "test",
-				ClaudeConfigDir: tt.claudeConfigDir,
-				Instructions:    "test",
+				Name:                  "test",
+				ClaudeConfigDirLegacy: tt.claudeConfigDir,
+				Instructions:          "test",
 			}
 			got := role.GetClaudeConfigDir()
 			if got != tt.want {
@@ -669,8 +669,8 @@ instructions: |
 	if role.Name != "{{ .RoleName }}" {
 		t.Errorf("Name = %q, want %q", role.Name, "{{ .RoleName }}")
 	}
-	if role.ClaudeConfigDir != "{{ .H2Dir }}/claude-config/default" {
-		t.Errorf("ClaudeConfigDir = %q, want %q", role.ClaudeConfigDir, "{{ .H2Dir }}/claude-config/default")
+	if role.ClaudeConfigDirLegacy != "{{ .H2Dir }}/claude-config/default" {
+		t.Errorf("ClaudeConfigDirLegacy = %q, want %q", role.ClaudeConfigDirLegacy, "{{ .H2Dir }}/claude-config/default")
 	}
 }
 
@@ -777,8 +777,8 @@ model: "{{ .Var.model }}"
 		t.Fatalf("LoadRoleRenderedFrom: %v", err)
 	}
 
-	if role.Model != "haiku" {
-		t.Errorf("Model = %q, want %q", role.Model, "haiku")
+	if role.GetModel() != "haiku" {
+		t.Errorf("GetModel() = %q, want %q", role.GetModel(), "haiku")
 	}
 }
 
@@ -998,8 +998,8 @@ model: "{{ .Var.model }}"
 	if role.WorkingDir != "/projects/foo" {
 		t.Fatalf("pre-override WorkingDir = %q, want %q", role.WorkingDir, "/projects/foo")
 	}
-	if role.Model != "opus" {
-		t.Fatalf("pre-override Model = %q, want %q", role.Model, "opus")
+	if role.GetModel() != "opus" {
+		t.Fatalf("pre-override GetModel() = %q, want %q", role.GetModel(), "opus")
 	}
 
 	// Apply overrides — these should win over template-rendered values.
@@ -1011,8 +1011,8 @@ model: "{{ .Var.model }}"
 	if role.WorkingDir != "/bar" {
 		t.Errorf("post-override WorkingDir = %q, want %q", role.WorkingDir, "/bar")
 	}
-	if role.Model != "haiku" {
-		t.Errorf("post-override Model = %q, want %q", role.Model, "haiku")
+	if role.GetModel() != "haiku" {
+		t.Errorf("post-override GetModel() = %q, want %q", role.GetModel(), "haiku")
 	}
 }
 
@@ -1293,6 +1293,232 @@ permission_mode: invalid_mode
 	}
 	if !strings.Contains(err.Error(), "invalid permission_mode") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// --- Backward compat tests for agent_harness config ---
+
+func TestGetHarnessType_Default(t *testing.T) {
+	role := &Role{Name: "test", Instructions: "test"}
+	if got := role.GetHarnessType(); got != "claude_code" {
+		t.Errorf("GetHarnessType() = %q, want %q", got, "claude_code")
+	}
+}
+
+func TestGetHarnessType_LegacyClaude(t *testing.T) {
+	role := &Role{Name: "test", Instructions: "test", AgentTypeLegacy: "claude"}
+	if got := role.GetHarnessType(); got != "claude_code" {
+		t.Errorf("GetHarnessType() = %q, want %q", got, "claude_code")
+	}
+}
+
+func TestGetHarnessType_LegacyCodex(t *testing.T) {
+	role := &Role{Name: "test", Instructions: "test", AgentTypeLegacy: "codex"}
+	if got := role.GetHarnessType(); got != "codex" {
+		t.Errorf("GetHarnessType() = %q, want %q", got, "codex")
+	}
+}
+
+func TestGetHarnessType_NewConfig(t *testing.T) {
+	role := &Role{
+		Name:         "test",
+		Instructions: "test",
+		AgentHarness: &AgentHarnessConfig{HarnessType: "codex"},
+	}
+	if got := role.GetHarnessType(); got != "codex" {
+		t.Errorf("GetHarnessType() = %q, want %q", got, "codex")
+	}
+}
+
+func TestGetHarnessType_NewOverridesLegacy(t *testing.T) {
+	role := &Role{
+		Name:            "test",
+		Instructions:    "test",
+		AgentTypeLegacy: "claude",
+		AgentHarness:    &AgentHarnessConfig{HarnessType: "codex"},
+	}
+	if got := role.GetHarnessType(); got != "codex" {
+		t.Errorf("GetHarnessType() = %q, want %q (new should override legacy)", got, "codex")
+	}
+}
+
+func TestGetAgentType_MapsClaudeCodeToClaude(t *testing.T) {
+	role := &Role{
+		Name:         "test",
+		Instructions: "test",
+		AgentHarness: &AgentHarnessConfig{HarnessType: "claude_code"},
+	}
+	if got := role.GetAgentType(); got != "claude" {
+		t.Errorf("GetAgentType() = %q, want %q", got, "claude")
+	}
+}
+
+func TestGetAgentType_GenericWithCommand(t *testing.T) {
+	role := &Role{
+		Name:         "test",
+		Instructions: "test",
+		AgentHarness: &AgentHarnessConfig{HarnessType: "generic", Command: "/usr/local/bin/my-agent"},
+	}
+	if got := role.GetAgentType(); got != "/usr/local/bin/my-agent" {
+		t.Errorf("GetAgentType() = %q, want %q", got, "/usr/local/bin/my-agent")
+	}
+}
+
+func TestGetModel_Legacy(t *testing.T) {
+	role := &Role{Name: "test", Instructions: "test", ModelLegacy: "opus"}
+	if got := role.GetModel(); got != "opus" {
+		t.Errorf("GetModel() = %q, want %q", got, "opus")
+	}
+}
+
+func TestGetModel_New(t *testing.T) {
+	role := &Role{
+		Name:         "test",
+		Instructions: "test",
+		AgentHarness: &AgentHarnessConfig{Model: "sonnet"},
+	}
+	if got := role.GetModel(); got != "sonnet" {
+		t.Errorf("GetModel() = %q, want %q", got, "sonnet")
+	}
+}
+
+func TestGetModel_NewOverridesLegacy(t *testing.T) {
+	role := &Role{
+		Name:         "test",
+		Instructions: "test",
+		ModelLegacy:  "opus",
+		AgentHarness: &AgentHarnessConfig{Model: "sonnet"},
+	}
+	if got := role.GetModel(); got != "sonnet" {
+		t.Errorf("GetModel() = %q, want %q (new should override legacy)", got, "sonnet")
+	}
+}
+
+func TestGetClaudeConfigDir_NewConfig(t *testing.T) {
+	role := &Role{
+		Name:         "test",
+		Instructions: "test",
+		AgentHarness: &AgentHarnessConfig{ClaudeConfigDir: "/new/config/dir"},
+	}
+	if got := role.GetClaudeConfigDir(); got != "/new/config/dir" {
+		t.Errorf("GetClaudeConfigDir() = %q, want %q", got, "/new/config/dir")
+	}
+}
+
+func TestGetClaudeConfigDir_NewOverridesLegacy(t *testing.T) {
+	role := &Role{
+		Name:                  "test",
+		Instructions:          "test",
+		ClaudeConfigDirLegacy: "/old/config/dir",
+		AgentHarness:          &AgentHarnessConfig{ClaudeConfigDir: "/new/config/dir"},
+	}
+	if got := role.GetClaudeConfigDir(); got != "/new/config/dir" {
+		t.Errorf("GetClaudeConfigDir() = %q, want %q (new should override legacy)", got, "/new/config/dir")
+	}
+}
+
+func TestGetCodexConfigDir(t *testing.T) {
+	// Not set → empty.
+	role := &Role{Name: "test", Instructions: "test"}
+	if got := role.GetCodexConfigDir(); got != "" {
+		t.Errorf("GetCodexConfigDir() = %q, want empty", got)
+	}
+
+	// Set via AgentHarness.
+	role2 := &Role{
+		Name:         "test",
+		Instructions: "test",
+		AgentHarness: &AgentHarnessConfig{CodexConfigDir: "/codex/config"},
+	}
+	if got := role2.GetCodexConfigDir(); got != "/codex/config" {
+		t.Errorf("GetCodexConfigDir() = %q, want %q", got, "/codex/config")
+	}
+}
+
+func TestLoadRoleFrom_LegacyYAML(t *testing.T) {
+	// Old-format YAML with top-level agent_type, model, claude_config_dir.
+	yamlContent := `
+name: legacy-test
+agent_type: claude
+model: opus
+claude_config_dir: /custom/config
+instructions: |
+  A legacy role.
+`
+	path := writeTempFile(t, "legacy.yaml", yamlContent)
+	role, err := LoadRoleFrom(path)
+	if err != nil {
+		t.Fatalf("LoadRoleFrom: %v", err)
+	}
+
+	if role.GetHarnessType() != "claude_code" {
+		t.Errorf("GetHarnessType() = %q, want %q", role.GetHarnessType(), "claude_code")
+	}
+	if role.GetAgentType() != "claude" {
+		t.Errorf("GetAgentType() = %q, want %q", role.GetAgentType(), "claude")
+	}
+	if role.GetModel() != "opus" {
+		t.Errorf("GetModel() = %q, want %q", role.GetModel(), "opus")
+	}
+	if role.GetClaudeConfigDir() != "/custom/config" {
+		t.Errorf("GetClaudeConfigDir() = %q, want %q", role.GetClaudeConfigDir(), "/custom/config")
+	}
+}
+
+func TestLoadRoleFrom_NewNestedYAML(t *testing.T) {
+	// New-format YAML with nested agent_harness section.
+	yamlContent := `
+name: new-test
+agent_harness:
+  harness_type: codex
+  model: o3-mini
+  codex_config_dir: /codex/config
+instructions: |
+  A new-format role.
+`
+	path := writeTempFile(t, "new.yaml", yamlContent)
+	role, err := LoadRoleFrom(path)
+	if err != nil {
+		t.Fatalf("LoadRoleFrom: %v", err)
+	}
+
+	if role.GetHarnessType() != "codex" {
+		t.Errorf("GetHarnessType() = %q, want %q", role.GetHarnessType(), "codex")
+	}
+	if role.GetAgentType() != "codex" {
+		t.Errorf("GetAgentType() = %q, want %q", role.GetAgentType(), "codex")
+	}
+	if role.GetModel() != "o3-mini" {
+		t.Errorf("GetModel() = %q, want %q", role.GetModel(), "o3-mini")
+	}
+	if role.GetCodexConfigDir() != "/codex/config" {
+		t.Errorf("GetCodexConfigDir() = %q, want %q", role.GetCodexConfigDir(), "/codex/config")
+	}
+}
+
+func TestLoadRoleFrom_NewOverridesLegacyYAML(t *testing.T) {
+	// Both old and new format — new takes precedence.
+	yamlContent := `
+name: mixed-test
+agent_type: claude
+model: opus
+agent_harness:
+  harness_type: codex
+  model: o3-mini
+instructions: |
+  A mixed-format role.
+`
+	path := writeTempFile(t, "mixed.yaml", yamlContent)
+	role, err := LoadRoleFrom(path)
+	if err != nil {
+		t.Fatalf("LoadRoleFrom: %v", err)
+	}
+
+	if role.GetHarnessType() != "codex" {
+		t.Errorf("GetHarnessType() = %q, want %q (new should win)", role.GetHarnessType(), "codex")
+	}
+	if role.GetModel() != "o3-mini" {
+		t.Errorf("GetModel() = %q, want %q (new should win)", role.GetModel(), "o3-mini")
 	}
 }
 

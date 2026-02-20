@@ -83,8 +83,8 @@ func newRoleShowCmd() *cobra.Command {
 			}
 
 			fmt.Printf("Name:        %s\n", role.Name)
-			if role.Model != "" {
-				fmt.Printf("Model:       %s\n", role.Model)
+			if role.GetModel() != "" {
+				fmt.Printf("Model:       %s\n", role.GetModel())
 			}
 			if role.Description != "" {
 				fmt.Printf("Description: %s\n", role.Description)
@@ -165,11 +165,11 @@ func defaultRoleTemplate() string {
 	return `name: "{{ .RoleName }}"
 description: "A {{ .RoleName }} agent for h2"
 
-# Agent type (currently only "claude" is supported)
-agent_type: claude
-
-# Model to use for this role
-model: opus
+# Agent harness configuration
+agent_harness:
+  harness_type: claude_code
+  model: opus
+  claude_config_dir: "{{ .H2Dir }}/claude-config/default"
 
 # Permission mode for Claude Code
 # Valid: default, delegate, acceptEdits, plan, dontAsk, bypassPermissions
@@ -180,11 +180,6 @@ model: opus
 # "instructions" instead, which appends to the default system prompt.
 # system_prompt: |
 #   You are a specialized agent that ...
-
-# Claude config directory (for custom settings files, hooks, or auth)
-# You can create separate configs for roles with different requirements.
-# Set to ~/ to use the system default (no override).
-claude_config_dir: "{{ .H2Dir }}/claude-config/default"
 
 instructions: |
   You are a {{ .RoleName }} agent running in h2, a terminal multiplexer with inter-agent messaging.
@@ -262,11 +257,11 @@ func conciergeRoleTemplate() string {
 	return `name: "{{ .RoleName }}"
 description: "The concierge agent — your primary interface in h2"
 
-# Agent type (currently only "claude" is supported)
-agent_type: claude
-
-# Model to use for this role
-model: opus
+# Agent harness configuration
+agent_harness:
+  harness_type: claude_code
+  model: opus
+  claude_config_dir: "{{ .H2Dir }}/claude-config/default"
 
 # Permission mode for Claude Code
 # Valid: default, delegate, acceptEdits, plan, dontAsk, bypassPermissions
@@ -277,11 +272,6 @@ model: opus
 # "instructions" instead, which appends to the default system prompt.
 # system_prompt: |
 #   You are a specialized agent that ...
-
-# Claude config directory (for custom settings files, hooks, or auth)
-# You can create separate configs for roles with different requirements.
-# Set to ~/ to use the system default (no override).
-claude_config_dir: "{{ .H2Dir }}/claude-config/default"
 
 instructions: |
   You are the concierge — the primary agent the user interacts with in h2.
@@ -396,9 +386,9 @@ func newRoleCheckCmd() *cobra.Command {
 
 			fmt.Printf("Role %q is valid.\n", role.Name)
 
-			fmt.Printf("  Agent type:  %s\n", role.GetAgentType())
-			if role.Model != "" {
-				fmt.Printf("  Model:       %s\n", role.Model)
+			fmt.Printf("  Harness type: %s\n", role.GetHarnessType())
+			if role.GetModel() != "" {
+				fmt.Printf("  Model:       %s\n", role.GetModel())
 			}
 			fmt.Printf("  Allow rules: %d\n", len(role.Permissions.Allow))
 			fmt.Printf("  Deny rules:  %d\n", len(role.Permissions.Deny))

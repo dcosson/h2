@@ -98,7 +98,7 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 		SessionID:       "<generated-uuid>",
 		Instructions:    role.Instructions,
 		SystemPrompt:    role.SystemPrompt,
-		Model:           role.Model,
+		Model:           role.GetModel(),
 		PermissionMode:  role.PermissionMode,
 		AllowedTools:    role.Permissions.Allow,
 		DisallowedTools: role.Permissions.Deny,
@@ -128,8 +128,8 @@ func printDryRun(rc *ResolvedAgentConfig) {
 	if role.Description != "" {
 		fmt.Printf("Description: %s\n", role.Description)
 	}
-	if role.Model != "" {
-		fmt.Printf("Model: %s\n", role.Model)
+	if role.GetModel() != "" {
+		fmt.Printf("Model: %s\n", role.GetModel())
 	}
 	if role.PermissionMode != "" {
 		fmt.Printf("Permission Mode: %s\n", role.PermissionMode)

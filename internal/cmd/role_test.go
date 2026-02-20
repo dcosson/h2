@@ -77,8 +77,8 @@ func TestRoleTemplate_RenderedIsValidRole(t *testing.T) {
 		if role.Name != name {
 			t.Errorf("role.Name = %q, want %q", role.Name, name)
 		}
-		if role.ClaudeConfigDir != "/tmp/test-h2/claude-config/default" {
-			t.Errorf("role.ClaudeConfigDir = %q, want %q", role.ClaudeConfigDir, "/tmp/test-h2/claude-config/default")
+		if role.GetClaudeConfigDir() != "/tmp/test-h2/claude-config/default" {
+			t.Errorf("role.GetClaudeConfigDir() = %q, want %q", role.GetClaudeConfigDir(), "/tmp/test-h2/claude-config/default")
 		}
 	}
 }

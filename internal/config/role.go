@@ -91,13 +91,26 @@ var ValidPermissionModes = []string{
 	"default", "delegate", "acceptEdits", "plan", "dontAsk", "bypassPermissions",
 }
 
+// AgentHarnessConfig holds harness-specific configuration nested under agent_harness.
+type AgentHarnessConfig struct {
+	HarnessType     string `yaml:"harness_type,omitempty"`
+	Model           string `yaml:"model,omitempty"`
+	Command         string `yaml:"command,omitempty"`           // generic only
+	ClaudeConfigDir string `yaml:"claude_config_dir,omitempty"` // claude_code only
+	CodexConfigDir  string `yaml:"codex_config_dir,omitempty"`  // codex only
+}
+
 // Role defines a named configuration bundle for an h2 agent.
 type Role struct {
 	Name            string                  `yaml:"name"`
 	Description     string                  `yaml:"description,omitempty"`
-	AgentType       string                  `yaml:"agent_type,omitempty"` // "claude" (default), future: other agent types
-	Model           string                  `yaml:"model,omitempty"`
-	ClaudeConfigDir string                  `yaml:"claude_config_dir,omitempty"`
+	AgentHarness    *AgentHarnessConfig     `yaml:"agent_harness,omitempty"`
+
+	// Deprecated top-level fields (backward compat — use agent_harness instead).
+	AgentTypeLegacy       string            `yaml:"agent_type,omitempty"`
+	ModelLegacy           string            `yaml:"model,omitempty"`
+	ClaudeConfigDirLegacy string            `yaml:"claude_config_dir,omitempty"`
+
 	WorkingDir      string                  `yaml:"working_dir,omitempty"`  // agent CWD (default ".")
 	Worktree        *WorktreeConfig         `yaml:"worktree,omitempty"`    // git worktree settings
 	SystemPrompt    string                  `yaml:"system_prompt,omitempty"` // replaces Claude's entire default system prompt (--system-prompt)
@@ -129,12 +142,56 @@ func (r *Role) ResolveWorkingDir(invocationCWD string) (string, error) {
 	return filepath.Join(h2Dir, dir), nil
 }
 
-// GetAgentType returns the agent type for this role, defaulting to "claude".
-func (r *Role) GetAgentType() string {
-	if r.AgentType != "" {
-		return r.AgentType
+// GetHarnessType returns the canonical harness type name, defaulting to "claude_code".
+// Checks AgentHarness.HarnessType first, then falls back to legacy AgentType
+// (mapping "claude" → "claude_code").
+func (r *Role) GetHarnessType() string {
+	if r.AgentHarness != nil && r.AgentHarness.HarnessType != "" {
+		return r.AgentHarness.HarnessType
 	}
-	return "claude"
+	if r.AgentTypeLegacy != "" {
+		if r.AgentTypeLegacy == "claude" {
+			return "claude_code"
+		}
+		return r.AgentTypeLegacy
+	}
+	return "claude_code"
+}
+
+// GetAgentType returns the command name for this role's agent type, for use
+// with agent.ResolveAgentType(). Defaults to "claude".
+// Maps new canonical names back to command names: "claude_code" → "claude".
+func (r *Role) GetAgentType() string {
+	ht := r.GetHarnessType()
+	switch ht {
+	case "claude_code":
+		return "claude"
+	case "generic":
+		if r.AgentHarness != nil && r.AgentHarness.Command != "" {
+			return r.AgentHarness.Command
+		}
+		return ht
+	default:
+		return ht // "codex" etc. match command name
+	}
+}
+
+// GetModel returns the model, checking nested AgentHarness config first,
+// then falling back to the legacy top-level field.
+func (r *Role) GetModel() string {
+	if r.AgentHarness != nil && r.AgentHarness.Model != "" {
+		return r.AgentHarness.Model
+	}
+	return r.ModelLegacy
+}
+
+// GetCodexConfigDir returns the Codex config directory from the nested config.
+// Returns empty string if not set.
+func (r *Role) GetCodexConfigDir() string {
+	if r.AgentHarness != nil && r.AgentHarness.CodexConfigDir != "" {
+		return r.AgentHarness.CodexConfigDir
+	}
+	return ""
 }
 
 // Permissions defines the permission configuration for a role.
@@ -170,26 +227,35 @@ func DefaultClaudeConfigDir() string {
 }
 
 // GetClaudeConfigDir returns the Claude config directory for this role.
-// If not specified in the role, returns the default shared config dir.
+// Checks AgentHarness.ClaudeConfigDir first, then legacy ClaudeConfigDirLegacy.
+// If not specified in either, returns the default shared config dir.
 // If set to "~/" (the home directory), returns "" to indicate that
 // CLAUDE_CONFIG_DIR should not be overridden (use system default).
 func (r *Role) GetClaudeConfigDir() string {
-	if r.ClaudeConfigDir != "" {
-		// Expand ~ to home directory if present.
-		if strings.HasPrefix(r.ClaudeConfigDir, "~/") {
-			rest := r.ClaudeConfigDir[2:]
-			if rest == "" {
-				// "~/" means use system default — don't override CLAUDE_CONFIG_DIR.
-				return ""
-			}
-			home, err := os.UserHomeDir()
-			if err == nil {
-				return filepath.Join(home, rest)
-			}
-		}
-		return r.ClaudeConfigDir
+	dir := r.ClaudeConfigDirLegacy
+	if r.AgentHarness != nil && r.AgentHarness.ClaudeConfigDir != "" {
+		dir = r.AgentHarness.ClaudeConfigDir
+	}
+	if dir != "" {
+		return expandClaudeConfigDir(dir)
 	}
 	return DefaultClaudeConfigDir()
+}
+
+// expandClaudeConfigDir handles tilde expansion for Claude config dir paths.
+func expandClaudeConfigDir(dir string) string {
+	if strings.HasPrefix(dir, "~/") {
+		rest := dir[2:]
+		if rest == "" {
+			// "~/" means use system default — don't override CLAUDE_CONFIG_DIR.
+			return ""
+		}
+		home, err := os.UserHomeDir()
+		if err == nil {
+			return filepath.Join(home, rest)
+		}
+	}
+	return dir
 }
 
 // IsClaudeConfigAuthenticated checks if the given Claude config directory

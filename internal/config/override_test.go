@@ -29,8 +29,8 @@ func TestApplyOverrides_MultipleStrings(t *testing.T) {
 	if role.WorkingDir != "/workspace" {
 		t.Errorf("WorkingDir = %q, want %q", role.WorkingDir, "/workspace")
 	}
-	if role.Model != "opus" {
-		t.Errorf("Model = %q, want %q", role.Model, "opus")
+	if role.GetModel() != "opus" {
+		t.Errorf("GetModel() = %q, want %q", role.GetModel(), "opus")
 	}
 	if role.Description != "My agent" {
 		t.Errorf("Description = %q, want %q", role.Description, "My agent")
@@ -220,6 +220,45 @@ func TestApplyOverrides_NestedStringField(t *testing.T) {
 	}
 	if role.Worktree.BranchFrom != "develop" {
 		t.Errorf("Worktree.BranchFrom = %q, want %q", role.Worktree.BranchFrom, "develop")
+	}
+}
+
+func TestApplyOverrides_NestedAgentHarness(t *testing.T) {
+	role := &Role{Name: "test", Instructions: "test"}
+	err := ApplyOverrides(role, []string{"agent_harness.model=sonnet"})
+	if err != nil {
+		t.Fatalf("ApplyOverrides: %v", err)
+	}
+	if role.AgentHarness == nil {
+		t.Fatal("AgentHarness should have been auto-initialized")
+	}
+	if role.AgentHarness.Model != "sonnet" {
+		t.Errorf("AgentHarness.Model = %q, want %q", role.AgentHarness.Model, "sonnet")
+	}
+	if role.GetModel() != "sonnet" {
+		t.Errorf("GetModel() = %q, want %q", role.GetModel(), "sonnet")
+	}
+}
+
+func TestApplyOverrides_NestedAgentHarnessType(t *testing.T) {
+	role := &Role{Name: "test", Instructions: "test"}
+	err := ApplyOverrides(role, []string{"agent_harness.harness_type=codex"})
+	if err != nil {
+		t.Fatalf("ApplyOverrides: %v", err)
+	}
+	if role.GetHarnessType() != "codex" {
+		t.Errorf("GetHarnessType() = %q, want %q", role.GetHarnessType(), "codex")
+	}
+}
+
+func TestApplyOverrides_LegacyModelStillWorks(t *testing.T) {
+	role := &Role{Name: "test", Instructions: "test"}
+	err := ApplyOverrides(role, []string{"model=opus"})
+	if err != nil {
+		t.Fatalf("ApplyOverrides: %v", err)
+	}
+	if role.GetModel() != "opus" {
+		t.Errorf("GetModel() = %q, want %q", role.GetModel(), "opus")
 	}
 }
 
