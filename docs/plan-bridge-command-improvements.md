@@ -9,7 +9,7 @@ Split `h2 bridge` into subcommands, add runtime concierge management via socket 
 ### Current
 
 ```
-h2 bridge [--no-concierge | --set-concierge <name>] [--role <name>] [--for <user>]
+h2 bridge [--no-concierge | --set-concierge <name>] [--concierge-role <name>] [--for <user>]
 ```
 
 Single command that creates a bridge and optionally spawns a concierge.
@@ -17,7 +17,7 @@ Single command that creates a bridge and optionally spawns a concierge.
 ### Proposed
 
 ```
-h2 bridge create  [--no-concierge | --set-concierge <name>] [--role <name>] [--for <user>]
+h2 bridge create  [--no-concierge | --set-concierge <name>] [--concierge-role <name>] [--for <user>]
 h2 bridge stop    [name]
 h2 bridge set-concierge <agent-name> [--for <user>]
 h2 bridge remove-concierge [--for <user>]
@@ -514,7 +514,7 @@ svc := bridgeservice.New(bridges, concierge, socketdir.Dir(), user,
 5. **handleInbound + lastRoutedAgent**: Verify typing target updates after message routing
 6. **Startup message variants**: With concierge, without concierge, no agents, with/without allowed commands
 7. **Bridge stop subcommand**: Single bridge auto-select, multiple bridges error, explicit name
-8. **CLI backward compat**: Verify `h2 bridge --for alice` still works as alias for `h2 bridge create --for alice`. Verify flag validation (mutual exclusivity of `--no-concierge`/`--set-concierge`, `--role` restrictions) works after subcommand refactor
+8. **CLI backward compat**: Verify `h2 bridge --for alice` still works as alias for `h2 bridge create --for alice`. Verify flag validation (mutual exclusivity of `--no-concierge`/`--set-concierge`, `--concierge-role` restrictions) works after subcommand refactor
 
 **All tests should be run with `-race` to validate the concierge locking changes.**
 

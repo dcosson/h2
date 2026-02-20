@@ -21,10 +21,10 @@ func newBridgeCmd() *cobra.Command {
 	var forUser string
 	var noConcierge bool
 	var setConcierge string
-	var roleName string
+	var conciergeRole string
 
 	cmd := &cobra.Command{
-		Use:   "bridge [--no-concierge | --set-concierge <name>] [--role <name>]",
+		Use:   "bridge [--no-concierge | --set-concierge <name>] [--concierge-role <name>]",
 		Short: "Run the bridge service",
 		Long: `Runs the bridge service that routes messages between external platforms
 (Telegram, macOS notifications) and h2 agent sessions.
@@ -38,13 +38,13 @@ to route to an existing agent without spawning a new session.`,
 			if noConcierge && setConcierge != "" {
 				return fmt.Errorf("cannot specify both --no-concierge and --set-concierge")
 			}
-			if cmd.Flags().Changed("role") && (noConcierge || setConcierge != "") {
-				return fmt.Errorf("--role can only be used when launching a new concierge session")
+			if cmd.Flags().Changed("concierge-role") && (noConcierge || setConcierge != "") {
+				return fmt.Errorf("--concierge-role cannot be used with --no-concierge or --set-concierge")
 			}
 			if setConcierge != "" {
 				// Not launching a new concierge, so no command/args needed.
-			} else if !noConcierge && roleName == "" {
-				return fmt.Errorf("--role is required when launching a new concierge session")
+			} else if !noConcierge && conciergeRole == "" {
+				return fmt.Errorf("--concierge-role is required when launching a new concierge session")
 			}
 
 			cfg, err := config.Load()
@@ -93,13 +93,13 @@ to route to an existing agent without spawning a new session.`,
 			rootDir, _ := config.RootDir()
 			ctx := &tmpl.Context{
 				AgentName: conciergeSessionName,
-				RoleName:  roleName,
+				RoleName:  conciergeRole,
 				H2Dir:     config.ConfigDir(),
 				H2RootDir: rootDir,
 			}
-			role, err := config.LoadRoleRenderedWithFuncs(roleName, ctx, config.NameStubFuncs)
+			role, err := config.LoadRoleRenderedWithFuncs(conciergeRole, ctx, config.NameStubFuncs)
 			if err != nil {
-				return fmt.Errorf("concierge role not found; create one with: h2 role init concierge")
+				return fmt.Errorf("concierge role not found; create one with: h2 role create concierge --template concierge")
 			}
 			return setupAndForkAgent(conciergeSessionName, role, false, "", nil)
 		},
@@ -108,7 +108,7 @@ to route to an existing agent without spawning a new session.`,
 	cmd.Flags().StringVar(&forUser, "for", "", "Which user's bridge config to load")
 	cmd.Flags().BoolVar(&noConcierge, "no-concierge", false, "Run without a concierge session")
 	cmd.Flags().StringVar(&setConcierge, "set-concierge", "", "Route to an existing concierge agent by name")
-	cmd.Flags().StringVar(&roleName, "role", "concierge", "Role to use for the concierge session")
+	cmd.Flags().StringVar(&conciergeRole, "concierge-role", "concierge", "Role to use for the concierge session")
 
 	return cmd
 }
