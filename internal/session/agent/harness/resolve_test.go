@@ -8,6 +8,7 @@ import (
 	// Register harness implementations.
 	_ "h2/internal/session/agent/harness/claude"
 	_ "h2/internal/session/agent/harness/codex"
+	_ "h2/internal/session/agent/harness/generic"
 )
 
 func TestResolve_ClaudeCode(t *testing.T) {
@@ -49,6 +50,29 @@ func TestResolve_Codex(t *testing.T) {
 	}
 	if h.Command() != "codex" {
 		t.Errorf("Command() = %q, want %q", h.Command(), "codex")
+	}
+}
+
+func TestResolve_Generic(t *testing.T) {
+	h, err := harness.Resolve(harness.HarnessConfig{HarnessType: "generic", Command: "bash"}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if h == nil {
+		t.Fatal("expected non-nil harness")
+	}
+	if h.Name() != "generic" {
+		t.Errorf("Name() = %q, want %q", h.Name(), "generic")
+	}
+	if h.Command() != "bash" {
+		t.Errorf("Command() = %q, want %q", h.Command(), "bash")
+	}
+}
+
+func TestResolve_Generic_NoCommand(t *testing.T) {
+	_, err := harness.Resolve(harness.HarnessConfig{HarnessType: "generic"}, nil)
+	if err == nil {
+		t.Fatal("expected error for generic without command")
 	}
 }
 

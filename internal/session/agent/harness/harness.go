@@ -134,8 +134,10 @@ func Resolve(cfg HarnessConfig, log *activitylog.Logger) (Harness, error) {
 		if cfg.Command == "" {
 			return nil, fmt.Errorf("generic harness requires a command")
 		}
-		// placeholder: will be generic.New(cfg)
-		return nil, fmt.Errorf("generic harness not yet implemented")
+		if f, ok := registry[cfg.HarnessType]; ok {
+			return f(cfg, log), nil
+		}
+		return nil, fmt.Errorf("generic harness not registered (import harness/generic)")
 	default:
 		return nil, fmt.Errorf("unknown harness type: %q (supported: claude_code, codex, generic)", cfg.HarnessType)
 	}

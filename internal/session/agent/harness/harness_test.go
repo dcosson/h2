@@ -28,13 +28,18 @@ func TestResolve_GenericWithoutCommand(t *testing.T) {
 	}
 }
 
-func TestResolve_GenericWithCommand_Placeholder(t *testing.T) {
-	_, err := Resolve(HarnessConfig{HarnessType: "generic", Command: "bash"}, nil)
-	if err == nil {
-		t.Fatal("expected placeholder error for generic harness (not yet implemented)")
+func TestResolve_GenericWithCommand_NotRegistered(t *testing.T) {
+	// Without importing harness/generic, the factory is not registered.
+	// Skip if already registered.
+	h, err := Resolve(HarnessConfig{HarnessType: "generic", Command: "bash"}, nil)
+	if h != nil {
+		t.Skip("generic harness already registered")
 	}
-	if !strings.Contains(err.Error(), "not yet implemented") {
-		t.Errorf("error = %q, want placeholder error", err.Error())
+	if err == nil {
+		t.Fatal("expected error for unregistered generic harness")
+	}
+	if !strings.Contains(err.Error(), "not registered") {
+		t.Errorf("error = %q, want it to contain 'not registered'", err.Error())
 	}
 }
 
