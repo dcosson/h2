@@ -32,7 +32,6 @@ type Session struct {
 	SessionID      string // Claude Code session ID (UUID), set for claude commands
 	RoleName       string // Role name, if launched with --role
 	SessionDir     string // Session directory path (~/.h2/sessions/<name>/)
-	ClaudeConfigDir string // Shared Claude config dir (used as CLAUDE_CONFIG_DIR)
 	Instructions    string   // Role instructions, passed via --append-system-prompt
 	SystemPrompt    string   // Replaces default system prompt, passed via --system-prompt
 	Model           string   // Model selection, passed via --model
@@ -363,8 +362,9 @@ func (s *Session) RunDaemon() error {
 	if s.SessionDir != "" {
 		s.ExtraEnv["H2_SESSION_DIR"] = s.SessionDir
 	}
-	if s.ClaudeConfigDir != "" {
-		s.ExtraEnv["CLAUDE_CONFIG_DIR"] = s.ClaudeConfigDir
+	// Merge agent-type-specific env vars (e.g. CLAUDE_CONFIG_DIR for Claude Code).
+	for k, v := range s.Agent.AgentType().BuildCommandEnvVars(config.ConfigDir(), s.RoleName) {
+		s.ExtraEnv[k] = v
 	}
 
 	// Start child in a PTY.

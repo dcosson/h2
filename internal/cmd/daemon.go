@@ -17,7 +17,6 @@ func newDaemonCmd() *cobra.Command {
 	var sessionID string
 	var roleName string
 	var sessionDir string
-	var claudeConfigDir string
 	var instructions string
 	var systemPrompt string
 	var model string
@@ -69,7 +68,6 @@ func newDaemonCmd() *cobra.Command {
 				Args:            args[1:],
 				RoleName:        roleName,
 				SessionDir:      sessionDir,
-				ClaudeConfigDir: claudeConfigDir,
 				Instructions:    instructions,
 				SystemPrompt:    systemPrompt,
 				Model:           model,
@@ -93,7 +91,6 @@ func newDaemonCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sessionID, "session-id", "", "Claude Code session ID")
 	cmd.Flags().StringVar(&roleName, "role", "", "Role name")
 	cmd.Flags().StringVar(&sessionDir, "session-dir", "", "Session directory path")
-	cmd.Flags().StringVar(&claudeConfigDir, "claude-config-dir", "", "Claude config directory")
 	cmd.Flags().StringVar(&instructions, "instructions", "", "Role instructions to pass via --append-system-prompt")
 	cmd.Flags().StringVar(&systemPrompt, "system-prompt", "", "System prompt to pass via --system-prompt")
 	cmd.Flags().StringVar(&model, "model", "", "Model selection to pass via --model")

@@ -222,3 +222,42 @@ func TestGenericType_NewAdapter_ReturnsNil(t *testing.T) {
 		t.Fatal("expected nil adapter for generic type")
 	}
 }
+
+// --- BuildCommandEnvVars tests ---
+
+func TestClaudeCodeType_BuildCommandEnvVars(t *testing.T) {
+	ct := NewClaudeCodeType()
+	envVars := ct.BuildCommandEnvVars("/home/user/.h2", "my-role")
+	if envVars == nil {
+		t.Fatal("expected non-nil env vars")
+	}
+	want := "/home/user/.h2/claude-config/my-role"
+	if envVars["CLAUDE_CONFIG_DIR"] != want {
+		t.Fatalf("CLAUDE_CONFIG_DIR = %q, want %q", envVars["CLAUDE_CONFIG_DIR"], want)
+	}
+}
+
+func TestClaudeCodeType_BuildCommandEnvVars_EmptyRole(t *testing.T) {
+	ct := NewClaudeCodeType()
+	envVars := ct.BuildCommandEnvVars("/home/user/.h2", "")
+	want := "/home/user/.h2/claude-config/default"
+	if envVars["CLAUDE_CONFIG_DIR"] != want {
+		t.Fatalf("CLAUDE_CONFIG_DIR = %q, want %q (empty role should default to 'default')", envVars["CLAUDE_CONFIG_DIR"], want)
+	}
+}
+
+func TestCodexType_BuildCommandEnvVars_ReturnsNil(t *testing.T) {
+	ct := NewCodexType()
+	envVars := ct.BuildCommandEnvVars("/home/user/.h2", "my-role")
+	if envVars != nil {
+		t.Fatalf("expected nil env vars for codex, got %v", envVars)
+	}
+}
+
+func TestGenericType_BuildCommandEnvVars_ReturnsNil(t *testing.T) {
+	gt := NewGenericType("bash")
+	envVars := gt.BuildCommandEnvVars("/home/user/.h2", "my-role")
+	if envVars != nil {
+		t.Fatalf("expected nil env vars for generic, got %v", envVars)
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"h2/internal/config"
 	"h2/internal/git"
 	"h2/internal/session"
+	"h2/internal/session/agent"
 )
 
 // forkDaemonFunc is the function used to fork daemon processes.
@@ -38,14 +39,16 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 		return fmt.Errorf("setup session dir: %w", err)
 	}
 
-	claudeConfigDir := role.GetClaudeConfigDir()
+	cmdCommand := role.GetAgentType()
+
+	// Ensure agent-type-specific config directories exist.
+	agentType := agent.ResolveAgentType(cmdCommand)
+	claudeConfigDir := agentType.BuildCommandEnvVars(config.ConfigDir(), role.Name)["CLAUDE_CONFIG_DIR"]
 	if claudeConfigDir != "" {
 		if err := config.EnsureClaudeConfigDir(claudeConfigDir); err != nil {
 			return fmt.Errorf("ensure claude config dir: %w", err)
 		}
 	}
-
-	cmdCommand := role.GetAgentType()
 	var heartbeat session.DaemonHeartbeat
 	if role.Heartbeat != nil {
 		d, err := role.Heartbeat.ParseIdleTimeout()
@@ -89,7 +92,6 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 		Command:         cmdCommand,
 		RoleName:        role.Name,
 		SessionDir:      sessionDir,
-		ClaudeConfigDir: claudeConfigDir,
 		Instructions:    role.Instructions,
 		SystemPrompt:    role.SystemPrompt,
 		Model:           role.Model,

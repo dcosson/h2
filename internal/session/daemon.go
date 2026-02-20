@@ -39,7 +39,6 @@ type RunDaemonOpts struct {
 	Args            []string
 	RoleName        string
 	SessionDir      string
-	ClaudeConfigDir string
 	Instructions    string   // role instructions → --append-system-prompt
 	SystemPrompt    string   // replaces default system prompt → --system-prompt
 	Model           string   // model selection → --model
@@ -57,7 +56,6 @@ func RunDaemon(opts RunDaemonOpts) error {
 	s.SessionID = opts.SessionID
 	s.RoleName = opts.RoleName
 	s.SessionDir = opts.SessionDir
-	s.ClaudeConfigDir = opts.ClaudeConfigDir
 	s.Instructions = opts.Instructions
 	s.SystemPrompt = opts.SystemPrompt
 	s.Model = opts.Model
@@ -91,18 +89,19 @@ func RunDaemon(opts RunDaemonOpts) error {
 	}()
 
 	// Write session metadata for h2 peek and other tools.
-	if s.SessionDir != "" && s.ClaudeConfigDir != "" {
+	if s.SessionDir != "" {
+		agentEnvVars := s.Agent.AgentType().BuildCommandEnvVars(config.ConfigDir(), opts.RoleName)
 		cwd, _ := os.Getwd()
 		meta := config.SessionMetadata{
-			AgentName:              opts.Name,
-			SessionID:              opts.SessionID,
-			ClaudeConfigDir:        s.ClaudeConfigDir,
-			CWD:                    cwd,
-			ClaudeCodeSessionLogPath: config.ClaudeCodeSessionLogPath(s.ClaudeConfigDir, cwd, opts.SessionID),
-			Command:                opts.Command,
-			Role:                   opts.RoleName,
-			Overrides:              opts.Overrides,
-			StartedAt:              s.StartTime.UTC().Format(time.RFC3339),
+			AgentName:       opts.Name,
+			SessionID:       opts.SessionID,
+			ClaudeConfigDir: agentEnvVars["CLAUDE_CONFIG_DIR"],
+			CWD:             cwd,
+			ClaudeCodeSessionLogPath: config.ClaudeCodeSessionLogPath(agentEnvVars["CLAUDE_CONFIG_DIR"], cwd, opts.SessionID),
+			Command:         opts.Command,
+			Role:            opts.RoleName,
+			Overrides:       opts.Overrides,
+			StartedAt:       s.StartTime.UTC().Format(time.RFC3339),
 		}
 		if err := config.WriteSessionMetadata(s.SessionDir, meta); err != nil {
 			log.Printf("warning: write session metadata: %v", err)
@@ -234,7 +233,6 @@ type ForkDaemonOpts struct {
 	Args            []string
 	RoleName        string
 	SessionDir      string
-	ClaudeConfigDir string
 	Instructions    string   // role instructions → --append-system-prompt
 	SystemPrompt    string   // replaces default system prompt → --system-prompt
 	Model           string   // model selection → --model
@@ -261,9 +259,6 @@ func ForkDaemon(opts ForkDaemonOpts) error {
 	}
 	if opts.SessionDir != "" {
 		daemonArgs = append(daemonArgs, "--session-dir", opts.SessionDir)
-	}
-	if opts.ClaudeConfigDir != "" {
-		daemonArgs = append(daemonArgs, "--claude-config-dir", opts.ClaudeConfigDir)
 	}
 	if opts.Heartbeat.IdleTimeout > 0 {
 		daemonArgs = append(daemonArgs, "--heartbeat-idle-timeout", opts.Heartbeat.IdleTimeout.String())

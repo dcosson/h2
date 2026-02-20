@@ -43,6 +43,11 @@ type AgentType interface {
 	// BuildCommandArgs maps role configuration fields to CLI flags for this
 	// agent type. Returns nil if no flags are applicable (e.g. generic).
 	BuildCommandArgs(cfg CommandArgsConfig) []string
+
+	// BuildCommandEnvVars returns environment variables to set for the child
+	// process. h2Dir is the resolved h2 config directory; roleName is the
+	// role name (empty means "default").
+	BuildCommandEnvVars(h2Dir, roleName string) map[string]string
 }
 
 // ClaudeCodeType provides full integration: OTEL, hooks, session ID, env vars.
@@ -84,6 +89,16 @@ func (t *ClaudeCodeType) BuildCommandArgs(cfg CommandArgsConfig) []string {
 		args = append(args, "--disallowedTools", strings.Join(cfg.DisallowedTools, ","))
 	}
 	return args
+}
+
+// BuildCommandEnvVars returns env vars for Claude Code (CLAUDE_CONFIG_DIR).
+func (t *ClaudeCodeType) BuildCommandEnvVars(h2Dir, roleName string) map[string]string {
+	if roleName == "" {
+		roleName = "default"
+	}
+	return map[string]string{
+		"CLAUDE_CONFIG_DIR": filepath.Join(h2Dir, "claude-config", roleName),
+	}
 }
 
 // CodexType provides integration for OpenAI Codex CLI: OTEL traces, no hooks.
@@ -128,6 +143,11 @@ func (t *CodexType) BuildCommandArgs(cfg CommandArgsConfig) []string {
 	return args
 }
 
+// BuildCommandEnvVars returns an empty map — Codex doesn't need special env vars.
+func (t *CodexType) BuildCommandEnvVars(h2Dir, roleName string) map[string]string {
+	return nil
+}
+
 // GenericType is a fallback for unknown agents — no adapter, output-based state detection.
 type GenericType struct {
 	command string
@@ -150,6 +170,11 @@ func (t *GenericType) NewAdapter(log *activitylog.Logger) adapter.AgentAdapter {
 
 // BuildCommandArgs returns nil — generic agents don't use role flags.
 func (t *GenericType) BuildCommandArgs(cfg CommandArgsConfig) []string {
+	return nil
+}
+
+// BuildCommandEnvVars returns nil — generic agents don't need special env vars.
+func (t *GenericType) BuildCommandEnvVars(h2Dir, roleName string) map[string]string {
 	return nil
 }
 
