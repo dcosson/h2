@@ -158,9 +158,9 @@ func (r *Role) GetHarnessType() string {
 	return "claude_code"
 }
 
-// GetAgentType returns the command name for this role's agent type, for use
-// with agent.ResolveAgentType(). Defaults to "claude".
-// Maps new canonical names back to command names: "claude_code" → "claude".
+// GetAgentType returns the command name for this role's agent type.
+// Defaults to "claude". Maps canonical harness type names back to
+// command names: "claude_code" → "claude".
 func (r *Role) GetAgentType() string {
 	ht := r.GetHarnessType()
 	switch ht {
