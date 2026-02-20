@@ -5,18 +5,25 @@ package codex
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"h2/internal/activitylog"
 	"h2/internal/session/agent/adapter"
 	"h2/internal/session/agent/monitor"
+	"h2/internal/session/agent/shared/otelserver"
 )
 
 // CodexAdapter translates Codex CLI telemetry into AgentEvents.
-// Codex emits OTEL traces (not logs/metrics like Claude Code).
-// The full OTEL trace parser is implemented in a separate bead.
+// Codex emits OTEL traces via /v1/traces. The adapter owns an OtelServer
+// and an OtelParser that converts trace spans into normalized events.
 type CodexAdapter struct {
+	otelServer  *otelserver.OtelServer
+	otelParser  *OtelParser
 	activityLog *activitylog.Logger
-	internalCh  chan monitor.AgentEvent
+
+	// internalCh buffers events from the OTEL parser callbacks.
+	// Start() forwards these to the external events channel.
+	internalCh chan monitor.AgentEvent
 }
 
 // New creates a CodexAdapter.
@@ -24,9 +31,11 @@ func New(log *activitylog.Logger) *CodexAdapter {
 	if log == nil {
 		log = activitylog.Nop()
 	}
+	ch := make(chan monitor.AgentEvent, 256)
 	return &CodexAdapter{
 		activityLog: log,
-		internalCh:  make(chan monitor.AgentEvent, 256),
+		internalCh:  ch,
+		otelParser:  NewOtelParser(ch),
 	}
 }
 
@@ -35,11 +44,23 @@ func (a *CodexAdapter) Name() string {
 	return "codex"
 }
 
-// PrepareForLaunch returns the OTEL trace exporter config for Codex.
-// The full implementation (creating OtelServer, returning -c flag) is
-// in the OTEL trace parser bead.
+// PrepareForLaunch creates the OTEL server and returns the -c flag
+// that configures Codex's trace exporter to send to h2's collector.
 func (a *CodexAdapter) PrepareForLaunch(agentName string) (adapter.LaunchConfig, error) {
-	return adapter.LaunchConfig{}, nil
+	s, err := otelserver.New(otelserver.Callbacks{
+		OnTraces: a.otelParser.OnTraces,
+	})
+	if err != nil {
+		return adapter.LaunchConfig{}, fmt.Errorf("create otel server: %w", err)
+	}
+	a.otelServer = s
+
+	endpoint := fmt.Sprintf("http://127.0.0.1:%d", s.Port)
+	return adapter.LaunchConfig{
+		PrependArgs: []string{
+			"-c", fmt.Sprintf(`otel.trace_exporter={type="otlp-http",endpoint="%s"}`, endpoint),
+		},
+	}, nil
 }
 
 // Start forwards internal events to the external channel and blocks
@@ -64,7 +85,17 @@ func (a *CodexAdapter) HandleHookEvent(eventName string, payload json.RawMessage
 	return false
 }
 
-// Stop cleans up resources.
+// Stop cleans up the OTEL server.
 func (a *CodexAdapter) Stop() {
-	// No resources to clean up in the stub.
+	if a.otelServer != nil {
+		a.otelServer.Stop()
+	}
+}
+
+// OtelPort returns the OTEL server port (available after PrepareForLaunch).
+func (a *CodexAdapter) OtelPort() int {
+	if a.otelServer != nil {
+		return a.otelServer.Port
+	}
+	return 0
 }
