@@ -72,9 +72,8 @@ func (s *Service) Run(ctx context.Context) error {
 
 	sockPath := filepath.Join(s.socketDir, socketdir.Format(socketdir.TypeBridge, s.user))
 
-	// Clean up stale socket.
-	if _, err := os.Stat(sockPath); err == nil {
-		os.Remove(sockPath)
+	if err := socketdir.ProbeSocket(sockPath, fmt.Sprintf("bridge for user %q", s.user)); err != nil {
+		return err
 	}
 
 	ln, err := net.Listen("unix", sockPath)

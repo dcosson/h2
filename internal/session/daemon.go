@@ -76,14 +76,8 @@ func RunDaemon(opts RunDaemonOpts) error {
 
 	sockPath := socketdir.Path(socketdir.TypeAgent, opts.Name)
 
-	// Check if socket already exists.
-	if _, err := os.Stat(sockPath); err == nil {
-		conn, err := net.DialTimeout("unix", sockPath, 500*time.Millisecond)
-		if err == nil {
-			conn.Close()
-			return fmt.Errorf("agent %q is already running", opts.Name)
-		}
-		os.Remove(sockPath)
+	if err := socketdir.ProbeSocket(sockPath, fmt.Sprintf("agent %q", opts.Name)); err != nil {
+		return err
 	}
 
 	// Create Unix socket.
