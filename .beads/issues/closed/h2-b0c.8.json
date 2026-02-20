@@ -2,7 +2,7 @@
   "id": "h2-b0c.8",
   "title": "Delete old agent_type.go and adapter/ packages",
   "description": "Remove agent/agent_type.go, agent/agent_type_test.go, agent/adapter/ directory (adapter.go, adapter_test.go, claude/, codex/). All code has been moved to harness/ packages. Verify no remaining imports reference old paths.",
-  "status": "open",
+  "status": "closed",
   "priority": 1,
   "type": "task",
   "parent": "h2-b0c",
@@ -19,5 +19,7 @@
   "created_by": "Danny Cosson",
   "owner": "dcosson@gmail.com",
   "created_at": "2026-02-20T12:16:23.152253-08:00",
-  "updated_at": "2026-02-20T12:16:23.152253-08:00"
+  "updated_at": "2026-02-20T15:41:14.961867-08:00",
+  "closed_at": "2026-02-20T15:41:14.961867-08:00",
+  "close_reason": "Closed"
 }

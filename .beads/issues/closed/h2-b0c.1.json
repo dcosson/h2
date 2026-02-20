@@ -2,7 +2,7 @@
   "id": "h2-b0c.1",
   "title": "Restructure Role YAML config with nested agent_harness section",
   "description": "Add AgentHarnessConfig struct to config/role.go with nested agent_harness YAML section (harness_type, model, claude_config_dir, codex_config_dir, command). Add accessor methods (GetHarnessType, GetModel, GetClaudeConfigDir, GetCodexConfigDir, GetHarnessConfig) with backward compat fallback from deprecated top-level fields (agent_type, model, claude_config_dir). Update role template in cmd/role.go to use new nested format. Update all callers of role.Model, role.GetAgentType(), role.GetClaudeConfigDir().",
-  "status": "open",
+  "status": "closed",
   "priority": 1,
   "type": "task",
   "parent": "h2-b0c",
@@ -33,5 +33,7 @@
   "created_by": "Danny Cosson",
   "owner": "dcosson@gmail.com",
   "created_at": "2026-02-20T12:14:48.376396-08:00",
-  "updated_at": "2026-02-20T12:14:48.376396-08:00"
+  "updated_at": "2026-02-20T15:41:14.885279-08:00",
+  "closed_at": "2026-02-20T15:41:14.885278-08:00",
+  "close_reason": "Closed"
 }
