@@ -115,24 +115,28 @@ func (h *ClaudeCodeHarness) EnsureConfigDir(h2Dir string) error {
 
 // PrepareForLaunch creates the OTEL server and returns the env vars and
 // CLI args needed to launch Claude Code with telemetry enabled.
-func (h *ClaudeCodeHarness) PrepareForLaunch(agentName, sessionID string) (harness.LaunchConfig, error) {
+// When dryRun is true, returns placeholder env vars without starting a server.
+func (h *ClaudeCodeHarness) PrepareForLaunch(agentName, sessionID string, dryRun bool) (harness.LaunchConfig, error) {
 	if sessionID != "" {
 		h.sessionID = sessionID
 	} else {
 		h.sessionID = uuid.New().String()
 	}
 
-	// Create OTEL server with callbacks that parse and emit events.
-	s, err := otelserver.New(otelserver.Callbacks{
-		OnLogs:    h.otelParser.OnLogs,
-		OnMetrics: h.otelParser.OnMetrics,
-	})
-	if err != nil {
-		return harness.LaunchConfig{}, fmt.Errorf("create otel server: %w", err)
+	endpoint := "http://127.0.0.1:<PORT>"
+	if !dryRun {
+		// Create OTEL server with callbacks that parse and emit events.
+		s, err := otelserver.New(otelserver.Callbacks{
+			OnLogs:    h.otelParser.OnLogs,
+			OnMetrics: h.otelParser.OnMetrics,
+		})
+		if err != nil {
+			return harness.LaunchConfig{}, fmt.Errorf("create otel server: %w", err)
+		}
+		h.otelServer = s
+		endpoint = fmt.Sprintf("http://127.0.0.1:%d", s.Port)
 	}
-	h.otelServer = s
 
-	endpoint := fmt.Sprintf("http://127.0.0.1:%d", s.Port)
 	return harness.LaunchConfig{
 		Env: map[string]string{
 			"CLAUDE_CODE_ENABLE_TELEMETRY": "1",

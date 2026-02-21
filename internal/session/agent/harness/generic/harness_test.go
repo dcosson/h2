@@ -75,7 +75,7 @@ func TestEnsureConfigDir_Noop(t *testing.T) {
 
 func TestPrepareForLaunch(t *testing.T) {
 	g := New(harness.HarnessConfig{Command: "bash"})
-	cfg, err := g.PrepareForLaunch("test-agent", "")
+	cfg, err := g.PrepareForLaunch("test-agent", "", false)
 	if err != nil {
 		t.Fatalf("PrepareForLaunch: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestPrepareForLaunch(t *testing.T) {
 
 func TestPrepareForLaunch_EmptyCommand(t *testing.T) {
 	g := New(harness.HarnessConfig{})
-	_, err := g.PrepareForLaunch("test-agent", "")
+	_, err := g.PrepareForLaunch("test-agent", "", false)
 	if err == nil {
 		t.Fatal("expected error for empty command")
 	}
@@ -123,7 +123,7 @@ func TestStart_BridgesOutputToEvents(t *testing.T) {
 	defer func() { monitor.IdleThreshold = origThreshold }()
 
 	g := New(harness.HarnessConfig{Command: "bash"})
-	if _, err := g.PrepareForLaunch("test", ""); err != nil {
+	if _, err := g.PrepareForLaunch("test", "", false); err != nil {
 		t.Fatalf("PrepareForLaunch: %v", err)
 	}
 	events := make(chan monitor.AgentEvent, 64)
@@ -182,7 +182,7 @@ func TestStart_BridgesOutputToEvents(t *testing.T) {
 
 func TestStart_CancelReturns(t *testing.T) {
 	g := New(harness.HarnessConfig{Command: "bash"})
-	if _, err := g.PrepareForLaunch("test", ""); err != nil {
+	if _, err := g.PrepareForLaunch("test", "", false); err != nil {
 		t.Fatalf("PrepareForLaunch: %v", err)
 	}
 	events := make(chan monitor.AgentEvent, 64)

@@ -145,7 +145,7 @@ func TestEnsureConfigDir_Noop(t *testing.T) {
 
 func TestPrepareForLaunch(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
-	cfg, err := h.PrepareForLaunch("test-agent", "")
+	cfg, err := h.PrepareForLaunch("test-agent", "", false)
 	if err != nil {
 		t.Fatalf("PrepareForLaunch error: %v", err)
 	}

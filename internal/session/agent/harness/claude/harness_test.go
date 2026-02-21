@@ -162,7 +162,7 @@ func TestEnsureConfigDir_EmptyConfigDir(t *testing.T) {
 
 func TestPrepareForLaunch(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
-	cfg, err := h.PrepareForLaunch("test-agent", "")
+	cfg, err := h.PrepareForLaunch("test-agent", "", false)
 	if err != nil {
 		t.Fatalf("PrepareForLaunch: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestPrepareForLaunch(t *testing.T) {
 
 func TestPrepareForLaunch_WithSessionID(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
-	_, err := h.PrepareForLaunch("test-agent", "custom-session-id")
+	_, err := h.PrepareForLaunch("test-agent", "custom-session-id", false)
 	if err != nil {
 		t.Fatalf("PrepareForLaunch: %v", err)
 	}

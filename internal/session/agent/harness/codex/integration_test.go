@@ -24,7 +24,7 @@ func TestIntegration_FullPipeline(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
 	mon := monitor.New()
 
-	cfg, err := h.PrepareForLaunch("test-codex", "")
+	cfg, err := h.PrepareForLaunch("test-codex", "", false)
 	if err != nil {
 		t.Fatalf("PrepareForLaunch: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestIntegration_MultipleTracePayloads(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
 	mon := monitor.New()
 
-	_, err := h.PrepareForLaunch("test-codex", "")
+	_, err := h.PrepareForLaunch("test-codex", "", false)
 	if err != nil {
 		t.Fatalf("PrepareForLaunch: %v", err)
 	}

@@ -50,7 +50,7 @@ func (g *GenericHarness) EnsureConfigDir(h2Dir string) error                    
 // LaunchConfig — generic agents don't need OTEL servers or special env vars.
 // The collector is created here (not in Start) so that HandleOutput() works
 // immediately after the child process starts without a race.
-func (g *GenericHarness) PrepareForLaunch(agentName, sessionID string) (harness.LaunchConfig, error) {
+func (g *GenericHarness) PrepareForLaunch(agentName, sessionID string, dryRun bool) (harness.LaunchConfig, error) {
 	if g.command == "" {
 		return harness.LaunchConfig{}, fmt.Errorf("generic harness: command is empty")
 	}

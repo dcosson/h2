@@ -94,9 +94,16 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 		envVars["H2_POD"] = pod
 	}
 
+	// Capture PrependArgs from PrepareForLaunch in dry-run mode (no side effects).
+	var prependArgs []string
+	if launchCfg, err := h.PrepareForLaunch(name, "<generated-uuid>", true); err == nil {
+		prependArgs = launchCfg.PrependArgs
+	}
+
 	// Build child args: what the agent command would receive.
 	// Uses Harness.BuildCommandArgs for agent-specific flags.
-	childArgs := h.BuildCommandArgs(harness.CommandArgsConfig{
+	childArgs := prependArgs
+	childArgs = append(childArgs, h.BuildCommandArgs(harness.CommandArgsConfig{
 		SessionID:       "<generated-uuid>",
 		Instructions:    role.Instructions,
 		SystemPrompt:    role.SystemPrompt,
@@ -104,15 +111,7 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 		PermissionMode:  role.PermissionMode,
 		AllowedTools:    role.Permissions.Allow,
 		DisallowedTools: role.Permissions.Deny,
-	})
-
-	// Also capture PrependArgs from PrepareForLaunch (e.g. Codex OTEL config).
-	// We call PrepareForLaunch then immediately Stop to avoid lingering side effects.
-	launchCfg, launchErr := h.PrepareForLaunch(name, "<generated-uuid>")
-	if launchErr == nil {
-		childArgs = append(launchCfg.PrependArgs, childArgs...)
-	}
-	h.Stop()
+	})...)
 
 	return &ResolvedAgentConfig{
 		Name:       name,

@@ -15,7 +15,7 @@ import (
 func newTestAgent() *agent.Agent {
 	h := resolveMinimalHarness("generic-test")
 	a := agent.New(h)
-	a.PrepareForLaunch("test", "")
+	a.PrepareForLaunch("test", "", false)
 	a.Start(context.Background())
 	return a
 }

@@ -42,8 +42,11 @@ type Harness interface {
 	BuildCommandEnvVars(h2Dir string) map[string]string
 	EnsureConfigDir(h2Dir string) error
 
-	// Launch (called once, before child process starts)
-	PrepareForLaunch(agentName, sessionID string) (LaunchConfig, error)
+	// Launch (called once, before child process starts).
+	// When dryRun is true, returns what the LaunchConfig would look like
+	// without starting servers or creating resources. Placeholder values
+	// (e.g. "<PORT>") may be used for dynamic fields.
+	PrepareForLaunch(agentName, sessionID string, dryRun bool) (LaunchConfig, error)
 
 	// Runtime (called after child process starts)
 	Start(ctx context.Context, events chan<- monitor.AgentEvent) error

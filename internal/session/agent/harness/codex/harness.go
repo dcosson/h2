@@ -96,7 +96,15 @@ func (h *CodexHarness) EnsureConfigDir(h2Dir string) error { return nil }
 
 // PrepareForLaunch creates the OTEL server and returns the -c flag
 // that configures Codex's trace exporter to send to h2's collector.
-func (h *CodexHarness) PrepareForLaunch(agentName, sessionID string) (harness.LaunchConfig, error) {
+// When dryRun is true, returns placeholder args without starting a server.
+func (h *CodexHarness) PrepareForLaunch(agentName, sessionID string, dryRun bool) (harness.LaunchConfig, error) {
+	if dryRun {
+		return harness.LaunchConfig{
+			PrependArgs: []string{
+				"-c", `otel.trace_exporter={otlp-http={endpoint="http://127.0.0.1:<PORT>",protocol="json"}}`,
+			},
+		}, nil
+	}
 	cfg, s, err := BuildLaunchConfig(otelserver.Callbacks{
 		OnTraces: h.otelParser.OnTraces,
 	})

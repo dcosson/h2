@@ -184,7 +184,7 @@ func (s *Session) setupAgent() error {
 	s.Agent.SetHarness(h)
 
 	// Prepare harness and get launch config (env vars, prepend args).
-	launchCfg, err := s.Agent.PrepareForLaunch(s.Name, s.SessionID)
+	launchCfg, err := s.Agent.PrepareForLaunch(s.Name, s.SessionID, false)
 	if err != nil {
 		return fmt.Errorf("prepare agent for launch: %w", err)
 	}

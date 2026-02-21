@@ -64,17 +64,17 @@ func (a *Agent) ActivityLog() *activitylog.Logger {
 // PrepareForLaunch prepares the harness and returns env vars and CLI args
 // to inject into the child process. Must be called after SetActivityLog
 // and before Start.
-func (a *Agent) PrepareForLaunch(agentName, sessionID string) (harness.LaunchConfig, error) {
+func (a *Agent) PrepareForLaunch(agentName, sessionID string, dryRun bool) (harness.LaunchConfig, error) {
 	if a.harness == nil {
 		return harness.LaunchConfig{}, nil
 	}
 
 	// Create hook collector for agents that use hooks (Claude Code).
-	if a.harness.Name() == "claude_code" {
+	if !dryRun && a.harness.Name() == "claude_code" {
 		a.hooksCollector = collector.NewHookCollector(a.ActivityLog())
 	}
 
-	return a.harness.PrepareForLaunch(agentName, sessionID)
+	return a.harness.PrepareForLaunch(agentName, sessionID, dryRun)
 }
 
 // Start begins the harness+monitor pipeline. Must be called after
