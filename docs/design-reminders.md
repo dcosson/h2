@@ -25,7 +25,7 @@ A reminder has:
 - **Schedule**: When to fire. One-time (timestamp or countdown) or recurring (RRULE).
 - **Message**: The text delivered to the agent when the reminder fires.
 - **Condition** (optional): A check evaluated before firing. Can be programmatic (shell command) or agent-evaluated (plain English).
-- **Condition mode**: How to interpret the condition result (gate, until, once).
+- **Condition mode**: How to interpret the condition result (each, until, once).
 
 ### Condition Modes
 
@@ -33,11 +33,11 @@ Conditions answer: "should this reminder fire right now?" The condition **mode**
 
 | Mode | Condition true | Condition false | Use case |
 |------|---------------|-----------------|----------|
-| `gate` | Fire | Skip this instance, keep schedule | "Only nudge me about PRs if there are open ones" |
+| `each` | Fire | Skip this instance, keep schedule | "Only nudge me about PRs if there are open ones" |
 | `until` | Cancel reminder | Fire | "Keep checking the build until it passes" |
 | `once` | Fire once, then cancel | Skip, keep waiting | "Run smoke tests once the deploy finishes" |
 
-**`gate`** — The condition gates each instance. Recurring schedule keeps running regardless. Good for "do X every hour, but only if Y is true."
+**`each`** — The condition is checked each instance. Recurring schedule keeps running regardless. Good for "do X every hour, but only if Y is true."
 
 **`until`** — Fire on every scheduled instance. When the condition becomes true, the reminder has served its purpose and is cancelled. Good for "keep doing X until Y happens."
 
@@ -50,7 +50,7 @@ Conditions answer: "should this reminder fire right now?" The condition **mode**
 ```yaml
 condition:
   command: "gh pr list --state open --json number | jq 'length > 0'"
-  mode: gate
+  mode: each
 ```
 
 **Agent-evaluated** — Plain English. The daemon includes the condition text in the message and asks the agent to evaluate it before proceeding with the task. The agent decides.
@@ -72,7 +72,7 @@ If the condition IS met, proceed with the following task:
 Run the post-deploy smoke tests against staging.
 ```
 
-The daemon doesn't need to parse the agent's response — it's a one-shot delivery. The agent handles the branching. For `until` and `once` modes with agent conditions, the agent's reply determines whether the reminder should be cancelled, but implementing that feedback loop is a v2 concern. For v1, agent conditions only support `gate` mode (the schedule keeps running, the agent decides per-instance).
+The daemon doesn't need to parse the agent's response — it's a one-shot delivery. The agent handles the branching. For `until` and `once` modes with agent conditions, the agent's reply determines whether the reminder should be cancelled, but implementing that feedback loop is a v2 concern. For v1, agent conditions only support `each` mode (the schedule keeps running, the agent decides per-instance).
 
 > **Open question**: Should we support agent-evaluated `until`/`once` in v1? This requires the agent to signal back "condition was met" so the daemon can cancel the reminder. Could be done via a special reply format or a follow-up CLI call. Punting for now.
 
@@ -105,7 +105,7 @@ type ScheduleSpec struct {
 type ConditionSpec struct {
     Command string `json:"command,omitempty"` // shell command, exit 0 = true
     Prompt  string `json:"prompt,omitempty"`  // plain English, agent-evaluated
-    Mode    string `json:"mode"`             // "gate", "until", "once"
+    Mode    string `json:"mode"`             // "each", "until", "once"
 }
 ```
 
@@ -187,7 +187,7 @@ func RunReminderScheduler(cfg ReminderSchedulerConfig) {
 1. Compute next fire time
 2. Sleep (or use a timer) until that time
 3. If condition is set and programmatic: evaluate shell command
-4. Apply condition mode logic (gate/until/once)
+4. Apply condition mode logic (each/until/once)
 5. If firing: `message.PrepareMessage(queue, agentName, "h2-reminder", body, priority)`
 6. Update `last_fired_at`, `fire_count` in the JSON file
 7. If one-time or condition-cancelled: update status to `completed`/`cancelled`
@@ -209,7 +209,7 @@ Actually, reconsidering: option 3 couples the CLI to the daemon being running. I
 ## CLI: `h2 reminder`
 
 ```
-h2 reminder add <agent> --message "..." --schedule "..." [--condition "..." --mode gate]
+h2 reminder add <agent> --message "..." --schedule "..." [--condition "..." --mode each]
 h2 reminder list [agent]
 h2 reminder show <id>
 h2 reminder remove <id>
@@ -229,7 +229,7 @@ Flags:
 - `--priority`: Message priority (default: "idle")
 - `--condition`: Shell command condition
 - `--condition-prompt`: Agent-evaluated condition (plain English)
-- `--mode`: Condition mode: "gate", "until", "once" (default: "gate")
+- `--mode`: Condition mode: "each", "until", "once" (default: "each")
 
 Exactly one of `--at`, `--in`, `--every`, `--rrule` is required.
 
@@ -248,7 +248,7 @@ h2 reminder add concierge -m "Review open PRs" --rrule "FREQ=DAILY;BYDAY=MO,TU,W
 # Every hour, but only if there are open PRs (skip otherwise)
 h2 reminder add concierge -m "Review open PRs" --every 1h \
   --condition "gh pr list --state open --json number | jq -e 'length > 0'" \
-  --mode gate
+  --mode each
 
 # Keep checking build until it passes, then stop
 h2 reminder add coder-1 -m "Check the build status and fix any failures" --every 15m \
@@ -343,7 +343,7 @@ Eventually, reminders could subsume heartbeat by adding an `idle_timeout` schedu
 2. **Agent-evaluated condition feedback**: For `until`/`once` modes with agent conditions, the daemon needs to know if the condition was met. Options:
    - Special reply format from agent (e.g. `[condition-met]`)
    - CLI call from agent (e.g. `h2 reminder complete <id>`)
-   - v1: only support `gate` mode for agent conditions; `until`/`once` require programmatic conditions
+   - v1: only support `each` mode for agent conditions; `until`/`once` require programmatic conditions
 
 3. **Max fire count / expiry**: Should reminders support a max number of fires or an expiry time? RRULE has COUNT and UNTIL, which cover this. For `interval`, we could add `--count N` and `--until <time>`.
 
