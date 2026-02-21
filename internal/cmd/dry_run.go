@@ -170,17 +170,18 @@ func printDryRun(rc *ResolvedAgentConfig) {
 	fmt.Println()
 	fmt.Printf("Command: %s\n", rc.Command)
 	if len(rc.ChildArgs) > 0 {
-		// Show args with multiline values truncated for readability.
-		var displayArgs []string
+		fmt.Println("Args:")
 		for _, arg := range rc.ChildArgs {
 			if strings.Contains(arg, "\n") {
-				lines := strings.Count(arg, "\n") + 1
-				displayArgs = append(displayArgs, fmt.Sprintf("<%d lines>", lines))
+				// Multiline arg: indent each line for readability.
+				lines := strings.Split(arg, "\n")
+				for _, line := range lines {
+					fmt.Printf("    %s\n", line)
+				}
 			} else {
-				displayArgs = append(displayArgs, arg)
+				fmt.Printf("  %s\n", arg)
 			}
 		}
-		fmt.Printf("Args: %s\n", strings.Join(displayArgs, " "))
 	}
 
 	fmt.Println()

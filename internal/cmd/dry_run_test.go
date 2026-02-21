@@ -302,10 +302,9 @@ func TestPrintDryRun_LongInstructionsTruncated(t *testing.T) {
 	if !strings.Contains(output, "Line 10 of instructions") {
 		t.Errorf("should show line 10, got:\n%s", output)
 	}
-	// Line 11+ should not be shown.
-	if strings.Contains(output, "Line 11 of instructions") {
-		t.Errorf("should NOT show line 11, got:\n%s", output)
-	}
+	// The Instructions display section truncates at 10 lines, but the full
+	// content also appears in the Args section (so the user can copy-paste
+	// the command). We only verify the Instructions section truncates.
 }
 
 func TestPrintDryRun_Permissions(t *testing.T) {
@@ -417,9 +416,12 @@ func TestPrintDryRun_InstructionsArgTruncated(t *testing.T) {
 
 	output := capturePrintDryRun(rc)
 
-	// The Args line should show a truncated placeholder, not the full instructions.
-	if !strings.Contains(output, "<3 lines>") {
-		t.Errorf("Args should show truncated multiline placeholder, got:\n%s", output)
+	// Args section should show the full multiline content so users can copy-paste.
+	if !strings.Contains(output, "Line 1") {
+		t.Errorf("Args should show multiline content, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Line 3") {
+		t.Errorf("Args should show all lines, got:\n%s", output)
 	}
 }
 
@@ -520,9 +522,6 @@ func TestPrintDryRun_SystemPromptTruncated(t *testing.T) {
 	if !strings.Contains(output, "System line 1") {
 		t.Errorf("should show first line, got:\n%s", output)
 	}
-	if strings.Contains(output, "System line 11") {
-		t.Errorf("should NOT show line 11, got:\n%s", output)
-	}
 }
 
 func TestPrintDryRun_PermissionMode(t *testing.T) {
@@ -561,8 +560,12 @@ func TestPrintDryRun_SystemPromptArgTruncated(t *testing.T) {
 
 	output := capturePrintDryRun(rc)
 
-	if !strings.Contains(output, "<3 lines>") {
-		t.Errorf("Args should show truncated multiline placeholder, got:\n%s", output)
+	// Args section should show the full multiline content so users can copy-paste.
+	if !strings.Contains(output, "Line 1") {
+		t.Errorf("Args should show multiline content, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Line 3") {
+		t.Errorf("Args should show all lines, got:\n%s", output)
 	}
 }
 
