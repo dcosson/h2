@@ -66,6 +66,7 @@ func (h *CodexHarness) DisplayCommand() string   { return "codex" }
 // and are silently ignored.
 func (h *CodexHarness) BuildCommandArgs(cfg harness.CommandArgsConfig) []string {
 	var roleArgs []string
+	roleArgs = append(roleArgs, "--no-alt-screen")
 	if cfg.Instructions != "" {
 		// JSON-encode the value so newlines become \n and quotes are escaped.
 		// Codex -c parses values as JSON when possible.

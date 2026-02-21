@@ -48,8 +48,8 @@ func TestDisplayCommand(t *testing.T) {
 func TestBuildCommandArgs_Instructions(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
 	args := h.BuildCommandArgs(harness.CommandArgsConfig{Instructions: "Do testing"})
-	if len(args) != 3 || args[0] != "-c" || args[1] != `instructions="Do testing"` || args[2] != "--full-auto" {
-		t.Fatalf(`expected [-c instructions="Do testing" --full-auto], got %v`, args)
+	if len(args) != 4 || args[0] != "--no-alt-screen" || args[1] != "-c" || args[2] != `instructions="Do testing"` || args[3] != "--full-auto" {
+		t.Fatalf(`expected [--no-alt-screen -c instructions="Do testing" --full-auto], got %v`, args)
 	}
 }
 
@@ -58,7 +58,7 @@ func TestBuildCommandArgs_InstructionsMultiline(t *testing.T) {
 	args := h.BuildCommandArgs(harness.CommandArgsConfig{Instructions: "Line 1\nLine 2\nSay \"hello\""})
 	// json.Marshal escapes newlines and quotes for Codex -c JSON parsing.
 	want := `instructions="Line 1\nLine 2\nSay \"hello\""`
-	if len(args) < 2 || args[1] != want {
+	if len(args) < 3 || args[0] != "--no-alt-screen" || args[2] != want {
 		t.Fatalf("expected %s, got %v", want, args)
 	}
 }
@@ -66,40 +66,40 @@ func TestBuildCommandArgs_InstructionsMultiline(t *testing.T) {
 func TestBuildCommandArgs_Model(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
 	args := h.BuildCommandArgs(harness.CommandArgsConfig{Model: "gpt-4o"})
-	if len(args) != 3 || args[0] != "--model" || args[1] != "gpt-4o" || args[2] != "--full-auto" {
-		t.Fatalf("expected [--model gpt-4o --full-auto], got %v", args)
+	if len(args) != 4 || args[0] != "--no-alt-screen" || args[1] != "--model" || args[2] != "gpt-4o" || args[3] != "--full-auto" {
+		t.Fatalf("expected [--no-alt-screen --model gpt-4o --full-auto], got %v", args)
 	}
 }
 
 func TestBuildCommandArgs_FullAuto(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
 	args := h.BuildCommandArgs(harness.CommandArgsConfig{PermissionMode: "full-auto"})
-	if len(args) != 1 || args[0] != "--full-auto" {
-		t.Fatalf("expected [--full-auto], got %v", args)
+	if len(args) != 2 || args[0] != "--no-alt-screen" || args[1] != "--full-auto" {
+		t.Fatalf("expected [--no-alt-screen --full-auto], got %v", args)
 	}
 }
 
 func TestBuildCommandArgs_Suggest(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
 	args := h.BuildCommandArgs(harness.CommandArgsConfig{PermissionMode: "suggest"})
-	if len(args) != 1 || args[0] != "--suggest" {
-		t.Fatalf("expected [--suggest], got %v", args)
+	if len(args) != 2 || args[0] != "--no-alt-screen" || args[1] != "--suggest" {
+		t.Fatalf("expected [--no-alt-screen --suggest], got %v", args)
 	}
 }
 
 func TestBuildCommandArgs_Ask(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
 	args := h.BuildCommandArgs(harness.CommandArgsConfig{PermissionMode: "ask"})
-	if len(args) != 0 {
-		t.Fatalf("expected empty args for ask mode (default), got %v", args)
+	if len(args) != 1 || args[0] != "--no-alt-screen" {
+		t.Fatalf("expected [--no-alt-screen] for ask mode (default), got %v", args)
 	}
 }
 
 func TestBuildCommandArgs_DefaultFullAuto(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
 	args := h.BuildCommandArgs(harness.CommandArgsConfig{})
-	if len(args) != 1 || args[0] != "--full-auto" {
-		t.Fatalf("expected [--full-auto] for empty config, got %v", args)
+	if len(args) != 2 || args[0] != "--no-alt-screen" || args[1] != "--full-auto" {
+		t.Fatalf("expected [--no-alt-screen --full-auto] for empty config, got %v", args)
 	}
 }
 
@@ -121,8 +121,8 @@ func TestBuildCommandArgs_IgnoresUnsupported(t *testing.T) {
 		DisallowedTools: []string{"Write"},
 		PermissionMode:  "ask",
 	})
-	if len(args) != 0 {
-		t.Fatalf("expected no args (unsupported fields ignored, ask=default), got %v", args)
+	if len(args) != 1 || args[0] != "--no-alt-screen" {
+		t.Fatalf("expected [--no-alt-screen] (unsupported fields ignored, ask=default), got %v", args)
 	}
 }
 
