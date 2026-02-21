@@ -22,7 +22,7 @@ Both are stored the same way and evaluated by the same daemon logic.
 ### Reminder
 
 A reminder has:
-- **Schedule**: When to fire. One-time (timestamp or countdown) or recurring (RRULE).
+- **Schedule**: When to fire. A start time, optionally with a recurrence rule (RRULE or interval).
 - **Message**: The text delivered to the agent when the reminder fires.
 - **Condition** (optional): A check evaluated before firing. Can be programmatic (shell command) or agent-evaluated (plain English).
 - **Condition mode**: How to interpret the condition result (each, until, once).
@@ -95,11 +95,16 @@ type ReminderSpec struct {
 }
 
 type ScheduleSpec struct {
-    // Exactly one of these should be set:
-    At       *time.Time `json:"at,omitempty"`        // one-time: fire at this time
-    In       string     `json:"in,omitempty"`        // one-time: fire after this duration (e.g. "2h", "30m")
-    RRule    string     `json:"rrule,omitempty"`     // recurring: RRULE string
-    Interval string     `json:"interval,omitempty"`  // recurring shorthand: fire every N duration (e.g. "1h", "30m")
+    // Start is when the reminder first fires. Required.
+    // For one-time reminders (no recurrence), this is the fire time.
+    // For recurring reminders, this is the anchor (DTSTART) for the pattern.
+    // CLI --in flag resolves to a Start time on creation (start = now + duration).
+    Start    time.Time  `json:"start"`
+
+    // Recurrence (optional). At most one of these. If neither is set, the
+    // reminder fires once at Start and transitions to "completed".
+    RRule    string     `json:"rrule,omitempty"`     // RFC 5545 RRULE string
+    Interval string     `json:"interval,omitempty"`  // simple repeating (e.g. "30m", "1h")
 }
 
 type ConditionSpec struct {
@@ -137,29 +142,59 @@ The daemon loads all `active` reminders on startup and watches the directory for
 
 ## Scheduling
 
+Every reminder has a `start` time. Optionally it also has a recurrence rule (`rrule` or `interval`). If there's no recurrence, it fires once at `start` and completes. If there is recurrence, `start` is the anchor (DTSTART) for the pattern.
+
 ### One-time
 
-- **`at`**: Fire at a specific wall-clock time. If the time is in the past, fire immediately.
-- **`in`**: Fire after a duration from now. Converted to an `at` time on creation.
+Just a `start` with no recurrence:
 
-After firing, status transitions to `completed`.
+```yaml
+schedule:
+  start: "2026-02-21T15:00:00-08:00"
+```
+
+If the start time is in the past when the scheduler loads it, fire immediately.
+
+The CLI `--in` flag is sugar: `--in 2h` resolves to `start = now + 2h` on creation and is stored as an absolute timestamp in JSON (so it survives daemon restarts).
 
 ### Recurring
 
-- **`rrule`**: Full RRULE string per RFC 5545. Supports complex schedules (every weekday at 9am, every 2nd Tuesday, etc.).
-- **`interval`**: Shorthand for simple recurring. `"30m"` means fire every 30 minutes. Converted to an RRULE internally, or handled as a simple ticker.
+A `start` plus one recurrence field. At most one of `rrule` or `interval` may be set.
 
-Recurring reminders stay `active` until manually cancelled or a condition cancels them.
+**`interval`** — Simple repeating timer. Fires every N duration starting from `start`.
+
+```yaml
+schedule:
+  start: "2026-02-21T12:00:00-08:00"
+  interval: "30m"    # fires at 12:00, 12:30, 1:00, ...
+```
+
+Internally implemented as a simple ticker — no calendar-aware logic needed.
+
+**`rrule`** — Full RRULE string per RFC 5545. `start` serves as DTSTART, anchoring the recurrence pattern (timezone, first occurrence).
+
+```yaml
+schedule:
+  start: "2026-02-21T09:00:00-08:00"   # weekdays at 9am PST
+  rrule: "FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR"
+```
+
+RRULE does not encode DTSTART — it's a separate property in iCalendar. We keep them separate here too. The scheduler computes the next occurrence after "now" using DTSTART + RRULE. If RRULE includes COUNT or UNTIL, the reminder transitions to `completed` when the series is exhausted.
+
+Recurring reminders stay `active` until manually cancelled, a condition cancels them, or the RRULE series is exhausted.
 
 ### RRULE Library
 
-Use `github.com/teambition/rrule-go` for RRULE parsing and next-occurrence calculation. This handles timezone-aware recurrence, DTSTART, UNTIL, COUNT, etc.
+Use `github.com/teambition/rrule-go` for RRULE parsing and next-occurrence calculation. It accepts a `DTStart` option and handles timezone-aware recurrence, UNTIL, COUNT, BYDAY, etc.
 
-For the `interval` shorthand, we can either:
-1. Convert to RRULE (e.g. `FREQ=MINUTELY;INTERVAL=30`)
-2. Handle as a simple `time.Ticker` — simpler, and avoids RRULE overhead for the common case
+### CLI Time Parsing
 
-**Decision**: Use a simple ticker for `interval`, RRULE library for `rrule`. Keep them as separate code paths internally.
+The CLI accepts these formats for `--start`:
+
+- RFC 3339: `"2026-02-21T09:00:00-08:00"`
+- Date only (midnight local): `"2026-02-21"`
+
+These are stored as RFC 3339 timestamps in the JSON. Natural language parsing (`"tomorrow 9am"`) is a stretch goal.
 
 ## Daemon Integration
 
@@ -222,10 +257,10 @@ h2 reminder resume <id>
 Flags:
 - `--message` / `-m`: The reminder text (required)
 - `--name`: Human-readable name (optional, used in list output)
-- `--at`: One-time at a specific time (e.g. "2026-02-20T15:00:00", "3pm", "tomorrow 9am")
-- `--in`: One-time after a duration (e.g. "2h", "30m")
-- `--every`: Recurring interval shorthand (e.g. "1h", "30m")
-- `--rrule`: Full RRULE string
+- `--start`: When to fire (e.g. "2026-02-21T09:00:00-08:00"). For recurring, this is the anchor/first occurrence. Defaults to now if omitted with `--every`.
+- `--in`: Shorthand: sets start to now + duration (e.g. "2h", "30m"). Mutually exclusive with `--start`.
+- `--every`: Recurring interval (e.g. "1h", "30m"). Combined with `--start`.
+- `--rrule`: Full RRULE string. Requires `--start`.
 - `--priority`: Message priority (default: "idle")
 - `--condition`: Shell command condition
 - `--condition-prompt`: Agent-evaluated condition (plain English)
@@ -239,11 +274,16 @@ Examples:
 # One-time in 2 hours
 h2 reminder add concierge -m "Check if the deploy finished" --in 2h
 
-# Every 30 minutes
+# One-time at a specific time
+h2 reminder add concierge -m "Send the weekly report" --start "2026-02-21T17:00:00-08:00"
+
+# Every 30 minutes (starting now)
 h2 reminder add concierge -m "Check CI status" --every 30m
 
-# Every weekday at 9am
-h2 reminder add concierge -m "Review open PRs" --rrule "FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR"
+# Every weekday at 9am PST
+h2 reminder add concierge -m "Review open PRs" \
+  --start "2026-02-21T09:00:00-08:00" \
+  --rrule "FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR"
 
 # Every hour, but only if there are open PRs (skip otherwise)
 h2 reminder add concierge -m "Review open PRs" --every 1h \
@@ -292,19 +332,20 @@ reminders:
   - name: check-ci
     message: "Check the CI pipeline. If there are failures, investigate and fix them."
     schedule:
-      every: 30m
+      interval: 30m
     priority: idle
 
   - name: morning-review
     message: "Review all open PRs and summarize their status."
     schedule:
-      rrule: "FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=9;BYMINUTE=0"
+      rrule: "FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR"
+      start: "2026-02-21T09:00:00-08:00"  # anchor: weekdays at 9am PST
     priority: normal
 
   - name: wait-for-deploy
     message: "Run post-deploy smoke tests against staging."
     schedule:
-      every: 5m
+      interval: 5m
     condition:
       prompt: "Check if the staging deploy has completed successfully."
       mode: once
