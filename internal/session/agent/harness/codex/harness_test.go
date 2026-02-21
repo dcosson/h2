@@ -53,6 +53,16 @@ func TestBuildCommandArgs_Instructions(t *testing.T) {
 	}
 }
 
+func TestBuildCommandArgs_InstructionsMultiline(t *testing.T) {
+	h := New(harness.HarnessConfig{}, nil)
+	args := h.BuildCommandArgs(harness.CommandArgsConfig{Instructions: "Line 1\nLine 2\nSay \"hello\""})
+	// json.Marshal escapes newlines and quotes for Codex -c JSON parsing.
+	want := `instructions="Line 1\nLine 2\nSay \"hello\""`
+	if len(args) < 2 || args[1] != want {
+		t.Fatalf("expected %s, got %v", want, args)
+	}
+}
+
 func TestBuildCommandArgs_Model(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
 	args := h.BuildCommandArgs(harness.CommandArgsConfig{Model: "gpt-4o"})

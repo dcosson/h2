@@ -62,7 +62,10 @@ func (h *CodexHarness) DisplayCommand() string   { return "codex" }
 func (h *CodexHarness) BuildCommandArgs(cfg harness.CommandArgsConfig) []string {
 	var args []string
 	if cfg.Instructions != "" {
-		args = append(args, "-c", `instructions="`+cfg.Instructions+`"`)
+		// JSON-encode the value so newlines become \n and quotes are escaped.
+		// Codex -c parses values as JSON when possible.
+		encoded, _ := json.Marshal(cfg.Instructions)
+		args = append(args, "-c", "instructions="+string(encoded))
 	}
 	if cfg.Model != "" {
 		args = append(args, "--model", cfg.Model)
