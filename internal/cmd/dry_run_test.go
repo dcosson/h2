@@ -256,7 +256,7 @@ func TestPrintDryRun_BasicOutput(t *testing.T) {
 		"Model: opus",
 		"Instructions: (2 lines)",
 		"Do testing things",
-		"Command: claude",
+		"claude \\",
 		"H2_ACTOR=test-agent",
 		"H2_ROLE=test-role",
 		"H2_POD=my-pod",

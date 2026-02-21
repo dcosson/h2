@@ -168,18 +168,33 @@ func printDryRun(rc *ResolvedAgentConfig) {
 	}
 
 	fmt.Println()
-	fmt.Printf("Command: %s\n", rc.Command)
-	if len(rc.ChildArgs) > 0 {
-		fmt.Println("Args:")
-		for _, arg := range rc.ChildArgs {
-			if strings.Contains(arg, "\n") {
-				// Multiline arg: indent each line for readability.
-				lines := strings.Split(arg, "\n")
-				for _, line := range lines {
-					fmt.Printf("    %s\n", line)
+	// Print command + args in a copy-pasteable format with \ continuations.
+	if len(rc.ChildArgs) == 0 {
+		fmt.Println(rc.Command)
+	} else {
+		// Group flags with their values.
+		var parts []string
+		for i := 0; i < len(rc.ChildArgs); i++ {
+			arg := rc.ChildArgs[i]
+			if strings.HasPrefix(arg, "-") && i+1 < len(rc.ChildArgs) && !strings.HasPrefix(rc.ChildArgs[i+1], "-") {
+				// Flag with a value: combine into one part.
+				i++
+				val := rc.ChildArgs[i]
+				// Shell-quote the value if it contains spaces or special chars.
+				if strings.ContainsAny(val, " \t\"'\\$`") {
+					val = "'" + strings.ReplaceAll(val, "'", "'\\''") + "'"
 				}
+				parts = append(parts, arg+" "+val)
 			} else {
-				fmt.Printf("  %s\n", arg)
+				parts = append(parts, arg)
+			}
+		}
+		fmt.Printf("%s \\\n", rc.Command)
+		for i, part := range parts {
+			if i < len(parts)-1 {
+				fmt.Printf("  %s \\\n", part)
+			} else {
+				fmt.Printf("  %s\n", part)
 			}
 		}
 	}
