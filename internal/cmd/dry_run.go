@@ -106,6 +106,14 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 		DisallowedTools: role.Permissions.Deny,
 	})
 
+	// Also capture PrependArgs from PrepareForLaunch (e.g. Codex OTEL config).
+	// We call PrepareForLaunch then immediately Stop to avoid lingering side effects.
+	launchCfg, launchErr := h.PrepareForLaunch(name, "<generated-uuid>")
+	if launchErr == nil {
+		childArgs = append(launchCfg.PrependArgs, childArgs...)
+	}
+	h.Stop()
+
 	return &ResolvedAgentConfig{
 		Name:       name,
 		Role:       role,

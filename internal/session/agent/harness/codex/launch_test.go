@@ -34,7 +34,7 @@ func TestBuildLaunchConfig_CreatesOtelServer(t *testing.T) {
 	if !strings.Contains(cFlag, expectedEndpoint) {
 		t.Errorf("PrependArgs[1] = %q, want to contain %q", cFlag, expectedEndpoint)
 	}
-	expectedPrefix := `otel.trace_exporter={type="otlp-http"`
+	expectedPrefix := `otel.trace_exporter={otlp-http={endpoint="`
 	if !strings.Contains(cFlag, expectedPrefix) {
 		t.Errorf("PrependArgs[1] = %q, want to contain %q", cFlag, expectedPrefix)
 	}

@@ -21,7 +21,7 @@ func BuildLaunchConfig(cb otelserver.Callbacks) (harness.LaunchConfig, *otelserv
 	endpoint := fmt.Sprintf("http://127.0.0.1:%d", s.Port)
 	cfg := harness.LaunchConfig{
 		PrependArgs: []string{
-			"-c", fmt.Sprintf(`otel.trace_exporter={type="otlp-http",endpoint="%s"}`, endpoint),
+			"-c", fmt.Sprintf(`otel.trace_exporter={otlp-http={endpoint="%s",protocol="json"}}`, endpoint),
 		},
 	}
 	return cfg, s, nil
