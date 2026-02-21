@@ -37,7 +37,10 @@ type Harness interface {
 	Command() string        // executable name: "claude", "codex", or custom
 	DisplayCommand() string // for display
 
-	// Config (called before launch)
+	// Config (called before launch).
+	// BuildCommandArgs returns the complete argument list for the child process.
+	// It receives PrependArgs from PrepareForLaunch and any extra args passed
+	// on the command line, and combines them with role-derived flags.
 	BuildCommandArgs(cfg CommandArgsConfig) []string
 	BuildCommandEnvVars(h2Dir string) map[string]string
 	EnsureConfigDir(h2Dir string) error
@@ -64,9 +67,17 @@ type HarnessConfig struct {
 	Command     string // executable command (only used by generic)
 }
 
-// CommandArgsConfig holds role configuration fields to be mapped to CLI flags.
-// Each harness maps these to its own flag conventions.
+// CommandArgsConfig holds all inputs needed to build the child process args.
+// Each harness maps role config fields to its own flag conventions, then
+// combines them with PrependArgs (from PrepareForLaunch) and ExtraArgs
+// (from the command line).
 type CommandArgsConfig struct {
+	// PrependArgs are injected by PrepareForLaunch (e.g. Codex OTEL config).
+	PrependArgs []string
+	// ExtraArgs are additional args passed on the command line by the user.
+	ExtraArgs []string
+
+	// Role config fields mapped to CLI flags by each harness.
 	SessionID       string
 	Instructions    string
 	SystemPrompt    string
@@ -74,6 +85,17 @@ type CommandArgsConfig struct {
 	PermissionMode  string
 	AllowedTools    []string
 	DisallowedTools []string
+}
+
+// CombineArgs assembles the complete child process argument list from
+// PrependArgs, ExtraArgs, and harness-specific role args.
+// Order: PrependArgs + ExtraArgs + roleArgs.
+func CombineArgs(cfg CommandArgsConfig, roleArgs []string) []string {
+	var args []string
+	args = append(args, cfg.PrependArgs...)
+	args = append(args, cfg.ExtraArgs...)
+	args = append(args, roleArgs...)
+	return args
 }
 
 // LaunchConfig holds configuration to inject into the agent child process.

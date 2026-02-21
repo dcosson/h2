@@ -261,14 +261,9 @@ func resolveFullHarness(command, roleName string, log *activitylog.Logger) (harn
 // (e.g. --session-id for Claude Code) and appending agent-type-specific
 // role flags via BuildCommandArgs.
 func (s *Session) childArgs() []string {
-	var args []string
-	if len(s.prependArgs) > 0 {
-		args = append(s.prependArgs, s.Args...)
-	} else {
-		args = s.Args
-	}
-
-	roleArgs := s.Agent.Harness().BuildCommandArgs(harness.CommandArgsConfig{
+	return s.Agent.Harness().BuildCommandArgs(harness.CommandArgsConfig{
+		PrependArgs:     s.prependArgs,
+		ExtraArgs:       s.Args,
 		SessionID:       s.SessionID,
 		Instructions:    s.Instructions,
 		SystemPrompt:    s.SystemPrompt,
@@ -277,9 +272,6 @@ func (s *Session) childArgs() []string {
 		AllowedTools:    s.AllowedTools,
 		DisallowedTools: s.DisallowedTools,
 	})
-	args = append(args, roleArgs...)
-
-	return args
 }
 
 // NewClient creates a new Client with all session callbacks wired.

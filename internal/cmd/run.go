@@ -126,7 +126,7 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 					}
 				}
 				if dryRun {
-					rc, err := resolveAgentConfig(name, role, pod, overrides)
+					rc, err := resolveAgentConfig(name, role, pod, overrides, args)
 					if err != nil {
 						return err
 					}

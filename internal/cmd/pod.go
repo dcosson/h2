@@ -184,7 +184,7 @@ func podDryRun(templateName string, pod string, expanded []config.ExpandedAgent,
 			return fmt.Errorf("load role %q for agent %q: %w", roleName, agent.Name, err)
 		}
 
-		rc, err := resolveAgentConfig(agent.Name, role, pod, nil)
+		rc, err := resolveAgentConfig(agent.Name, role, pod, nil, nil)
 		if err != nil {
 			return fmt.Errorf("resolve agent %q: %w", agent.Name, err)
 		}

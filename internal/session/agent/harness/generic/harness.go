@@ -40,7 +40,9 @@ func (g *GenericHarness) DisplayCommand() string   { return g.command }
 
 // --- Config (no-ops for generic) ---
 
-func (g *GenericHarness) BuildCommandArgs(cfg harness.CommandArgsConfig) []string { return nil }
+func (g *GenericHarness) BuildCommandArgs(cfg harness.CommandArgsConfig) []string {
+	return harness.CombineArgs(cfg, nil)
+}
 func (g *GenericHarness) BuildCommandEnvVars(h2Dir string) map[string]string     { return nil }
 func (g *GenericHarness) EnsureConfigDir(h2Dir string) error                     { return nil }
 

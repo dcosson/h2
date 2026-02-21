@@ -21,7 +21,7 @@ func TestResolveAgentConfig_Basic(t *testing.T) {
 		Instructions: "Do testing things",
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestResolveAgentConfig_WithPod(t *testing.T) {
 		Instructions: "Test instructions",
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "my-pod", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "my-pod", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestResolveAgentConfig_NoPodEnvWhenEmpty(t *testing.T) {
 		Instructions: "Test instructions",
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestResolveAgentConfig_GeneratesName(t *testing.T) {
 		Instructions: "Test instructions",
 	}
 
-	rc, err := resolveAgentConfig("", role, "", nil)
+	rc, err := resolveAgentConfig("", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestResolveAgentConfig_Overrides(t *testing.T) {
 	}
 
 	overrides := []string{"model=opus", "description=custom"}
-	rc, err := resolveAgentConfig("test-agent", role, "", overrides)
+	rc, err := resolveAgentConfig("test-agent", role, "", overrides, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestResolveAgentConfig_Worktree(t *testing.T) {
 		},
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestResolveAgentConfig_ChildArgsIncludeInstructions(t *testing.T) {
 		Instructions: "Do the thing\nLine 2",
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestResolveAgentConfig_NoInstructionsNoAppendFlag(t *testing.T) {
 		Instructions: "",
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestResolveAgentConfig_Heartbeat(t *testing.T) {
 		},
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestPrintDryRun_BasicOutput(t *testing.T) {
 		Instructions: "Do testing things\nWith multiple lines",
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "my-pod", []string{"model=opus"})
+	rc, err := resolveAgentConfig("test-agent", role, "my-pod", []string{"model=opus"}, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestPrintDryRun_LongInstructionsTruncated(t *testing.T) {
 		Instructions: strings.Join(lines, "\n"),
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -325,7 +325,7 @@ func TestPrintDryRun_Permissions(t *testing.T) {
 		},
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -358,7 +358,7 @@ func TestPrintDryRun_Heartbeat(t *testing.T) {
 		},
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -390,7 +390,7 @@ func TestPrintDryRun_WorktreeLabel(t *testing.T) {
 		},
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -410,7 +410,7 @@ func TestPrintDryRun_InstructionsArgTruncated(t *testing.T) {
 		Instructions: "Line 1\nLine 2\nLine 3",
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -434,7 +434,7 @@ func TestResolveAgentConfig_ChildArgsIncludeSystemPrompt(t *testing.T) {
 		SystemPrompt: "You are a custom agent.\nDo custom things.",
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -467,7 +467,7 @@ func TestResolveAgentConfig_ChildArgsIncludeNewFields(t *testing.T) {
 		},
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -507,7 +507,7 @@ func TestPrintDryRun_SystemPromptTruncated(t *testing.T) {
 		SystemPrompt: strings.Join(lines, "\n"),
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -534,7 +534,7 @@ func TestPrintDryRun_PermissionMode(t *testing.T) {
 		PermissionMode: "plan",
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -554,7 +554,7 @@ func TestPrintDryRun_SystemPromptArgTruncated(t *testing.T) {
 		SystemPrompt: "Line 1\nLine 2\nLine 3",
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}

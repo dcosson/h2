@@ -32,7 +32,7 @@ type ResolvedAgentConfig struct {
 
 // resolveAgentConfig computes all values needed to launch an agent without
 // performing any side effects (no dir creation, no worktree creation, no forking).
-func resolveAgentConfig(name string, role *config.Role, pod string, overrides []string) (*ResolvedAgentConfig, error) {
+func resolveAgentConfig(name string, role *config.Role, pod string, overrides []string, extraArgs []string) (*ResolvedAgentConfig, error) {
 	if name == "" {
 		name = session.GenerateName()
 	}
@@ -100,10 +100,10 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 		prependArgs = launchCfg.PrependArgs
 	}
 
-	// Build child args: what the agent command would receive.
-	// Uses Harness.BuildCommandArgs for agent-specific flags.
-	childArgs := prependArgs
-	childArgs = append(childArgs, h.BuildCommandArgs(harness.CommandArgsConfig{
+	// Build the complete child args via BuildCommandArgs.
+	childArgs := h.BuildCommandArgs(harness.CommandArgsConfig{
+		PrependArgs:     prependArgs,
+		ExtraArgs:       extraArgs,
 		SessionID:       "<generated-uuid>",
 		Instructions:    role.Instructions,
 		SystemPrompt:    role.SystemPrompt,
@@ -111,7 +111,7 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 		PermissionMode:  role.PermissionMode,
 		AllowedTools:    role.Permissions.Allow,
 		DisallowedTools: role.Permissions.Deny,
-	})...)
+	})
 
 	return &ResolvedAgentConfig{
 		Name:       name,

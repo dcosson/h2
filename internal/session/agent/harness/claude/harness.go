@@ -65,31 +65,32 @@ func (h *ClaudeCodeHarness) DisplayCommand() string   { return "claude" }
 
 // --- Config (called before launch) ---
 
-// BuildCommandArgs maps role config to Claude Code CLI flags.
+// BuildCommandArgs maps role config to Claude Code CLI flags, combined with
+// PrependArgs and ExtraArgs into the complete child process argument list.
 func (h *ClaudeCodeHarness) BuildCommandArgs(cfg harness.CommandArgsConfig) []string {
-	var args []string
+	var roleArgs []string
 	if cfg.SessionID != "" {
-		args = append(args, "--session-id", cfg.SessionID)
+		roleArgs = append(roleArgs, "--session-id", cfg.SessionID)
 	}
 	if cfg.SystemPrompt != "" {
-		args = append(args, "--system-prompt", cfg.SystemPrompt)
+		roleArgs = append(roleArgs, "--system-prompt", cfg.SystemPrompt)
 	}
 	if cfg.Instructions != "" {
-		args = append(args, "--append-system-prompt", cfg.Instructions)
+		roleArgs = append(roleArgs, "--append-system-prompt", cfg.Instructions)
 	}
 	if cfg.Model != "" {
-		args = append(args, "--model", cfg.Model)
+		roleArgs = append(roleArgs, "--model", cfg.Model)
 	}
 	if cfg.PermissionMode != "" {
-		args = append(args, "--permission-mode", cfg.PermissionMode)
+		roleArgs = append(roleArgs, "--permission-mode", cfg.PermissionMode)
 	}
 	if len(cfg.AllowedTools) > 0 {
-		args = append(args, "--allowedTools", strings.Join(cfg.AllowedTools, ","))
+		roleArgs = append(roleArgs, "--allowedTools", strings.Join(cfg.AllowedTools, ","))
 	}
 	if len(cfg.DisallowedTools) > 0 {
-		args = append(args, "--disallowedTools", strings.Join(cfg.DisallowedTools, ","))
+		roleArgs = append(roleArgs, "--disallowedTools", strings.Join(cfg.DisallowedTools, ","))
 	}
-	return args
+	return harness.CombineArgs(cfg, roleArgs)
 }
 
 // BuildCommandEnvVars returns env vars for Claude Code (CLAUDE_CONFIG_DIR).

@@ -56,32 +56,33 @@ func (h *CodexHarness) DisplayCommand() string   { return "codex" }
 
 // --- Config (called before launch) ---
 
-// BuildCommandArgs maps role config to Codex CLI flags.
+// BuildCommandArgs maps role config to Codex CLI flags, combined with
+// PrependArgs and ExtraArgs into the complete child process argument list.
 // SystemPrompt, AllowedTools, and DisallowedTools have no Codex equivalent
 // and are silently ignored.
 func (h *CodexHarness) BuildCommandArgs(cfg harness.CommandArgsConfig) []string {
-	var args []string
+	var roleArgs []string
 	if cfg.Instructions != "" {
 		// JSON-encode the value so newlines become \n and quotes are escaped.
 		// Codex -c parses values as JSON when possible.
 		encoded, _ := json.Marshal(cfg.Instructions)
-		args = append(args, "-c", "instructions="+string(encoded))
+		roleArgs = append(roleArgs, "-c", "instructions="+string(encoded))
 	}
 	if cfg.Model != "" {
-		args = append(args, "--model", cfg.Model)
+		roleArgs = append(roleArgs, "--model", cfg.Model)
 	}
 	switch cfg.PermissionMode {
 	case "full-auto":
-		args = append(args, "--full-auto")
+		roleArgs = append(roleArgs, "--full-auto")
 	case "suggest":
-		args = append(args, "--suggest")
+		roleArgs = append(roleArgs, "--suggest")
 	case "ask":
 		// --ask is the default for Codex, no flag needed.
 	default:
 		// Default to full-auto for h2-managed agents.
-		args = append(args, "--full-auto")
+		roleArgs = append(roleArgs, "--full-auto")
 	}
-	return args
+	return harness.CombineArgs(cfg, roleArgs)
 }
 
 // BuildCommandEnvVars returns nil — Codex doesn't need special env vars.
