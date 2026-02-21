@@ -7,9 +7,9 @@ import (
 	"h2/internal/session/agent/shared/otelserver"
 )
 
-// BuildLaunchConfig creates an OtelServer for receiving Codex OTEL traces
+// BuildLaunchConfig creates an OtelServer for receiving Codex OTEL logs
 // and returns a LaunchConfig with the -c flag that configures Codex's
-// trace exporter to send to our server.
+// log exporter to send to our server.
 //
 // The caller is responsible for calling OtelServer.Stop() when done.
 func BuildLaunchConfig(cb otelserver.Callbacks) (harness.LaunchConfig, *otelserver.OtelServer, error) {
@@ -18,10 +18,10 @@ func BuildLaunchConfig(cb otelserver.Callbacks) (harness.LaunchConfig, *otelserv
 		return harness.LaunchConfig{}, nil, fmt.Errorf("create otel server: %w", err)
 	}
 
-	endpoint := fmt.Sprintf("http://127.0.0.1:%d", s.Port)
+	endpoint := fmt.Sprintf("http://127.0.0.1:%d/v1/logs", s.Port)
 	cfg := harness.LaunchConfig{
 		PrependArgs: []string{
-			"-c", fmt.Sprintf(`otel.trace_exporter={otlp-http={endpoint="%s",protocol="json"}}`, endpoint),
+			"-c", fmt.Sprintf(`otel.exporter={otlp-http={endpoint="%s",protocol="json"}}`, endpoint),
 		},
 	}
 	return cfg, s, nil

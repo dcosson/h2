@@ -20,7 +20,7 @@ func TestBuildLaunchConfig_CreatesOtelServer(t *testing.T) {
 		t.Fatal("expected non-zero OtelServer port")
 	}
 
-	// PrependArgs should be ["-c", "otel.trace_exporter={...}"]
+	// PrependArgs should be ["-c", "otel.exporter={...}"]
 	if len(cfg.PrependArgs) != 2 {
 		t.Fatalf("PrependArgs length = %d, want 2", len(cfg.PrependArgs))
 	}
@@ -28,13 +28,13 @@ func TestBuildLaunchConfig_CreatesOtelServer(t *testing.T) {
 		t.Errorf("PrependArgs[0] = %q, want %q", cfg.PrependArgs[0], "-c")
 	}
 
-	// The -c value should contain the OTEL trace exporter config with the correct port.
+	// The -c value should contain the OTEL log exporter config with the correct port.
 	cFlag := cfg.PrependArgs[1]
-	expectedEndpoint := fmt.Sprintf("http://127.0.0.1:%d", s.Port)
+	expectedEndpoint := fmt.Sprintf("http://127.0.0.1:%d/v1/logs", s.Port)
 	if !strings.Contains(cFlag, expectedEndpoint) {
 		t.Errorf("PrependArgs[1] = %q, want to contain %q", cFlag, expectedEndpoint)
 	}
-	expectedPrefix := `otel.trace_exporter={otlp-http={endpoint="`
+	expectedPrefix := `otel.exporter={otlp-http={endpoint="`
 	if !strings.Contains(cFlag, expectedPrefix) {
 		t.Errorf("PrependArgs[1] = %q, want to contain %q", cFlag, expectedPrefix)
 	}
@@ -64,10 +64,10 @@ func TestBuildLaunchConfig_TwoServers_DifferentPorts(t *testing.T) {
 }
 
 func TestBuildLaunchConfig_CallbacksWired(t *testing.T) {
-	var gotTraces bool
+	var gotLogs bool
 	cfg, s, err := BuildLaunchConfig(otelserver.Callbacks{
-		OnTraces: func(body []byte) {
-			gotTraces = true
+		OnLogs: func(body []byte) {
+			gotLogs = true
 		},
 	})
 	if err != nil {
@@ -80,15 +80,15 @@ func TestBuildLaunchConfig_CallbacksWired(t *testing.T) {
 		t.Fatalf("PrependArgs length = %d, want 2", len(cfg.PrependArgs))
 	}
 
-	// Post a trace payload to verify the callback is wired.
-	url := fmt.Sprintf("http://127.0.0.1:%d/v1/traces", s.Port)
-	resp, err := http.Post(url, "application/json", strings.NewReader(`{"resourceSpans":[]}`))
+	// Post a logs payload to verify the callback is wired.
+	url := fmt.Sprintf("http://127.0.0.1:%d/v1/logs", s.Port)
+	resp, err := http.Post(url, "application/json", strings.NewReader(`{"resourceLogs":[]}`))
 	if err != nil {
-		t.Fatalf("POST /v1/traces: %v", err)
+		t.Fatalf("POST /v1/logs: %v", err)
 	}
 	resp.Body.Close()
 
-	if !gotTraces {
-		t.Error("OnTraces callback was not called")
+	if !gotLogs {
+		t.Error("OnLogs callback was not called")
 	}
 }

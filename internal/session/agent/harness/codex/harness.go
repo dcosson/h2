@@ -6,8 +6,12 @@ package codex
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 
 	"h2/internal/activitylog"
+	"h2/internal/config"
 	"h2/internal/session/agent/harness"
 	"h2/internal/session/agent/monitor"
 	"h2/internal/session/agent/shared/otelserver"
@@ -96,18 +100,24 @@ func (h *CodexHarness) EnsureConfigDir(h2Dir string) error { return nil }
 // --- Launch (called once, before child process starts) ---
 
 // PrepareForLaunch creates the OTEL server and returns the -c flag
-// that configures Codex's trace exporter to send to h2's collector.
+// that configures Codex's log exporter to send to h2's collector.
 // When dryRun is true, returns placeholder args without starting a server.
 func (h *CodexHarness) PrepareForLaunch(agentName, sessionID string, dryRun bool) (harness.LaunchConfig, error) {
 	if dryRun {
 		return harness.LaunchConfig{
 			PrependArgs: []string{
-				"-c", `otel.trace_exporter={otlp-http={endpoint="http://127.0.0.1:<PORT>",protocol="json"}}`,
+				"-c", `otel.exporter={otlp-http={endpoint="http://127.0.0.1:<PORT>/v1/logs",protocol="json"}}`,
 			},
 		}, nil
 	}
+
+	debugPath := resolveDebugPath(agentName, sessionID)
+	h.otelParser.ConfigureDebug(debugPath)
+
 	cfg, s, err := BuildLaunchConfig(otelserver.Callbacks{
-		OnTraces: h.otelParser.OnTraces,
+		OnLogs:    h.otelParser.OnLogs,
+		OnMetrics: h.otelParser.OnMetricsRaw,
+		OnTraces:  h.otelParser.OnTraces,
 	})
 	if err != nil {
 		return harness.LaunchConfig{}, err
@@ -160,3 +170,44 @@ func (h *CodexHarness) OtelPort() int {
 	return 0
 }
 
+func resolveSessionDir(agentName, sessionID string) string {
+	if agentName != "" {
+		return config.SessionDir(agentName)
+	}
+	if sessionID == "" {
+		return ""
+	}
+
+	root := config.SessionsDir()
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return ""
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		dir := filepath.Join(root, entry.Name())
+		meta, err := config.ReadSessionMetadata(dir)
+		if err != nil {
+			continue
+		}
+		if meta != nil && meta.SessionID == sessionID {
+			return dir
+		}
+	}
+	return ""
+}
+
+func resolveDebugPath(agentName, sessionID string) string {
+	sessionDir := resolveSessionDir(agentName, sessionID)
+	if sessionDir != "" {
+		return filepath.Join(sessionDir, "codex-otel-debug.log")
+	}
+	// Last-resort path so parser startup logging still lands somewhere.
+	name := sessionID
+	if name == "" {
+		name = "unknown"
+	}
+	return filepath.Join(config.ConfigDir(), "logs", fmt.Sprintf("codex-otel-%s.log", name))
+}

@@ -2,17 +2,31 @@ package codex
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"h2/internal/session/agent/monitor"
 )
 
-// OtelParser parses Codex OTEL trace payloads and emits AgentEvents.
-// Codex emits traces (not logs) via /v1/traces with span names like
-// "codex.conversation_starts", "codex.user_prompt", etc.
+// OtelParser parses Codex OTEL payloads and emits AgentEvents.
+// Codex emits high-level codex.* events as OTEL logs via /v1/logs.
+// We also keep /v1/traces parsing for backwards compatibility/debugging.
 type OtelParser struct {
-	events chan<- monitor.AgentEvent
+	events    chan<- monitor.AgentEvent
+	debugPath string
+	debugMu   sync.Mutex
+	debugFile *os.File
+
+	tokenMu         sync.Mutex
+	hasTokenBase    bool
+	lastInputTokens int64
+	lastCachedTokens int64
 }
 
 // NewOtelParser creates a parser that emits events on the given channel.
@@ -20,31 +34,128 @@ func NewOtelParser(events chan<- monitor.AgentEvent) *OtelParser {
 	return &OtelParser{events: events}
 }
 
-// OnTraces is the callback for /v1/traces payloads from the OTEL server.
-func (p *OtelParser) OnTraces(body []byte) {
-	var payload otelTracesPayload
-	if err := json.Unmarshal(body, &payload); err != nil {
+// ConfigureDebug sets the debug log path and eagerly initializes the file.
+func (p *OtelParser) ConfigureDebug(path string) {
+	p.debugMu.Lock()
+	defer p.debugMu.Unlock()
+	if !otelDebugLoggingEnabled() {
+		p.debugPath = ""
 		return
 	}
-	p.processTraces(payload)
+	p.debugPath = path
+	p.ensureDebugFile()
+	if p.debugFile != nil {
+		_, _ = p.debugFile.WriteString(time.Now().Format(time.RFC3339Nano) + " " + fmt.Sprintf("startup parser=codex_otel path=%s pid=%d", path, os.Getpid()) + "\n")
+	}
 }
 
-func (p *OtelParser) processTraces(payload otelTracesPayload) {
+// OnTraces is the callback for /v1/traces payloads from the OTEL server.
+func (p *OtelParser) OnTraces(body []byte) {
+	p.debugf("received /v1/traces payload bytes=%d", len(body))
+
+	var payload otelTracesPayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		p.debugf("invalid json: %v body=%q", err, truncate(body, 600))
+		return
+	}
+
+	spanCount, emittedCount, unknown := p.processTraces(payload)
+	if spanCount == 0 {
+		p.debugf("parsed payload but found zero spans")
+		return
+	}
+	if len(unknown) > 0 {
+		p.debugf("processed spans=%d emitted=%d unknown_spans=%s", spanCount, emittedCount, strings.Join(unknown, ","))
+		return
+	}
+	p.debugf("processed spans=%d emitted=%d", spanCount, emittedCount)
+}
+
+// OnLogs is the callback for /v1/logs payloads from the OTEL server.
+func (p *OtelParser) OnLogs(body []byte) {
+	p.debugf("received /v1/logs payload bytes=%d", len(body))
+
+	var payload otelLogsPayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		p.debugf("invalid json logs: %v body=%q", err, truncate(body, 600))
+		return
+	}
+
+	recordCount, emittedCount, unknown := p.processLogs(payload)
+	if recordCount == 0 {
+		p.debugf("parsed logs payload but found zero log records")
+		return
+	}
+	if len(unknown) > 0 {
+		p.debugf("processed log_records=%d emitted=%d unknown_events=%s", recordCount, emittedCount, strings.Join(unknown, ","))
+		return
+	}
+	p.debugf("processed log_records=%d emitted=%d", recordCount, emittedCount)
+}
+
+// OnMetricsRaw records that /v1/metrics was hit for Codex OTEL debugging.
+func (p *OtelParser) OnMetricsRaw(body []byte) {
+	p.debugf("received /v1/metrics payload bytes=%d", len(body))
+}
+
+func (p *OtelParser) processTraces(payload otelTracesPayload) (spanCount int, emittedCount int, unknown []string) {
 	now := time.Now()
+	unknownSet := make(map[string]struct{})
 	for _, rs := range payload.ResourceSpans {
 		for _, ss := range rs.ScopeSpans {
 			for _, span := range ss.Spans {
-				p.processSpan(span, now)
+				spanCount++
+				res := p.processEvent(span.Name, span.Attributes, now)
+				emittedCount += res.emitted
+				if !res.recognized {
+					unknownSet[span.Name] = struct{}{}
+				}
 			}
 		}
 	}
+	for name := range unknownSet {
+		unknown = append(unknown, name)
+	}
+	return spanCount, emittedCount, unknown
 }
 
-func (p *OtelParser) processSpan(span otelSpan, ts time.Time) {
-	switch span.Name {
+func (p *OtelParser) processLogs(payload otelLogsPayload) (recordCount int, emittedCount int, unknown []string) {
+	now := time.Now()
+	unknownSet := make(map[string]struct{})
+	for ri, rl := range payload.ResourceLogs {
+		for si, sl := range rl.ScopeLogs {
+			for li, rec := range sl.LogRecords {
+				recordCount++
+				eventName := getAttr(rec.Attributes, "event.name")
+				p.debugf("log_record resource=%d scope=%d index=%d event.name=%q attrs={%s}", ri, si, li, eventName, formatAttrs(rec.Attributes))
+				res := p.processEvent(eventName, rec.Attributes, now)
+				emittedCount += res.emitted
+				if !res.recognized {
+					if eventName == "" {
+						eventName = "(missing event.name)"
+					}
+					unknownSet[eventName] = struct{}{}
+				}
+			}
+		}
+	}
+	for name := range unknownSet {
+		unknown = append(unknown, name)
+	}
+	return recordCount, emittedCount, unknown
+}
+
+type spanProcessResult struct {
+	recognized bool
+	emitted    int
+}
+
+func (p *OtelParser) processEvent(name string, attrs []otelAttribute, ts time.Time) spanProcessResult {
+	switch name {
 	case "codex.conversation_starts":
-		convID := getAttr(span.Attributes, "conversation.id")
-		model := getAttr(span.Attributes, "model")
+		p.resetTokenBaselines()
+		convID := getAttr(attrs, "conversation.id")
+		model := getAttr(attrs, "model")
 		p.emit(monitor.AgentEvent{
 			Type:      monitor.EventSessionStarted,
 			Timestamp: ts,
@@ -53,6 +164,16 @@ func (p *OtelParser) processSpan(span otelSpan, ts time.Time) {
 				Model:    model,
 			},
 		})
+		p.emit(monitor.AgentEvent{
+			Type:      monitor.EventStateChange,
+			Timestamp: ts,
+			Data: monitor.StateChangeData{
+				State:    monitor.StateIdle,
+				SubState: monitor.SubStateNone,
+			},
+		})
+		p.debugf("span=codex.conversation_starts conversation.id=%q model=%q", convID, model)
+		return spanProcessResult{recognized: true, emitted: 2}
 
 	case "codex.user_prompt":
 		p.emit(monitor.AgentEvent{
@@ -60,33 +181,68 @@ func (p *OtelParser) processSpan(span otelSpan, ts time.Time) {
 			Timestamp: ts,
 			Data:      monitor.TurnStartedData{},
 		})
+		p.emit(monitor.AgentEvent{
+			Type:      monitor.EventStateChange,
+			Timestamp: ts,
+			Data: monitor.StateChangeData{
+				State:    monitor.StateActive,
+				SubState: monitor.SubStateThinking,
+			},
+		})
+		p.debugf("span=codex.user_prompt")
+		return spanProcessResult{recognized: true, emitted: 2}
 
 	case "codex.sse_event":
-		// Only completed SSE events carry token counts.
-		eventKind := getAttr(span.Attributes, "event.kind")
-		if eventKind != "response.completed" {
-			return
+		eventKind := getAttr(attrs, "event.kind")
+		if eventKind == "response.created" {
+			p.emit(monitor.AgentEvent{
+				Type:      monitor.EventStateChange,
+				Timestamp: ts,
+				Data: monitor.StateChangeData{
+					State:    monitor.StateActive,
+					SubState: monitor.SubStateThinking,
+				},
+			})
+			p.debugf("span=codex.sse_event event.kind=%q", eventKind)
+			return spanProcessResult{recognized: true, emitted: 1}
 		}
-		input := getIntAttr(span.Attributes, "input_token_count")
-		output := getIntAttr(span.Attributes, "output_token_count")
-		cached := getIntAttr(span.Attributes, "cached_token_count")
+		if eventKind != "response.completed" {
+			p.debugf("span=codex.sse_event event.kind=%q (ignored)", eventKind)
+			return spanProcessResult{recognized: true}
+		}
+		input := getIntAttr(attrs, "input_token_count")
+		output := getIntAttr(attrs, "output_token_count")
+		cached := getIntAttr(attrs, "cached_token_count")
 		if input > 0 || output > 0 {
+			deltaInput, deltaCached := p.deltaInputAndCached(input, cached)
 			p.emit(monitor.AgentEvent{
 				Type:      monitor.EventTurnCompleted,
 				Timestamp: ts,
 				Data: monitor.TurnCompletedData{
-					InputTokens:  input,
+					InputTokens:  deltaInput,
 					OutputTokens: output,
-					CachedTokens: cached,
+					CachedTokens: deltaCached,
 				},
 			})
+			p.emit(monitor.AgentEvent{
+				Type:      monitor.EventStateChange,
+				Timestamp: ts,
+				Data: monitor.StateChangeData{
+					State:    monitor.StateIdle,
+					SubState: monitor.SubStateNone,
+				},
+			})
+			p.debugf("span=codex.sse_event completed input=%d output=%d cached=%d delta_input=%d delta_cached=%d", input, output, cached, deltaInput, deltaCached)
+			return spanProcessResult{recognized: true, emitted: 2}
 		}
+		p.debugf("span=codex.sse_event completed but zero tokens (ignored)")
+		return spanProcessResult{recognized: true}
 
 	case "codex.tool_result":
-		toolName := getAttr(span.Attributes, "tool_name")
-		callID := getAttr(span.Attributes, "call_id")
-		durationMs := getIntAttr(span.Attributes, "duration_ms")
-		success := getAttr(span.Attributes, "success") != "false"
+		toolName := getAttr(attrs, "tool_name")
+		callID := getAttr(attrs, "call_id")
+		durationMs := getIntAttr(attrs, "duration_ms")
+		success := getAttr(attrs, "success") != "false"
 		if toolName != "" {
 			p.emit(monitor.AgentEvent{
 				Type:      monitor.EventToolCompleted,
@@ -98,13 +254,39 @@ func (p *OtelParser) processSpan(span otelSpan, ts time.Time) {
 					Success:    success,
 				},
 			})
+			p.debugf("span=codex.tool_result tool=%q call_id=%q duration_ms=%d success=%t", toolName, callID, durationMs, success)
+			return spanProcessResult{recognized: true, emitted: 1}
 		}
+		p.debugf("span=codex.tool_result missing tool_name")
+		return spanProcessResult{recognized: true}
 
 	case "codex.tool_decision":
-		decision := getAttr(span.Attributes, "decision")
+		decision := getAttr(attrs, "decision")
+		if decision == "approved" {
+			toolName := getAttr(attrs, "tool_name")
+			callID := getAttr(attrs, "call_id")
+			p.emit(monitor.AgentEvent{
+				Type:      monitor.EventToolStarted,
+				Timestamp: ts,
+				Data: monitor.ToolStartedData{
+					ToolName: toolName,
+					CallID:   callID,
+				},
+			})
+			p.emit(monitor.AgentEvent{
+				Type:      monitor.EventStateChange,
+				Timestamp: ts,
+				Data: monitor.StateChangeData{
+					State:    monitor.StateActive,
+					SubState: monitor.SubStateToolUse,
+				},
+			})
+			p.debugf("span=codex.tool_decision decision=approved tool=%q call_id=%q", toolName, callID)
+			return spanProcessResult{recognized: true, emitted: 2}
+		}
 		if decision == "ask_user" {
-			toolName := getAttr(span.Attributes, "tool_name")
-			callID := getAttr(span.Attributes, "call_id")
+			toolName := getAttr(attrs, "tool_name")
+			callID := getAttr(attrs, "call_id")
 			p.emit(monitor.AgentEvent{
 				Type:      monitor.EventApprovalRequested,
 				Timestamp: ts,
@@ -113,15 +295,87 @@ func (p *OtelParser) processSpan(span otelSpan, ts time.Time) {
 					CallID:   callID,
 				},
 			})
+			p.emit(monitor.AgentEvent{
+				Type:      monitor.EventStateChange,
+				Timestamp: ts,
+				Data: monitor.StateChangeData{
+					State:    monitor.StateActive,
+					SubState: monitor.SubStateWaitingForPermission,
+				},
+			})
+			p.debugf("span=codex.tool_decision decision=ask_user tool=%q call_id=%q", toolName, callID)
+			return spanProcessResult{recognized: true, emitted: 2}
 		}
+		p.debugf("span=codex.tool_decision decision=%q (ignored)", decision)
+		return spanProcessResult{recognized: true}
 	}
+	p.debugf("event=%q (unknown)", name)
+	return spanProcessResult{}
+}
+
+func formatAttrs(attrs []otelAttribute) string {
+	if len(attrs) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(attrs))
+	for _, a := range attrs {
+		parts = append(parts, fmt.Sprintf("%s=%q", a.Key, attrValueString(a.Value)))
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ", ")
+}
+
+func attrValueString(v otelAttrValue) string {
+	if len(v.IntValue) > 0 {
+		s := string(v.IntValue)
+		if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+			s = s[1 : len(s)-1]
+		}
+		return s
+	}
+	return v.StringValue
+}
+
+func (p *OtelParser) resetTokenBaselines() {
+	p.tokenMu.Lock()
+	defer p.tokenMu.Unlock()
+	p.hasTokenBase = false
+	p.lastInputTokens = 0
+	p.lastCachedTokens = 0
+}
+
+func (p *OtelParser) deltaInputAndCached(input, cached int64) (int64, int64) {
+	p.tokenMu.Lock()
+	defer p.tokenMu.Unlock()
+
+	if !p.hasTokenBase {
+		p.hasTokenBase = true
+		p.lastInputTokens = input
+		p.lastCachedTokens = cached
+		return input, cached
+	}
+
+	deltaInput := input - p.lastInputTokens
+	deltaCached := cached - p.lastCachedTokens
+	if deltaInput < 0 {
+		deltaInput = input
+	}
+	if deltaCached < 0 {
+		deltaCached = cached
+	}
+
+	p.lastInputTokens = input
+	p.lastCachedTokens = cached
+	return deltaInput, deltaCached
 }
 
 func (p *OtelParser) emit(ev monitor.AgentEvent) {
+	p.debugf("emit type=%s", ev.Type.String())
 	select {
 	case p.events <- ev:
 	default:
 		// Drop event if channel is full.
+		p.debugf("drop type=%s reason=events_channel_full", ev.Type.String())
 	}
 }
 
@@ -141,6 +395,22 @@ type otelScopeSpans struct {
 
 type otelSpan struct {
 	Name       string          `json:"name"`
+	Attributes []otelAttribute `json:"attributes"`
+}
+
+type otelLogsPayload struct {
+	ResourceLogs []otelResourceLogs `json:"resourceLogs"`
+}
+
+type otelResourceLogs struct {
+	ScopeLogs []otelScopeLogs `json:"scopeLogs"`
+}
+
+type otelScopeLogs struct {
+	LogRecords []otelLogRecord `json:"logRecords"`
+}
+
+type otelLogRecord struct {
 	Attributes []otelAttribute `json:"attributes"`
 }
 
@@ -185,4 +455,48 @@ func getIntAttr(attrs []otelAttribute, key string) int64 {
 		}
 	}
 	return 0
+}
+
+func (p *OtelParser) debugf(format string, args ...any) {
+	if p.debugPath == "" {
+		return
+	}
+	if !otelDebugLoggingEnabled() {
+		return
+	}
+
+	p.debugMu.Lock()
+	defer p.debugMu.Unlock()
+
+	p.ensureDebugFile()
+	if p.debugFile == nil {
+		return
+	}
+
+	msg := fmt.Sprintf(format, args...)
+	_, _ = p.debugFile.WriteString(time.Now().Format(time.RFC3339Nano) + " " + msg + "\n")
+}
+
+func otelDebugLoggingEnabled() bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv("OTEL_DEBUG_LOGGING_ENABLED")))
+	return v == "1" || v == "true" || v == "yes" || v == "on"
+}
+
+func (p *OtelParser) ensureDebugFile() {
+	if p.debugFile != nil || p.debugPath == "" {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(p.debugPath), 0o755)
+	f, err := os.OpenFile(p.debugPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err == nil {
+		p.debugFile = f
+	}
+}
+
+func truncate(body []byte, n int) string {
+	s := string(body)
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "...(truncated)"
 }

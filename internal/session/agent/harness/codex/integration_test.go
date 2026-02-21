@@ -63,22 +63,22 @@ func TestIntegration_FullPipeline(t *testing.T) {
 	// Give goroutines time to start.
 	time.Sleep(20 * time.Millisecond)
 
-	// 3. Simulate Codex sending OTEL trace events.
-	tracesURL := fmt.Sprintf("http://127.0.0.1:%d/v1/traces", port)
+	// 3. Simulate Codex sending OTEL log events.
+	logsURL := fmt.Sprintf("http://127.0.0.1:%d/v1/logs", port)
 
 	// 3a. conversation_starts → session ID discovery
-	postTrace(t, tracesURL, "codex.conversation_starts", []otelAttribute{
+	postLog(t, logsURL, "codex.conversation_starts", []otelAttribute{
 		{Key: "conversation.id", Value: otelAttrValue{StringValue: "conv-integration-1"}},
 		{Key: "model", Value: otelAttrValue{StringValue: "o3-mini"}},
 	})
 
 	// 3b. user_prompt → turn started
-	postTrace(t, tracesURL, "codex.user_prompt", []otelAttribute{
+	postLog(t, logsURL, "codex.user_prompt", []otelAttribute{
 		{Key: "prompt_length", Value: otelAttrValue{IntValue: json.RawMessage("25")}},
 	})
 
 	// 3c. tool_result → tool tracking
-	postTrace(t, tracesURL, "codex.tool_result", []otelAttribute{
+	postLog(t, logsURL, "codex.tool_result", []otelAttribute{
 		{Key: "tool_name", Value: otelAttrValue{StringValue: "shell"}},
 		{Key: "call_id", Value: otelAttrValue{StringValue: "call-1"}},
 		{Key: "duration_ms", Value: otelAttrValue{IntValue: json.RawMessage("250")}},
@@ -86,7 +86,7 @@ func TestIntegration_FullPipeline(t *testing.T) {
 	})
 
 	// 3d. sse_event (response.completed) → token counting
-	postTrace(t, tracesURL, "codex.sse_event", []otelAttribute{
+	postLog(t, logsURL, "codex.sse_event", []otelAttribute{
 		{Key: "event.kind", Value: otelAttrValue{StringValue: "response.completed"}},
 		{Key: "input_token_count", Value: otelAttrValue{IntValue: json.RawMessage("1000")}},
 		{Key: "output_token_count", Value: otelAttrValue{IntValue: json.RawMessage("500")}},
@@ -94,14 +94,14 @@ func TestIntegration_FullPipeline(t *testing.T) {
 	})
 
 	// 3e. tool_decision (ask_user) → approval requested
-	postTrace(t, tracesURL, "codex.tool_decision", []otelAttribute{
+	postLog(t, logsURL, "codex.tool_decision", []otelAttribute{
 		{Key: "tool_name", Value: otelAttrValue{StringValue: "shell"}},
 		{Key: "call_id", Value: otelAttrValue{StringValue: "call-2"}},
 		{Key: "decision", Value: otelAttrValue{StringValue: "ask_user"}},
 	})
 
 	// 3f. Second tool_result → accumulation
-	postTrace(t, tracesURL, "codex.tool_result", []otelAttribute{
+	postLog(t, logsURL, "codex.tool_result", []otelAttribute{
 		{Key: "tool_name", Value: otelAttrValue{StringValue: "shell"}},
 		{Key: "call_id", Value: otelAttrValue{StringValue: "call-2"}},
 		{Key: "duration_ms", Value: otelAttrValue{IntValue: json.RawMessage("100")}},
@@ -137,9 +137,9 @@ func TestIntegration_FullPipeline(t *testing.T) {
 	}
 }
 
-// TestIntegration_MultipleTracePayloads verifies that the harness handles
-// multiple spans in a single /v1/traces POST (batch delivery).
-func TestIntegration_MultipleTracePayloads(t *testing.T) {
+// TestIntegration_MultipleLogPayloads verifies that the harness handles
+// multiple log records in a single /v1/logs POST (batch delivery).
+func TestIntegration_MultipleLogPayloads(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
 	mon := monitor.New()
 
@@ -167,28 +167,28 @@ func TestIntegration_MultipleTracePayloads(t *testing.T) {
 	}()
 	time.Sleep(20 * time.Millisecond)
 
-	// Send multiple spans in a single POST (batch).
-	tracesURL := fmt.Sprintf("http://127.0.0.1:%d/v1/traces", h.OtelPort())
-	payload := otelTracesPayload{
-		ResourceSpans: []otelResourceSpans{{
-			ScopeSpans: []otelScopeSpans{{
-				Spans: []otelSpan{
+	// Send multiple log records in a single POST (batch).
+	logsURL := fmt.Sprintf("http://127.0.0.1:%d/v1/logs", h.OtelPort())
+	payload := otelLogsPayload{
+		ResourceLogs: []otelResourceLogs{{
+			ScopeLogs: []otelScopeLogs{{
+				LogRecords: []otelLogRecord{
 					{
-						Name: "codex.conversation_starts",
 						Attributes: []otelAttribute{
+							{Key: "event.name", Value: otelAttrValue{StringValue: "codex.conversation_starts"}},
 							{Key: "conversation.id", Value: otelAttrValue{StringValue: "batch-conv"}},
 							{Key: "model", Value: otelAttrValue{StringValue: "o3"}},
 						},
 					},
 					{
-						Name: "codex.user_prompt",
 						Attributes: []otelAttribute{
+							{Key: "event.name", Value: otelAttrValue{StringValue: "codex.user_prompt"}},
 							{Key: "prompt_length", Value: otelAttrValue{IntValue: json.RawMessage("10")}},
 						},
 					},
 					{
-						Name: "codex.sse_event",
 						Attributes: []otelAttribute{
+							{Key: "event.name", Value: otelAttrValue{StringValue: "codex.sse_event"}},
 							{Key: "event.kind", Value: otelAttrValue{StringValue: "response.completed"}},
 							{Key: "input_token_count", Value: otelAttrValue{IntValue: json.RawMessage("800")}},
 							{Key: "output_token_count", Value: otelAttrValue{IntValue: json.RawMessage("400")}},
@@ -200,9 +200,9 @@ func TestIntegration_MultipleTracePayloads(t *testing.T) {
 		}},
 	}
 	body, _ := json.Marshal(payload)
-	resp, err := http.Post(tracesURL, "application/json", strings.NewReader(string(body)))
+	resp, err := http.Post(logsURL, "application/json", strings.NewReader(string(body)))
 	if err != nil {
-		t.Fatalf("POST /v1/traces: %v", err)
+		t.Fatalf("POST /v1/logs: %v", err)
 	}
 	resp.Body.Close()
 
@@ -220,17 +220,17 @@ func TestIntegration_MultipleTracePayloads(t *testing.T) {
 
 // --- Test helpers ---
 
-// postTrace sends a single-span OTEL trace payload to the given URL.
-func postTrace(t *testing.T, url, spanName string, attrs []otelAttribute) {
+// postLog sends a single-record OTEL logs payload to the given URL.
+func postLog(t *testing.T, url, eventName string, attrs []otelAttribute) {
 	t.Helper()
-	body := makeTracePayload(spanName, attrs)
+	body := makeLogsPayload(eventName, attrs)
 	resp, err := http.Post(url, "application/json", strings.NewReader(string(body)))
 	if err != nil {
-		t.Fatalf("POST %s: %v", spanName, err)
+		t.Fatalf("POST %s: %v", eventName, err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("POST %s: status %d", spanName, resp.StatusCode)
+		t.Fatalf("POST %s: status %d", eventName, resp.StatusCode)
 	}
 }
 

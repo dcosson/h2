@@ -164,13 +164,42 @@ func init() {
 	}
 }
 
+var stringToState = map[string]monitor.State{
+	"initialized": monitor.StateInitialized,
+	"active":      monitor.StateActive,
+	"idle":        monitor.StateIdle,
+	"exited":      monitor.StateExited,
+}
+
+var stringToSubState = map[string]monitor.SubState{
+	"":                         monitor.SubStateNone,
+	"thinking":                 monitor.SubStateThinking,
+	"tool_use":                 monitor.SubStateToolUse,
+	"waiting_for_permission":   monitor.SubStateWaitingForPermission,
+	"compacting":               monitor.SubStateCompacting,
+}
+
+type stateChangeLogData struct {
+	State    string `json:"state"`
+	SubState string `json:"sub_state"`
+}
+
 func toEnvelope(ev monitor.AgentEvent) eventEnvelope {
 	env := eventEnvelope{
 		Type:      eventTypeToString[ev.Type],
 		Timestamp: ev.Timestamp,
 	}
 	if ev.Data != nil {
-		data, _ := json.Marshal(ev.Data)
+		dataValue := ev.Data
+		if ev.Type == monitor.EventStateChange {
+			if d, ok := ev.Data.(monitor.StateChangeData); ok {
+				dataValue = stateChangeLogData{
+					State:    d.State.String(),
+					SubState: d.SubState.String(),
+				}
+			}
+		}
+		data, _ := json.Marshal(dataValue)
 		env.Data = data
 	}
 	return env
@@ -227,8 +256,19 @@ func unmarshalData(evType monitor.AgentEventType, raw json.RawMessage) (any, err
 		var d monitor.AgentMessageData
 		return d, json.Unmarshal(raw, &d)
 	case monitor.EventStateChange:
-		var d monitor.StateChangeData
-		return d, json.Unmarshal(raw, &d)
+		var wire stateChangeLogData
+		if err := json.Unmarshal(raw, &wire); err != nil {
+			return nil, err
+		}
+		state, ok := stringToState[wire.State]
+		if !ok {
+			return nil, fmt.Errorf("unknown state: %q", wire.State)
+		}
+		subState, ok := stringToSubState[wire.SubState]
+		if !ok {
+			return nil, fmt.Errorf("unknown sub_state: %q", wire.SubState)
+		}
+		return monitor.StateChangeData{State: state, SubState: subState}, nil
 	case monitor.EventSessionEnded:
 		var d monitor.SessionEndedData
 		return d, json.Unmarshal(raw, &d)
