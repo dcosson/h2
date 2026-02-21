@@ -8,11 +8,11 @@ A harness for your harnesses. An agent runner, messaging, and orchestration laye
 
 ## What it does
 
-h2 manages AI coding agents as background processes, lets them message each other and you, and coordinates teams of agents working on projects together. It's a 3-tier system — use as much or as little as you need.
+h2 manages AI coding agents as background processes, lets them message each other and you, and coordinates teams of agents working on projects together. It's a 3-layer system — use as much or as little as you need.
 
 h2 is not a custom harness — it wraps existing agent tools (Claude Code, Codex, etc.) by communicating through their TTY interface. It works with Claude Max and ChatGPT Pro plans out of the box. No API keys or `setup-token` required.
 
-## Tier 1: Agent Runner
+## Layer 1: Agent Runner
 
 Launch, monitor, and manage AI coding agents.
 
@@ -66,7 +66,7 @@ h2 supports two approaches to managing agent permissions:
 
 Both are configured per-role.
 
-## Tier 2: Messaging
+## Layer 2: Messaging
 
 Agents can discover and message each other. You can message them from a Telegram bot on your phone.
 
@@ -148,7 +148,7 @@ Now find your chat id:
 - Open the URL again, and you'll now see a json payload with a `"chat": { "id": ... }` in it. That's your chat_id
 - Uncomment the lines from the h2 config.yaml file for the bridge, pasting in your bot token and chat id.
 
-## Tier 3: Orchestration
+## Layer 3: Orchestration
 
 > Still very much a work in progress — expect this to evolve significantly.
 
