@@ -169,8 +169,9 @@ func printDryRun(rc *ResolvedAgentConfig) {
 
 	fmt.Println()
 	// Print command + args in a copy-pasteable format with \ continuations.
+	fmt.Println("Command:")
 	if len(rc.ChildArgs) == 0 {
-		fmt.Println(rc.Command)
+		fmt.Printf("  %s\n", rc.Command)
 	} else {
 		// Group flags with their values.
 		var parts []string
@@ -189,12 +190,12 @@ func printDryRun(rc *ResolvedAgentConfig) {
 				parts = append(parts, arg)
 			}
 		}
-		fmt.Printf("%s \\\n", rc.Command)
+		fmt.Printf("  %s \\\n", rc.Command)
 		for i, part := range parts {
 			if i < len(parts)-1 {
-				fmt.Printf("  %s \\\n", part)
+				fmt.Printf("    %s \\\n", part)
 			} else {
-				fmt.Printf("  %s\n", part)
+				fmt.Printf("    %s\n", part)
 			}
 		}
 	}
