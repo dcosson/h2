@@ -54,7 +54,8 @@ type Harness interface {
 	// Runtime (called after child process starts)
 	Start(ctx context.Context, events chan<- monitor.AgentEvent) error
 	HandleHookEvent(eventName string, payload json.RawMessage) bool
-	HandleOutput() // signal that child process produced output
+	HandleInterrupt() bool // signal local interrupt (e.g. Ctrl+C)
+	HandleOutput()         // signal that child process produced output
 	Stop()
 }
 

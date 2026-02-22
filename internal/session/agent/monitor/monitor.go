@@ -25,13 +25,13 @@ type AgentMonitor struct {
 	model    string
 
 	// Accumulated metrics from events.
-	inputTokens  int64
-	outputTokens int64
-	cachedTokens int64
-	totalCostUSD float64
-	turnCount    int64
+	inputTokens     int64
+	outputTokens    int64
+	cachedTokens    int64
+	totalCostUSD    float64
+	turnCount       int64
 	userPromptCount int64
-	toolCounts   map[string]int64
+	toolCounts      map[string]int64
 
 	lastToolName        string
 	toolUseCount        int64
@@ -233,8 +233,8 @@ func (m *AgentMonitor) Model() string {
 	return m.model
 }
 
-// Metrics returns a snapshot of accumulated metrics.
-func (m *AgentMonitor) Metrics() MetricsSnapshot {
+// MetricsSnapshot returns a snapshot of accumulated metrics.
+func (m *AgentMonitor) MetricsSnapshot() AgentMetrics {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -243,14 +243,16 @@ func (m *AgentMonitor) Metrics() MetricsSnapshot {
 		toolCounts[k] = v
 	}
 
-	return MetricsSnapshot{
-		InputTokens:  m.inputTokens,
-		OutputTokens: m.outputTokens,
-		CachedTokens: m.cachedTokens,
-		TotalCostUSD: m.totalCostUSD,
-		TurnCount:    m.turnCount,
+	return AgentMetrics{
+		InputTokens:     m.inputTokens,
+		OutputTokens:    m.outputTokens,
+		TotalTokens:     m.inputTokens + m.outputTokens,
+		CachedTokens:    m.cachedTokens,
+		TotalCostUSD:    m.totalCostUSD,
+		TurnCount:       m.turnCount,
 		UserPromptCount: m.userPromptCount,
-		ToolCounts:   toolCounts,
+		ToolCounts:      toolCounts,
+		EventsReceived:  m.inputTokens > 0 || m.outputTokens > 0 || m.turnCount > 0 || m.userPromptCount > 0 || len(toolCounts) > 0,
 	}
 }
 
@@ -268,15 +270,17 @@ func (m *AgentMonitor) SetExited() {
 	m.setStateLocked(StateExited, SubStateNone)
 }
 
-// MetricsSnapshot is a point-in-time copy of accumulated metrics.
-type MetricsSnapshot struct {
-	InputTokens  int64
-	OutputTokens int64
-	CachedTokens int64
-	TotalCostUSD float64
-	TurnCount    int64
+// AgentMetrics is a point-in-time copy of accumulated metrics.
+type AgentMetrics struct {
+	InputTokens     int64
+	OutputTokens    int64
+	TotalTokens     int64
+	CachedTokens    int64
+	TotalCostUSD    float64
+	TurnCount       int64
 	UserPromptCount int64
-	ToolCounts   map[string]int64
+	ToolCounts      map[string]int64
+	EventsReceived  bool
 }
 
 // ActivitySnapshot contains monitor-derived activity state commonly used in status surfaces.

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"h2/internal/config"
-	"h2/internal/session/agent"
 	"h2/internal/session/agent/monitor"
 	"h2/internal/session/message"
 	"h2/internal/session/virtualterminal"
@@ -152,12 +151,7 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 		info.OutputTokens = m.OutputTokens
 		info.TotalTokens = m.TotalTokens
 		info.TotalCostUSD = m.TotalCostUSD
-		info.LinesAdded = m.LinesAdded
-		info.LinesRemoved = m.LinesRemoved
 		info.ToolCounts = m.ToolCounts
-
-		// Build per-model stats from OTEL metrics endpoint data.
-		info.ModelStats = buildModelStats(m)
 	}
 
 	// Point-in-time git stats.
@@ -173,38 +167,6 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 	info.BlockedToolName = activity.BlockedToolName
 
 	return info
-}
-
-// buildModelStats converts per-model maps into a sorted slice of ModelStat.
-func buildModelStats(m agent.OtelMetricsSnapshot) []message.ModelStat {
-	if len(m.ModelCosts) == 0 && len(m.ModelTokens) == 0 {
-		return nil
-	}
-
-	// Collect all model names.
-	models := make(map[string]bool)
-	for model := range m.ModelCosts {
-		models[model] = true
-	}
-	for model := range m.ModelTokens {
-		models[model] = true
-	}
-
-	var stats []message.ModelStat
-	for model := range models {
-		stat := message.ModelStat{
-			Model:   model,
-			CostUSD: m.ModelCosts[model],
-		}
-		if tokens, ok := m.ModelTokens[model]; ok {
-			stat.InputTokens = tokens["input"]
-			stat.OutputTokens = tokens["output"]
-			stat.CacheRead = tokens["cacheRead"]
-			stat.CacheCreate = tokens["cacheCreation"]
-		}
-		stats = append(stats, stat)
-	}
-	return stats
 }
 
 // gitDiffStats holds parsed git diff --numstat output.

@@ -3,7 +3,7 @@ package session
 import (
 	"testing"
 
-	"h2/internal/session/agent"
+	"h2/internal/session/agent/monitor"
 )
 
 // OTEL integration tests for the adapter path are in the adapter packages
@@ -49,7 +49,7 @@ func TestFormatTokens(t *testing.T) {
 		{10000000, "10M"},
 	}
 	for _, tt := range tests {
-		got := agent.FormatTokens(tt.n)
+		got := monitor.FormatTokens(tt.n)
 		if got != tt.want {
 			t.Errorf("FormatTokens(%d) = %q, want %q", tt.n, got, tt.want)
 		}
@@ -71,7 +71,7 @@ func TestFormatCost(t *testing.T) {
 		{10.50, "$10.50"},
 	}
 	for _, tt := range tests {
-		got := agent.FormatCost(tt.usd)
+		got := monitor.FormatCost(tt.usd)
 		if got != tt.want {
 			t.Errorf("FormatCost(%f) = %q, want %q", tt.usd, got, tt.want)
 		}

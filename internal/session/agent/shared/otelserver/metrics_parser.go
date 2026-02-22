@@ -1,8 +1,20 @@
-package agent
+package otelserver
 
 import "encoding/json"
 
 // --- OTLP Metrics JSON types ---
+
+// OtelAttribute represents a key-value attribute in OTLP payloads.
+type OtelAttribute struct {
+	Key   string        `json:"key"`
+	Value OtelAttrValue `json:"value"`
+}
+
+// OtelAttrValue holds the attribute value.
+type OtelAttrValue struct {
+	StringValue string          `json:"stringValue,omitempty"`
+	IntValue    json.RawMessage `json:"intValue,omitempty"`
+}
 
 // OtelMetricsPayload is the top-level structure for /v1/metrics.
 type OtelMetricsPayload struct {

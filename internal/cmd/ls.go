@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"h2/internal/config"
-	"h2/internal/session/agent"
+	"h2/internal/session/agent/monitor"
 	"h2/internal/session/message"
 	"h2/internal/socketdir"
 	s "h2/internal/termstyle"
@@ -239,10 +239,10 @@ func printAgentLine(info *message.AgentInfo) {
 	if info.TotalTokens > 0 || info.TotalCostUSD > 0 {
 		parts := []string{}
 		if info.InputTokens > 0 || info.OutputTokens > 0 {
-			parts = append(parts, agent.FormatTokens(info.InputTokens)+"/"+agent.FormatTokens(info.OutputTokens))
+			parts = append(parts, monitor.FormatTokens(info.InputTokens)+"/"+monitor.FormatTokens(info.OutputTokens))
 		}
 		if info.TotalCostUSD > 0 {
-			parts = append(parts, agent.FormatCost(info.TotalCostUSD))
+			parts = append(parts, monitor.FormatCost(info.TotalCostUSD))
 		}
 		metrics = fmt.Sprintf(", %s", strings.Join(parts, " "))
 	}

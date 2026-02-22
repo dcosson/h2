@@ -39,6 +39,11 @@ func (c *Collector) SignalOutput() {
 	}
 }
 
+// SignalInterrupt forces an immediate idle state update.
+func (c *Collector) SignalInterrupt() {
+	c.send(monitor.StateIdle)
+}
+
 // StateCh returns the channel that receives state updates.
 func (c *Collector) StateCh() <-chan monitor.StateUpdate {
 	return c.stateCh

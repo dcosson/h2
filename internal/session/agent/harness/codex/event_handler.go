@@ -35,9 +35,13 @@ type EventHandler struct {
 	idleMu    sync.Mutex
 	idleTimer *time.Timer
 	idleSeq   uint64
+
+	interruptMu             sync.Mutex
+	suppressActiveUntilTime time.Time
 }
 
 var codexIdleDebounceDelay = 200 * time.Millisecond
+var codexInterruptSuppressDelay = 500 * time.Millisecond
 
 // NewEventHandler creates a parser that emits events on the given channel.
 func NewEventHandler(events chan<- monitor.AgentEvent) *EventHandler {
@@ -196,6 +200,10 @@ func (p *EventHandler) processEvent(name string, attrs []otelAttribute, ts time.
 	case "codex.sse_event":
 		eventKind := getAttr(attrs, "event.kind")
 		if eventKind == "response.created" {
+			if p.shouldSuppressActiveTransitions(ts) {
+				p.debugf("span=codex.sse_event event.kind=%q (suppressed after interrupt)", eventKind)
+				return spanProcessResult{recognized: true}
+			}
 			p.cancelPendingIdle()
 			p.emitStateChange(ts, monitor.StateActive, monitor.SubStateThinking)
 			p.debugf("span=codex.sse_event event.kind=%q", eventKind)
@@ -253,6 +261,10 @@ func (p *EventHandler) processEvent(name string, attrs []otelAttribute, ts time.
 	case "codex.tool_decision":
 		decision := getAttr(attrs, "decision")
 		if decision == "approved" {
+			if p.shouldSuppressActiveTransitions(ts) {
+				p.debugf("span=codex.tool_decision decision=approved (suppressed after interrupt)")
+				return spanProcessResult{recognized: true}
+			}
 			p.cancelPendingIdle()
 			toolName := getAttr(attrs, "tool_name")
 			callID := getAttr(attrs, "call_id")
@@ -269,6 +281,10 @@ func (p *EventHandler) processEvent(name string, attrs []otelAttribute, ts time.
 			return spanProcessResult{recognized: true, emitted: 2}
 		}
 		if decision == "ask_user" {
+			if p.shouldSuppressActiveTransitions(ts) {
+				p.debugf("span=codex.tool_decision decision=ask_user (suppressed after interrupt)")
+				return spanProcessResult{recognized: true}
+			}
 			p.cancelPendingIdle()
 			toolName := getAttr(attrs, "tool_name")
 			callID := getAttr(attrs, "call_id")
@@ -289,6 +305,29 @@ func (p *EventHandler) processEvent(name string, attrs []otelAttribute, ts time.
 	}
 	p.debugf("event=%q (unknown)", name)
 	return spanProcessResult{}
+}
+
+// SignalInterrupt updates internal Codex parser state so in-flight OTEL events
+// from the interrupted turn don't immediately flip state back to active.
+func (p *EventHandler) OnInterrupt() {
+	p.cancelPendingIdle()
+	p.emitStateChange(time.Now(), monitor.StateIdle, monitor.SubStateNone)
+	p.interruptMu.Lock()
+	p.suppressActiveUntilTime = time.Now().Add(codexInterruptSuppressDelay)
+	p.interruptMu.Unlock()
+}
+
+func (p *EventHandler) shouldSuppressActiveTransitions(now time.Time) bool {
+	p.interruptMu.Lock()
+	defer p.interruptMu.Unlock()
+	if p.suppressActiveUntilTime.IsZero() {
+		return false
+	}
+	if now.Before(p.suppressActiveUntilTime) {
+		return true
+	}
+	p.suppressActiveUntilTime = time.Time{}
+	return false
 }
 
 func formatAttrs(attrs []otelAttribute) string {

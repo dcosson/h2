@@ -464,6 +464,55 @@ func TestEventHandler_SSECompleted_DebouncesIdleAndCancelsOnToolUse(t *testing.T
 	}
 }
 
+func TestEventHandler_InterruptSuppressesStaleActiveTransitions(t *testing.T) {
+	old := codexInterruptSuppressDelay
+	codexInterruptSuppressDelay = 40 * time.Millisecond
+	defer func() { codexInterruptSuppressDelay = old }()
+
+	events := make(chan monitor.AgentEvent, 64)
+	p := NewEventHandler(events)
+
+	// Become active/thinking first.
+	p.OnLogs(makeLogsPayload("codex.user_prompt", nil))
+	_ = drainEvents(events, 2)
+
+	// Local interrupt should move internal state to idle and suppress stale active events.
+	p.OnInterrupt()
+	got := drainEvents(events, 1)
+	if len(got) != 1 || got[0].Type != monitor.EventStateChange {
+		t.Fatalf("expected idle state_change on interrupt, got %+v", got)
+	}
+	sc := got[0].Data.(monitor.StateChangeData)
+	if sc.State != monitor.StateIdle || sc.SubState != monitor.SubStateNone {
+		t.Fatalf("expected idle/none state after interrupt, got (%v,%v)", sc.State, sc.SubState)
+	}
+
+	p.OnLogs(makeLogsPayload("codex.sse_event", []otelAttribute{
+		{Key: "event.kind", Value: otelAttrValue{StringValue: "response.created"}},
+	}))
+	p.OnLogs(makeLogsPayload("codex.tool_decision", []otelAttribute{
+		{Key: "tool_name", Value: otelAttrValue{StringValue: "shell"}},
+		{Key: "call_id", Value: otelAttrValue{StringValue: "call-stale-1"}},
+		{Key: "decision", Value: otelAttrValue{StringValue: "approved"}},
+	}))
+
+	select {
+	case ev := <-events:
+		t.Fatalf("unexpected stale event during suppress window: %+v", ev)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	// After suppress window expires, active transitions should emit again.
+	time.Sleep(30 * time.Millisecond)
+	p.OnLogs(makeLogsPayload("codex.sse_event", []otelAttribute{
+		{Key: "event.kind", Value: otelAttrValue{StringValue: "response.created"}},
+	}))
+	got = drainEvents(events, 1)
+	if len(got) != 1 || got[0].Type != monitor.EventStateChange {
+		t.Fatalf("expected state_change after suppress window, got %+v", got)
+	}
+}
+
 func TestEventHandler_ToolDecision_Allow_NoEmit(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
 	p := NewEventHandler(events)

@@ -89,6 +89,15 @@ func (g *GenericHarness) HandleHookEvent(eventName string, payload json.RawMessa
 	return false
 }
 
+// HandleInterrupt forces an immediate idle state update for local Ctrl+C.
+func (g *GenericHarness) HandleInterrupt() bool {
+	if g.collector != nil {
+		g.collector.SignalInterrupt()
+		return true
+	}
+	return false
+}
+
 // HandleOutput feeds the output collector to detect activity/idle transitions.
 func (g *GenericHarness) HandleOutput() {
 	if g.collector != nil {

@@ -133,13 +133,8 @@ func (a *Agent) HandleOutput() {
 // SignalInterrupt signals that a Ctrl+C was sent to the child process.
 // Always safe to call.
 func (a *Agent) SignalInterrupt() {
-	a.agentMonitor.Events() <- monitor.AgentEvent{
-		Type:      monitor.EventStateChange,
-		Timestamp: time.Now(),
-		Data: monitor.StateChangeData{
-			State:    monitor.StateIdle,
-			SubState: monitor.SubStateNone,
-		},
+	if a.harness != nil {
+		a.harness.HandleInterrupt()
 	}
 }
 
@@ -150,21 +145,9 @@ func (a *Agent) Harness() harness.Harness {
 	return a.harness
 }
 
-// Metrics returns a snapshot of the current OTEL metrics.
-// Metrics are accumulated by the AgentMonitor from AgentEvents emitted by
-// the harness.
-func (a *Agent) Metrics() OtelMetricsSnapshot {
-	ms := a.agentMonitor.Metrics()
-	hasData := ms.InputTokens > 0 || ms.OutputTokens > 0 || ms.TurnCount > 0
-	return OtelMetricsSnapshot{
-		InputTokens:     ms.InputTokens,
-		OutputTokens:    ms.OutputTokens,
-		TotalTokens:     ms.InputTokens + ms.OutputTokens,
-		TotalCostUSD:    ms.TotalCostUSD,
-		UserPromptCount: ms.UserPromptCount,
-		ToolCounts:      ms.ToolCounts,
-		EventsReceived:  hasData,
-	}
+// Metrics returns a point-in-time metrics copy from AgentMonitor.
+func (a *Agent) Metrics() monitor.AgentMetrics {
+	return a.agentMonitor.MetricsSnapshot()
 }
 
 // OtelPort returns the port the OTEL collector is listening on.

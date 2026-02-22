@@ -28,8 +28,8 @@ type CodexHarness struct {
 	model       string
 	activityLog *activitylog.Logger
 
-	otelServer *otelserver.OtelServer
-	otelParser *EventHandler
+	otelServer   *otelserver.OtelServer
+	eventHandler *EventHandler
 
 	// internalCh buffers events from the OTEL parser callbacks.
 	// Start() forwards these to the external events channel.
@@ -43,19 +43,19 @@ func New(cfg harness.HarnessConfig, log *activitylog.Logger) *CodexHarness {
 	}
 	ch := make(chan monitor.AgentEvent, 256)
 	return &CodexHarness{
-		configDir:   cfg.ConfigDir,
-		model:       cfg.Model,
-		activityLog: log,
-		internalCh:  ch,
-		otelParser:  NewEventHandler(ch),
+		configDir:    cfg.ConfigDir,
+		model:        cfg.Model,
+		activityLog:  log,
+		internalCh:   ch,
+		eventHandler: NewEventHandler(ch),
 	}
 }
 
 // --- Identity ---
 
 func (h *CodexHarness) Name() string           { return "codex" }
-func (h *CodexHarness) Command() string         { return "codex" }
-func (h *CodexHarness) DisplayCommand() string   { return "codex" }
+func (h *CodexHarness) Command() string        { return "codex" }
+func (h *CodexHarness) DisplayCommand() string { return "codex" }
 
 // --- Config (called before launch) ---
 
@@ -112,12 +112,12 @@ func (h *CodexHarness) PrepareForLaunch(agentName, sessionID string, dryRun bool
 	}
 
 	debugPath := resolveDebugPath(agentName, sessionID)
-	h.otelParser.ConfigureDebug(debugPath)
+	h.eventHandler.ConfigureDebug(debugPath)
 
 	s, err := otelserver.New(otelserver.Callbacks{
-		OnLogs:    h.otelParser.OnLogs,
-		OnMetrics: h.otelParser.OnMetricsRaw,
-		OnTraces:  h.otelParser.OnTraces,
+		OnLogs:    h.eventHandler.OnLogs,
+		OnMetrics: h.eventHandler.OnMetricsRaw,
+		OnTraces:  h.eventHandler.OnTraces,
 	})
 	if err != nil {
 		return harness.LaunchConfig{}, fmt.Errorf("create otel server: %w", err)
@@ -152,6 +152,16 @@ func (h *CodexHarness) Start(ctx context.Context, events chan<- monitor.AgentEve
 
 // HandleHookEvent returns false — Codex doesn't use h2 hooks.
 func (h *CodexHarness) HandleHookEvent(eventName string, payload json.RawMessage) bool {
+	return false
+}
+
+// HandleInterrupt handles local interrupts by emitting an idle state change and
+// suppressing stale post-interrupt active transitions.
+func (h *CodexHarness) HandleInterrupt() bool {
+	if h.eventHandler != nil {
+		h.eventHandler.OnInterrupt()
+		return true
+	}
 	return false
 }
 

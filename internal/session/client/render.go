@@ -12,7 +12,6 @@ import (
 
 	"github.com/vito/midterm"
 
-	"h2/internal/session/agent"
 	"h2/internal/session/agent/monitor"
 	"h2/internal/session/message"
 	"h2/internal/session/virtualterminal"
@@ -167,7 +166,7 @@ func (c *Client) RenderBar() {
 			if c.OtelMetrics != nil {
 				inTok, outTok, cost, connected, port := c.OtelMetrics()
 				if connected {
-					label += " | " + agent.FormatTokens(inTok) + "/" + agent.FormatTokens(outTok) + " " + agent.FormatCost(cost)
+					label += " | " + monitor.FormatTokens(inTok) + "/" + monitor.FormatTokens(outTok) + " " + monitor.FormatCost(cost)
 				} else {
 					label += fmt.Sprintf(" | [otel:%d]", port)
 				}

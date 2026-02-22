@@ -58,7 +58,7 @@ func TestMetrics_NoData_EventsReceivedFalse(t *testing.T) {
 	}
 }
 
-func TestOtelPort_NilHarness(t *testing.T) {
+func TestPort_NilHarness(t *testing.T) {
 	a := New(nil)
 	if port := a.OtelPort(); port != 0 {
 		t.Errorf("OtelPort = %d, want 0 for nil harness", port)

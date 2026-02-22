@@ -660,7 +660,7 @@ func (s *Session) OtelPort() int {
 }
 
 // Metrics delegates to the Agent.
-func (s *Session) Metrics() agent.OtelMetricsSnapshot {
+func (s *Session) Metrics() monitor.AgentMetrics {
 	return s.Agent.Metrics()
 }
 
@@ -762,15 +762,7 @@ func (s *Session) buildSessionSummary() activitylog.SessionSummaryData {
 		OutputTokens: snap.OutputTokens,
 		TotalTokens:  snap.TotalTokens,
 		CostUSD:      snap.TotalCostUSD,
-		APIRequests:  snap.APIRequestCount,
-		ToolCalls:    snap.ToolResultCount,
-		LinesAdded:   snap.LinesAdded,
-		LinesRemoved: snap.LinesRemoved,
 		ToolCounts:   snap.ToolCounts,
-
-		ActiveTimeHrs: snap.ActiveTimeHrs,
-		ModelCosts:    snap.ModelCosts,
-		ModelTokens:   snap.ModelTokens,
 	}
 
 	d.ToolUseCount = s.Agent.ActivitySnapshot().ToolUseCount

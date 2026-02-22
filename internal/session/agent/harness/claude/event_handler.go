@@ -150,6 +150,12 @@ func (h *EventHandler) ProcessHookEvent(eventName string, payload json.RawMessag
 	return true
 }
 
+// HandleInterrupt emits the normalized local interrupt transition.
+func (h *EventHandler) HandleInterrupt() bool {
+	h.emitStateChange(time.Now(), monitor.StateIdle, monitor.SubStateNone)
+	return true
+}
+
 // OnSessionLogLine parses one Claude session JSONL line.
 func (h *EventHandler) OnSessionLogLine(line []byte) {
 	if ev, ok := parseSessionLine(line); ok {

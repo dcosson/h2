@@ -118,16 +118,16 @@ func TestIntegration_FullPipeline(t *testing.T) {
 	})
 
 	waitFor(t, 2*time.Second, "token counts", func() bool {
-		m := mon.Metrics()
+		m := mon.MetricsSnapshot()
 		return m.InputTokens == 1000 && m.OutputTokens == 500 && m.CachedTokens == 200
 	})
 
 	waitFor(t, 2*time.Second, "turn count", func() bool {
-		return mon.Metrics().TurnCount == 1
+		return mon.MetricsSnapshot().TurnCount == 1
 	})
 
 	waitFor(t, 2*time.Second, "tool counts", func() bool {
-		m := mon.Metrics()
+		m := mon.MetricsSnapshot()
 		return m.ToolCounts["shell"] == 2
 	})
 
@@ -210,11 +210,11 @@ func TestIntegration_MultipleLogPayloads(t *testing.T) {
 		return mon.ThreadID() == "batch-conv"
 	})
 	waitFor(t, 2*time.Second, "batch tokens", func() bool {
-		m := mon.Metrics()
+		m := mon.MetricsSnapshot()
 		return m.InputTokens == 800 && m.OutputTokens == 400
 	})
 	waitFor(t, 2*time.Second, "batch turn count", func() bool {
-		return mon.Metrics().TurnCount == 1
+		return mon.MetricsSnapshot().TurnCount == 1
 	})
 }
 

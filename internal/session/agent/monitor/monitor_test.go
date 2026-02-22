@@ -70,7 +70,7 @@ func TestProcessEvent_TurnCompleted_AccumulatesTokens(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	snap := m.Metrics()
+	snap := m.MetricsSnapshot()
 	if snap.InputTokens != 400 {
 		t.Errorf("InputTokens = %d, want 400", snap.InputTokens)
 	}
@@ -122,8 +122,8 @@ func TestProcessEvent_TurnStarted_CountsUserPrompts(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	if m.Metrics().UserPromptCount != 3 {
-		t.Errorf("UserPromptCount = %d, want 3", m.Metrics().UserPromptCount)
+	if m.MetricsSnapshot().UserPromptCount != 3 {
+		t.Errorf("UserPromptCount = %d, want 3", m.MetricsSnapshot().UserPromptCount)
 	}
 }
 
@@ -148,7 +148,7 @@ func TestProcessEvent_ToolCompleted_CountsTools(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	snap := m.Metrics()
+	snap := m.MetricsSnapshot()
 	if snap.ToolCounts["Bash"] != 2 {
 		t.Errorf("ToolCounts[Bash] = %d, want 2", snap.ToolCounts["Bash"])
 	}
@@ -350,12 +350,12 @@ func TestMetrics_SnapshotIsolation(t *testing.T) {
 	}
 	time.Sleep(10 * time.Millisecond)
 
-	snap := m.Metrics()
+	snap := m.MetricsSnapshot()
 
 	// Mutating the snapshot should not affect the monitor.
 	snap.ToolCounts["Bash"] = 999
 
-	snap2 := m.Metrics()
+	snap2 := m.MetricsSnapshot()
 	if snap2.ToolCounts["Bash"] != 1 {
 		t.Errorf("ToolCounts[Bash] = %d, want 1 (snapshot mutation leaked)", snap2.ToolCounts["Bash"])
 	}

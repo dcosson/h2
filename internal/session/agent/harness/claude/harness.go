@@ -181,6 +181,14 @@ func (h *ClaudeCodeHarness) HandleHookEvent(eventName string, payload json.RawMe
 	return h.eventHandler.ProcessHookEvent(eventName, payload)
 }
 
+// HandleInterrupt emits an idle transition for a local Ctrl+C.
+func (h *ClaudeCodeHarness) HandleInterrupt() bool {
+	if h.eventHandler != nil {
+		return h.eventHandler.HandleInterrupt()
+	}
+	return false
+}
+
 // HandleOutput is a no-op for Claude Code (state is tracked via OTEL/hooks).
 func (h *ClaudeCodeHarness) HandleOutput() {}
 

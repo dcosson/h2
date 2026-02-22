@@ -1,4 +1,4 @@
-package agent
+package otelserver
 
 import (
 	"encoding/json"
