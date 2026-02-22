@@ -62,11 +62,8 @@ func (c *Client) HandleExitedBytes(buf []byte, start, n int) int {
 			}
 			return n
 		case 0x1B:
-			consumed, handled := c.HandleEscape(buf[i:n])
+			consumed, _ := c.HandleEscape(buf[i:n])
 			i += consumed
-			if handled {
-				continue
-			}
 		}
 	}
 	return n
@@ -239,11 +236,8 @@ func (c *Client) HandleDefaultBytes(buf []byte, start, n int) int {
 		i++
 
 		if b == 0x1B {
-			consumed, handled := c.HandleEscape(buf[i:n])
+			consumed, _ := c.HandleEscape(buf[i:n])
 			i += consumed
-			if handled {
-				continue
-			}
 			continue
 		}
 
@@ -535,11 +529,8 @@ func (c *Client) HandleScrollBytes(buf []byte, start, n int) int {
 		case 0x1B:
 			if i < n {
 				// More data in buffer — try to parse escape sequence.
-				consumed, handled := c.HandleEscape(buf[i:n])
+				consumed, _ := c.HandleEscape(buf[i:n])
 				i += consumed
-				if handled {
-					continue
-				}
 				// ESC followed by unrecognized byte — ignore.
 			} else {
 				// ESC at end of buffer — wait to see if it's bare Esc.

@@ -340,9 +340,7 @@ func collectReceivedTokens(t *testing.T, h2Dir, agentName string) []string {
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := scanner.Text()
-		for _, token := range extractTokensFromText(line) {
-			tokens = append(tokens, token)
-		}
+		tokens = append(tokens, extractTokensFromText(line)...)
 	}
 	if err := scanner.Err(); err != nil {
 		t.Fatalf("collectReceivedTokens: scan error: %v", err)
@@ -637,3 +635,22 @@ func uniqueStrings(ss []string) []string {
 	}
 	return result
 }
+
+// Keep helper symbols referenced so staticcheck doesn't flag this helper-only
+// file when specific reliability scenarios are temporarily disabled.
+var (
+	_ = sendTokenResult{}
+	_ = trySendToken
+	_ = sendTokens
+	_ = sendTokensAsync
+	_ = agentStatus{}
+	_ = queryAgentStatus
+	_ = waitForIdle
+	_ = waitForActive
+	_ = collectReceivedTokensFromAgentQuery
+	_ = verifyReceipt
+	_ = launchReliabilityAgent
+	_ = sendMessage
+	_ = sendMessageWithPriority
+	_ = sendRawMessage
+)

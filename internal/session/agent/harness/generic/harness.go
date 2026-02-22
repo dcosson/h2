@@ -73,7 +73,7 @@ func (g *GenericHarness) Start(ctx context.Context, events chan<- monitor.AgentE
 			case events <- monitor.AgentEvent{
 				Type:      monitor.EventStateChange,
 				Timestamp: time.Now(),
-				Data:      monitor.StateChangeData{State: su.State, SubState: su.SubState},
+				Data:      monitor.StateChangeData(su),
 			}:
 			case <-ctx.Done():
 				return ctx.Err()

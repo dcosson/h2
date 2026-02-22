@@ -39,7 +39,7 @@ func runQASetup(configPath string) error {
 	// Resolve Dockerfile path.
 	dockerfile := cfg.ResolvedDockerfile()
 	if _, err := os.Stat(dockerfile); os.IsNotExist(err) {
-		return fmt.Errorf("Dockerfile not found: %s", dockerfile)
+		return fmt.Errorf("dockerfile not found: %s", dockerfile)
 	}
 
 	tag := projectImageTag(cfg.configPath)

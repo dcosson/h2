@@ -2,7 +2,6 @@ package session
 
 import (
 	"encoding/json"
-	"io"
 	"net"
 
 	"h2/internal/session/client"
@@ -197,33 +196,4 @@ func (fw *frameWriter) Write(p []byte) (int, error) {
 		return 0, err
 	}
 	return len(p), nil
-}
-
-// frameInputReader reads data frames from the attach client. It is used
-// by the client's ReadInput goroutine when in direct (non-daemon) mode
-// where the VT reads from InputSrc directly. In attach mode, we
-// instead read frames in readClientInput, so this reader blocks forever
-// until the connection is closed.
-type frameInputReader struct {
-	conn net.Conn
-}
-
-func (fr *frameInputReader) Read(p []byte) (int, error) {
-	// Block until the connection closes. Input is handled by readClientInput.
-	buf := make([]byte, 1)
-	_, err := fr.conn.Read(buf)
-	return 0, err
-}
-
-// blockingReader blocks forever on Read. Used when no client is attached.
-type blockingReader struct {
-	ch chan struct{}
-}
-
-func (br *blockingReader) Read(p []byte) (int, error) {
-	if br.ch == nil {
-		br.ch = make(chan struct{})
-	}
-	<-br.ch // blocks forever
-	return 0, io.EOF
 }
