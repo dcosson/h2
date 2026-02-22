@@ -110,8 +110,8 @@ func TestList(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "agent.concierge.sock"), nil, 0o600)
 	os.WriteFile(filepath.Join(dir, "bridge.dcosson.sock"), nil, 0o600)
 	os.WriteFile(filepath.Join(dir, "agent.worker.sock"), nil, 0o600)
-	os.WriteFile(filepath.Join(dir, "random.txt"), nil, 0o600)       // ignored
-	os.WriteFile(filepath.Join(dir, "old-format.sock"), nil, 0o600)  // ignored (no type.name format)
+	os.WriteFile(filepath.Join(dir, "random.txt"), nil, 0o600)      // ignored
+	os.WriteFile(filepath.Join(dir, "old-format.sock"), nil, 0o600) // ignored (no type.name format)
 
 	entries, err := ListIn(dir)
 	if err != nil {

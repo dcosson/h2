@@ -68,7 +68,7 @@ func TestAuthedImageTag_SameHashAsProject(t *testing.T) {
 	authed := authedImageTag(path)
 
 	// Extract the hash portion (between "h2-qa-" and ":")
-	baseHash := base[6 : len(base)-5]   // strip "h2-qa-" and ":base"
+	baseHash := base[6 : len(base)-5]       // strip "h2-qa-" and ":base"
 	authedHash := authed[6 : len(authed)-7] // strip "h2-qa-" and ":authed"
 
 	if baseHash != authedHash {

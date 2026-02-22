@@ -9,7 +9,7 @@ import (
 
 // nonOverridableFields are Role fields that cannot be changed via --override.
 var nonOverridableFields = map[string]bool{
-	"name":        true,
+	"name":         true,
 	"instructions": true,
 	"permissions":  true,
 	"hooks":        true,

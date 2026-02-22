@@ -102,25 +102,25 @@ type AgentHarnessConfig struct {
 
 // Role defines a named configuration bundle for an h2 agent.
 type Role struct {
-	Name            string                  `yaml:"name"`
-	Description     string                  `yaml:"description,omitempty"`
-	AgentHarness    *AgentHarnessConfig     `yaml:"agent_harness,omitempty"`
+	Name         string              `yaml:"name"`
+	Description  string              `yaml:"description,omitempty"`
+	AgentHarness *AgentHarnessConfig `yaml:"agent_harness,omitempty"`
 
 	// Deprecated top-level fields (backward compat — use agent_harness instead).
-	AgentTypeLegacy       string            `yaml:"agent_type,omitempty"`
-	ModelLegacy           string            `yaml:"model,omitempty"`
-	ClaudeConfigDirLegacy string            `yaml:"claude_config_dir,omitempty"`
+	AgentTypeLegacy       string `yaml:"agent_type,omitempty"`
+	ModelLegacy           string `yaml:"model,omitempty"`
+	ClaudeConfigDirLegacy string `yaml:"claude_config_dir,omitempty"`
 
-	WorkingDir      string                  `yaml:"working_dir,omitempty"`  // agent CWD (default ".")
-	Worktree        *WorktreeConfig         `yaml:"worktree,omitempty"`    // git worktree settings
-	SystemPrompt    string                  `yaml:"system_prompt,omitempty"` // replaces Claude's entire default system prompt (--system-prompt)
-	Instructions    string                  `yaml:"instructions"`           // appended to default system prompt (--append-system-prompt)
-	PermissionMode  string                  `yaml:"permission_mode,omitempty"` // Claude CLI --permission-mode flag
-	Permissions     Permissions             `yaml:"permissions,omitempty"`
-	Heartbeat       *HeartbeatConfig        `yaml:"heartbeat,omitempty"`
-	Hooks           yaml.Node               `yaml:"hooks,omitempty"`      // passed through as-is to settings.json
-	Settings        yaml.Node               `yaml:"settings,omitempty"`   // extra settings.json keys
-	Variables       map[string]tmpl.VarDef  `yaml:"variables,omitempty"`  // template variable definitions
+	WorkingDir     string                 `yaml:"working_dir,omitempty"`     // agent CWD (default ".")
+	Worktree       *WorktreeConfig        `yaml:"worktree,omitempty"`        // git worktree settings
+	SystemPrompt   string                 `yaml:"system_prompt,omitempty"`   // replaces Claude's entire default system prompt (--system-prompt)
+	Instructions   string                 `yaml:"instructions"`              // appended to default system prompt (--append-system-prompt)
+	PermissionMode string                 `yaml:"permission_mode,omitempty"` // Claude CLI --permission-mode flag
+	Permissions    Permissions            `yaml:"permissions,omitempty"`
+	Heartbeat      *HeartbeatConfig       `yaml:"heartbeat,omitempty"`
+	Hooks          yaml.Node              `yaml:"hooks,omitempty"`     // passed through as-is to settings.json
+	Settings       yaml.Node              `yaml:"settings,omitempty"`  // extra settings.json keys
+	Variables      map[string]tmpl.VarDef `yaml:"variables,omitempty"` // template variable definitions
 }
 
 // ResolveWorkingDir returns the absolute path for the agent's working directory.

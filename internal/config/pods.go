@@ -102,9 +102,9 @@ func ListPodRoles() ([]*Role, error) {
 
 // PodTemplate defines a set of agents to launch together as a pod.
 type PodTemplate struct {
-	PodName   string                  `yaml:"pod_name"`
-	Variables map[string]tmpl.VarDef  `yaml:"variables"`
-	Agents    []PodTemplateAgent      `yaml:"agents"`
+	PodName   string                 `yaml:"pod_name"`
+	Variables map[string]tmpl.VarDef `yaml:"variables"`
+	Agents    []PodTemplateAgent     `yaml:"agents"`
 }
 
 // PodTemplateAgent defines a single agent within a pod template.

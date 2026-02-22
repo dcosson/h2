@@ -52,13 +52,13 @@ func TestValidatePrefix_Valid(t *testing.T) {
 
 func TestValidatePrefix_Invalid(t *testing.T) {
 	invalid := []string{
-		"",           // empty
-		"-leading",   // starts with hyphen
-		"_leading",   // starts with underscore
-		"has space",  // space
-		"has/slash",  // slash
-		"has.dot",    // dot
-		"café",       // non-ASCII
+		"",          // empty
+		"-leading",  // starts with hyphen
+		"_leading",  // starts with underscore
+		"has space", // space
+		"has/slash", // slash
+		"has.dot",   // dot
+		"café",      // non-ASCII
 	}
 	for _, p := range invalid {
 		if err := ValidatePrefix(p); err == nil {

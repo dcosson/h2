@@ -190,8 +190,8 @@ func TestSetupSessionDir(t *testing.T) {
 	setupFakeHome(t)
 
 	role := &Role{
-		Name:        "architect",
-		ModelLegacy: "opus",
+		Name:         "architect",
+		ModelLegacy:  "opus",
 		Instructions: "You are an architect agent.\nDesign systems.\n",
 		Permissions: Permissions{
 			Allow: []string{"Read", "Glob", "Write(docs/**)"},
@@ -290,10 +290,10 @@ func TestSetupSessionDir_NoAgent(t *testing.T) {
 
 func TestIsClaudeConfigAuthenticated(t *testing.T) {
 	tests := []struct {
-		name           string
-		claudeJSON     string
-		want           bool
-		wantErr        bool
+		name       string
+		claudeJSON string
+		want       bool
+		wantErr    bool
 	}{
 		{
 			name: "authenticated with oauthAccount",

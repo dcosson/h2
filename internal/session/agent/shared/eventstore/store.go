@@ -172,11 +172,11 @@ var stringToState = map[string]monitor.State{
 }
 
 var stringToSubState = map[string]monitor.SubState{
-	"":                         monitor.SubStateNone,
-	"thinking":                 monitor.SubStateThinking,
-	"tool_use":                 monitor.SubStateToolUse,
-	"waiting_for_permission":   monitor.SubStateWaitingForPermission,
-	"compacting":               monitor.SubStateCompacting,
+	"":                       monitor.SubStateNone,
+	"thinking":               monitor.SubStateThinking,
+	"tool_use":               monitor.SubStateToolUse,
+	"waiting_for_permission": monitor.SubStateWaitingForPermission,
+	"compacting":             monitor.SubStateCompacting,
 }
 
 type stateChangeLogData struct {

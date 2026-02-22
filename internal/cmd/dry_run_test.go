@@ -863,7 +863,7 @@ instructions: |
 	checks := []string{
 		"Agent: test-agent",
 		"Role: configurable",
-		"h2 project",     // template var resolved in instructions
+		"h2 project",           // template var resolved in instructions
 		"Environment: staging", // template var resolved in instructions
 	}
 	for _, check := range checks {
@@ -889,7 +889,7 @@ func TestRunDryRun_WithOverride(t *testing.T) {
 
 	checks := []string{
 		"Agent: test-agent",
-		"Model: opus",      // overridden
+		"Model: opus", // overridden
 		"Overrides: model=opus",
 	}
 	for _, check := range checks {

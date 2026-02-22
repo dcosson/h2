@@ -283,7 +283,7 @@ func TestOverridesRecordedInMetadata(t *testing.T) {
 	dir := t.TempDir()
 
 	overrides := map[string]string{
-		"working_dir":              "/workspace",
+		"working_dir":          "/workspace",
 		"worktree.project_dir": "/tmp/repo",
 	}
 	meta := SessionMetadata{

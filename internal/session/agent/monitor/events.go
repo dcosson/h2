@@ -13,7 +13,7 @@ type AgentEvent struct {
 type AgentEventType int
 
 const (
-	EventSessionStarted    AgentEventType = iota
+	EventSessionStarted AgentEventType = iota
 	EventUserPrompt
 	EventTurnCompleted
 	EventToolStarted

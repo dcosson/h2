@@ -195,9 +195,9 @@ func TestBuildEnvArgs_Passthrough(t *testing.T) {
 	cfg := &QAConfig{
 		Sandbox: QASandboxConfig{
 			Env: []string{
-				"H2_QA_TEST_VAR",    // passthrough
-				"FOO=bar",           // explicit
-				"MISSING_VAR",       // not in host env
+				"H2_QA_TEST_VAR", // passthrough
+				"FOO=bar",        // explicit
+				"MISSING_VAR",    // not in host env
 			},
 		},
 	}

@@ -9,9 +9,9 @@ import (
 
 func TestVarDef_Required(t *testing.T) {
 	tests := []struct {
-		name     string
-		def      VarDef
-		wantReq  bool
+		name    string
+		def     VarDef
+		wantReq bool
 	}{
 		{
 			name:    "no default key → required",

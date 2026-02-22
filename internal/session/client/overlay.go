@@ -37,42 +37,42 @@ func (c *Client) IsScrollMode() bool {
 
 // Client owns all UI state and holds a pointer to the underlying VT.
 type Client struct {
-	VT          *virtualterminal.VT
-	Output      io.Writer // per-client output (each client writes to its own connection)
-	Input       []byte
-	CursorPos   int // byte offset within Input
-	History     []string
-	HistIdx     int
-	Saved       []byte
-	Quit        bool
-	Mode        InputMode
-	PendingEsc     bool
-	EscTimer       *time.Timer
-	PassthroughEsc []byte
+	VT              *virtualterminal.VT
+	Output          io.Writer // per-client output (each client writes to its own connection)
+	Input           []byte
+	CursorPos       int // byte offset within Input
+	History         []string
+	HistIdx         int
+	Saved           []byte
+	Quit            bool
+	Mode            InputMode
+	PendingEsc      bool
+	EscTimer        *time.Timer
+	PassthroughEsc  []byte
 	ScrollOffset    int
 	SelectHint      bool
 	SelectHintTimer *time.Timer
 	InputPriority   message.Priority
-	DebugKeys     bool
-	DebugKeyBuf  []string
-	AgentName    string
-	OnModeChange func(mode InputMode)
-	QueueStatus  func() (int, bool)
-	OtelMetrics  func() (inputTokens int64, outputTokens int64, totalCostUSD float64, connected bool, port int) // returns OTEL metrics for status bar
-	AgentState   func() (state string, subState string, duration string)                       // returns Agent's derived state + sub-state
-	HookState    func() (lastToolName string)                                                // returns hook collector state
-	OnInterrupt func()                                    // called when Ctrl+C is written to the PTY
-	OnSubmit func(text string, priority message.Priority) // called for non-normal input
-	OnDetach func()                                       // called when user selects detach from menu
+	DebugKeys       bool
+	DebugKeyBuf     []string
+	AgentName       string
+	OnModeChange    func(mode InputMode)
+	QueueStatus     func() (int, bool)
+	OtelMetrics     func() (inputTokens int64, outputTokens int64, totalCostUSD float64, connected bool, port int) // returns OTEL metrics for status bar
+	AgentState      func() (state string, subState string, duration string)                                        // returns Agent's derived state + sub-state
+	HookState       func() (lastToolName string)                                                                   // returns hook collector state
+	OnInterrupt     func()                                                                                         // called when Ctrl+C is written to the PTY
+	OnSubmit        func(text string, priority message.Priority)                                                   // called for non-normal input
+	OnDetach        func()                                                                                         // called when user selects detach from menu
 
 	// Child process lifecycle callbacks (set by Session).
 	OnRelaunch func() // called when user presses Enter after child exits
 	OnQuit     func() // called when user presses q after child exits or selects Quit from menu
 
 	// Passthrough locking callbacks (set by Session).
-	TryPassthrough     func() bool // attempt to acquire passthrough; returns false if locked
-	ReleasePassthrough func()      // release passthrough ownership
-	TakePassthrough    func()      // force-take passthrough from current owner
+	TryPassthrough      func() bool // attempt to acquire passthrough; returns false if locked
+	ReleasePassthrough  func()      // release passthrough ownership
+	TakePassthrough     func()      // force-take passthrough from current owner
 	IsPassthroughLocked func() bool // returns true if another client owns passthrough
 
 	// Per-client terminal dimensions (used to resize VT on detach).

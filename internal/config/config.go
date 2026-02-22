@@ -70,9 +70,9 @@ func looksLikeH2Dir(dir string) bool {
 }
 
 var (
-	resolvedDir  string
-	resolvedErr  error
-	resolveOnce  sync.Once
+	resolvedDir string
+	resolvedErr error
+	resolveOnce sync.Once
 )
 
 // ResolveDir finds the h2 root directory.

@@ -134,7 +134,7 @@ type hookResponse struct {
 }
 
 type hookDecision struct {
-	HookEventName string         `json:"hookEventName"`
+	HookEventName string          `json:"hookEventName"`
 	Decision      decisionPayload `json:"decision"`
 }
 
