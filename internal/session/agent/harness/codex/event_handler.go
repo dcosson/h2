@@ -14,28 +14,42 @@ import (
 	"h2/internal/session/agent/monitor"
 )
 
-// OtelParser parses Codex OTEL payloads and emits AgentEvents.
+// EventHandler parses Codex OTEL payloads and emits AgentEvents.
 // Codex emits high-level codex.* events as OTEL logs via /v1/logs.
 // We also keep /v1/traces parsing for backwards compatibility/debugging.
-type OtelParser struct {
+type EventHandler struct {
 	events    chan<- monitor.AgentEvent
 	debugPath string
 	debugMu   sync.Mutex
 	debugFile *os.File
 
-	tokenMu         sync.Mutex
-	hasTokenBase    bool
-	lastInputTokens int64
+	tokenMu          sync.Mutex
+	hasTokenBase     bool
+	lastInputTokens  int64
 	lastCachedTokens int64
+
+	stateMu         sync.Mutex
+	currentState    monitor.State
+	currentSubState monitor.SubState
+
+	idleMu    sync.Mutex
+	idleTimer *time.Timer
+	idleSeq   uint64
 }
 
-// NewOtelParser creates a parser that emits events on the given channel.
-func NewOtelParser(events chan<- monitor.AgentEvent) *OtelParser {
-	return &OtelParser{events: events}
+var codexIdleDebounceDelay = 200 * time.Millisecond
+
+// NewEventHandler creates a parser that emits events on the given channel.
+func NewEventHandler(events chan<- monitor.AgentEvent) *EventHandler {
+	return &EventHandler{
+		events:          events,
+		currentState:    monitor.StateInitialized,
+		currentSubState: monitor.SubStateNone,
+	}
 }
 
 // ConfigureDebug sets the debug log path and eagerly initializes the file.
-func (p *OtelParser) ConfigureDebug(path string) {
+func (p *EventHandler) ConfigureDebug(path string) {
 	p.debugMu.Lock()
 	defer p.debugMu.Unlock()
 	if !otelDebugLoggingEnabled() {
@@ -50,7 +64,7 @@ func (p *OtelParser) ConfigureDebug(path string) {
 }
 
 // OnTraces is the callback for /v1/traces payloads from the OTEL server.
-func (p *OtelParser) OnTraces(body []byte) {
+func (p *EventHandler) OnTraces(body []byte) {
 	p.debugf("received /v1/traces payload bytes=%d", len(body))
 
 	var payload otelTracesPayload
@@ -72,7 +86,7 @@ func (p *OtelParser) OnTraces(body []byte) {
 }
 
 // OnLogs is the callback for /v1/logs payloads from the OTEL server.
-func (p *OtelParser) OnLogs(body []byte) {
+func (p *EventHandler) OnLogs(body []byte) {
 	p.debugf("received /v1/logs payload bytes=%d", len(body))
 
 	var payload otelLogsPayload
@@ -94,11 +108,11 @@ func (p *OtelParser) OnLogs(body []byte) {
 }
 
 // OnMetricsRaw records that /v1/metrics was hit for Codex OTEL debugging.
-func (p *OtelParser) OnMetricsRaw(body []byte) {
+func (p *EventHandler) OnMetricsRaw(body []byte) {
 	p.debugf("received /v1/metrics payload bytes=%d", len(body))
 }
 
-func (p *OtelParser) processTraces(payload otelTracesPayload) (spanCount int, emittedCount int, unknown []string) {
+func (p *EventHandler) processTraces(payload otelTracesPayload) (spanCount int, emittedCount int, unknown []string) {
 	now := time.Now()
 	unknownSet := make(map[string]struct{})
 	for _, rs := range payload.ResourceSpans {
@@ -119,7 +133,7 @@ func (p *OtelParser) processTraces(payload otelTracesPayload) (spanCount int, em
 	return spanCount, emittedCount, unknown
 }
 
-func (p *OtelParser) processLogs(payload otelLogsPayload) (recordCount int, emittedCount int, unknown []string) {
+func (p *EventHandler) processLogs(payload otelLogsPayload) (recordCount int, emittedCount int, unknown []string) {
 	now := time.Now()
 	unknownSet := make(map[string]struct{})
 	for ri, rl := range payload.ResourceLogs {
@@ -150,9 +164,10 @@ type spanProcessResult struct {
 	emitted    int
 }
 
-func (p *OtelParser) processEvent(name string, attrs []otelAttribute, ts time.Time) spanProcessResult {
+func (p *EventHandler) processEvent(name string, attrs []otelAttribute, ts time.Time) spanProcessResult {
 	switch name {
 	case "codex.conversation_starts":
+		p.cancelPendingIdle()
 		p.resetTokenBaselines()
 		convID := getAttr(attrs, "conversation.id")
 		model := getAttr(attrs, "model")
@@ -164,45 +179,25 @@ func (p *OtelParser) processEvent(name string, attrs []otelAttribute, ts time.Ti
 				Model:    model,
 			},
 		})
-		p.emit(monitor.AgentEvent{
-			Type:      monitor.EventStateChange,
-			Timestamp: ts,
-			Data: monitor.StateChangeData{
-				State:    monitor.StateIdle,
-				SubState: monitor.SubStateNone,
-			},
-		})
+		p.emitStateChange(ts, monitor.StateIdle, monitor.SubStateNone)
 		p.debugf("span=codex.conversation_starts conversation.id=%q model=%q", convID, model)
 		return spanProcessResult{recognized: true, emitted: 2}
 
 	case "codex.user_prompt":
+		p.cancelPendingIdle()
 		p.emit(monitor.AgentEvent{
-			Type:      monitor.EventTurnStarted,
+			Type:      monitor.EventUserPrompt,
 			Timestamp: ts,
-			Data:      monitor.TurnStartedData{},
 		})
-		p.emit(monitor.AgentEvent{
-			Type:      monitor.EventStateChange,
-			Timestamp: ts,
-			Data: monitor.StateChangeData{
-				State:    monitor.StateActive,
-				SubState: monitor.SubStateThinking,
-			},
-		})
+		p.emitStateChange(ts, monitor.StateActive, monitor.SubStateThinking)
 		p.debugf("span=codex.user_prompt")
 		return spanProcessResult{recognized: true, emitted: 2}
 
 	case "codex.sse_event":
 		eventKind := getAttr(attrs, "event.kind")
 		if eventKind == "response.created" {
-			p.emit(monitor.AgentEvent{
-				Type:      monitor.EventStateChange,
-				Timestamp: ts,
-				Data: monitor.StateChangeData{
-					State:    monitor.StateActive,
-					SubState: monitor.SubStateThinking,
-				},
-			})
+			p.cancelPendingIdle()
+			p.emitStateChange(ts, monitor.StateActive, monitor.SubStateThinking)
 			p.debugf("span=codex.sse_event event.kind=%q", eventKind)
 			return spanProcessResult{recognized: true, emitted: 1}
 		}
@@ -224,16 +219,11 @@ func (p *OtelParser) processEvent(name string, attrs []otelAttribute, ts time.Ti
 					CachedTokens: deltaCached,
 				},
 			})
-			p.emit(monitor.AgentEvent{
-				Type:      monitor.EventStateChange,
-				Timestamp: ts,
-				Data: monitor.StateChangeData{
-					State:    monitor.StateIdle,
-					SubState: monitor.SubStateNone,
-				},
-			})
+			if p.shouldScheduleIdleAfterCompletion() {
+				p.schedulePendingIdle()
+			}
 			p.debugf("span=codex.sse_event completed input=%d output=%d cached=%d delta_input=%d delta_cached=%d", input, output, cached, deltaInput, deltaCached)
-			return spanProcessResult{recognized: true, emitted: 2}
+			return spanProcessResult{recognized: true, emitted: 1}
 		}
 		p.debugf("span=codex.sse_event completed but zero tokens (ignored)")
 		return spanProcessResult{recognized: true}
@@ -263,6 +253,7 @@ func (p *OtelParser) processEvent(name string, attrs []otelAttribute, ts time.Ti
 	case "codex.tool_decision":
 		decision := getAttr(attrs, "decision")
 		if decision == "approved" {
+			p.cancelPendingIdle()
 			toolName := getAttr(attrs, "tool_name")
 			callID := getAttr(attrs, "call_id")
 			p.emit(monitor.AgentEvent{
@@ -273,18 +264,12 @@ func (p *OtelParser) processEvent(name string, attrs []otelAttribute, ts time.Ti
 					CallID:   callID,
 				},
 			})
-			p.emit(monitor.AgentEvent{
-				Type:      monitor.EventStateChange,
-				Timestamp: ts,
-				Data: monitor.StateChangeData{
-					State:    monitor.StateActive,
-					SubState: monitor.SubStateToolUse,
-				},
-			})
+			p.emitStateChange(ts, monitor.StateActive, monitor.SubStateToolUse)
 			p.debugf("span=codex.tool_decision decision=approved tool=%q call_id=%q", toolName, callID)
 			return spanProcessResult{recognized: true, emitted: 2}
 		}
 		if decision == "ask_user" {
+			p.cancelPendingIdle()
 			toolName := getAttr(attrs, "tool_name")
 			callID := getAttr(attrs, "call_id")
 			p.emit(monitor.AgentEvent{
@@ -295,14 +280,7 @@ func (p *OtelParser) processEvent(name string, attrs []otelAttribute, ts time.Ti
 					CallID:   callID,
 				},
 			})
-			p.emit(monitor.AgentEvent{
-				Type:      monitor.EventStateChange,
-				Timestamp: ts,
-				Data: monitor.StateChangeData{
-					State:    monitor.StateActive,
-					SubState: monitor.SubStateWaitingForPermission,
-				},
-			})
+			p.emitStateChange(ts, monitor.StateActive, monitor.SubStateWaitingForPermission)
 			p.debugf("span=codex.tool_decision decision=ask_user tool=%q call_id=%q", toolName, callID)
 			return spanProcessResult{recognized: true, emitted: 2}
 		}
@@ -336,7 +314,7 @@ func attrValueString(v otelAttrValue) string {
 	return v.StringValue
 }
 
-func (p *OtelParser) resetTokenBaselines() {
+func (p *EventHandler) resetTokenBaselines() {
 	p.tokenMu.Lock()
 	defer p.tokenMu.Unlock()
 	p.hasTokenBase = false
@@ -344,7 +322,69 @@ func (p *OtelParser) resetTokenBaselines() {
 	p.lastCachedTokens = 0
 }
 
-func (p *OtelParser) deltaInputAndCached(input, cached int64) (int64, int64) {
+func (p *EventHandler) emitStateChange(ts time.Time, state monitor.State, subState monitor.SubState) {
+	p.setState(state, subState)
+	p.emit(monitor.AgentEvent{
+		Type:      monitor.EventStateChange,
+		Timestamp: ts,
+		Data: monitor.StateChangeData{
+			State:    state,
+			SubState: subState,
+		},
+	})
+}
+
+func (p *EventHandler) setState(state monitor.State, subState monitor.SubState) {
+	p.stateMu.Lock()
+	defer p.stateMu.Unlock()
+	p.currentState = state
+	p.currentSubState = subState
+}
+
+func (p *EventHandler) shouldScheduleIdleAfterCompletion() bool {
+	p.stateMu.Lock()
+	defer p.stateMu.Unlock()
+	return p.currentState == monitor.StateActive && p.currentSubState != monitor.SubStateToolUse
+}
+
+func (p *EventHandler) schedulePendingIdle() {
+	p.idleMu.Lock()
+	defer p.idleMu.Unlock()
+
+	p.idleSeq++
+	seq := p.idleSeq
+	if p.idleTimer != nil {
+		p.idleTimer.Stop()
+	}
+	p.idleTimer = time.AfterFunc(codexIdleDebounceDelay, func() {
+		p.idleMu.Lock()
+		if seq != p.idleSeq {
+			p.idleMu.Unlock()
+			return
+		}
+		p.idleMu.Unlock()
+
+		p.stateMu.Lock()
+		state := p.currentState
+		sub := p.currentSubState
+		p.stateMu.Unlock()
+		if state == monitor.StateActive && sub != monitor.SubStateToolUse {
+			p.emitStateChange(time.Now(), monitor.StateIdle, monitor.SubStateNone)
+		}
+	})
+}
+
+func (p *EventHandler) cancelPendingIdle() {
+	p.idleMu.Lock()
+	defer p.idleMu.Unlock()
+	p.idleSeq++
+	if p.idleTimer != nil {
+		p.idleTimer.Stop()
+		p.idleTimer = nil
+	}
+}
+
+func (p *EventHandler) deltaInputAndCached(input, cached int64) (int64, int64) {
 	p.tokenMu.Lock()
 	defer p.tokenMu.Unlock()
 
@@ -369,7 +409,7 @@ func (p *OtelParser) deltaInputAndCached(input, cached int64) (int64, int64) {
 	return deltaInput, deltaCached
 }
 
-func (p *OtelParser) emit(ev monitor.AgentEvent) {
+func (p *EventHandler) emit(ev monitor.AgentEvent) {
 	p.debugf("emit type=%s", ev.Type.String())
 	select {
 	case p.events <- ev:
@@ -457,7 +497,7 @@ func getIntAttr(attrs []otelAttribute, key string) int64 {
 	return 0
 }
 
-func (p *OtelParser) debugf(format string, args ...any) {
+func (p *EventHandler) debugf(format string, args ...any) {
 	if p.debugPath == "" {
 		return
 	}
@@ -482,7 +522,7 @@ func otelDebugLoggingEnabled() bool {
 	return v == "1" || v == "true" || v == "yes" || v == "on"
 }
 
-func (p *OtelParser) ensureDebugFile() {
+func (p *EventHandler) ensureDebugFile() {
 	if p.debugFile != nil || p.debugPath == "" {
 		return
 	}

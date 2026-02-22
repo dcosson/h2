@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"h2/internal/activitylog"
@@ -30,7 +29,7 @@ type CodexHarness struct {
 	activityLog *activitylog.Logger
 
 	otelServer *otelserver.OtelServer
-	otelParser *OtelParser
+	otelParser *EventHandler
 
 	// internalCh buffers events from the OTEL parser callbacks.
 	// Start() forwards these to the external events channel.
@@ -48,7 +47,7 @@ func New(cfg harness.HarnessConfig, log *activitylog.Logger) *CodexHarness {
 		model:       cfg.Model,
 		activityLog: log,
 		internalCh:  ch,
-		otelParser:  NewOtelParser(ch),
+		otelParser:  NewEventHandler(ch),
 	}
 }
 
@@ -115,16 +114,21 @@ func (h *CodexHarness) PrepareForLaunch(agentName, sessionID string, dryRun bool
 	debugPath := resolveDebugPath(agentName, sessionID)
 	h.otelParser.ConfigureDebug(debugPath)
 
-	cfg, s, err := BuildLaunchConfig(otelserver.Callbacks{
+	s, err := otelserver.New(otelserver.Callbacks{
 		OnLogs:    h.otelParser.OnLogs,
 		OnMetrics: h.otelParser.OnMetricsRaw,
 		OnTraces:  h.otelParser.OnTraces,
 	})
 	if err != nil {
-		return harness.LaunchConfig{}, err
+		return harness.LaunchConfig{}, fmt.Errorf("create otel server: %w", err)
 	}
 	h.otelServer = s
-	return cfg, nil
+	endpoint := fmt.Sprintf("http://127.0.0.1:%d/v1/logs", s.Port)
+	return harness.LaunchConfig{
+		PrependArgs: []string{
+			"-c", fmt.Sprintf(`otel.exporter={otlp-http={endpoint="%s",protocol="json"}}`, endpoint),
+		},
+	}, nil
 }
 
 // --- Runtime (called after child process starts) ---
@@ -175,29 +179,7 @@ func resolveSessionDir(agentName, sessionID string) string {
 	if agentName != "" {
 		return config.SessionDir(agentName)
 	}
-	if sessionID == "" {
-		return ""
-	}
-
-	root := config.SessionsDir()
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return ""
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		dir := filepath.Join(root, entry.Name())
-		meta, err := config.ReadSessionMetadata(dir)
-		if err != nil {
-			continue
-		}
-		if meta != nil && meta.SessionID == sessionID {
-			return dir
-		}
-	}
-	return ""
+	return config.FindSessionDirByID(sessionID)
 }
 
 func resolveDebugPath(agentName, sessionID string) string {

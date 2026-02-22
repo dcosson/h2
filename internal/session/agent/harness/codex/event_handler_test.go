@@ -43,9 +43,9 @@ func drainEvents(ch chan monitor.AgentEvent, n int) []monitor.AgentEvent {
 	return events
 }
 
-func TestOtelParser_ConversationStarts(t *testing.T) {
+func TestEventHandler_ConversationStarts(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
-	p := NewOtelParser(events)
+	p := NewEventHandler(events)
 
 	body := makeLogsPayload("codex.conversation_starts", []otelAttribute{
 		{Key: "conversation.id", Value: otelAttrValue{StringValue: "conv-123"}},
@@ -76,9 +76,9 @@ func TestOtelParser_ConversationStarts(t *testing.T) {
 	}
 }
 
-func TestOtelParser_UserPrompt(t *testing.T) {
+func TestEventHandler_UserPrompt(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
-	p := NewOtelParser(events)
+	p := NewEventHandler(events)
 
 	body := makeLogsPayload("codex.user_prompt", []otelAttribute{
 		{Key: "prompt_length", Value: otelAttrValue{IntValue: json.RawMessage("42")}},
@@ -89,8 +89,8 @@ func TestOtelParser_UserPrompt(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("expected 2 events, got %d", len(got))
 	}
-	if got[0].Type != monitor.EventTurnStarted {
-		t.Fatalf("Type = %v, want EventTurnStarted", got[0].Type)
+	if got[0].Type != monitor.EventUserPrompt {
+		t.Fatalf("Type = %v, want EventUserPrompt", got[0].Type)
 	}
 	if got[1].Type != monitor.EventStateChange {
 		t.Fatalf("Type = %v, want EventStateChange", got[1].Type)
@@ -101,9 +101,9 @@ func TestOtelParser_UserPrompt(t *testing.T) {
 	}
 }
 
-func TestOtelParser_SSEEvent_Completed(t *testing.T) {
+func TestEventHandler_SSEEvent_Completed(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
-	p := NewOtelParser(events)
+	p := NewEventHandler(events)
 
 	body := makeLogsPayload("codex.sse_event", []otelAttribute{
 		{Key: "event.kind", Value: otelAttrValue{StringValue: "response.completed"}},
@@ -113,15 +113,12 @@ func TestOtelParser_SSEEvent_Completed(t *testing.T) {
 	})
 	p.OnLogs(body)
 
-	got := drainEvents(events, 2)
-	if len(got) != 2 {
-		t.Fatalf("expected 2 events, got %d", len(got))
+	got := drainEvents(events, 1)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(got))
 	}
 	if got[0].Type != monitor.EventTurnCompleted {
 		t.Fatalf("Type = %v, want EventTurnCompleted", got[0].Type)
-	}
-	if got[1].Type != monitor.EventStateChange {
-		t.Fatalf("Type = %v, want EventStateChange", got[1].Type)
 	}
 	data := got[0].Data.(monitor.TurnCompletedData)
 	if data.InputTokens != 500 {
@@ -133,15 +130,11 @@ func TestOtelParser_SSEEvent_Completed(t *testing.T) {
 	if data.CachedTokens != 100 {
 		t.Errorf("CachedTokens = %d, want 100", data.CachedTokens)
 	}
-	state := got[1].Data.(monitor.StateChangeData)
-	if state.State != monitor.StateIdle || state.SubState != monitor.SubStateNone {
-		t.Errorf("state = (%v,%v), want (Idle,None)", state.State, state.SubState)
-	}
 }
 
-func TestOtelParser_SSEEvent_Completed_UsesInputCachedDelta(t *testing.T) {
+func TestEventHandler_SSEEvent_Completed_UsesInputCachedDelta(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
-	p := NewOtelParser(events)
+	p := NewEventHandler(events)
 
 	first := makeLogsPayload("codex.sse_event", []otelAttribute{
 		{Key: "event.kind", Value: otelAttrValue{StringValue: "response.completed"}},
@@ -159,23 +152,23 @@ func TestOtelParser_SSEEvent_Completed_UsesInputCachedDelta(t *testing.T) {
 	})
 	p.OnLogs(second)
 
-	got := drainEvents(events, 4)
-	if len(got) != 4 {
-		t.Fatalf("expected 4 events, got %d", len(got))
+	got := drainEvents(events, 2)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(got))
 	}
 	firstTurn := got[0].Data.(monitor.TurnCompletedData)
 	if firstTurn.InputTokens != 1000 || firstTurn.CachedTokens != 900 || firstTurn.OutputTokens != 40 {
 		t.Fatalf("first turn = %+v, want input=1000 cached=900 output=40", firstTurn)
 	}
-	secondTurn := got[2].Data.(monitor.TurnCompletedData)
+	secondTurn := got[1].Data.(monitor.TurnCompletedData)
 	if secondTurn.InputTokens != 120 || secondTurn.CachedTokens != 80 || secondTurn.OutputTokens != 50 {
 		t.Fatalf("second turn = %+v, want input=120 cached=80 output=50", secondTurn)
 	}
 }
 
-func TestOtelParser_SSEEvent_Completed_DeltaResetsOnDecrease(t *testing.T) {
+func TestEventHandler_SSEEvent_Completed_DeltaResetsOnDecrease(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
-	p := NewOtelParser(events)
+	p := NewEventHandler(events)
 
 	first := makeLogsPayload("codex.sse_event", []otelAttribute{
 		{Key: "event.kind", Value: otelAttrValue{StringValue: "response.completed"}},
@@ -194,19 +187,19 @@ func TestOtelParser_SSEEvent_Completed_DeltaResetsOnDecrease(t *testing.T) {
 	})
 	p.OnLogs(second)
 
-	got := drainEvents(events, 4)
-	if len(got) != 4 {
-		t.Fatalf("expected 4 events, got %d", len(got))
+	got := drainEvents(events, 2)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(got))
 	}
-	secondTurn := got[2].Data.(monitor.TurnCompletedData)
+	secondTurn := got[1].Data.(monitor.TurnCompletedData)
 	if secondTurn.InputTokens != 700 || secondTurn.CachedTokens != 500 || secondTurn.OutputTokens != 30 {
 		t.Fatalf("second turn = %+v, want reset input=700 cached=500 output=30", secondTurn)
 	}
 }
 
-func TestOtelParser_SSEEvent_ResponseCreated_EmitsActive(t *testing.T) {
+func TestEventHandler_SSEEvent_ResponseCreated_EmitsActive(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
-	p := NewOtelParser(events)
+	p := NewEventHandler(events)
 
 	body := makeLogsPayload("codex.sse_event", []otelAttribute{
 		{Key: "event.kind", Value: otelAttrValue{StringValue: "response.created"}},
@@ -226,9 +219,9 @@ func TestOtelParser_SSEEvent_ResponseCreated_EmitsActive(t *testing.T) {
 	}
 }
 
-func TestOtelParser_SSEEvent_NonCompleted_NoEmit(t *testing.T) {
+func TestEventHandler_SSEEvent_NonCompleted_NoEmit(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
-	p := NewOtelParser(events)
+	p := NewEventHandler(events)
 
 	body := makeLogsPayload("codex.sse_event", []otelAttribute{
 		{Key: "event.kind", Value: otelAttrValue{StringValue: "response.in_progress"}},
@@ -243,9 +236,9 @@ func TestOtelParser_SSEEvent_NonCompleted_NoEmit(t *testing.T) {
 	}
 }
 
-func TestOtelParser_SSEEvent_CompletedZeroTokens_NoEmit(t *testing.T) {
+func TestEventHandler_SSEEvent_CompletedZeroTokens_NoEmit(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
-	p := NewOtelParser(events)
+	p := NewEventHandler(events)
 
 	body := makeLogsPayload("codex.sse_event", []otelAttribute{
 		{Key: "event.kind", Value: otelAttrValue{StringValue: "response.completed"}},
@@ -263,9 +256,9 @@ func TestOtelParser_SSEEvent_CompletedZeroTokens_NoEmit(t *testing.T) {
 	}
 }
 
-func TestOtelParser_ToolResult(t *testing.T) {
+func TestEventHandler_ToolResult(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
-	p := NewOtelParser(events)
+	p := NewEventHandler(events)
 
 	body := makeLogsPayload("codex.tool_result", []otelAttribute{
 		{Key: "tool_name", Value: otelAttrValue{StringValue: "shell"}},
@@ -297,9 +290,9 @@ func TestOtelParser_ToolResult(t *testing.T) {
 	}
 }
 
-func TestOtelParser_ToolResult_Failure(t *testing.T) {
+func TestEventHandler_ToolResult_Failure(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
-	p := NewOtelParser(events)
+	p := NewEventHandler(events)
 
 	body := makeLogsPayload("codex.tool_result", []otelAttribute{
 		{Key: "tool_name", Value: otelAttrValue{StringValue: "shell"}},
@@ -317,9 +310,9 @@ func TestOtelParser_ToolResult_Failure(t *testing.T) {
 	}
 }
 
-func TestOtelParser_ToolDecision_AskUser(t *testing.T) {
+func TestEventHandler_ToolDecision_AskUser(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
-	p := NewOtelParser(events)
+	p := NewEventHandler(events)
 
 	body := makeLogsPayload("codex.tool_decision", []otelAttribute{
 		{Key: "tool_name", Value: otelAttrValue{StringValue: "shell"}},
@@ -351,9 +344,9 @@ func TestOtelParser_ToolDecision_AskUser(t *testing.T) {
 	}
 }
 
-func TestOtelParser_ToolDecision_Approved_EmitsToolStarted(t *testing.T) {
+func TestEventHandler_ToolDecision_Approved_EmitsToolStarted(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
-	p := NewOtelParser(events)
+	p := NewEventHandler(events)
 
 	body := makeLogsPayload("codex.tool_decision", []otelAttribute{
 		{Key: "tool_name", Value: otelAttrValue{StringValue: "shell"}},
@@ -385,9 +378,95 @@ func TestOtelParser_ToolDecision_Approved_EmitsToolStarted(t *testing.T) {
 	}
 }
 
-func TestOtelParser_ToolDecision_Allow_NoEmit(t *testing.T) {
+func TestEventHandler_SSECompleted_DoesNotIdleDuringToolUse(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
-	p := NewOtelParser(events)
+	p := NewEventHandler(events)
+
+	p.OnLogs(makeLogsPayload("codex.tool_decision", []otelAttribute{
+		{Key: "tool_name", Value: otelAttrValue{StringValue: "shell"}},
+		{Key: "call_id", Value: otelAttrValue{StringValue: "call-tool-1"}},
+		{Key: "decision", Value: otelAttrValue{StringValue: "approved"}},
+	}))
+
+	p.OnLogs(makeLogsPayload("codex.sse_event", []otelAttribute{
+		{Key: "event.kind", Value: otelAttrValue{StringValue: "response.completed"}},
+		{Key: "input_token_count", Value: otelAttrValue{IntValue: json.RawMessage("100")}},
+		{Key: "output_token_count", Value: otelAttrValue{IntValue: json.RawMessage("20")}},
+		{Key: "cached_token_count", Value: otelAttrValue{IntValue: json.RawMessage("50")}},
+	}))
+
+	got := drainEvents(events, 3)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 events, got %d", len(got))
+	}
+	if got[0].Type != monitor.EventToolStarted {
+		t.Fatalf("event[0].Type = %v, want EventToolStarted", got[0].Type)
+	}
+	if got[1].Type != monitor.EventStateChange {
+		t.Fatalf("event[1].Type = %v, want EventStateChange", got[1].Type)
+	}
+	state := got[1].Data.(monitor.StateChangeData)
+	if state.State != monitor.StateActive || state.SubState != monitor.SubStateToolUse {
+		t.Fatalf("tool_use state = (%v,%v), want (Active,ToolUse)", state.State, state.SubState)
+	}
+	if got[2].Type != monitor.EventTurnCompleted {
+		t.Fatalf("event[2].Type = %v, want EventTurnCompleted", got[2].Type)
+	}
+
+	select {
+	case ev := <-events:
+		t.Fatalf("unexpected extra event while in tool_use: %+v", ev)
+	case <-time.After(50 * time.Millisecond):
+		// OK: no idle state emitted.
+	}
+}
+
+func TestEventHandler_SSECompleted_DebouncesIdleAndCancelsOnToolUse(t *testing.T) {
+	old := codexIdleDebounceDelay
+	codexIdleDebounceDelay = 30 * time.Millisecond
+	defer func() { codexIdleDebounceDelay = old }()
+
+	events := make(chan monitor.AgentEvent, 64)
+	p := NewEventHandler(events)
+
+	// Move parser state to active/thinking.
+	p.OnLogs(makeLogsPayload("codex.user_prompt", nil))
+	_ = drainEvents(events, 2)
+
+	// Completed response schedules idle debounce.
+	p.OnLogs(makeLogsPayload("codex.sse_event", []otelAttribute{
+		{Key: "event.kind", Value: otelAttrValue{StringValue: "response.completed"}},
+		{Key: "input_token_count", Value: otelAttrValue{IntValue: json.RawMessage("100")}},
+		{Key: "output_token_count", Value: otelAttrValue{IntValue: json.RawMessage("20")}},
+		{Key: "cached_token_count", Value: otelAttrValue{IntValue: json.RawMessage("50")}},
+	}))
+	got := drainEvents(events, 1)
+	if len(got) != 1 || got[0].Type != monitor.EventTurnCompleted {
+		t.Fatalf("expected immediate turn_completed, got %+v", got)
+	}
+
+	// Tool approval arrives inside debounce window and must cancel pending idle.
+	p.OnLogs(makeLogsPayload("codex.tool_decision", []otelAttribute{
+		{Key: "tool_name", Value: otelAttrValue{StringValue: "shell"}},
+		{Key: "call_id", Value: otelAttrValue{StringValue: "call-race-1"}},
+		{Key: "decision", Value: otelAttrValue{StringValue: "approved"}},
+	}))
+	got = drainEvents(events, 2)
+	if len(got) != 2 {
+		t.Fatalf("expected tool_started + state_change, got %d", len(got))
+	}
+
+	time.Sleep(60 * time.Millisecond)
+	select {
+	case ev := <-events:
+		t.Fatalf("unexpected event after debounce cancellation: %+v", ev)
+	default:
+	}
+}
+
+func TestEventHandler_ToolDecision_Allow_NoEmit(t *testing.T) {
+	events := make(chan monitor.AgentEvent, 64)
+	p := NewEventHandler(events)
 
 	body := makeLogsPayload("codex.tool_decision", []otelAttribute{
 		{Key: "tool_name", Value: otelAttrValue{StringValue: "shell"}},
@@ -403,9 +482,9 @@ func TestOtelParser_ToolDecision_Allow_NoEmit(t *testing.T) {
 	}
 }
 
-func TestOtelParser_UnknownSpan_NoEmit(t *testing.T) {
+func TestEventHandler_UnknownSpan_NoEmit(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
-	p := NewOtelParser(events)
+	p := NewEventHandler(events)
 
 	body := makeLogsPayload("codex.api_request", []otelAttribute{
 		{Key: "duration_ms", Value: otelAttrValue{IntValue: json.RawMessage("200")}},
@@ -420,9 +499,9 @@ func TestOtelParser_UnknownSpan_NoEmit(t *testing.T) {
 	}
 }
 
-func TestOtelParser_InvalidJSON_NoEmit(t *testing.T) {
+func TestEventHandler_InvalidJSON_NoEmit(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
-	p := NewOtelParser(events)
+	p := NewEventHandler(events)
 
 	p.OnLogs([]byte("not json"))
 
@@ -434,9 +513,9 @@ func TestOtelParser_InvalidJSON_NoEmit(t *testing.T) {
 	}
 }
 
-func TestOtelParser_MultipleSpans(t *testing.T) {
+func TestEventHandler_MultipleSpans(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
-	p := NewOtelParser(events)
+	p := NewEventHandler(events)
 
 	payload := otelLogsPayload{
 		ResourceLogs: []otelResourceLogs{{
@@ -472,8 +551,8 @@ func TestOtelParser_MultipleSpans(t *testing.T) {
 	if got[1].Type != monitor.EventStateChange {
 		t.Errorf("event[1].Type = %v, want EventStateChange", got[1].Type)
 	}
-	if got[2].Type != monitor.EventTurnStarted {
-		t.Errorf("event[2].Type = %v, want EventTurnStarted", got[2].Type)
+	if got[2].Type != monitor.EventUserPrompt {
+		t.Errorf("event[2].Type = %v, want EventUserPrompt", got[2].Type)
 	}
 	if got[3].Type != monitor.EventStateChange {
 		t.Errorf("event[3].Type = %v, want EventStateChange", got[3].Type)

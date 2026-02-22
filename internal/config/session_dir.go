@@ -18,6 +18,34 @@ func SessionDir(agentName string) string {
 	return filepath.Join(SessionsDir(), agentName)
 }
 
+// FindSessionDirByID returns the session directory whose metadata contains
+// the given session ID. Empty string means not found.
+func FindSessionDirByID(sessionID string) string {
+	if sessionID == "" {
+		return ""
+	}
+
+	root := SessionsDir()
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return ""
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		dir := filepath.Join(root, entry.Name())
+		meta, err := ReadSessionMetadata(dir)
+		if err != nil {
+			continue
+		}
+		if meta != nil && meta.SessionID == sessionID {
+			return dir
+		}
+	}
+	return ""
+}
+
 // SetupSessionDir creates the session directory for an agent and writes
 // per-agent files (e.g. permission-reviewer.md). Claude Code config
 // (auth, hooks, settings) lives in the shared claude config dir, not here.
@@ -168,4 +196,3 @@ func buildH2Hooks() map[string][]hookMatcher {
 
 	return hooks
 }
-

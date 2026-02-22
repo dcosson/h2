@@ -16,7 +16,7 @@ import (
 // TestIntegration_FullPipeline verifies the end-to-end Codex harness flow:
 //
 //	CodexHarness.PrepareForLaunch → OtelServer (random port)
-//	mockCodex sends OTEL traces via HTTP → OtelParser → events → AgentMonitor
+//	mockCodex sends OTEL traces via HTTP → EventHandler → events → AgentMonitor
 //
 // Verifies: session ID discovery, token counting, tool tracking, state transitions.
 func TestIntegration_FullPipeline(t *testing.T) {
