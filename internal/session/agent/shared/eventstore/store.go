@@ -144,7 +144,7 @@ type eventEnvelope struct {
 // eventTypeToString maps AgentEventType to its string representation.
 var eventTypeToString = map[monitor.AgentEventType]string{
 	monitor.EventSessionStarted:    "session_started",
-	monitor.EventTurnStarted:       "turn_started",
+	monitor.EventUserPrompt:        "user_prompt",
 	monitor.EventTurnCompleted:     "turn_completed",
 	monitor.EventToolStarted:       "tool_started",
 	monitor.EventToolCompleted:     "tool_completed",
@@ -237,9 +237,8 @@ func unmarshalData(evType monitor.AgentEventType, raw json.RawMessage) (any, err
 	case monitor.EventSessionStarted:
 		var d monitor.SessionStartedData
 		return d, json.Unmarshal(raw, &d)
-	case monitor.EventTurnStarted:
-		var d monitor.TurnStartedData
-		return d, json.Unmarshal(raw, &d)
+	case monitor.EventUserPrompt:
+		return nil, nil
 	case monitor.EventTurnCompleted:
 		var d monitor.TurnCompletedData
 		return d, json.Unmarshal(raw, &d)

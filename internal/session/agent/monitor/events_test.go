@@ -10,8 +10,8 @@ func TestAgentEventType_Values(t *testing.T) {
 	if EventSessionStarted != 0 {
 		t.Errorf("EventSessionStarted = %d, want 0", EventSessionStarted)
 	}
-	if EventTurnStarted != 1 {
-		t.Errorf("EventTurnStarted = %d, want 1", EventTurnStarted)
+	if EventUserPrompt != 1 {
+		t.Errorf("EventUserPrompt = %d, want 1", EventUserPrompt)
 	}
 	if EventTurnCompleted != 2 {
 		t.Errorf("EventTurnCompleted = %d, want 2", EventTurnCompleted)
@@ -116,7 +116,7 @@ func TestAgentEventType_String(t *testing.T) {
 		want string
 	}{
 		{EventSessionStarted, "session_started"},
-		{EventTurnStarted, "turn_started"},
+		{EventUserPrompt, "user_prompt"},
 		{EventTurnCompleted, "turn_completed"},
 		{EventToolStarted, "tool_started"},
 		{EventToolCompleted, "tool_completed"},

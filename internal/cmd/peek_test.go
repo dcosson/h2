@@ -196,7 +196,7 @@ func TestFormatAgentEvent_SessionEnded(t *testing.T) {
 func TestFormatAgentEvent_SkipsNoisyEvents(t *testing.T) {
 	now := time.Now()
 	noisy := []monitor.AgentEvent{
-		{Type: monitor.EventTurnStarted, Timestamp: now},
+		{Type: monitor.EventUserPrompt, Timestamp: now},
 		{Type: monitor.EventToolStarted, Timestamp: now, Data: monitor.ToolStartedData{ToolName: "Read"}},
 		{Type: monitor.EventStateChange, Timestamp: now, Data: monitor.StateChangeData{State: monitor.StateActive}},
 	}

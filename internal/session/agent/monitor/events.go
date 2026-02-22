@@ -14,7 +14,7 @@ type AgentEventType int
 
 const (
 	EventSessionStarted    AgentEventType = iota
-	EventTurnStarted
+	EventUserPrompt
 	EventTurnCompleted
 	EventToolStarted
 	EventToolCompleted
@@ -29,8 +29,8 @@ func (t AgentEventType) String() string {
 	switch t {
 	case EventSessionStarted:
 		return "session_started"
-	case EventTurnStarted:
-		return "turn_started"
+	case EventUserPrompt:
+		return "user_prompt"
 	case EventTurnCompleted:
 		return "turn_completed"
 	case EventToolStarted:
@@ -71,11 +71,6 @@ type ToolCompletedData struct {
 	CallID     string
 	DurationMs int64
 	Success    bool
-}
-
-// TurnStartedData is the payload for EventTurnStarted.
-type TurnStartedData struct {
-	TurnID string
 }
 
 // ToolStartedData is the payload for EventToolStarted.

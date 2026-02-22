@@ -1,8 +1,7 @@
-// Package outputcollector provides a reusable PTY idle detector. It monitors
+// Package ptycollector provides a reusable PTY idle detector. It monitors
 // output notifications and emits active/idle state transitions based on a
-// configurable silence threshold. Both the Claude Code and Codex adapters
-// embed this as a fallback state source.
-package outputcollector
+// configurable silence threshold.
+package ptycollector
 
 import (
 	"time"

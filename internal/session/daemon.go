@@ -126,11 +126,10 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 	s := d.Session
 	uptime := time.Since(d.StartTime)
 	st, sub := s.State()
+	activity := s.Agent.ActivitySnapshot()
 	var toolName string
 	if st == monitor.StateActive {
-		if hc := s.Agent.HookCollector(); hc != nil {
-			toolName = hc.Snapshot().LastToolName
-		}
+		toolName = activity.LastToolName
 	}
 	info := &message.AgentInfo{
 		Name:             s.Name,
@@ -168,14 +167,10 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 		info.GitLinesRemoved = gs.LinesRemoved
 	}
 
-	// Pull from hook collector if active.
-	if hc := s.Agent.HookCollector(); hc != nil {
-		hs := hc.Snapshot()
-		info.LastToolUse = hs.LastToolName
-		info.ToolUseCount = hs.ToolUseCount
-		info.BlockedOnPermission = hs.BlockedOnPermission
-		info.BlockedToolName = hs.BlockedToolName
-	}
+	info.LastToolUse = activity.LastToolName
+	info.ToolUseCount = activity.ToolUseCount
+	info.BlockedOnPermission = activity.BlockedOnPermission
+	info.BlockedToolName = activity.BlockedToolName
 
 	return info
 }

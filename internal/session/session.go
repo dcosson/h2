@@ -346,10 +346,7 @@ func (s *Session) NewClient() *client.Client {
 		return st.String(), sub.String(), virtualterminal.FormatIdleDuration(s.StateDuration())
 	}
 	cl.HookState = func() string {
-		if hc := s.Agent.HookCollector(); hc != nil {
-			return hc.Snapshot().LastToolName
-		}
-		return ""
+		return s.Agent.ActivitySnapshot().LastToolName
 	}
 	cl.OnInterrupt = func() {
 		s.Agent.NoteInterrupt()
@@ -776,10 +773,7 @@ func (s *Session) buildSessionSummary() activitylog.SessionSummaryData {
 		ModelTokens:   snap.ModelTokens,
 	}
 
-	// Hook collector metrics.
-	if hc := s.Agent.HookCollector(); hc != nil {
-		d.ToolUseCount = hc.Snapshot().ToolUseCount
-	}
+	d.ToolUseCount = s.Agent.ActivitySnapshot().ToolUseCount
 
 	// Session uptime.
 	if !s.StartTime.IsZero() {

@@ -1,6 +1,6 @@
 // Package generic implements the Harness for generic (non-Claude, non-Codex)
 // agent commands. It provides output-based idle detection via an internal
-// outputcollector.Collector — no OTEL, no hooks.
+// ptycollector.Collector — no OTEL, no hooks.
 package generic
 
 import (
@@ -12,7 +12,7 @@ import (
 	"h2/internal/activitylog"
 	"h2/internal/session/agent/harness"
 	"h2/internal/session/agent/monitor"
-	"h2/internal/session/agent/shared/outputcollector"
+	"h2/internal/session/agent/shared/ptycollector"
 )
 
 func init() {
@@ -24,7 +24,7 @@ func init() {
 // GenericHarness implements harness.Harness for arbitrary shell commands.
 type GenericHarness struct {
 	command   string
-	collector *outputcollector.Collector // created in PrepareForLaunch()
+	collector *ptycollector.Collector // created in PrepareForLaunch()
 }
 
 // New creates a GenericHarness for the given command.
@@ -56,7 +56,7 @@ func (g *GenericHarness) PrepareForLaunch(agentName, sessionID string, dryRun bo
 	if g.command == "" {
 		return harness.LaunchConfig{}, fmt.Errorf("generic harness: command is empty")
 	}
-	g.collector = outputcollector.New(monitor.IdleThreshold)
+	g.collector = ptycollector.New(monitor.IdleThreshold)
 	return harness.LaunchConfig{}, nil
 }
 

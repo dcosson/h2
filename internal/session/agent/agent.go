@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"h2/internal/activitylog"
-	"h2/internal/session/agent/collector"
 	"h2/internal/session/agent/harness"
 	"h2/internal/session/agent/monitor"
 )
@@ -19,10 +18,6 @@ type Agent struct {
 
 	agentMonitor *monitor.AgentMonitor
 	cancel       context.CancelFunc
-
-	// Hook collector: kept for backward compat Snapshot() data.
-	// Hook events are forwarded to both harness and hooksCollector.
-	hooksCollector *collector.HookCollector
 
 	// Activity logger (nil-safe; Nop logger when not set).
 	activityLog *activitylog.Logger
@@ -69,11 +64,6 @@ func (a *Agent) PrepareForLaunch(agentName, sessionID string, dryRun bool) (harn
 		return harness.LaunchConfig{}, nil
 	}
 
-	// Create hook collector for agents that use hooks (Claude Code).
-	if !dryRun && a.harness.Name() == "claude_code" {
-		a.hooksCollector = collector.NewHookCollector(a.ActivityLog())
-	}
-
 	return a.harness.PrepareForLaunch(agentName, sessionID, dryRun)
 }
 
@@ -88,20 +78,12 @@ func (a *Agent) Start(ctx context.Context) {
 	go a.agentMonitor.Run(ctx)
 }
 
-// HandleHookEvent processes a hook event, forwarding to both the harness
-// (for event emission) and the hook collector (for backward compat Snapshot data).
+// HandleHookEvent processes a hook event via the harness.
 func (a *Agent) HandleHookEvent(eventName string, payload json.RawMessage) bool {
-	// Forward to hook collector for Snapshot() data.
-	if a.hooksCollector != nil {
-		a.hooksCollector.ProcessEvent(eventName, payload)
-	}
-
-	// Forward to harness for AgentEvent emission.
 	if a.harness != nil {
 		return a.harness.HandleHookEvent(eventName, payload)
 	}
-
-	return a.hooksCollector != nil
+	return false
 }
 
 // SetEventWriter sets the callback for persisting events. Must be called
@@ -149,10 +131,15 @@ func (a *Agent) HandleOutput() {
 }
 
 // NoteInterrupt signals that a Ctrl+C was sent to the child process.
-// Always safe to call — no-op if the hook collector is not active.
+// Always safe to call.
 func (a *Agent) NoteInterrupt() {
-	if a.hooksCollector != nil {
-		a.hooksCollector.NoteInterrupt()
+	a.agentMonitor.Events() <- monitor.AgentEvent{
+		Type:      monitor.EventStateChange,
+		Timestamp: time.Now(),
+		Data: monitor.StateChangeData{
+			State:    monitor.StateIdle,
+			SubState: monitor.SubStateNone,
+		},
 	}
 }
 
@@ -174,6 +161,7 @@ func (a *Agent) Metrics() OtelMetricsSnapshot {
 		OutputTokens:   ms.OutputTokens,
 		TotalTokens:    ms.InputTokens + ms.OutputTokens,
 		TotalCostUSD:   ms.TotalCostUSD,
+		UserPromptCount: ms.UserPromptCount,
 		ToolCounts:     ms.ToolCounts,
 		EventsReceived: hasData,
 	}
@@ -192,9 +180,9 @@ func (a *Agent) OtelPort() int {
 	return 0
 }
 
-// HookCollector returns the hook collector, or nil if not active.
-func (a *Agent) HookCollector() *collector.HookCollector {
-	return a.hooksCollector
+// ActivitySnapshot returns monitor-derived activity fields used in status rendering.
+func (a *Agent) ActivitySnapshot() monitor.ActivitySnapshot {
+	return a.agentMonitor.Activity()
 }
 
 // Stop cleans up agent resources and stops all goroutines.
@@ -217,8 +205,4 @@ func (a *Agent) Stop() {
 		a.harness.Stop()
 	}
 
-	// Stop collectors.
-	if a.hooksCollector != nil {
-		a.hooksCollector.Stop()
-	}
 }

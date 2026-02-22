@@ -30,7 +30,13 @@ type AgentMonitor struct {
 	cachedTokens int64
 	totalCostUSD float64
 	turnCount    int64
+	userPromptCount int64
 	toolCounts   map[string]int64
+
+	lastToolName        string
+	toolUseCount        int64
+	blockedOnPermission bool
+	blockedToolName     string
 }
 
 // Option configures an AgentMonitor.
@@ -97,10 +103,11 @@ func (m *AgentMonitor) processEvent(ev AgentEvent) {
 			m.model = data.Model
 		}
 
-	case EventTurnStarted:
-		m.turnCount++
+	case EventUserPrompt:
+		m.userPromptCount++
 
 	case EventTurnCompleted:
+		m.turnCount++
 		if data, ok := ev.Data.(TurnCompletedData); ok {
 			m.inputTokens += data.InputTokens
 			m.outputTokens += data.OutputTokens
@@ -112,6 +119,28 @@ func (m *AgentMonitor) processEvent(ev AgentEvent) {
 		if data, ok := ev.Data.(ToolCompletedData); ok {
 			if data.ToolName != "" {
 				m.toolCounts[data.ToolName]++
+				m.lastToolName = data.ToolName
+			}
+		}
+		m.blockedOnPermission = false
+		m.blockedToolName = ""
+
+	case EventToolStarted:
+		if data, ok := ev.Data.(ToolStartedData); ok {
+			if data.ToolName != "" {
+				m.lastToolName = data.ToolName
+			}
+		}
+		m.toolUseCount++
+		m.blockedOnPermission = false
+		m.blockedToolName = ""
+
+	case EventApprovalRequested:
+		if data, ok := ev.Data.(ApprovalRequestedData); ok {
+			m.blockedOnPermission = true
+			m.blockedToolName = data.ToolName
+			if data.ToolName != "" {
+				m.lastToolName = data.ToolName
 			}
 		}
 
@@ -120,6 +149,12 @@ func (m *AgentMonitor) processEvent(ev AgentEvent) {
 			// Exited is sticky — don't allow state changes once exited.
 			if m.state != StateExited {
 				m.setStateLocked(data.State, data.SubState)
+			}
+			if data.SubState == SubStateWaitingForPermission {
+				m.blockedOnPermission = true
+			} else if data.State != StateActive || data.SubState != SubStateWaitingForPermission {
+				m.blockedOnPermission = false
+				m.blockedToolName = ""
 			}
 		}
 
@@ -214,6 +249,7 @@ func (m *AgentMonitor) Metrics() MetricsSnapshot {
 		CachedTokens: m.cachedTokens,
 		TotalCostUSD: m.totalCostUSD,
 		TurnCount:    m.turnCount,
+		UserPromptCount: m.userPromptCount,
 		ToolCounts:   toolCounts,
 	}
 }
@@ -239,5 +275,26 @@ type MetricsSnapshot struct {
 	CachedTokens int64
 	TotalCostUSD float64
 	TurnCount    int64
+	UserPromptCount int64
 	ToolCounts   map[string]int64
+}
+
+// ActivitySnapshot contains monitor-derived activity state commonly used in status surfaces.
+type ActivitySnapshot struct {
+	LastToolName        string
+	ToolUseCount        int64
+	BlockedOnPermission bool
+	BlockedToolName     string
+}
+
+// Activity returns a snapshot of activity fields derived from normalized events.
+func (m *AgentMonitor) Activity() ActivitySnapshot {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return ActivitySnapshot{
+		LastToolName:        m.lastToolName,
+		ToolUseCount:        m.toolUseCount,
+		BlockedOnPermission: m.blockedOnPermission,
+		BlockedToolName:     m.blockedToolName,
+	}
 }

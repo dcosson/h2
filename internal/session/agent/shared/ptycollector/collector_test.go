@@ -1,4 +1,4 @@
-package outputcollector
+package ptycollector
 
 import (
 	"testing"

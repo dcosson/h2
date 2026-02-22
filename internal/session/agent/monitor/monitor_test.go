@@ -85,20 +85,45 @@ func TestProcessEvent_TurnCompleted_AccumulatesTokens(t *testing.T) {
 	}
 }
 
-func TestProcessEvent_TurnStarted_CountsTurns(t *testing.T) {
+func TestProcessEvent_TurnCompleted_DoesNotChangeState(t *testing.T) {
 	m := New()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go m.Run(ctx)
 
-	m.Events() <- AgentEvent{Type: EventTurnStarted, Timestamp: time.Now()}
-	m.Events() <- AgentEvent{Type: EventTurnStarted, Timestamp: time.Now()}
-	m.Events() <- AgentEvent{Type: EventTurnStarted, Timestamp: time.Now()}
+	m.Events() <- AgentEvent{
+		Type:      EventStateChange,
+		Timestamp: time.Now(),
+		Data:      StateChangeData{State: StateActive, SubState: SubStateThinking},
+	}
+	m.Events() <- AgentEvent{
+		Type:      EventTurnCompleted,
+		Timestamp: time.Now(),
+		Data:      TurnCompletedData{InputTokens: 1},
+	}
 
 	time.Sleep(10 * time.Millisecond)
 
-	if m.Metrics().TurnCount != 3 {
-		t.Errorf("TurnCount = %d, want 3", m.Metrics().TurnCount)
+	state, subState := m.State()
+	if state != StateActive || subState != SubStateThinking {
+		t.Fatalf("state = (%v,%v), want (Active,Thinking)", state, subState)
+	}
+}
+
+func TestProcessEvent_TurnStarted_CountsUserPrompts(t *testing.T) {
+	m := New()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go m.Run(ctx)
+
+	m.Events() <- AgentEvent{Type: EventUserPrompt, Timestamp: time.Now()}
+	m.Events() <- AgentEvent{Type: EventUserPrompt, Timestamp: time.Now()}
+	m.Events() <- AgentEvent{Type: EventUserPrompt, Timestamp: time.Now()}
+
+	time.Sleep(10 * time.Millisecond)
+
+	if m.Metrics().UserPromptCount != 3 {
+		t.Errorf("UserPromptCount = %d, want 3", m.Metrics().UserPromptCount)
 	}
 }
 

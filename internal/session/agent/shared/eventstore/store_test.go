@@ -200,7 +200,7 @@ func TestTail_StreamsNewEvents(t *testing.T) {
 
 	// Write a new event after tailing starts.
 	post := monitor.AgentEvent{
-		Type:      monitor.EventTurnStarted,
+		Type:      monitor.EventUserPrompt,
 		Timestamp: time.Now().Truncate(time.Millisecond),
 	}
 	// Small delay to let the tail goroutine start.
@@ -212,8 +212,8 @@ func TestTail_StreamsNewEvents(t *testing.T) {
 	// Should receive the post event.
 	select {
 	case ev := <-ch:
-		if ev.Type != monitor.EventTurnStarted {
-			t.Errorf("type = %v, want EventTurnStarted", ev.Type)
+		if ev.Type != monitor.EventUserPrompt {
+			t.Errorf("type = %v, want EventUserPrompt", ev.Type)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for tail event")
@@ -274,7 +274,7 @@ func TestTail_PartialLineHandling(t *testing.T) {
 
 	// Build a complete JSON line, then split it to simulate partial writes.
 	ev := monitor.AgentEvent{
-		Type:      monitor.EventTurnStarted,
+		Type:      monitor.EventUserPrompt,
 		Timestamp: time.Now().Truncate(time.Millisecond),
 	}
 	env := toEnvelope(ev)
@@ -318,8 +318,8 @@ func TestTail_PartialLineHandling(t *testing.T) {
 	// Should now receive the complete event.
 	select {
 	case got := <-ch:
-		if got.Type != monitor.EventTurnStarted {
-			t.Errorf("type = %v, want EventTurnStarted", got.Type)
+		if got.Type != monitor.EventUserPrompt {
+			t.Errorf("type = %v, want EventUserPrompt", got.Type)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for event from reassembled partial line")

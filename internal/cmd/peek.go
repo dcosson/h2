@@ -145,7 +145,7 @@ func formatAgentEvent(ev monitor.AgentEvent, now time.Time, messageChars int) st
 		return fmt.Sprintf("[%s] session ended", ts)
 
 	default:
-		// Skip turn_started, tool_started, state_change (too noisy).
+		// Skip user_prompt, tool_started, state_change (too noisy).
 		return ""
 	}
 }

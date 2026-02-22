@@ -134,6 +134,7 @@ type OtelMetricsSnapshot struct {
 	OutputTokens    int64
 	TotalTokens     int64
 	TotalCostUSD    float64
+	UserPromptCount int64
 	APIRequestCount int64
 	ToolResultCount int64
 	ToolCounts      map[string]int64
