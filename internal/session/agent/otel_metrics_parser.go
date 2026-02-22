@@ -101,8 +101,8 @@ type ParsedOtelMetrics struct {
 	LinesAdded    int64
 	LinesRemoved  int64
 	ActiveTimeHrs float64
-	ModelCosts    map[string]float64            // model -> cost USD
-	ModelTokens   map[string]map[string]int64   // model -> type -> count
+	ModelCosts    map[string]float64          // model -> cost USD
+	ModelTokens   map[string]map[string]int64 // model -> type -> count
 }
 
 // dataPointValue extracts the numeric value from a data point.

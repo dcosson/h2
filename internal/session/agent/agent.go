@@ -130,9 +130,9 @@ func (a *Agent) HandleOutput() {
 	}
 }
 
-// NoteInterrupt signals that a Ctrl+C was sent to the child process.
+// SignalInterrupt signals that a Ctrl+C was sent to the child process.
 // Always safe to call.
-func (a *Agent) NoteInterrupt() {
+func (a *Agent) SignalInterrupt() {
 	a.agentMonitor.Events() <- monitor.AgentEvent{
 		Type:      monitor.EventStateChange,
 		Timestamp: time.Now(),
@@ -157,13 +157,13 @@ func (a *Agent) Metrics() OtelMetricsSnapshot {
 	ms := a.agentMonitor.Metrics()
 	hasData := ms.InputTokens > 0 || ms.OutputTokens > 0 || ms.TurnCount > 0
 	return OtelMetricsSnapshot{
-		InputTokens:    ms.InputTokens,
-		OutputTokens:   ms.OutputTokens,
-		TotalTokens:    ms.InputTokens + ms.OutputTokens,
-		TotalCostUSD:   ms.TotalCostUSD,
+		InputTokens:     ms.InputTokens,
+		OutputTokens:    ms.OutputTokens,
+		TotalTokens:     ms.InputTokens + ms.OutputTokens,
+		TotalCostUSD:    ms.TotalCostUSD,
 		UserPromptCount: ms.UserPromptCount,
-		ToolCounts:     ms.ToolCounts,
-		EventsReceived: hasData,
+		ToolCounts:      ms.ToolCounts,
+		EventsReceived:  hasData,
 	}
 }
 

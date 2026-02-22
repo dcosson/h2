@@ -10,7 +10,7 @@ import (
 )
 
 // Collector derives state from child PTY output.
-// It goes active on each NoteOutput signal and idle after the configured
+// It goes active on each SignalOutput signal and idle after the configured
 // threshold with no further output.
 type Collector struct {
 	idleThreshold time.Duration
@@ -31,8 +31,8 @@ func New(idleThreshold time.Duration) *Collector {
 	return c
 }
 
-// NoteOutput signals that the child process produced output.
-func (c *Collector) NoteOutput() {
+// SignalOutput signals that the child process produced output.
+func (c *Collector) SignalOutput() {
 	select {
 	case c.notifyCh <- struct{}{}:
 	default:

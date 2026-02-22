@@ -357,7 +357,7 @@ func TestDeliver_InterruptCallsNoteInterrupt(t *testing.T) {
 		WaitForIdle: func(ctx context.Context) bool {
 			return true
 		},
-		NoteInterrupt: func() {
+		SignalInterrupt: func() {
 			interruptCalls++
 		},
 		OnDeliver: func() {
@@ -377,7 +377,7 @@ func TestDeliver_InterruptCallsNoteInterrupt(t *testing.T) {
 	close(stop)
 
 	if interruptCalls != 1 {
-		t.Fatalf("expected 1 NoteInterrupt call, got %d", interruptCalls)
+		t.Fatalf("expected 1 SignalInterrupt call, got %d", interruptCalls)
 	}
 }
 
@@ -402,7 +402,7 @@ func TestDeliver_NormalDoesNotCallNoteInterrupt(t *testing.T) {
 		Queue:     q,
 		PtyWriter: &buf,
 		IsIdle:    func() bool { return true },
-		NoteInterrupt: func() {
+		SignalInterrupt: func() {
 			interruptCalls++
 		},
 		OnDeliver: func() {
@@ -422,7 +422,7 @@ func TestDeliver_NormalDoesNotCallNoteInterrupt(t *testing.T) {
 	close(stop)
 
 	if interruptCalls != 0 {
-		t.Fatalf("NoteInterrupt should not be called for normal priority, got %d calls", interruptCalls)
+		t.Fatalf("SignalInterrupt should not be called for normal priority, got %d calls", interruptCalls)
 	}
 }
 

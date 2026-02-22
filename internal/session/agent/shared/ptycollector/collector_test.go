@@ -13,7 +13,7 @@ func TestCollector_ActiveOnOutput(t *testing.T) {
 	c := New(testIdleThreshold)
 	defer c.Stop()
 
-	c.NoteOutput()
+	c.SignalOutput()
 
 	select {
 	case su := <-c.StateCh():
@@ -29,7 +29,7 @@ func TestCollector_IdleAfterThreshold(t *testing.T) {
 	c := New(testIdleThreshold)
 	defer c.Stop()
 
-	c.NoteOutput()
+	c.SignalOutput()
 	// Drain the active signal.
 	<-c.StateCh()
 
@@ -47,12 +47,12 @@ func TestCollector_ResetTimerOnOutput(t *testing.T) {
 	c := New(testIdleThreshold)
 	defer c.Stop()
 
-	c.NoteOutput()
+	c.SignalOutput()
 	<-c.StateCh() // drain active
 
 	// Send another output before idle fires — should reset the timer.
 	time.Sleep(testIdleThreshold / 2)
-	c.NoteOutput()
+	c.SignalOutput()
 
 	select {
 	case su := <-c.StateCh():
@@ -68,6 +68,6 @@ func TestCollector_Stop(t *testing.T) {
 	c := New(testIdleThreshold)
 	c.Stop()
 
-	// After stop, NoteOutput should not panic.
-	c.NoteOutput()
+	// After stop, SignalOutput should not panic.
+	c.SignalOutput()
 }

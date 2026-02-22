@@ -72,8 +72,8 @@ func (m *OtelMetrics) UpdateFromMetricsEndpoint(parsed *ParsedOtelMetrics) {
 	m.ModelTokens = parsed.ModelTokens
 }
 
-// NoteEvent marks that an OTEL event was received (even if no metrics extracted).
-func (m *OtelMetrics) NoteEvent() {
+// SignalEvent marks that an OTEL event was received (even if no metrics extracted).
+func (m *OtelMetrics) SignalEvent() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.EventsReceived = true

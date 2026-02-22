@@ -10,10 +10,10 @@ import (
 // prepends (most recent first).
 type MessageQueue struct {
 	mu          sync.Mutex
-	interrupt   []*Message        // priority 1 - FIFO
-	normal      []*Message        // priority 2 - FIFO
-	idleFirst   []*Message        // priority 3 - prepended (most recent first)
-	idle        []*Message        // priority 4 - FIFO
+	interrupt   []*Message // priority 1 - FIFO
+	normal      []*Message // priority 2 - FIFO
+	idleFirst   []*Message // priority 3 - prepended (most recent first)
+	idle        []*Message // priority 4 - FIFO
 	allMessages map[string]*Message
 	paused      bool
 	notify      chan struct{}

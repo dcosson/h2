@@ -19,7 +19,7 @@ This document defines how `h2` derives agent state from normalized events, and w
 
 ## Codex
 
-Source implementation: `internal/session/agent/harness/codex/otel_parser.go`.
+Source implementation: `internal/session/agent/harness/codex/event_handler.go`.
 
 Underlying OTEL log signals:
 
@@ -58,7 +58,7 @@ Notes:
 
 ## Claude Code
 
-Source implementation: `internal/session/agent/harness/claude/hook_handler.go`.
+Source implementation: `internal/session/agent/harness/claude/event_handler.go`.
 
 Underlying hook signals:
 
@@ -66,7 +66,7 @@ Underlying hook signals:
 - `PreToolUse`
 - `PostToolUse`
 - `PermissionRequest`
-- `permission_decision`
+- `permission_decision` (not a claude code hook, we emit it in the h2 permission-request after a response is sent)
 - `PreCompact`
 - `SessionStart`
 - `Stop`

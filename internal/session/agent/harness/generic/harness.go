@@ -35,16 +35,16 @@ func New(cfg harness.HarnessConfig) *GenericHarness {
 // --- Identity ---
 
 func (g *GenericHarness) Name() string           { return "generic" }
-func (g *GenericHarness) Command() string         { return g.command }
-func (g *GenericHarness) DisplayCommand() string   { return g.command }
+func (g *GenericHarness) Command() string        { return g.command }
+func (g *GenericHarness) DisplayCommand() string { return g.command }
 
 // --- Config (no-ops for generic) ---
 
 func (g *GenericHarness) BuildCommandArgs(cfg harness.CommandArgsConfig) []string {
 	return harness.CombineArgs(cfg, nil)
 }
-func (g *GenericHarness) BuildCommandEnvVars(h2Dir string) map[string]string     { return nil }
-func (g *GenericHarness) EnsureConfigDir(h2Dir string) error                     { return nil }
+func (g *GenericHarness) BuildCommandEnvVars(h2Dir string) map[string]string { return nil }
+func (g *GenericHarness) EnsureConfigDir(h2Dir string) error                 { return nil }
 
 // --- Launch ---
 
@@ -92,7 +92,7 @@ func (g *GenericHarness) HandleHookEvent(eventName string, payload json.RawMessa
 // HandleOutput feeds the output collector to detect activity/idle transitions.
 func (g *GenericHarness) HandleOutput() {
 	if g.collector != nil {
-		g.collector.NoteOutput()
+		g.collector.SignalOutput()
 	}
 }
 

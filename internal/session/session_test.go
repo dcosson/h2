@@ -89,7 +89,7 @@ func TestStateTransitions_Exited(t *testing.T) {
 
 	startAgent(t, s)
 
-	s.NoteExit()
+	s.SignalExit()
 	time.Sleep(50 * time.Millisecond)
 	if got, _ := s.State(); got != monitor.StateExited {
 		t.Fatalf("expected StateExited, got %v", got)

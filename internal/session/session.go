@@ -16,13 +16,13 @@ import (
 	"h2/internal/activitylog"
 	"h2/internal/config"
 	"h2/internal/session/agent"
-	"h2/internal/tmpl"
 	"h2/internal/session/agent/harness"
 	"h2/internal/session/agent/monitor"
 	"h2/internal/session/agent/shared/eventstore"
 	"h2/internal/session/client"
 	"h2/internal/session/message"
 	"h2/internal/session/virtualterminal"
+	"h2/internal/tmpl"
 
 	// Register harness implementations via init().
 	_ "h2/internal/session/agent/harness/claude"
@@ -33,23 +33,23 @@ import (
 // Session manages the message queue, delivery loop, observable state,
 // child process lifecycle, and client connections for an h2 session.
 type Session struct {
-	Name       string
-	Command    string
-	Args       []string
-	SessionID      string // Claude Code session ID (UUID), set for claude commands
-	RoleName       string // Role name, if launched with --role
-	SessionDir     string // Session directory path (~/.h2/sessions/<name>/)
-	Instructions    string   // Role instructions, passed via --append-system-prompt
-	SystemPrompt    string   // Replaces default system prompt, passed via --system-prompt
-	Model           string   // Model selection, passed via --model
-	PermissionMode  string   // Permission mode, passed via --permission-mode
-	AllowedTools    []string // Allowed tools, passed via --allowedTools (comma-joined)
-	DisallowedTools []string // Disallowed tools, passed via --disallowedTools (comma-joined)
-	Queue      *message.MessageQueue
-	AgentName  string
-	Agent      *agent.Agent
-	VT         *virtualterminal.VT
-	Client     *client.Client // primary/interactive client (nil in daemon-only)
+	Name             string
+	Command          string
+	Args             []string
+	SessionID        string   // Claude Code session ID (UUID), set for claude commands
+	RoleName         string   // Role name, if launched with --role
+	SessionDir       string   // Session directory path (~/.h2/sessions/<name>/)
+	Instructions     string   // Role instructions, passed via --append-system-prompt
+	SystemPrompt     string   // Replaces default system prompt, passed via --system-prompt
+	Model            string   // Model selection, passed via --model
+	PermissionMode   string   // Permission mode, passed via --permission-mode
+	AllowedTools     []string // Allowed tools, passed via --allowedTools (comma-joined)
+	DisallowedTools  []string // Disallowed tools, passed via --disallowedTools (comma-joined)
+	Queue            *message.MessageQueue
+	AgentName        string
+	Agent            *agent.Agent
+	VT               *virtualterminal.VT
+	Client           *client.Client // primary/interactive client (nil in daemon-only)
 	Clients          []*client.Client
 	clientsMu        sync.Mutex
 	PassthroughOwner *client.Client // which client owns passthrough mode (nil = none)
@@ -349,7 +349,7 @@ func (s *Session) NewClient() *client.Client {
 		return s.Agent.ActivitySnapshot().LastToolName
 	}
 	cl.OnInterrupt = func() {
-		s.Agent.NoteInterrupt()
+		s.Agent.SignalInterrupt()
 	}
 	cl.OnSubmit = func(text string, pri message.Priority) {
 		s.SubmitInput(text, pri)
@@ -587,7 +587,7 @@ func (s *Session) lifecycleLoop(stopStatus chan struct{}, interactive bool) erro
 		})
 		s.VT.Mu.Unlock()
 
-		s.NoteExit()
+		s.SignalExit()
 		s.Queue.Pause()
 
 		select {
@@ -690,8 +690,8 @@ func (s *Session) HandleOutput() {
 	s.Agent.HandleOutput()
 }
 
-// NoteExit signals that the child process has exited or hung.
-func (s *Session) NoteExit() {
+// SignalExit signals that the child process has exited or hung.
+func (s *Session) SignalExit() {
 	s.Agent.SetExited()
 }
 
@@ -725,8 +725,8 @@ func (s *Session) StartServices() {
 		WaitForIdle: func(ctx context.Context) bool {
 			return s.Agent.WaitForState(ctx, monitor.StateIdle)
 		},
-		NoteInterrupt: func() {
-			s.Agent.NoteInterrupt()
+		SignalInterrupt: func() {
+			s.Agent.SignalInterrupt()
 		},
 		OnDeliver: s.OnDeliver,
 		Stop:      s.stopCh,
