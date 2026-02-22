@@ -56,7 +56,7 @@ func (c *Client) renderLiveView(buf *bytes.Buffer) {
 		startRow = 0
 	}
 	for i := 0; i < c.VT.ChildRows; i++ {
-		fmt.Fprintf(buf, "\033[%d;1H\033[2K", i+1)
+		fmt.Fprintf(buf, "\033[%d;1H", i+1)
 		c.RenderLineFrom(buf, c.VT.Vt, startRow+i)
 	}
 }
@@ -74,7 +74,7 @@ func (c *Client) renderScrollView(buf *bytes.Buffer) {
 		startRow = 0
 	}
 	for i := 0; i < c.VT.ChildRows; i++ {
-		fmt.Fprintf(buf, "\033[%d;1H\033[2K", i+1)
+		fmt.Fprintf(buf, "\033[%d;1H", i+1)
 		c.RenderLineFrom(buf, sb, startRow+i)
 	}
 	// Draw "(scrolling)" indicator at row 1, right-aligned, in inverse video.
@@ -91,37 +91,7 @@ func (c *Client) RenderLineFrom(buf *bytes.Buffer, vt *midterm.Terminal, row int
 	if row >= len(vt.Content) {
 		return
 	}
-	line := vt.Content[row]
-	var pos int
-	var lastFormat midterm.Format
-	for region := range vt.Format.Regions(row) {
-		f := region.F
-		if f != lastFormat {
-			buf.WriteString("\033[0m")
-			buf.WriteString(f.Render())
-			lastFormat = f
-		}
-		end := pos + region.Size
-
-		if pos < len(line) {
-			contentEnd := end
-			if contentEnd > len(line) {
-				contentEnd = len(line)
-			}
-			buf.WriteString(string(line[pos:contentEnd]))
-		}
-
-		padStart := len(line)
-		if padStart < pos {
-			padStart = pos
-		}
-		if padStart < end {
-			buf.WriteString(strings.Repeat(" ", end-padStart))
-		}
-
-		pos = end
-	}
-	buf.WriteString("\033[0m")
+	_ = vt.RenderLine(buf, row)
 }
 
 // RenderLine writes one row of the primary virtual terminal to buf.

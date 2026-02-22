@@ -12,6 +12,9 @@ import (
 
 // ColorToX11 converts a termenv.Color to X11 rgb: format.
 func ColorToX11(c termenv.Color) string {
+	if c == nil {
+		return ""
+	}
 	switch v := c.(type) {
 	case termenv.RGBColor:
 		hex := string(v)
@@ -22,7 +25,11 @@ func ColorToX11(c termenv.Color) string {
 			return fmt.Sprintf("rgb:%04x/%04x/%04x", r*0x101, g*0x101, b*0x101)
 		}
 	}
-	return ""
+	rgb := termenv.ConvertToRGB(c)
+	r := uint8(rgb.R*255 + 0.5)
+	g := uint8(rgb.G*255 + 0.5)
+	b := uint8(rgb.B*255 + 0.5)
+	return fmt.Sprintf("rgb:%04x/%04x/%04x", uint16(r)*0x101, uint16(g)*0x101, uint16(b)*0x101)
 }
 
 // IsEscSequenceComplete reports whether the given escape sequence is complete.
@@ -161,4 +168,30 @@ func FormatIdleDuration(d time.Duration) string {
 	}
 	days := int(d.Hours() / 24)
 	return fmt.Sprintf("%dd", days)
+}
+
+// FallbackOSCPalette returns OSC 10/11-compatible X11 rgb values derived from
+// COLORFGBG. When parsing fails, it defaults to a dark terminal palette.
+func FallbackOSCPalette(colorfgbg string) (fg, bg string) {
+	// Most shells/terminals encode COLORFGBG as "<fg>;<bg>" and may append
+	// extra fields. Prefer the second field as background when available.
+	parts := strings.Split(strings.TrimSpace(colorfgbg), ";")
+	bgDark := true
+	bgField := ""
+	if len(parts) >= 2 {
+		bgField = strings.TrimSpace(parts[1])
+	} else if len(parts) == 1 {
+		bgField = strings.TrimSpace(parts[0])
+	}
+	if bgField != "" {
+		if idx, err := strconv.Atoi(bgField); err == nil {
+			// xterm 16-color convention: 0-7 are dark colors, 8-15 are bright.
+			bgDark = idx < 8
+		}
+	}
+
+	if bgDark {
+		return "rgb:ffff/ffff/ffff", "rgb:0000/0000/0000"
+	}
+	return "rgb:0000/0000/0000", "rgb:ffff/ffff/ffff"
 }

@@ -413,6 +413,17 @@ func (s *Session) pipeOutputCallback() func() {
 func (s *Session) RunDaemon() error {
 	// Initialize VT with default daemon dimensions.
 	s.initVT(24, 80)
+	if oscFg := os.Getenv("H2_OSC_FG"); oscFg != "" {
+		s.VT.OscFg = oscFg
+	}
+	if oscBg := os.Getenv("H2_OSC_BG"); oscBg != "" {
+		s.VT.OscBg = oscBg
+	}
+	if os.Getenv("COLORFGBG") == "" {
+		if c := os.Getenv("H2_COLORFGBG"); c != "" {
+			_ = os.Setenv("COLORFGBG", c)
+		}
+	}
 	s.VT.ChildRows = s.VT.Rows - 2 // default ReservedRows
 	s.VT.Vt = midterm.NewTerminal(s.VT.ChildRows, s.VT.Cols)
 	s.VT.Scrollback = midterm.NewTerminal(s.VT.ChildRows, s.VT.Cols)

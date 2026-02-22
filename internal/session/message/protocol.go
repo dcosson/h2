@@ -19,8 +19,11 @@ type Request struct {
 	Raw      bool   `json:"raw,omitempty"` // send body directly to PTY without prefix
 
 	// attach fields
-	Cols int `json:"cols,omitempty"`
-	Rows int `json:"rows,omitempty"`
+	Cols      int    `json:"cols,omitempty"`
+	Rows      int    `json:"rows,omitempty"`
+	OscFg     string `json:"osc_fg,omitempty"`    // X11 rgb:rrrr/gggg/bbbb
+	OscBg     string `json:"osc_bg,omitempty"`    // X11 rgb:rrrr/gggg/bbbb
+	ColorFGBG string `json:"colorfgbg,omitempty"` // terminal COLORFGBG hint
 
 	// show fields
 	MessageID string `json:"message_id,omitempty"`

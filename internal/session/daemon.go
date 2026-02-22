@@ -199,6 +199,9 @@ type ForkDaemonOpts struct {
 	CWD             string   // working directory for the child process
 	Pod             string   // pod name (set as H2_POD env var)
 	Overrides       []string // --override key=value pairs (recorded in session metadata)
+	OscFg           string   // startup terminal foreground color (X11 rgb)
+	OscBg           string   // startup terminal background color (X11 rgb)
+	ColorFGBG       string   // startup COLORFGBG hint
 }
 
 // ForkDaemon starts a daemon in a background process by re-execing with
@@ -260,6 +263,15 @@ func ForkDaemon(opts ForkDaemonOpts) error {
 	}
 	if opts.Pod != "" {
 		env = append(env, "H2_POD="+opts.Pod)
+	}
+	if opts.OscFg != "" {
+		env = append(env, "H2_OSC_FG="+opts.OscFg)
+	}
+	if opts.OscBg != "" {
+		env = append(env, "H2_OSC_BG="+opts.OscBg)
+	}
+	if opts.ColorFGBG != "" {
+		env = append(env, "H2_COLORFGBG="+opts.ColorFGBG)
 	}
 	cmd.Env = env
 

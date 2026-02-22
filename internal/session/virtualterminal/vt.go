@@ -106,11 +106,22 @@ func (vt *VT) PipeOutput(onData func()) {
 
 // RespondOSCColors responds to OSC 10/11 color queries from the child.
 func (vt *VT) RespondOSCColors(data []byte) {
-	if vt.OscFg != "" && bytes.Contains(data, []byte("\033]10;?")) {
-		fmt.Fprintf(vt.Ptm, "\033]10;%s\033\\", vt.OscFg)
+	fg := vt.OscFg
+	bg := vt.OscBg
+	if fg == "" || bg == "" {
+		fallbackFg, fallbackBg := FallbackOSCPalette(os.Getenv("COLORFGBG"))
+		if fg == "" {
+			fg = fallbackFg
+		}
+		if bg == "" {
+			bg = fallbackBg
+		}
 	}
-	if vt.OscBg != "" && bytes.Contains(data, []byte("\033]11;?")) {
-		fmt.Fprintf(vt.Ptm, "\033]11;%s\033\\", vt.OscBg)
+	if bytes.Contains(data, []byte("\033]10;?")) {
+		fmt.Fprintf(vt.Ptm, "\033]10;%s\033\\", fg)
+	}
+	if bytes.Contains(data, []byte("\033]11;?")) {
+		fmt.Fprintf(vt.Ptm, "\033]11;%s\033\\", bg)
 	}
 }
 

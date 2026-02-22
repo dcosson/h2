@@ -147,6 +147,7 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 			}
 
 			sessionID := uuid.New().String()
+			oscFg, oscBg, colorfgbg := detectTerminalColorHints()
 
 			// Fork a daemon process.
 			if err := forkDaemonFunc(session.ForkDaemonOpts{
@@ -156,6 +157,9 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 				Args:      cmdArgs,
 				Heartbeat: heartbeat,
 				Pod:       pod,
+				OscFg:     oscFg,
+				OscBg:     oscBg,
+				ColorFGBG: colorfgbg,
 			}); err != nil {
 				return err
 			}

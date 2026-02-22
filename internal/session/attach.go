@@ -3,6 +3,7 @@ package session
 import (
 	"encoding/json"
 	"net"
+	"os"
 
 	"h2/internal/session/client"
 	"h2/internal/session/message"
@@ -42,6 +43,15 @@ func (d *Daemon) handleAttach(conn net.Conn, req *message.Request) {
 	// Set up per-client output for this connection.
 	vt.Mu.Lock()
 	cl.Output = &frameWriter{conn: conn}
+	if vt.OscFg == "" && req.OscFg != "" {
+		vt.OscFg = req.OscFg
+	}
+	if vt.OscBg == "" && req.OscBg != "" {
+		vt.OscBg = req.OscBg
+	}
+	if os.Getenv("COLORFGBG") == "" && req.ColorFGBG != "" {
+		_ = os.Setenv("COLORFGBG", req.ColorFGBG)
+	}
 
 	// Resize PTY to client's terminal size, but only if dimensions actually
 	// changed. Unnecessary resizes send SIGWINCH to the child, which can

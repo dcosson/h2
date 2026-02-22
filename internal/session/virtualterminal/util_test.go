@@ -1,6 +1,20 @@
 package virtualterminal
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/muesli/termenv"
+)
+
+func TestColorToX11_ANSIColor(t *testing.T) {
+	got := ColorToX11(termenv.ANSIColor(0))
+	if got == "" {
+		t.Fatalf("ColorToX11(ANSIColor(0)) returned empty value")
+	}
+	if got != "rgb:0000/0000/0000" {
+		t.Fatalf("ColorToX11(ANSIColor(0)) = %q, want %q", got, "rgb:0000/0000/0000")
+	}
+}
 
 func TestIsCtrlEnterSequence(t *testing.T) {
 	tests := []struct {
@@ -63,6 +77,49 @@ func TestIsShiftEnterSequence(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := IsShiftEnterSequence(tt.seq); got != tt.want {
 				t.Errorf("IsShiftEnterSequence(%q) = %v, want %v", tt.seq, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFallbackOSCPalette(t *testing.T) {
+	tests := []struct {
+		name      string
+		colorfgbg string
+		wantFg    string
+		wantBg    string
+	}{
+		{
+			name:      "dark background",
+			colorfgbg: "15;0",
+			wantFg:    "rgb:ffff/ffff/ffff",
+			wantBg:    "rgb:0000/0000/0000",
+		},
+		{
+			name:      "light background",
+			colorfgbg: "0;15",
+			wantFg:    "rgb:0000/0000/0000",
+			wantBg:    "rgb:ffff/ffff/ffff",
+		},
+		{
+			name:      "empty defaults dark",
+			colorfgbg: "",
+			wantFg:    "rgb:ffff/ffff/ffff",
+			wantBg:    "rgb:0000/0000/0000",
+		},
+		{
+			name:      "uses second field as background when extra fields exist",
+			colorfgbg: "0;15;0",
+			wantFg:    "rgb:0000/0000/0000",
+			wantBg:    "rgb:ffff/ffff/ffff",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotFg, gotBg := FallbackOSCPalette(tt.colorfgbg)
+			if gotFg != tt.wantFg || gotBg != tt.wantBg {
+				t.Fatalf("FallbackOSCPalette(%q) = (%q,%q), want (%q,%q)", tt.colorfgbg, gotFg, gotBg, tt.wantFg, tt.wantBg)
 			}
 		})
 	}
