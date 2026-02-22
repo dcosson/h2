@@ -16,6 +16,7 @@ import (
 	"h2/internal/session/agent/harness"
 	"h2/internal/session/agent/monitor"
 	"h2/internal/session/agent/shared/otelserver"
+	"h2/internal/session/agent/shared/sessionlogcollector"
 )
 
 func init() {
@@ -30,11 +31,10 @@ type ClaudeCodeHarness struct {
 	model       string
 	activityLog *activitylog.Logger
 
-	otelServer  *otelserver.OtelServer
-	hookHandler *HookHandler
-	sessionLog  *SessionLogCollector
-	otelParser  *OtelParser
-	sessionID   string
+	otelServer     *otelserver.OtelServer
+	eventHandler   *EventHandler
+	sessionLogPath string
+	sessionID      string
 
 	// internalCh buffers events from callbacks and hook handlers.
 	// Start() forwards these to the external events channel.
@@ -48,20 +48,19 @@ func New(cfg harness.HarnessConfig, log *activitylog.Logger) *ClaudeCodeHarness 
 	}
 	ch := make(chan monitor.AgentEvent, 256)
 	return &ClaudeCodeHarness{
-		configDir:   cfg.ConfigDir,
-		model:       cfg.Model,
-		activityLog: log,
-		internalCh:  ch,
-		hookHandler: NewHookHandler(ch, log),
-		otelParser:  NewOtelParser(ch),
+		configDir:    cfg.ConfigDir,
+		model:        cfg.Model,
+		activityLog:  log,
+		internalCh:   ch,
+		eventHandler: NewEventHandler(ch, log),
 	}
 }
 
 // --- Identity ---
 
 func (h *ClaudeCodeHarness) Name() string           { return "claude_code" }
-func (h *ClaudeCodeHarness) Command() string         { return "claude" }
-func (h *ClaudeCodeHarness) DisplayCommand() string   { return "claude" }
+func (h *ClaudeCodeHarness) Command() string        { return "claude" }
+func (h *ClaudeCodeHarness) DisplayCommand() string { return "claude" }
 
 // --- Config (called before launch) ---
 
@@ -128,8 +127,8 @@ func (h *ClaudeCodeHarness) PrepareForLaunch(agentName, sessionID string, dryRun
 	if !dryRun {
 		// Create OTEL server with callbacks that parse and emit events.
 		s, err := otelserver.New(otelserver.Callbacks{
-			OnLogs:    h.otelParser.OnLogs,
-			OnMetrics: h.otelParser.OnMetrics,
+			OnLogs:    h.eventHandler.OnLogs,
+			OnMetrics: h.eventHandler.OnMetrics,
 		})
 		if err != nil {
 			return harness.LaunchConfig{}, fmt.Errorf("create otel server: %w", err)
@@ -158,8 +157,8 @@ func (h *ClaudeCodeHarness) PrepareForLaunch(agentName, sessionID string, dryRun
 // until ctx is cancelled.
 func (h *ClaudeCodeHarness) Start(ctx context.Context, events chan<- monitor.AgentEvent) error {
 	// Start session log tailer if configured.
-	if h.sessionLog != nil {
-		go h.sessionLog.Run(ctx, h.internalCh)
+	if h.sessionLogPath != "" {
+		go sessionlogcollector.New(h.sessionLogPath, h.eventHandler.OnSessionLogLine).Run(ctx)
 	}
 
 	// Forward internal events to the external channel.
@@ -179,7 +178,7 @@ func (h *ClaudeCodeHarness) Start(ctx context.Context, events chan<- monitor.Age
 
 // HandleHookEvent delegates hook events to the HookHandler.
 func (h *ClaudeCodeHarness) HandleHookEvent(eventName string, payload json.RawMessage) bool {
-	return h.hookHandler.ProcessEvent(eventName, payload)
+	return h.eventHandler.ProcessHookEvent(eventName, payload)
 }
 
 // HandleOutput is a no-op for Claude Code (state is tracked via OTEL/hooks).
@@ -210,7 +209,5 @@ func (h *ClaudeCodeHarness) OtelPort() int {
 // SetSessionLogPath configures the path to Claude Code's session JSONL
 // for the session log tailer. Must be called before Start().
 func (h *ClaudeCodeHarness) SetSessionLogPath(path string) {
-	if path != "" {
-		h.sessionLog = NewSessionLogCollector(path)
-	}
+	h.sessionLogPath = path
 }

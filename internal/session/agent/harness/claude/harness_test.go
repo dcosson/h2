@@ -236,8 +236,8 @@ func TestHandleHookEvent_EmitsStateChange(t *testing.T) {
 		}
 	}
 
-	if got[0].Type != monitor.EventTurnStarted {
-		t.Errorf("event[0].Type = %v, want EventTurnStarted", got[0].Type)
+	if got[0].Type != monitor.EventUserPrompt {
+		t.Errorf("event[0].Type = %v, want EventUserPrompt", got[0].Type)
 	}
 	if got[1].Type != monitor.EventStateChange {
 		t.Errorf("event[1].Type = %v, want EventStateChange", got[1].Type)
