@@ -17,14 +17,41 @@ import (
 // HarnessFactory creates a Harness from a config and logger.
 type HarnessFactory func(HarnessConfig, *activitylog.Logger) Harness
 
-// registry holds registered harness factories keyed by type name.
-var registry = map[string]HarnessFactory{}
+type registeredHarness struct {
+	factory        HarnessFactory
+	canonicalName  string
+	defaultCommand string
+	defaultModel   string
+}
 
-// Register adds a harness factory for the given type name(s).
+// HarnessSpec describes a harness registration.
+type HarnessSpec struct {
+	Names          []string
+	Factory        HarnessFactory
+	DefaultCommand string
+	DefaultModel   string
+}
+
+// registry holds registered harness definitions keyed by alias/type name.
+var registry = map[string]registeredHarness{}
+
+// Register adds a harness definition for the given type name(s).
 // Called from init() in each harness sub-package.
-func Register(factory HarnessFactory, names ...string) {
-	for _, name := range names {
-		registry[name] = factory
+func Register(spec HarnessSpec) {
+	if len(spec.Names) == 0 {
+		panic("harness.Register: at least one name is required")
+	}
+	if spec.Factory == nil {
+		panic("harness.Register: factory is required")
+	}
+	canonical := spec.Names[0]
+	for _, name := range spec.Names {
+		registry[name] = registeredHarness{
+			factory:        spec.Factory,
+			canonicalName:  canonical,
+			defaultCommand: spec.DefaultCommand,
+			defaultModel:   spec.DefaultModel,
+		}
 	}
 }
 
@@ -144,26 +171,36 @@ func (s *PTYInputSender) SendInterrupt() error {
 // Resolve maps a HarnessConfig to a concrete Harness implementation.
 // Returns an error for unknown harness types or invalid configs.
 func Resolve(cfg HarnessConfig, log *activitylog.Logger) (Harness, error) {
-	switch cfg.HarnessType {
-	case "claude_code", "claude":
-		if f, ok := registry[cfg.HarnessType]; ok {
-			return f(cfg, log), nil
-		}
-		return nil, fmt.Errorf("claude_code harness not registered (import harness/claude)")
-	case "codex":
-		if f, ok := registry[cfg.HarnessType]; ok {
-			return f(cfg, log), nil
-		}
-		return nil, fmt.Errorf("codex harness not registered (import harness/codex)")
-	case "generic":
-		if cfg.Command == "" {
-			return nil, fmt.Errorf("generic harness requires a command")
-		}
-		if f, ok := registry[cfg.HarnessType]; ok {
-			return f(cfg, log), nil
-		}
-		return nil, fmt.Errorf("generic harness not registered (import harness/generic)")
-	default:
+	reg, ok := registry[cfg.HarnessType]
+	if !ok {
 		return nil, fmt.Errorf("unknown harness type: %q (supported: claude_code, codex, generic)", cfg.HarnessType)
 	}
+	if reg.canonicalName == "generic" && cfg.Command == "" {
+		return nil, fmt.Errorf("generic harness requires a command")
+	}
+	return reg.factory(cfg, log), nil
+}
+
+// CanonicalName resolves a harness alias to its canonical name.
+func CanonicalName(name string) string {
+	if reg, ok := registry[name]; ok {
+		return reg.canonicalName
+	}
+	return name
+}
+
+// DefaultModel returns the registered default model for a harness type/alias.
+func DefaultModel(name string) string {
+	if reg, ok := registry[name]; ok {
+		return reg.defaultModel
+	}
+	return ""
+}
+
+// DefaultCommand returns the registered default command for a harness type/alias.
+func DefaultCommand(name string) string {
+	if reg, ok := registry[name]; ok {
+		return reg.defaultCommand
+	}
+	return ""
 }

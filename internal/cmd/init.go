@@ -60,6 +60,7 @@ func newInitCmd() *cobra.Command {
 				filepath.Join(abs, "sessions"),
 				filepath.Join(abs, "sockets"),
 				filepath.Join(abs, "claude-config", "default"),
+				filepath.Join(abs, "codex-config", "default"),
 				filepath.Join(abs, "projects"),
 				filepath.Join(abs, "worktrees"),
 				filepath.Join(abs, "pods", "roles"),

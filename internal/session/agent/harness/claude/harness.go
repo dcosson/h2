@@ -20,9 +20,14 @@ import (
 )
 
 func init() {
-	harness.Register(func(cfg harness.HarnessConfig, log *activitylog.Logger) harness.Harness {
-		return New(cfg, log)
-	}, "claude_code", "claude")
+	harness.Register(harness.HarnessSpec{
+		Names: []string{"claude_code", "claude"},
+		Factory: func(cfg harness.HarnessConfig, log *activitylog.Logger) harness.Harness {
+			return New(cfg, log)
+		},
+		DefaultCommand: "claude",
+		DefaultModel:   "opus",
+	})
 }
 
 // ClaudeCodeHarness implements harness.Harness for Claude Code.

@@ -225,15 +225,25 @@ func resolveFullHarness(command, roleName string, log *activitylog.Logger) (harn
 			H2Dir:    config.ConfigDir(),
 		}
 		if role, err := config.LoadRoleRendered(roleName, ctx); err == nil {
-			ht := role.GetHarnessType()
+			ht := harness.CanonicalName(role.GetHarnessType())
+			model := role.GetModel()
+			if model == "" {
+				model = harness.DefaultModel(ht)
+			}
+			command := role.GetAgentType()
+			if command == "" {
+				command = harness.DefaultCommand(ht)
+			}
 			cfg := harness.HarnessConfig{
 				HarnessType: ht,
-				Command:     role.GetAgentType(),
-				Model:       role.GetModel(),
+				Command:     command,
+				Model:       model,
 			}
 			switch ht {
 			case "claude_code", "claude":
 				cfg.ConfigDir = role.GetClaudeConfigDir()
+			case "codex":
+				cfg.ConfigDir = role.GetCodexConfigDir()
 			}
 			return harness.Resolve(cfg, log)
 		}

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"h2/internal/activitylog"
@@ -17,9 +18,14 @@ import (
 )
 
 func init() {
-	harness.Register(func(cfg harness.HarnessConfig, log *activitylog.Logger) harness.Harness {
-		return New(cfg, log)
-	}, "codex")
+	harness.Register(harness.HarnessSpec{
+		Names: []string{"codex"},
+		Factory: func(cfg harness.HarnessConfig, log *activitylog.Logger) harness.Harness {
+			return New(cfg, log)
+		},
+		DefaultCommand: "codex",
+		DefaultModel:   "gpt-5-codex",
+	})
 }
 
 // CodexHarness implements harness.Harness for OpenAI Codex CLI.
@@ -91,11 +97,24 @@ func (h *CodexHarness) BuildCommandArgs(cfg harness.CommandArgsConfig) []string 
 
 // BuildCommandEnvVars returns nil — Codex doesn't need special env vars.
 func (h *CodexHarness) BuildCommandEnvVars(h2Dir string) map[string]string {
-	return nil
+	if h.configDir == "" {
+		return nil
+	}
+	return map[string]string{
+		"CODEX_HOME": h.configDir,
+	}
 }
 
-// EnsureConfigDir is a no-op for Codex.
-func (h *CodexHarness) EnsureConfigDir(h2Dir string) error { return nil }
+// EnsureConfigDir creates the configured CODEX_HOME directory if needed.
+func (h *CodexHarness) EnsureConfigDir(h2Dir string) error {
+	if h.configDir == "" {
+		return nil
+	}
+	if err := os.MkdirAll(h.configDir, 0o755); err != nil {
+		return fmt.Errorf("create codex config dir: %w", err)
+	}
+	return nil
+}
 
 // --- Launch (called once, before child process starts) ---
 

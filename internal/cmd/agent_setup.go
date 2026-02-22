@@ -19,15 +19,25 @@ var forkDaemonFunc = session.ForkDaemon
 // roleHarnessConfig builds a harness.HarnessConfig from a Role.
 // Used by agent setup and dry-run to resolve the harness.
 func roleHarnessConfig(role *config.Role) harness.HarnessConfig {
-	ht := role.GetHarnessType()
+	ht := harness.CanonicalName(role.GetHarnessType())
+	model := role.GetModel()
+	if model == "" {
+		model = harness.DefaultModel(ht)
+	}
+	command := role.GetAgentType()
+	if command == "" {
+		command = harness.DefaultCommand(ht)
+	}
 	cfg := harness.HarnessConfig{
 		HarnessType: ht,
-		Command:     role.GetAgentType(),
-		Model:       role.GetModel(),
+		Command:     command,
+		Model:       model,
 	}
 	switch ht {
 	case "claude_code", "claude":
 		cfg.ConfigDir = role.GetClaudeConfigDir()
+	case "codex":
+		cfg.ConfigDir = role.GetCodexConfigDir()
 	}
 	return cfg
 }
@@ -102,6 +112,7 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 	oscFg, oscBg, colorfgbg := detectTerminalColorHints()
 
 	// Fork the daemon.
+	roleCfg := roleHarnessConfig(role)
 	if err := forkDaemonFunc(session.ForkDaemonOpts{
 		Name:            name,
 		SessionID:       sessionID,
@@ -110,7 +121,7 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 		SessionDir:      sessionDir,
 		Instructions:    role.Instructions,
 		SystemPrompt:    role.SystemPrompt,
-		Model:           role.GetModel(),
+		Model:           roleCfg.Model,
 		PermissionMode:  role.PermissionMode,
 		AllowedTools:    role.Permissions.Allow,
 		DisallowedTools: role.Permissions.Deny,

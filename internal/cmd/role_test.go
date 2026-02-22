@@ -44,8 +44,8 @@ func TestRoleTemplate_ValidGoTemplate(t *testing.T) {
 		if !strings.Contains(rendered, name) {
 			t.Errorf("roleTemplate(%q): rendered should contain '%s'", name, name)
 		}
-		if !strings.Contains(rendered, "/tmp/test-h2/claude-config/default") {
-			t.Errorf("roleTemplate(%q): rendered should contain resolved claude_config_dir", name)
+		if !strings.Contains(rendered, "agent_account_profile: default") {
+			t.Errorf("roleTemplate(%q): rendered should contain default agent account profile", name)
 		}
 	}
 }
@@ -77,8 +77,8 @@ func TestRoleTemplate_RenderedIsValidRole(t *testing.T) {
 		if role.Name != name {
 			t.Errorf("role.Name = %q, want %q", role.Name, name)
 		}
-		if role.GetClaudeConfigDir() != "/tmp/test-h2/claude-config/default" {
-			t.Errorf("role.GetClaudeConfigDir() = %q, want %q", role.GetClaudeConfigDir(), "/tmp/test-h2/claude-config/default")
+		if !strings.HasSuffix(role.GetClaudeConfigDir(), "/claude-config/default") {
+			t.Errorf("role.GetClaudeConfigDir() = %q, want suffix %q", role.GetClaudeConfigDir(), "/claude-config/default")
 		}
 	}
 }
@@ -92,7 +92,7 @@ func setupRoleTestH2Dir(t *testing.T) string {
 	t.Cleanup(config.ResetResolveCache)
 
 	h2Dir := filepath.Join(t.TempDir(), "myh2")
-	for _, sub := range []string{"roles", "sessions", "sockets", "claude-config/default"} {
+	for _, sub := range []string{"roles", "sessions", "sockets", "claude-config/default", "codex-config/default"} {
 		if err := os.MkdirAll(filepath.Join(h2Dir, sub), 0o755); err != nil {
 			t.Fatal(err)
 		}

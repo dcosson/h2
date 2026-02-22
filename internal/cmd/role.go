@@ -166,10 +166,14 @@ func defaultRoleTemplate() string {
 description: "A {{ .RoleName }} agent for h2"
 
 # Agent harness configuration
-agent_harness:
-  harness_type: claude_code
-  model: opus
-  claude_config_dir: "{{ .H2Dir }}/claude-config/default"
+agent_harness: claude_code
+agent_account_profile: default
+# agent_model: opus
+# agent_harness_command: claude
+# claude_code_config_path_prefix: "{{ .H2Dir }}/claude-config"
+# codex_config_path_prefix: "{{ .H2Dir }}/codex-config"
+# claude_code_config_path: ""
+# codex_config_path: ""
 
 # Permission mode for Claude Code
 # Valid: default, delegate, acceptEdits, plan, dontAsk, bypassPermissions
@@ -258,10 +262,14 @@ func conciergeRoleTemplate() string {
 description: "The concierge agent — your primary interface in h2"
 
 # Agent harness configuration
-agent_harness:
-  harness_type: claude_code
-  model: opus
-  claude_config_dir: "{{ .H2Dir }}/claude-config/default"
+agent_harness: claude_code
+agent_account_profile: default
+# agent_model: opus
+# agent_harness_command: claude
+# claude_code_config_path_prefix: "{{ .H2Dir }}/claude-config"
+# codex_config_path_prefix: "{{ .H2Dir }}/codex-config"
+# claude_code_config_path: ""
+# codex_config_path: ""
 
 # Permission mode for Claude Code
 # Valid: default, delegate, acceptEdits, plan, dontAsk, bypassPermissions

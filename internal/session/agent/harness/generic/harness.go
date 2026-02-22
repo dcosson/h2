@@ -16,9 +16,12 @@ import (
 )
 
 func init() {
-	harness.Register(func(cfg harness.HarnessConfig, log *activitylog.Logger) harness.Harness {
-		return New(cfg)
-	}, "generic")
+	harness.Register(harness.HarnessSpec{
+		Names: []string{"generic"},
+		Factory: func(cfg harness.HarnessConfig, log *activitylog.Logger) harness.Harness {
+			return New(cfg)
+		},
+	})
 }
 
 // GenericHarness implements harness.Harness for arbitrary shell commands.

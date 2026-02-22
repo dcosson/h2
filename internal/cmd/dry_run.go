@@ -18,6 +18,7 @@ type ResolvedAgentConfig struct {
 	Name       string
 	Role       *config.Role
 	Command    string
+	Model      string
 	SessionDir string
 	WorkingDir string
 	IsWorktree bool
@@ -101,13 +102,14 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 	}
 
 	// Build the complete child args via BuildCommandArgs.
+	roleCfg := roleHarnessConfig(role)
 	childArgs := h.BuildCommandArgs(harness.CommandArgsConfig{
 		PrependArgs:     prependArgs,
 		ExtraArgs:       extraArgs,
 		SessionID:       "<generated-uuid>",
 		Instructions:    role.Instructions,
 		SystemPrompt:    role.SystemPrompt,
-		Model:           role.GetModel(),
+		Model:           roleCfg.Model,
 		PermissionMode:  role.PermissionMode,
 		AllowedTools:    role.Permissions.Allow,
 		DisallowedTools: role.Permissions.Deny,
@@ -117,6 +119,7 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 		Name:       name,
 		Role:       role,
 		Command:    h.Command(),
+		Model:      roleCfg.Model,
 		SessionDir: sessionDir,
 		WorkingDir: agentCWD,
 		IsWorktree: isWorktree,
@@ -137,8 +140,8 @@ func printDryRun(rc *ResolvedAgentConfig) {
 	if role.Description != "" {
 		fmt.Printf("Description: %s\n", role.Description)
 	}
-	if role.GetModel() != "" {
-		fmt.Printf("Model: %s\n", role.GetModel())
+	if rc.Model != "" {
+		fmt.Printf("Model: %s\n", rc.Model)
 	}
 	if role.PermissionMode != "" {
 		fmt.Printf("Permission Mode: %s\n", role.PermissionMode)

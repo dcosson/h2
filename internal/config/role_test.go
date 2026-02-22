@@ -1323,7 +1323,7 @@ func TestGetHarnessType_NewConfig(t *testing.T) {
 	role := &Role{
 		Name:         "test",
 		Instructions: "test",
-		AgentHarness: &AgentHarnessConfig{HarnessType: "codex"},
+		AgentHarness: "codex",
 	}
 	if got := role.GetHarnessType(); got != "codex" {
 		t.Errorf("GetHarnessType() = %q, want %q", got, "codex")
@@ -1335,7 +1335,7 @@ func TestGetHarnessType_NewOverridesLegacy(t *testing.T) {
 		Name:            "test",
 		Instructions:    "test",
 		AgentTypeLegacy: "claude",
-		AgentHarness:    &AgentHarnessConfig{HarnessType: "codex"},
+		AgentHarness:    "codex",
 	}
 	if got := role.GetHarnessType(); got != "codex" {
 		t.Errorf("GetHarnessType() = %q, want %q (new should override legacy)", got, "codex")
@@ -1346,18 +1346,19 @@ func TestGetAgentType_MapsClaudeCodeToClaude(t *testing.T) {
 	role := &Role{
 		Name:         "test",
 		Instructions: "test",
-		AgentHarness: &AgentHarnessConfig{HarnessType: "claude_code"},
+		AgentHarness: "claude_code",
 	}
-	if got := role.GetAgentType(); got != "claude" {
-		t.Errorf("GetAgentType() = %q, want %q", got, "claude")
+	if got := role.GetAgentType(); got != "" {
+		t.Errorf("GetAgentType() = %q, want empty explicit command", got)
 	}
 }
 
 func TestGetAgentType_GenericWithCommand(t *testing.T) {
 	role := &Role{
-		Name:         "test",
-		Instructions: "test",
-		AgentHarness: &AgentHarnessConfig{HarnessType: "generic", Command: "/usr/local/bin/my-agent"},
+		Name:                "test",
+		Instructions:        "test",
+		AgentHarness:        "generic",
+		AgentHarnessCommand: "/usr/local/bin/my-agent",
 	}
 	if got := role.GetAgentType(); got != "/usr/local/bin/my-agent" {
 		t.Errorf("GetAgentType() = %q, want %q", got, "/usr/local/bin/my-agent")
@@ -1375,7 +1376,7 @@ func TestGetModel_New(t *testing.T) {
 	role := &Role{
 		Name:         "test",
 		Instructions: "test",
-		AgentHarness: &AgentHarnessConfig{Model: "sonnet"},
+		AgentModel:   "sonnet",
 	}
 	if got := role.GetModel(); got != "sonnet" {
 		t.Errorf("GetModel() = %q, want %q", got, "sonnet")
@@ -1387,7 +1388,7 @@ func TestGetModel_NewOverridesLegacy(t *testing.T) {
 		Name:         "test",
 		Instructions: "test",
 		ModelLegacy:  "opus",
-		AgentHarness: &AgentHarnessConfig{Model: "sonnet"},
+		AgentModel:   "sonnet",
 	}
 	if got := role.GetModel(); got != "sonnet" {
 		t.Errorf("GetModel() = %q, want %q (new should override legacy)", got, "sonnet")
@@ -1396,9 +1397,9 @@ func TestGetModel_NewOverridesLegacy(t *testing.T) {
 
 func TestGetClaudeConfigDir_NewConfig(t *testing.T) {
 	role := &Role{
-		Name:         "test",
-		Instructions: "test",
-		AgentHarness: &AgentHarnessConfig{ClaudeConfigDir: "/new/config/dir"},
+		Name:                 "test",
+		Instructions:         "test",
+		ClaudeCodeConfigPath: "/new/config/dir",
 	}
 	if got := role.GetClaudeConfigDir(); got != "/new/config/dir" {
 		t.Errorf("GetClaudeConfigDir() = %q, want %q", got, "/new/config/dir")
@@ -1410,7 +1411,7 @@ func TestGetClaudeConfigDir_NewOverridesLegacy(t *testing.T) {
 		Name:                  "test",
 		Instructions:          "test",
 		ClaudeConfigDirLegacy: "/old/config/dir",
-		AgentHarness:          &AgentHarnessConfig{ClaudeConfigDir: "/new/config/dir"},
+		ClaudeCodeConfigPath:  "/new/config/dir",
 	}
 	if got := role.GetClaudeConfigDir(); got != "/new/config/dir" {
 		t.Errorf("GetClaudeConfigDir() = %q, want %q (new should override legacy)", got, "/new/config/dir")
@@ -1418,17 +1419,18 @@ func TestGetClaudeConfigDir_NewOverridesLegacy(t *testing.T) {
 }
 
 func TestGetCodexConfigDir(t *testing.T) {
-	// Not set → empty.
+	// Not set → defaults to codex-config/default.
 	role := &Role{Name: "test", Instructions: "test"}
-	if got := role.GetCodexConfigDir(); got != "" {
-		t.Errorf("GetCodexConfigDir() = %q, want empty", got)
+	wantDefault := filepath.Join(ConfigDir(), "codex-config", "default")
+	if got := role.GetCodexConfigDir(); got != wantDefault {
+		t.Errorf("GetCodexConfigDir() = %q, want %q", got, wantDefault)
 	}
 
-	// Set via AgentHarness.
+	// Set via explicit codex path.
 	role2 := &Role{
-		Name:         "test",
-		Instructions: "test",
-		AgentHarness: &AgentHarnessConfig{CodexConfigDir: "/codex/config"},
+		Name:            "test",
+		Instructions:    "test",
+		CodexConfigPath: "/codex/config",
 	}
 	if got := role2.GetCodexConfigDir(); got != "/codex/config" {
 		t.Errorf("GetCodexConfigDir() = %q, want %q", got, "/codex/config")
@@ -1454,8 +1456,8 @@ instructions: |
 	if role.GetHarnessType() != "claude_code" {
 		t.Errorf("GetHarnessType() = %q, want %q", role.GetHarnessType(), "claude_code")
 	}
-	if role.GetAgentType() != "claude" {
-		t.Errorf("GetAgentType() = %q, want %q", role.GetAgentType(), "claude")
+	if role.GetAgentType() != "" {
+		t.Errorf("GetAgentType() = %q, want empty explicit command", role.GetAgentType())
 	}
 	if role.GetModel() != "opus" {
 		t.Errorf("GetModel() = %q, want %q", role.GetModel(), "opus")
@@ -1485,8 +1487,8 @@ instructions: |
 	if role.GetHarnessType() != "codex" {
 		t.Errorf("GetHarnessType() = %q, want %q", role.GetHarnessType(), "codex")
 	}
-	if role.GetAgentType() != "codex" {
-		t.Errorf("GetAgentType() = %q, want %q", role.GetAgentType(), "codex")
+	if role.GetAgentType() != "" {
+		t.Errorf("GetAgentType() = %q, want empty explicit command", role.GetAgentType())
 	}
 	if role.GetModel() != "o3-mini" {
 		t.Errorf("GetModel() = %q, want %q", role.GetModel(), "o3-mini")

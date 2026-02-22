@@ -102,9 +102,22 @@ type AgentHarnessConfig struct {
 
 // Role defines a named configuration bundle for an h2 agent.
 type Role struct {
-	Name         string              `yaml:"name"`
-	Description  string              `yaml:"description,omitempty"`
-	AgentHarness *AgentHarnessConfig `yaml:"agent_harness,omitempty"`
+	Name        string `yaml:"name"`
+	Description string `yaml:"description,omitempty"`
+
+	// New flattened harness fields.
+	AgentHarness               string `yaml:"agent_harness,omitempty"`                  // claude_code | codex | generic
+	AgentModel                 string `yaml:"agent_model,omitempty"`                    // explicit model; empty => harness default
+	AgentHarnessCommand        string `yaml:"agent_harness_command,omitempty"`          // command override for any harness
+	AgentAccountProfile        string `yaml:"agent_account_profile,omitempty"`          // default account profile name ("default")
+	ClaudeCodeConfigPath       string `yaml:"claude_code_config_path,omitempty"`        // explicit path override
+	ClaudeCodeConfigPathPrefix string `yaml:"claude_code_config_path_prefix,omitempty"` // default: <H2Dir>/claude-config
+	CodexConfigPath            string `yaml:"codex_config_path,omitempty"`              // explicit path override
+	CodexConfigPathPrefix      string `yaml:"codex_config_path_prefix,omitempty"`       // default: <H2Dir>/codex-config
+
+	// Legacy nested harness config retained for backward compatibility with
+	// historical role files that used a mapping under agent_harness.
+	LegacyAgentHarness *AgentHarnessConfig `yaml:"-"`
 
 	// Deprecated top-level fields (backward compat — use agent_harness instead).
 	AgentTypeLegacy       string `yaml:"agent_type,omitempty"`
@@ -121,6 +134,97 @@ type Role struct {
 	Hooks          yaml.Node              `yaml:"hooks,omitempty"`     // passed through as-is to settings.json
 	Settings       yaml.Node              `yaml:"settings,omitempty"`  // extra settings.json keys
 	Variables      map[string]tmpl.VarDef `yaml:"variables,omitempty"` // template variable definitions
+}
+
+// UnmarshalYAML supports both new and legacy role harness layouts:
+// 1) new scalar:   agent_harness: codex
+// 2) legacy map:   agent_harness: { harness_type, model, command, ... }
+func (r *Role) UnmarshalYAML(value *yaml.Node) error {
+	type roleAlias struct {
+		Name                       string                 `yaml:"name"`
+		Description                string                 `yaml:"description,omitempty"`
+		AgentHarness               yaml.Node              `yaml:"agent_harness,omitempty"`
+		AgentModel                 string                 `yaml:"agent_model,omitempty"`
+		AgentHarnessCommand        string                 `yaml:"agent_harness_command,omitempty"`
+		AgentAccountProfile        string                 `yaml:"agent_account_profile,omitempty"`
+		ClaudeCodeConfigPath       string                 `yaml:"claude_code_config_path,omitempty"`
+		ClaudeCodeConfigPathPrefix string                 `yaml:"claude_code_config_path_prefix,omitempty"`
+		CodexConfigPath            string                 `yaml:"codex_config_path,omitempty"`
+		CodexConfigPathPrefix      string                 `yaml:"codex_config_path_prefix,omitempty"`
+		AgentTypeLegacy            string                 `yaml:"agent_type,omitempty"`
+		ModelLegacy                string                 `yaml:"model,omitempty"`
+		ClaudeConfigDirLegacy      string                 `yaml:"claude_config_dir,omitempty"`
+		WorkingDir                 string                 `yaml:"working_dir,omitempty"`
+		Worktree                   *WorktreeConfig        `yaml:"worktree,omitempty"`
+		SystemPrompt               string                 `yaml:"system_prompt,omitempty"`
+		Instructions               string                 `yaml:"instructions"`
+		PermissionMode             string                 `yaml:"permission_mode,omitempty"`
+		Permissions                Permissions            `yaml:"permissions,omitempty"`
+		Heartbeat                  *HeartbeatConfig       `yaml:"heartbeat,omitempty"`
+		Hooks                      yaml.Node              `yaml:"hooks,omitempty"`
+		Settings                   yaml.Node              `yaml:"settings,omitempty"`
+		Variables                  map[string]tmpl.VarDef `yaml:"variables,omitempty"`
+	}
+	var aux roleAlias
+	if err := value.Decode(&aux); err != nil {
+		return err
+	}
+
+	r.Name = aux.Name
+	r.Description = aux.Description
+	r.AgentModel = aux.AgentModel
+	r.AgentHarnessCommand = aux.AgentHarnessCommand
+	r.AgentAccountProfile = aux.AgentAccountProfile
+	r.ClaudeCodeConfigPath = aux.ClaudeCodeConfigPath
+	r.ClaudeCodeConfigPathPrefix = aux.ClaudeCodeConfigPathPrefix
+	r.CodexConfigPath = aux.CodexConfigPath
+	r.CodexConfigPathPrefix = aux.CodexConfigPathPrefix
+	r.AgentTypeLegacy = aux.AgentTypeLegacy
+	r.ModelLegacy = aux.ModelLegacy
+	r.ClaudeConfigDirLegacy = aux.ClaudeConfigDirLegacy
+	r.WorkingDir = aux.WorkingDir
+	r.Worktree = aux.Worktree
+	r.SystemPrompt = aux.SystemPrompt
+	r.Instructions = aux.Instructions
+	r.PermissionMode = aux.PermissionMode
+	r.Permissions = aux.Permissions
+	r.Heartbeat = aux.Heartbeat
+	r.Hooks = aux.Hooks
+	r.Settings = aux.Settings
+	r.Variables = aux.Variables
+
+	// Parse agent_harness (scalar new format, mapping legacy format).
+	switch aux.AgentHarness.Kind {
+	case 0:
+		// omitted
+	case yaml.ScalarNode:
+		r.AgentHarness = aux.AgentHarness.Value
+	case yaml.MappingNode:
+		var legacy AgentHarnessConfig
+		if err := aux.AgentHarness.Decode(&legacy); err != nil {
+			return fmt.Errorf("parse legacy agent_harness mapping: %w", err)
+		}
+		r.LegacyAgentHarness = &legacy
+		if r.AgentHarness == "" {
+			r.AgentHarness = legacy.HarnessType
+		}
+		if r.AgentModel == "" {
+			r.AgentModel = legacy.Model
+		}
+		if r.AgentHarnessCommand == "" {
+			r.AgentHarnessCommand = legacy.Command
+		}
+		if r.ClaudeCodeConfigPath == "" {
+			r.ClaudeCodeConfigPath = legacy.ClaudeConfigDir
+		}
+		if r.CodexConfigPath == "" {
+			r.CodexConfigPath = legacy.CodexConfigDir
+		}
+	default:
+		return fmt.Errorf("agent_harness must be a string or mapping")
+	}
+
+	return nil
 }
 
 // ResolveWorkingDir returns the absolute path for the agent's working directory.
@@ -146,8 +250,14 @@ func (r *Role) ResolveWorkingDir(invocationCWD string) (string, error) {
 // Checks AgentHarness.HarnessType first, then falls back to legacy AgentType
 // (mapping "claude" → "claude_code").
 func (r *Role) GetHarnessType() string {
-	if r.AgentHarness != nil && r.AgentHarness.HarnessType != "" {
-		return r.AgentHarness.HarnessType
+	if r.AgentHarness != "" {
+		if r.AgentHarness == "claude" {
+			return "claude_code"
+		}
+		return r.AgentHarness
+	}
+	if r.LegacyAgentHarness != nil && r.LegacyAgentHarness.HarnessType != "" {
+		return r.LegacyAgentHarness.HarnessType
 	}
 	if r.AgentTypeLegacy != "" {
 		if r.AgentTypeLegacy == "claude" {
@@ -162,25 +272,23 @@ func (r *Role) GetHarnessType() string {
 // Defaults to "claude". Maps canonical harness type names back to
 // command names: "claude_code" → "claude".
 func (r *Role) GetAgentType() string {
-	ht := r.GetHarnessType()
-	switch ht {
-	case "claude_code":
-		return "claude"
-	case "generic":
-		if r.AgentHarness != nil && r.AgentHarness.Command != "" {
-			return r.AgentHarness.Command
-		}
-		return ht
-	default:
-		return ht // "codex" etc. match command name
+	if r.AgentHarnessCommand != "" {
+		return r.AgentHarnessCommand
 	}
+	if r.LegacyAgentHarness != nil && r.LegacyAgentHarness.Command != "" {
+		return r.LegacyAgentHarness.Command
+	}
+	return ""
 }
 
-// GetModel returns the model, checking nested AgentHarness config first,
+// GetModel returns the explicit configured model, checking flattened config first,
 // then falling back to the legacy top-level field.
 func (r *Role) GetModel() string {
-	if r.AgentHarness != nil && r.AgentHarness.Model != "" {
-		return r.AgentHarness.Model
+	if r.AgentModel != "" {
+		return r.AgentModel
+	}
+	if r.LegacyAgentHarness != nil && r.LegacyAgentHarness.Model != "" {
+		return r.LegacyAgentHarness.Model
 	}
 	return r.ModelLegacy
 }
@@ -188,10 +296,25 @@ func (r *Role) GetModel() string {
 // GetCodexConfigDir returns the Codex config directory from the nested config.
 // Returns empty string if not set.
 func (r *Role) GetCodexConfigDir() string {
-	if r.AgentHarness != nil && r.AgentHarness.CodexConfigDir != "" {
-		return r.AgentHarness.CodexConfigDir
+	if r.CodexConfigPath != "" {
+		return r.CodexConfigPath
 	}
-	return ""
+	if r.LegacyAgentHarness != nil && r.LegacyAgentHarness.CodexConfigDir != "" {
+		return r.LegacyAgentHarness.CodexConfigDir
+	}
+	prefix := r.CodexConfigPathPrefix
+	if prefix == "" {
+		prefix = filepath.Join(ConfigDir(), "codex-config")
+	}
+	return filepath.Join(prefix, r.GetAgentAccountProfile())
+}
+
+// GetAgentAccountProfile returns the selected account profile name.
+func (r *Role) GetAgentAccountProfile() string {
+	if strings.TrimSpace(r.AgentAccountProfile) != "" {
+		return strings.TrimSpace(r.AgentAccountProfile)
+	}
+	return "default"
 }
 
 // Permissions defines the permission configuration for a role.
@@ -232,14 +355,20 @@ func DefaultClaudeConfigDir() string {
 // If set to "~/" (the home directory), returns "" to indicate that
 // CLAUDE_CONFIG_DIR should not be overridden (use system default).
 func (r *Role) GetClaudeConfigDir() string {
-	dir := r.ClaudeConfigDirLegacy
-	if r.AgentHarness != nil && r.AgentHarness.ClaudeConfigDir != "" {
-		dir = r.AgentHarness.ClaudeConfigDir
+	if r.ClaudeCodeConfigPath != "" {
+		return expandClaudeConfigDir(r.ClaudeCodeConfigPath)
 	}
-	if dir != "" {
-		return expandClaudeConfigDir(dir)
+	if r.LegacyAgentHarness != nil && r.LegacyAgentHarness.ClaudeConfigDir != "" {
+		return expandClaudeConfigDir(r.LegacyAgentHarness.ClaudeConfigDir)
 	}
-	return DefaultClaudeConfigDir()
+	if r.ClaudeConfigDirLegacy != "" {
+		return expandClaudeConfigDir(r.ClaudeConfigDirLegacy)
+	}
+	prefix := r.ClaudeCodeConfigPathPrefix
+	if prefix == "" {
+		prefix = filepath.Join(ConfigDir(), "claude-config")
+	}
+	return expandClaudeConfigDir(filepath.Join(prefix, r.GetAgentAccountProfile()))
 }
 
 // expandClaudeConfigDir handles tilde expansion for Claude config dir paths.

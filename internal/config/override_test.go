@@ -223,26 +223,23 @@ func TestApplyOverrides_NestedStringField(t *testing.T) {
 	}
 }
 
-func TestApplyOverrides_NestedAgentHarness(t *testing.T) {
+func TestApplyOverrides_AgentModel(t *testing.T) {
 	role := &Role{Name: "test", Instructions: "test"}
-	err := ApplyOverrides(role, []string{"agent_harness.model=sonnet"})
+	err := ApplyOverrides(role, []string{"agent_model=sonnet"})
 	if err != nil {
 		t.Fatalf("ApplyOverrides: %v", err)
 	}
-	if role.AgentHarness == nil {
-		t.Fatal("AgentHarness should have been auto-initialized")
-	}
-	if role.AgentHarness.Model != "sonnet" {
-		t.Errorf("AgentHarness.Model = %q, want %q", role.AgentHarness.Model, "sonnet")
+	if role.AgentModel != "sonnet" {
+		t.Errorf("AgentModel = %q, want %q", role.AgentModel, "sonnet")
 	}
 	if role.GetModel() != "sonnet" {
 		t.Errorf("GetModel() = %q, want %q", role.GetModel(), "sonnet")
 	}
 }
 
-func TestApplyOverrides_NestedAgentHarnessType(t *testing.T) {
+func TestApplyOverrides_AgentHarness(t *testing.T) {
 	role := &Role{Name: "test", Instructions: "test"}
-	err := ApplyOverrides(role, []string{"agent_harness.harness_type=codex"})
+	err := ApplyOverrides(role, []string{"agent_harness=codex"})
 	if err != nil {
 		t.Fatalf("ApplyOverrides: %v", err)
 	}
