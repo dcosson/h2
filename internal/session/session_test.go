@@ -45,10 +45,10 @@ func waitForState(t *testing.T, s *Session, target monitor.State, timeout time.D
 // For GenericType agents, this starts the output collector bridge to the monitor.
 func startAgent(t *testing.T, s *Session) {
 	t.Helper()
-	if _, err := s.Agent.PrepareForLaunch(s.Name, s.SessionID, false); err != nil {
+	if _, err := s.harness.PrepareForLaunch(s.Name, s.SessionID, false); err != nil {
 		t.Fatalf("PrepareForLaunch: %v", err)
 	}
-	s.Agent.Start(context.Background())
+	s.startAgentPipeline(context.Background())
 }
 
 func TestStateTransitions_ActiveToIdle(t *testing.T) {

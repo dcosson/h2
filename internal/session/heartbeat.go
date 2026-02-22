@@ -4,7 +4,6 @@ import (
 	"os/exec"
 	"time"
 
-	"h2/internal/session/agent"
 	"h2/internal/session/agent/monitor"
 	"h2/internal/session/message"
 )
@@ -15,7 +14,7 @@ type HeartbeatConfig struct {
 	Message     string
 	Condition   string // optional shell command; nudge only if exit code 0
 
-	Agent     *agent.Agent
+	Session   *Session
 	Queue     *message.MessageQueue
 	AgentName string
 	Stop      <-chan struct{}
@@ -27,13 +26,13 @@ type HeartbeatConfig struct {
 func RunHeartbeat(cfg HeartbeatConfig) {
 	for {
 		// Wait for agent to become idle.
-		if !waitForIdle(cfg.Agent, cfg.Stop) {
+		if !waitForIdle(cfg.Session, cfg.Stop) {
 			return
 		}
 
 		// Start idle timer.
 		timer := time.NewTimer(cfg.IdleTimeout)
-		fired := waitForTimer(timer, cfg.Agent, cfg.Stop)
+		fired := waitForTimer(timer, cfg.Session, cfg.Stop)
 		if !fired {
 			timer.Stop()
 			continue // agent went active or stop signaled
@@ -45,7 +44,7 @@ func RunHeartbeat(cfg HeartbeatConfig) {
 			if err := cmd.Run(); err != nil {
 				// Condition not met — wait for next state change before retrying.
 				select {
-				case <-cfg.Agent.StateChanged():
+				case <-cfg.Session.StateChanged():
 					continue
 				case <-cfg.Stop:
 					return
@@ -59,13 +58,13 @@ func RunHeartbeat(cfg HeartbeatConfig) {
 }
 
 // waitForIdle blocks until the agent is idle. Returns false if stop is signaled.
-func waitForIdle(a *agent.Agent, stop <-chan struct{}) bool {
+func waitForIdle(s *Session, stop <-chan struct{}) bool {
 	for {
-		if st, _ := a.State(); st == monitor.StateIdle {
+		if st, _ := s.State(); st == monitor.StateIdle {
 			return true
 		}
 		select {
-		case <-a.StateChanged():
+		case <-s.StateChanged():
 			continue
 		case <-stop:
 			return false
@@ -75,18 +74,18 @@ func waitForIdle(a *agent.Agent, stop <-chan struct{}) bool {
 
 // waitForTimer waits for the timer to fire while the agent remains idle.
 // Returns true if the timer fired (and agent is still idle), false otherwise.
-func waitForTimer(timer *time.Timer, a *agent.Agent, stop <-chan struct{}) bool {
+func waitForTimer(timer *time.Timer, s *Session, stop <-chan struct{}) bool {
 	for {
 		select {
 		case <-timer.C:
 			// Timer fired — verify agent is still idle.
-			if st, _ := a.State(); st == monitor.StateIdle {
+			if st, _ := s.State(); st == monitor.StateIdle {
 				return true
 			}
 			return false
-		case <-a.StateChanged():
+		case <-s.StateChanged():
 			// State changed — if no longer idle, cancel.
-			if st, _ := a.State(); st != monitor.StateIdle {
+			if st, _ := s.State(); st != monitor.StateIdle {
 				return false
 			}
 			// Still idle (e.g. active→idle transition); keep waiting.

@@ -153,6 +153,6 @@ func (d *Daemon) handleHookEvent(conn net.Conn, req *message.Request) {
 		return
 	}
 
-	d.Session.Agent.HandleHookEvent(req.EventName, req.Payload)
+	d.Session.HandleHookEvent(req.EventName, req.Payload)
 	message.SendResponse(conn, &message.Response{OK: true})
 }

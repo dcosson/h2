@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -15,7 +16,6 @@ import (
 
 	"h2/internal/activitylog"
 	"h2/internal/config"
-	"h2/internal/session/agent"
 	"h2/internal/session/agent/harness"
 	"h2/internal/session/agent/monitor"
 	"h2/internal/session/agent/shared/eventstore"
@@ -47,7 +47,10 @@ type Session struct {
 	DisallowedTools  []string // Disallowed tools, passed via --disallowedTools (comma-joined)
 	Queue            *message.MessageQueue
 	AgentName        string
-	Agent            *agent.Agent
+	harness          harness.Harness
+	monitor          *monitor.AgentMonitor
+	agentCancel      context.CancelFunc
+	activityLog      *activitylog.Logger
 	VT               *virtualterminal.VT
 	Client           *client.Client // primary/interactive client (nil in daemon-only)
 	Clients          []*client.Client
@@ -95,7 +98,8 @@ func New(name string, command string, args []string) *Session {
 		Args:       args,
 		AgentName:  name,
 		Queue:      message.NewMessageQueue(),
-		Agent:      agent.New(h),
+		harness:    h,
+		monitor:    monitor.New(),
 		exitNotify: make(chan struct{}, 1),
 		stopCh:     make(chan struct{}),
 		relaunchCh: make(chan struct{}, 1),
@@ -173,7 +177,7 @@ func (s *Session) setupAgent() error {
 	os.MkdirAll(logDir, 0o755)
 	logPath := filepath.Join(logDir, "session-activity.jsonl")
 	actLog := activitylog.New(true, logPath, s.Name, s.SessionID)
-	s.Agent.SetActivityLog(actLog)
+	s.activityLog = actLog
 
 	// Re-resolve harness with proper config (logger, configDir).
 	// The minimal harness from session.New() lacks these.
@@ -181,10 +185,10 @@ func (s *Session) setupAgent() error {
 	if err != nil {
 		return fmt.Errorf("resolve harness: %w", err)
 	}
-	s.Agent.SetHarness(h)
+	s.harness = h
 
 	// Prepare harness and get launch config (env vars, prepend args).
-	launchCfg, err := s.Agent.PrepareForLaunch(s.Name, s.SessionID, false)
+	launchCfg, err := s.harness.PrepareForLaunch(s.Name, s.SessionID, false)
 	if err != nil {
 		return fmt.Errorf("prepare agent for launch: %w", err)
 	}
@@ -202,7 +206,7 @@ func (s *Session) setupAgent() error {
 	if s.SessionDir != "" {
 		if es, err := eventstore.Open(s.SessionDir); err == nil {
 			s.eventStore = es
-			s.Agent.SetEventWriter(es.Append)
+			s.monitor.SetEventWriter(es.Append)
 		}
 	}
 
@@ -261,7 +265,7 @@ func resolveFullHarness(command, roleName string, log *activitylog.Logger) (harn
 // (e.g. --session-id for Claude Code) and appending agent-type-specific
 // role flags via BuildCommandArgs.
 func (s *Session) childArgs() []string {
-	return s.Agent.Harness().BuildCommandArgs(harness.CommandArgsConfig{
+	return s.harness.BuildCommandArgs(harness.CommandArgsConfig{
 		PrependArgs:     s.prependArgs,
 		ExtraArgs:       s.Args,
 		SessionID:       s.SessionID,
@@ -338,18 +342,18 @@ func (s *Session) NewClient() *client.Client {
 		return s.Queue.PendingCount(), s.Queue.IsPaused()
 	}
 	cl.OtelMetrics = func() (int64, int64, float64, bool, int) {
-		m := s.Agent.Metrics()
-		return m.InputTokens, m.OutputTokens, m.TotalCostUSD, m.EventsReceived, s.Agent.OtelPort()
+		m := s.Metrics()
+		return m.InputTokens, m.OutputTokens, m.TotalCostUSD, m.EventsReceived, s.OtelPort()
 	}
 	cl.AgentState = func() (string, string, string) {
 		st, sub := s.State()
 		return st.String(), sub.String(), virtualterminal.FormatIdleDuration(s.StateDuration())
 	}
 	cl.HookState = func() string {
-		return s.Agent.ActivitySnapshot().LastToolName
+		return s.ActivitySnapshot().LastToolName
 	}
 	cl.OnInterrupt = func() {
-		s.Agent.SignalInterrupt()
+		s.SignalInterrupt()
 	}
 	cl.OnSubmit = func(text string, pri message.Priority) {
 		s.SubmitInput(text, pri)
@@ -442,7 +446,7 @@ func (s *Session) RunDaemon() error {
 		s.ExtraEnv["H2_SESSION_DIR"] = s.SessionDir
 	}
 	// Merge harness-specific env vars (e.g. CLAUDE_CONFIG_DIR for Claude Code).
-	for k, v := range s.Agent.Harness().BuildCommandEnvVars(config.ConfigDir()) {
+	for k, v := range s.harness.BuildCommandEnvVars(config.ConfigDir()) {
 		s.ExtraEnv[k] = v
 	}
 
@@ -454,7 +458,7 @@ func (s *Session) RunDaemon() error {
 	s.VT.Vt.ForwardResponses = s.VT.Ptm
 
 	// Start adapter+monitor pipeline (after child process is running).
-	s.Agent.Start(context.Background())
+	s.startAgentPipeline(context.Background())
 
 	// Start delivery loop.
 	go s.StartServices()
@@ -465,7 +469,7 @@ func (s *Session) RunDaemon() error {
 			IdleTimeout: s.HeartbeatIdleTimeout,
 			Message:     s.HeartbeatMessage,
 			Condition:   s.HeartbeatCondition,
-			Agent:       s.Agent,
+			Session:     s,
 			Queue:       s.Queue,
 			AgentName:   s.AgentName,
 			Stop:        s.stopCh,
@@ -544,7 +548,7 @@ func (s *Session) RunInteractive() error {
 	s.VT.Vt.ForwardResponses = s.VT.Ptm
 
 	// Start adapter+monitor pipeline (after child process is running).
-	s.Agent.Start(context.Background())
+	s.startAgentPipeline(context.Background())
 
 	// Set up interactive terminal (raw mode, mouse, SIGWINCH, input reading).
 	cleanup, stopStatus, err := s.Client.SetupInteractiveTerminal()
@@ -652,47 +656,73 @@ func (s *Session) TickStatus(stop <-chan struct{}) {
 	}
 }
 
-// --- Delegators to Agent ---
-
-// OtelPort delegates to the Agent.
+// OtelPort returns the OTEL collector port when supported by the harness.
 func (s *Session) OtelPort() int {
-	return s.Agent.OtelPort()
+	type otelPorter interface {
+		OtelPort() int
+	}
+	if op, ok := s.harness.(otelPorter); ok {
+		return op.OtelPort()
+	}
+	return 0
 }
 
-// Metrics delegates to the Agent.
+// Metrics returns a snapshot of monitor metrics.
 func (s *Session) Metrics() monitor.AgentMetrics {
-	return s.Agent.Metrics()
+	return s.monitor.MetricsSnapshot()
 }
 
 // State returns the current agent state and sub-state.
 func (s *Session) State() (monitor.State, monitor.SubState) {
-	return s.Agent.State()
+	return s.monitor.State()
 }
 
 // StateChanged returns a channel that is closed when the agent state changes.
 func (s *Session) StateChanged() <-chan struct{} {
-	return s.Agent.StateChanged()
+	return s.monitor.StateChanged()
 }
 
 // WaitForState blocks until the agent reaches the target state or ctx is cancelled.
 func (s *Session) WaitForState(ctx context.Context, target monitor.State) bool {
-	return s.Agent.WaitForState(ctx, target)
+	return s.monitor.WaitForState(ctx, target)
 }
 
 // StateDuration returns how long the agent has been in its current state.
 func (s *Session) StateDuration() time.Duration {
-	return s.Agent.StateDuration()
+	return s.monitor.StateDuration()
 }
 
 // HandleOutput signals that the child process has produced output.
 // Delegates to the Agent's harness (e.g. generic harness feeds output collector).
 func (s *Session) HandleOutput() {
-	s.Agent.HandleOutput()
+	if s.harness != nil {
+		s.harness.HandleOutput()
+	}
+}
+
+// HandleHookEvent forwards a hook payload to the active harness.
+func (s *Session) HandleHookEvent(eventName string, payload json.RawMessage) bool {
+	if s.harness != nil {
+		return s.harness.HandleHookEvent(eventName, payload)
+	}
+	return false
+}
+
+// SignalInterrupt notifies the harness of a user interrupt.
+func (s *Session) SignalInterrupt() {
+	if s.harness != nil {
+		s.harness.HandleInterrupt()
+	}
 }
 
 // SignalExit signals that the child process has exited or hung.
 func (s *Session) SignalExit() {
-	s.Agent.SetExited()
+	s.monitor.SetExited()
+}
+
+// ActivitySnapshot returns current monitor-derived activity fields.
+func (s *Session) ActivitySnapshot() monitor.ActivitySnapshot {
+	return s.monitor.Activity()
 }
 
 // SubmitInput enqueues user-typed input for priority-aware delivery.
@@ -715,18 +745,18 @@ func (s *Session) StartServices() {
 		AgentName: s.AgentName,
 		PtyWriter: s.PtyWriter(),
 		IsIdle: func() bool {
-			st, _ := s.Agent.State()
+			st, _ := s.State()
 			return st == monitor.StateIdle
 		},
 		IsBlocked: func() bool {
-			st, sub := s.Agent.State()
+			st, sub := s.State()
 			return st == monitor.StateActive && sub == monitor.SubStateWaitingForPermission
 		},
 		WaitForIdle: func(ctx context.Context) bool {
-			return s.Agent.WaitForState(ctx, monitor.StateIdle)
+			return s.WaitForState(ctx, monitor.StateIdle)
 		},
 		SignalInterrupt: func() {
-			s.Agent.SignalInterrupt()
+			s.SignalInterrupt()
 		},
 		OnDeliver: s.OnDeliver,
 		Stop:      s.stopCh,
@@ -744,9 +774,10 @@ func (s *Session) Stop() {
 
 	// Gather session summary data before stopping the agent (which closes files).
 	summary := s.buildSessionSummary()
-	s.Agent.ActivityLog().SessionSummary(summary)
-
-	s.Agent.Stop()
+	if s.activityLog != nil {
+		s.activityLog.SessionSummary(summary)
+	}
+	s.stopAgentPipeline()
 
 	if s.eventStore != nil {
 		s.eventStore.Close()
@@ -755,7 +786,7 @@ func (s *Session) Stop() {
 
 // buildSessionSummary collects metrics from all available sources.
 func (s *Session) buildSessionSummary() activitylog.SessionSummaryData {
-	snap := s.Agent.Metrics()
+	snap := s.Metrics()
 
 	d := activitylog.SessionSummaryData{
 		InputTokens:  snap.InputTokens,
@@ -765,7 +796,7 @@ func (s *Session) buildSessionSummary() activitylog.SessionSummaryData {
 		ToolCounts:   snap.ToolCounts,
 	}
 
-	d.ToolUseCount = s.Agent.ActivitySnapshot().ToolUseCount
+	d.ToolUseCount = s.ActivitySnapshot().ToolUseCount
 
 	// Session uptime.
 	if !s.StartTime.IsZero() {
@@ -780,4 +811,22 @@ func (s *Session) buildSessionSummary() activitylog.SessionSummaryData {
 	}
 
 	return d
+}
+
+func (s *Session) startAgentPipeline(ctx context.Context) {
+	ctx, s.agentCancel = context.WithCancel(ctx)
+	if s.harness != nil {
+		go s.harness.Start(ctx, s.monitor.Events()) //nolint:errcheck // harness startup loop is best-effort
+	}
+	go s.monitor.Run(ctx) //nolint:errcheck // monitor exits on context cancellation
+}
+
+func (s *Session) stopAgentPipeline() {
+	if s.agentCancel != nil {
+		s.agentCancel()
+		s.agentCancel = nil
+	}
+	if s.harness != nil {
+		s.harness.Stop()
+	}
 }

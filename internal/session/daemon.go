@@ -89,7 +89,7 @@ func RunDaemon(opts RunDaemonOpts) error {
 
 	// Write session metadata for h2 peek and other tools.
 	if s.SessionDir != "" {
-		agentEnvVars := s.Agent.Harness().BuildCommandEnvVars(config.ConfigDir())
+		agentEnvVars := s.harness.BuildCommandEnvVars(config.ConfigDir())
 		cwd, _ := os.Getwd()
 		meta := config.SessionMetadata{
 			AgentName:       opts.Name,
@@ -125,7 +125,7 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 	s := d.Session
 	uptime := time.Since(d.StartTime)
 	st, sub := s.State()
-	activity := s.Agent.ActivitySnapshot()
+	activity := s.ActivitySnapshot()
 	var toolName string
 	if st == monitor.StateActive {
 		toolName = activity.LastToolName
@@ -145,7 +145,7 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 	}
 
 	// Pull from OTEL collector if active.
-	m := s.Agent.Metrics()
+	m := s.Metrics()
 	if m.EventsReceived {
 		info.InputTokens = m.InputTokens
 		info.OutputTokens = m.OutputTokens
