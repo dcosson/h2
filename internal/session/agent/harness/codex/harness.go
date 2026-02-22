@@ -24,7 +24,7 @@ func init() {
 			return New(cfg, log)
 		},
 		DefaultCommand: "codex",
-		DefaultModel:   "gpt-5-codex",
+		DefaultModel:   "gpt-5.3-codex",
 	})
 }
 
