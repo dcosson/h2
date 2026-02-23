@@ -436,9 +436,11 @@ func (s *Session) RunDaemon() error {
 	}
 	s.VT.ChildRows = s.VT.Rows - 2 // default ReservedRows
 	s.VT.Vt = midterm.NewTerminal(s.VT.ChildRows, s.VT.Cols)
+	s.VT.SetupScrollCapture()
 	s.VT.Scrollback = midterm.NewTerminal(s.VT.ChildRows, s.VT.Cols)
 	s.VT.Scrollback.AutoResizeY = true
 	s.VT.Scrollback.AppendOnly = true
+	s.VT.ResetPlainHistory()
 	s.VT.LastOut = time.Now()
 	s.VT.Output = io.Discard
 
@@ -538,9 +540,11 @@ func (s *Session) RunInteractive() error {
 
 	s.VT.ChildRows = rows - s.Client.ReservedRows()
 	s.VT.Vt = midterm.NewTerminal(s.VT.ChildRows, cols)
+	s.VT.SetupScrollCapture()
 	s.VT.Scrollback = midterm.NewTerminal(s.VT.ChildRows, cols)
 	s.VT.Scrollback.AutoResizeY = true
 	s.VT.Scrollback.AppendOnly = true
+	s.VT.ResetPlainHistory()
 	s.VT.LastOut = time.Now()
 	s.VT.Output = os.Stdout
 	s.Client.Output = os.Stdout
@@ -624,6 +628,7 @@ func (s *Session) lifecycleLoop(stopStatus chan struct{}, interactive bool) erro
 				return err
 			}
 			s.VT.Vt = midterm.NewTerminal(s.VT.ChildRows, s.VT.Cols)
+			s.VT.SetupScrollCapture()
 			if interactive {
 				s.VT.Vt.ForwardRequests = os.Stdout
 			}
@@ -631,6 +636,7 @@ func (s *Session) lifecycleLoop(stopStatus chan struct{}, interactive bool) erro
 			s.VT.Scrollback = midterm.NewTerminal(s.VT.ChildRows, s.VT.Cols)
 			s.VT.Scrollback.AutoResizeY = true
 			s.VT.Scrollback.AppendOnly = true
+			s.VT.ResetPlainHistory()
 
 			s.VT.Mu.Lock()
 			s.VT.ChildExited = false

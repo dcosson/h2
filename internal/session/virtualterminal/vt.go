@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/creack/pty"
 	"github.com/vito/midterm"
@@ -36,6 +37,41 @@ type VT struct {
 	ChildExited bool
 	ChildHung   bool
 	ExitError   error
+
+	// ScrollHistory stores ANSI-formatted lines that scrolled off the top of
+	// VT.Vt via midterm's OnScrollback callback. This captures scrollback from
+	// apps that use scroll regions (e.g. codex inline viewport).
+	ScrollHistory    []string
+	scrollHistoryMax int
+
+	// PlainHistory stores ANSI-stripped logical output lines captured directly
+	// from PTY bytes as a fallback scrollback source for repaint-heavy TUIs.
+	PlainHistory    []string
+	plainLine       []rune
+	plainMaxLines   int
+	plainParseState int
+}
+
+// SetupScrollCapture installs the OnScrollback callback on VT.Vt so that
+// lines scrolling off the top of the visible screen are captured with ANSI
+// formatting into ScrollHistory. Must be called after VT.Vt is created.
+func (vt *VT) SetupScrollCapture() {
+	if vt.scrollHistoryMax <= 0 {
+		vt.scrollHistoryMax = 50000
+	}
+	vt.Vt.OnScrollback(func(line midterm.Line) {
+		rendered := line.Display() + "\033[0m"
+		vt.ScrollHistory = append(vt.ScrollHistory, rendered)
+		if len(vt.ScrollHistory) > vt.scrollHistoryMax {
+			trim := len(vt.ScrollHistory) - vt.scrollHistoryMax
+			vt.ScrollHistory = vt.ScrollHistory[trim:]
+		}
+	})
+}
+
+// ResetScrollHistory clears the captured scroll history.
+func (vt *VT) ResetScrollHistory() {
+	vt.ScrollHistory = nil
 }
 
 // KillChild sends SIGKILL to the child process. Used when the child is hung
@@ -95,6 +131,7 @@ func (vt *VT) PipeOutput(onData func()) {
 			if vt.Scrollback != nil {
 				vt.Scrollback.Write(buf[:n])
 			}
+			vt.CapturePlainHistory(buf[:n])
 			onData()
 			vt.Mu.Unlock()
 		}
@@ -102,6 +139,108 @@ func (vt *VT) PipeOutput(onData func()) {
 			return
 		}
 	}
+}
+
+const (
+	plainParseNormal = iota
+	plainParseEsc
+	plainParseCSI
+	plainParseOSC
+	plainParseOSCEsc
+)
+
+// CapturePlainHistory appends ANSI-stripped output lines to PlainHistory.
+func (vt *VT) CapturePlainHistory(data []byte) {
+	if vt.plainMaxLines <= 0 {
+		vt.plainMaxLines = 50000
+	}
+	for len(data) > 0 {
+		r, sz := utf8.DecodeRune(data)
+		if r == utf8.RuneError && sz == 1 {
+			// treat invalid byte as a single-byte rune
+			r = rune(data[0])
+		}
+		data = data[sz:]
+
+		switch vt.plainParseState {
+		case plainParseEsc:
+			switch r {
+			case '[':
+				vt.plainParseState = plainParseCSI
+			case ']':
+				vt.plainParseState = plainParseOSC
+			default:
+				vt.plainParseState = plainParseNormal
+			}
+			continue
+		case plainParseCSI:
+			// CSI sequence ends with a final byte in 0x40-0x7E.
+			if r >= 0x40 && r <= 0x7E {
+				// Cursor-position commands (H, f) and erase-display (J)
+				// indicate the app is repositioning/clearing. Discard any
+				// accumulated text so TUI repaints don't corrupt history.
+				if r == 'H' || r == 'f' || r == 'J' {
+					vt.plainLine = vt.plainLine[:0]
+				}
+				vt.plainParseState = plainParseNormal
+			}
+			continue
+		case plainParseOSC:
+			// OSC ends with BEL or ST (ESC \).
+			if r == 0x07 {
+				vt.plainParseState = plainParseNormal
+			} else if r == 0x1B {
+				vt.plainParseState = plainParseOSCEsc
+			}
+			continue
+		case plainParseOSCEsc:
+			if r == '\\' {
+				vt.plainParseState = plainParseNormal
+			} else if r == 0x1B {
+				vt.plainParseState = plainParseOSCEsc
+			} else {
+				vt.plainParseState = plainParseOSC
+			}
+			continue
+		}
+
+		// plainParseNormal
+		switch r {
+		case 0x1B:
+			vt.plainParseState = plainParseEsc
+		case '\r':
+			// Carriage return moves to column 0; do not clear eagerly.
+			// Clearing here turns CRLF output into empty history lines.
+		case '\n':
+			vt.appendPlainLine(string(vt.plainLine))
+			vt.plainLine = vt.plainLine[:0]
+		case 0x08, 0x7F:
+			if len(vt.plainLine) > 0 {
+				vt.plainLine = vt.plainLine[:len(vt.plainLine)-1]
+			}
+		case '\t':
+			vt.plainLine = append(vt.plainLine, ' ', ' ', ' ', ' ')
+		default:
+			if r >= 0x20 {
+				vt.plainLine = append(vt.plainLine, r)
+			}
+		}
+	}
+}
+
+func (vt *VT) appendPlainLine(line string) {
+	vt.PlainHistory = append(vt.PlainHistory, line)
+	if len(vt.PlainHistory) > vt.plainMaxLines {
+		trim := len(vt.PlainHistory) - vt.plainMaxLines
+		vt.PlainHistory = vt.PlainHistory[trim:]
+	}
+}
+
+// ResetPlainHistory clears the fallback plain scrollback parser state.
+func (vt *VT) ResetPlainHistory() {
+	vt.PlainHistory = nil
+	vt.plainLine = nil
+	vt.plainParseState = plainParseNormal
 }
 
 // RespondOSCColors responds to OSC 10/11 color queries from the child.

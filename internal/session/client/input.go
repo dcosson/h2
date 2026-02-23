@@ -551,6 +551,9 @@ func (c *Client) HandleScrollBytes(buf []byte, start, n int) int {
 // EnterScrollMode switches to scroll mode, freezing the display.
 // If currently in passthrough, enters ModePassthroughScroll to preserve state.
 func (c *Client) EnterScrollMode() {
+	c.ScrollAnchorY = c.scrollbackBottomRow()
+	c.PlainAnchorLen = len(c.VT.PlainHistory)
+	c.ScrollHistoryAnchor = len(c.VT.ScrollHistory)
 	if c.Mode == ModePassthrough {
 		c.setMode(ModePassthroughScroll)
 	} else {
@@ -565,6 +568,9 @@ func (c *Client) EnterScrollMode() {
 // ModePassthroughScroll restores ModePassthrough; ModeScroll restores ModeNormal.
 func (c *Client) ExitScrollMode() {
 	c.ScrollOffset = 0
+	c.ScrollAnchorY = 0
+	c.PlainAnchorLen = 0
+	c.ScrollHistoryAnchor = 0
 	if c.Mode == ModePassthroughScroll {
 		c.setMode(ModePassthrough)
 	} else {
@@ -602,13 +608,10 @@ func (c *Client) ScrollDown(lines int) {
 
 // ClampScrollOffset ensures ScrollOffset is within valid bounds.
 func (c *Client) ClampScrollOffset() {
-	if c.VT.Scrollback == nil {
+	maxOffset, ok := c.scrollMaxOffset()
+	if !ok {
 		c.ScrollOffset = 0
 		return
-	}
-	maxOffset := c.VT.Scrollback.Cursor.Y - c.VT.ChildRows + 1
-	if maxOffset < 0 {
-		maxOffset = 0
 	}
 	if c.ScrollOffset > maxOffset {
 		c.ScrollOffset = maxOffset
@@ -616,6 +619,99 @@ func (c *Client) ClampScrollOffset() {
 	if c.ScrollOffset < 0 {
 		c.ScrollOffset = 0
 	}
+}
+
+// scrollbackBottomRow returns the effective last row in scrollback.
+// Some TUIs repaint in-place and keep cursor near the bottom while content
+// height grows, so relying on cursor alone can under-count history.
+func (c *Client) scrollbackBottomRow() int {
+	if c.VT == nil || c.VT.Scrollback == nil {
+		return 0
+	}
+	sb := c.VT.Scrollback
+	bottom := len(sb.Content) - 1
+	if sb.Cursor.Y > bottom {
+		// Repaint-heavy TUIs can leave cursor coordinates far beyond content
+		// while redrawing. Treat large overshoots as invalid for anchoring.
+		maxAhead := c.VT.ChildRows
+		if maxAhead < 1 {
+			maxAhead = 1
+		}
+		if sb.Cursor.Y <= bottom+maxAhead {
+			bottom = sb.Cursor.Y
+		}
+	}
+	if bottom < 0 {
+		return 0
+	}
+	return bottom
+}
+
+func (c *Client) plainBottomRow() int {
+	if c.VT == nil || len(c.VT.PlainHistory) == 0 {
+		return -1
+	}
+	return len(c.VT.PlainHistory) - 1
+}
+
+// plainScrollBottom returns the effective bottom for PlainHistory rendering.
+// In scroll mode it uses the frozen anchor; otherwise the live length.
+func (c *Client) plainScrollBottom() int {
+	if c.IsScrollMode() && c.PlainAnchorLen > 0 {
+		return c.PlainAnchorLen - 1
+	}
+	return c.plainBottomRow()
+}
+
+// scrollbackScrollBottom returns the effective bottom for midterm scrollback rendering.
+func (c *Client) scrollbackScrollBottom() int {
+	if c.IsScrollMode() {
+		return c.ScrollAnchorY
+	}
+	return c.scrollbackBottomRow()
+}
+
+func (c *Client) scrollMaxOffset() (int, bool) {
+	if c.VT == nil {
+		return 0, false
+	}
+	// Prefer ScrollHistory (from midterm OnScrollback callback) when available.
+	if c.hasScrollHistory() {
+		histLen := c.scrollHistoryLen()
+		// Total content = ScrollHistory + live screen (ChildRows).
+		// Max offset = total - ChildRows = histLen.
+		if histLen < 0 {
+			histLen = 0
+		}
+		return histLen, true
+	}
+	// Fallback to AppendOnly scrollback for apps without scroll regions.
+	if c.VT.Scrollback == nil {
+		return 0, false
+	}
+	bottom := c.scrollbackScrollBottom()
+	if pb := c.plainScrollBottom(); pb > bottom {
+		bottom = pb
+	}
+	maxOffset := bottom - c.VT.ChildRows + 1
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	return maxOffset, true
+}
+
+// hasScrollHistory returns true if ScrollHistory has captured lines.
+func (c *Client) hasScrollHistory() bool {
+	return c.VT != nil && len(c.VT.ScrollHistory) > 0
+}
+
+// scrollHistoryLen returns the ScrollHistory length to use for rendering.
+// In scroll mode, uses the frozen anchor; otherwise the live length.
+func (c *Client) scrollHistoryLen() int {
+	if c.IsScrollMode() && c.ScrollHistoryAnchor > 0 {
+		return c.ScrollHistoryAnchor
+	}
+	return len(c.VT.ScrollHistory)
 }
 
 // isSGRMouseSequence returns true if seq is an SGR mouse event
@@ -655,10 +751,12 @@ func (c *Client) HandleSGRMouse(params []byte, press bool) {
 			c.ShowSelectHint()
 		}
 	case 64: // scroll up
-		if !c.IsScrollMode() {
+		if c.IsScrollMode() {
+			c.ScrollUp(scrollStep)
+		} else {
 			c.EnterScrollMode()
+			c.ScrollUp(scrollStep)
 		}
-		c.ScrollUp(scrollStep)
 	case 65: // scroll down
 		if c.IsScrollMode() {
 			c.ScrollDown(scrollStep)

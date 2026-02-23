@@ -63,22 +63,84 @@ func (c *Client) renderLiveView(buf *bytes.Buffer) {
 
 // renderScrollView renders the scrollback buffer at the current ScrollOffset.
 func (c *Client) renderScrollView(buf *bytes.Buffer) {
+	// Prefer ScrollHistory (captured via midterm OnScrollback) when available.
+	// This is populated for apps that use scroll regions (e.g. codex inline viewport).
+	if c.hasScrollHistory() {
+		c.renderScrollViewHistory(buf)
+		return
+	}
+	// Fallback to AppendOnly scrollback for apps without scroll regions (e.g. Claude Code).
 	sb := c.VT.Scrollback
 	if sb == nil {
 		c.renderLiveView(buf)
 		return
 	}
-	bottom := sb.Cursor.Y
+	bottom := c.scrollbackScrollBottom()
 	startRow := bottom - c.VT.ChildRows + 1 - c.ScrollOffset
 	if startRow < 0 {
 		startRow = 0
 	}
 	for i := 0; i < c.VT.ChildRows; i++ {
-		fmt.Fprintf(buf, "\033[%d;1H", i+1)
-		c.RenderLineFrom(buf, sb, startRow+i)
+		fmt.Fprintf(buf, "\033[%d;1H\033[2K", i+1)
+		row := startRow + i
+		if row >= 0 && row < len(sb.Content) {
+			c.RenderLineFrom(buf, sb, row)
+		}
 	}
-	// Draw "(scrolling)" indicator at row 1, right-aligned, in inverse video.
+	c.renderScrollIndicator(buf)
+}
+
+// renderScrollViewHistory renders using ScrollHistory (scrolled-off lines from
+// VT.Vt's OnScrollback callback) combined with the live VT.Vt screen content.
+// The full content is: [ScrollHistory...] ++ [VT.Vt.Content rows].
+func (c *Client) renderScrollViewHistory(buf *bytes.Buffer) {
+	histLen := c.scrollHistoryLen()
+	totalRows := histLen + c.VT.ChildRows
+
+	// startRow is the index into the combined [ScrollHistory + live] buffer.
+	startRow := totalRows - c.VT.ChildRows - c.ScrollOffset
+	if startRow < 0 {
+		startRow = 0
+	}
+
+	for i := 0; i < c.VT.ChildRows; i++ {
+		fmt.Fprintf(buf, "\033[%d;1H\033[2K", i+1)
+		row := startRow + i
+		if row < 0 || row >= totalRows {
+			continue
+		}
+		if row < histLen {
+			// Render from ScrollHistory (ANSI-formatted string).
+			line := c.VT.ScrollHistory[row]
+			buf.WriteString(line)
+		} else {
+			// Render from live VT.Vt content.
+			vtRow := row - histLen
+			c.RenderLineFrom(buf, c.VT.Vt, vtRow)
+		}
+	}
+	c.renderScrollIndicator(buf)
+}
+
+// renderScrollIndicator draws the "(scrolling)" indicator at row 1, right-aligned.
+func (c *Client) renderScrollIndicator(buf *bytes.Buffer) {
 	indicator := "(scrolling)"
+	if c.DebugScroll {
+		maxOffset, _ := c.scrollMaxOffset()
+		indicator = fmt.Sprintf(
+			"(scrolling off=%d/%d hist=%d sb=%d child=%d)",
+			c.ScrollOffset,
+			maxOffset,
+			len(c.VT.ScrollHistory),
+			func() int {
+				if c.VT.Scrollback != nil {
+					return len(c.VT.Scrollback.Content)
+				}
+				return 0
+			}(),
+			c.VT.ChildRows,
+		)
+	}
 	col := c.VT.Cols - len(indicator) + 1
 	if col < 1 {
 		col = 1
