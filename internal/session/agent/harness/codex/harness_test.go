@@ -48,8 +48,8 @@ func TestDisplayCommand(t *testing.T) {
 func TestBuildCommandArgs_Instructions(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
 	args := h.BuildCommandArgs(harness.CommandArgsConfig{Instructions: "Do testing"})
-	if len(args) != 3 || args[0] != "-c" || args[1] != `instructions="Do testing"` || args[2] != "--full-auto" {
-		t.Fatalf(`expected [-c instructions="Do testing" --full-auto], got %v`, args)
+	if len(args) != 2 || args[0] != "-c" || args[1] != `instructions="Do testing"` {
+		t.Fatalf(`expected [-c instructions="Do testing"], got %v`, args)
 	}
 }
 
@@ -66,8 +66,8 @@ func TestBuildCommandArgs_InstructionsMultiline(t *testing.T) {
 func TestBuildCommandArgs_Model(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
 	args := h.BuildCommandArgs(harness.CommandArgsConfig{Model: "gpt-4o"})
-	if len(args) != 3 || args[0] != "--model" || args[1] != "gpt-4o" || args[2] != "--full-auto" {
-		t.Fatalf("expected [--model gpt-4o --full-auto], got %v", args)
+	if len(args) != 2 || args[0] != "--model" || args[1] != "gpt-4o" {
+		t.Fatalf("expected [--model gpt-4o], got %v", args)
 	}
 }
 
@@ -79,11 +79,11 @@ func TestBuildCommandArgs_FullAuto(t *testing.T) {
 	}
 }
 
-func TestBuildCommandArgs_UnknownPermissionMode_DefaultsToFullAuto(t *testing.T) {
+func TestBuildCommandArgs_UnknownPermissionMode_Ignored(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
 	args := h.BuildCommandArgs(harness.CommandArgsConfig{PermissionMode: "suggest"})
-	if len(args) != 1 || args[0] != "--full-auto" {
-		t.Fatalf("expected [--full-auto] for unknown permission mode, got %v", args)
+	if len(args) != 0 {
+		t.Fatalf("expected [] for unknown permission mode (let Codex default), got %v", args)
 	}
 }
 
@@ -95,11 +95,11 @@ func TestBuildCommandArgs_Ask(t *testing.T) {
 	}
 }
 
-func TestBuildCommandArgs_DefaultFullAuto(t *testing.T) {
+func TestBuildCommandArgs_EmptyConfig_NoFlags(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
 	args := h.BuildCommandArgs(harness.CommandArgsConfig{})
-	if len(args) != 1 || args[0] != "--full-auto" {
-		t.Fatalf("expected [--full-auto] for empty config, got %v", args)
+	if len(args) != 0 {
+		t.Fatalf("expected [] for empty config (let Codex default), got %v", args)
 	}
 }
 

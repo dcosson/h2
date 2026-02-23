@@ -20,10 +20,6 @@ var forkDaemonFunc = session.ForkDaemon
 // Used by agent setup and dry-run to resolve the harness.
 func roleHarnessConfig(role *config.Role) harness.HarnessConfig {
 	ht := harness.CanonicalName(role.GetHarnessType())
-	model := role.GetModel()
-	if model == "" {
-		model = harness.DefaultModel(ht)
-	}
 	command := role.GetAgentType()
 	if command == "" {
 		command = harness.DefaultCommand(ht)
@@ -31,7 +27,7 @@ func roleHarnessConfig(role *config.Role) harness.HarnessConfig {
 	cfg := harness.HarnessConfig{
 		HarnessType: ht,
 		Command:     command,
-		Model:       model,
+		Model:       role.GetModel(),
 	}
 	switch ht {
 	case "claude_code", "claude":

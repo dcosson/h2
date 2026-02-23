@@ -21,7 +21,6 @@ type registeredHarness struct {
 	factory        HarnessFactory
 	canonicalName  string
 	defaultCommand string
-	defaultModel   string
 }
 
 // HarnessSpec describes a harness registration.
@@ -29,7 +28,6 @@ type HarnessSpec struct {
 	Names          []string
 	Factory        HarnessFactory
 	DefaultCommand string
-	DefaultModel   string
 }
 
 // registry holds registered harness definitions keyed by alias/type name.
@@ -50,7 +48,6 @@ func Register(spec HarnessSpec) {
 			factory:        spec.Factory,
 			canonicalName:  canonical,
 			defaultCommand: spec.DefaultCommand,
-			defaultModel:   spec.DefaultModel,
 		}
 	}
 }
@@ -189,14 +186,6 @@ func CanonicalName(name string) string {
 		return reg.canonicalName
 	}
 	return name
-}
-
-// DefaultModel returns the registered default model for a harness type/alias.
-func DefaultModel(name string) string {
-	if reg, ok := registry[name]; ok {
-		return reg.defaultModel
-	}
-	return ""
 }
 
 // DefaultCommand returns the registered default command for a harness type/alias.

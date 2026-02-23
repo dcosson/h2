@@ -26,7 +26,6 @@ func init() {
 			return New(cfg, log)
 		},
 		DefaultCommand: "claude",
-		DefaultModel:   "opus",
 	})
 }
 

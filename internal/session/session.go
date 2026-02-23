@@ -228,10 +228,6 @@ func resolveFullHarness(command, roleName string, log *activitylog.Logger) (harn
 		}
 		if role, err := config.LoadRoleRendered(roleName, ctx); err == nil {
 			ht := harness.CanonicalName(role.GetHarnessType())
-			model := role.GetModel()
-			if model == "" {
-				model = harness.DefaultModel(ht)
-			}
 			command := role.GetAgentType()
 			if command == "" {
 				command = harness.DefaultCommand(ht)
@@ -239,7 +235,7 @@ func resolveFullHarness(command, roleName string, log *activitylog.Logger) (harn
 			cfg := harness.HarnessConfig{
 				HarnessType: ht,
 				Command:     command,
-				Model:       model,
+				Model:       role.GetModel(),
 			}
 			switch ht {
 			case "claude_code", "claude":

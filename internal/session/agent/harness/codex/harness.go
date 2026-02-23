@@ -24,7 +24,6 @@ func init() {
 			return New(cfg, log)
 		},
 		DefaultCommand: "codex",
-		DefaultModel:   "gpt-5.3-codex",
 	})
 }
 
@@ -99,18 +98,11 @@ func (h *CodexHarness) BuildCommandArgs(cfg harness.CommandArgsConfig) []string 
 		if cfg.CodexSandboxMode != "" {
 			roleArgs = append(roleArgs, "--sandbox", cfg.CodexSandboxMode)
 		}
-	} else {
-		// Fall back to PermissionMode → combo flag mapping.
-		switch cfg.PermissionMode {
-		case "full-auto":
-			roleArgs = append(roleArgs, "--full-auto")
-		case "ask":
-			// --ask is the default for Codex, no flag needed.
-		default:
-			// Default to full-auto for h2-managed agents.
-			roleArgs = append(roleArgs, "--full-auto")
-		}
+	} else if cfg.PermissionMode == "full-auto" {
+		// Legacy PermissionMode passthrough.
+		roleArgs = append(roleArgs, "--full-auto")
 	}
+	// When nothing is set, let Codex use its own defaults.
 	return harness.CombineArgs(cfg, roleArgs)
 }
 
