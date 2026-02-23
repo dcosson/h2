@@ -191,7 +191,7 @@ func TestScrollUpDown(t *testing.T) {
 		t.Fatalf("expected offset 5, got %d", o.ScrollOffset)
 	}
 
-	o.ScrollDown(3)
+	o.ScrollDown(3, true)
 	if o.ScrollOffset != 2 {
 		t.Fatalf("expected offset 2, got %d", o.ScrollOffset)
 	}
@@ -228,9 +228,28 @@ func TestScrollDown_ExitsAtZero(t *testing.T) {
 	}
 
 	// Scroll down past zero should exit scroll mode.
-	o.ScrollDown(10)
+	o.ScrollDown(10, true)
 	if o.Mode != ModeNormal {
 		t.Fatalf("expected ModeNormal after scrolling to bottom, got %d", o.Mode)
+	}
+	if o.ScrollOffset != 0 {
+		t.Fatalf("expected offset 0, got %d", o.ScrollOffset)
+	}
+}
+
+func TestScrollDown_StaysInModeWhenNoExit(t *testing.T) {
+	o := newTestClient(10, 80)
+	for i := 0; i < 30; i++ {
+		o.VT.Scrollback.Write([]byte("line\n"))
+	}
+
+	o.EnterScrollMode()
+	o.ScrollUp(3)
+
+	// Scroll down past zero with exitAtBottom=false should stay in scroll mode.
+	o.ScrollDown(10, false)
+	if !o.IsScrollMode() {
+		t.Fatal("expected to stay in scroll mode with exitAtBottom=false")
 	}
 	if o.ScrollOffset != 0 {
 		t.Fatalf("expected offset 0, got %d", o.ScrollOffset)
@@ -777,7 +796,7 @@ func TestExitedScrollMode_ScrollDownToBottomExits(t *testing.T) {
 	}
 
 	// Scroll down past zero exits scroll mode.
-	o.ScrollDown(10)
+	o.ScrollDown(10, true)
 	if o.Mode != ModeNormal {
 		t.Fatalf("expected ModeNormal after scrolling to bottom, got %d", o.Mode)
 	}
@@ -1243,7 +1262,7 @@ func TestScrollDownToBottom_FromPassthroughScroll_RestoresPassthrough(t *testing
 	}
 
 	// Scroll down past zero exits back to passthrough.
-	o.ScrollDown(10)
+	o.ScrollDown(10, true)
 	if o.Mode != ModePassthrough {
 		t.Fatalf("expected ModePassthrough after scrolling to bottom, got %d", o.Mode)
 	}

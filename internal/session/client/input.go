@@ -436,7 +436,7 @@ func (c *Client) HandleCSI(remaining []byte) (consumed int, handled bool) {
 			if final == 'A' {
 				c.ScrollUp(1)
 			} else {
-				c.ScrollDown(1)
+				c.ScrollDown(1, false)
 			}
 			break
 		}
@@ -483,7 +483,7 @@ func (c *Client) HandleCSI(remaining []byte) (consumed int, handled bool) {
 			if final == 'H' {
 				c.ScrollUp(1 << 20) // clamps to max
 			} else {
-				c.ScrollDown(1 << 20) // exits scroll mode
+				c.ScrollDown(1<<20, true) // exits scroll mode
 			}
 			break
 		}
@@ -510,7 +510,7 @@ func (c *Client) HandleCSI(remaining []byte) (consumed int, handled bool) {
 			if params == "5" {
 				c.ScrollUp(page)
 			} else {
-				c.ScrollDown(page)
+				c.ScrollDown(page, false)
 			}
 			break
 		}
@@ -643,12 +643,16 @@ func (c *Client) ScrollUp(lines int) {
 }
 
 // ScrollDown moves the scroll view down by the given number of lines.
-// If we reach the bottom (offset 0), exits scroll mode.
-func (c *Client) ScrollDown(lines int) {
+// If exitAtBottom is true and we reach offset 0, exits scroll mode.
+// If exitAtBottom is false, clamps to offset 0 and stays in scroll mode.
+func (c *Client) ScrollDown(lines int, exitAtBottom bool) {
 	c.ScrollOffset -= lines
 	if c.ScrollOffset <= 0 {
-		c.ExitScrollMode()
-		return
+		if exitAtBottom {
+			c.ExitScrollMode()
+			return
+		}
+		c.ScrollOffset = 0
 	}
 	c.ClampScrollOffset()
 	c.RenderScreen()
@@ -793,7 +797,7 @@ func (c *Client) HandleSGRMouse(params []byte, press bool) {
 				}
 			}
 		} else if c.IsScrollMode() {
-			c.ScrollDown(scrollStep)
+			c.ScrollDown(scrollStep, true)
 		}
 	}
 }
