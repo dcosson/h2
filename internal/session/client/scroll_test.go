@@ -91,24 +91,25 @@ func TestClampScrollOffset_Negative(t *testing.T) {
 	}
 }
 
-func TestClampScrollOffset_UsesContentBottomWhenCursorLags(t *testing.T) {
+func TestClampScrollOffset_UsesCursorYNotContentLen(t *testing.T) {
 	o := newTestClient(10, 80)
 	for i := 0; i < 40; i++ {
 		o.VT.Scrollback.Write([]byte("line\n"))
 	}
-	// Simulate a repaint-heavy app where cursor position does not reflect
-	// true content height.
-	o.VT.Scrollback.Cursor.Y = 0
+	// Simulate a TUI where Content is inflated (AutoResizeY grew it)
+	// but cursor is at a reasonable position.
+	o.VT.Scrollback.Cursor.Y = 20
 
 	o.ScrollOffset = 999
 	o.ClampScrollOffset()
 
-	want := len(o.VT.Scrollback.Content) - o.VT.ChildRows
+	// maxOffset should be based on Cursor.Y, not len(Content).
+	want := 20 - o.VT.ChildRows + 1
 	if want < 0 {
 		want = 0
 	}
 	if o.ScrollOffset != want {
-		t.Fatalf("expected offset %d based on content height, got %d", want, o.ScrollOffset)
+		t.Fatalf("expected offset %d based on Cursor.Y, got %d", want, o.ScrollOffset)
 	}
 }
 
@@ -144,9 +145,6 @@ func TestEnterExitScrollMode(t *testing.T) {
 	}
 	if o.ScrollAnchorY != 0 {
 		t.Fatalf("expected anchor reset to 0, got %d", o.ScrollAnchorY)
-	}
-	if o.PlainAnchorLen != 0 {
-		t.Fatalf("expected PlainAnchorLen reset to 0, got %d", o.PlainAnchorLen)
 	}
 	if o.ScrollHistoryAnchor != 0 {
 		t.Fatalf("expected ScrollHistoryAnchor reset to 0, got %d", o.ScrollHistoryAnchor)

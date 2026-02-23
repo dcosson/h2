@@ -440,7 +440,7 @@ func (s *Session) RunDaemon() error {
 	s.VT.Scrollback = midterm.NewTerminal(s.VT.ChildRows, s.VT.Cols)
 	s.VT.Scrollback.AutoResizeY = true
 	s.VT.Scrollback.AppendOnly = true
-	s.VT.ResetPlainHistory()
+
 	s.VT.LastOut = time.Now()
 	s.VT.Output = io.Discard
 
@@ -544,7 +544,7 @@ func (s *Session) RunInteractive() error {
 	s.VT.Scrollback = midterm.NewTerminal(s.VT.ChildRows, cols)
 	s.VT.Scrollback.AutoResizeY = true
 	s.VT.Scrollback.AppendOnly = true
-	s.VT.ResetPlainHistory()
+
 	s.VT.LastOut = time.Now()
 	s.VT.Output = os.Stdout
 	s.Client.Output = os.Stdout
@@ -636,7 +636,6 @@ func (s *Session) lifecycleLoop(stopStatus chan struct{}, interactive bool) erro
 			s.VT.Scrollback = midterm.NewTerminal(s.VT.ChildRows, s.VT.Cols)
 			s.VT.Scrollback.AutoResizeY = true
 			s.VT.Scrollback.AppendOnly = true
-			s.VT.ResetPlainHistory()
 
 			s.VT.Mu.Lock()
 			s.VT.ChildExited = false

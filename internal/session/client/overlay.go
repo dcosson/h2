@@ -51,7 +51,6 @@ type Client struct {
 	PassthroughEsc      []byte
 	ScrollOffset        int
 	ScrollAnchorY       int // frozen scrollback bottom row while in scroll mode
-	PlainAnchorLen      int // frozen len(PlainHistory) while in scroll mode
 	ScrollHistoryAnchor int // frozen len(ScrollHistory) at scroll mode entry
 	SelectHint          bool
 	SelectHintTimer     *time.Timer

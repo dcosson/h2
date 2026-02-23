@@ -552,7 +552,6 @@ func (c *Client) HandleScrollBytes(buf []byte, start, n int) int {
 // If currently in passthrough, enters ModePassthroughScroll to preserve state.
 func (c *Client) EnterScrollMode() {
 	c.ScrollAnchorY = c.scrollbackBottomRow()
-	c.PlainAnchorLen = len(c.VT.PlainHistory)
 	c.ScrollHistoryAnchor = len(c.VT.ScrollHistory)
 	if c.Mode == ModePassthrough {
 		c.setMode(ModePassthroughScroll)
@@ -569,7 +568,6 @@ func (c *Client) EnterScrollMode() {
 func (c *Client) ExitScrollMode() {
 	c.ScrollOffset = 0
 	c.ScrollAnchorY = 0
-	c.PlainAnchorLen = 0
 	c.ScrollHistoryAnchor = 0
 	if c.Mode == ModePassthroughScroll {
 		c.setMode(ModePassthrough)
@@ -622,45 +620,18 @@ func (c *Client) ClampScrollOffset() {
 }
 
 // scrollbackBottomRow returns the effective last row in scrollback.
-// Some TUIs repaint in-place and keep cursor near the bottom while content
-// height grows, so relying on cursor alone can under-count history.
+// Uses Cursor.Y rather than len(Content) because AutoResizeY grows Content
+// via ensureHeight but never shrinks it, so len(Content) can be massively
+// inflated for TUI apps that reposition the cursor.
 func (c *Client) scrollbackBottomRow() int {
 	if c.VT == nil || c.VT.Scrollback == nil {
 		return 0
 	}
-	sb := c.VT.Scrollback
-	bottom := len(sb.Content) - 1
-	if sb.Cursor.Y > bottom {
-		// Repaint-heavy TUIs can leave cursor coordinates far beyond content
-		// while redrawing. Treat large overshoots as invalid for anchoring.
-		maxAhead := c.VT.ChildRows
-		if maxAhead < 1 {
-			maxAhead = 1
-		}
-		if sb.Cursor.Y <= bottom+maxAhead {
-			bottom = sb.Cursor.Y
-		}
-	}
-	if bottom < 0 {
+	y := c.VT.Scrollback.Cursor.Y
+	if y < 0 {
 		return 0
 	}
-	return bottom
-}
-
-func (c *Client) plainBottomRow() int {
-	if c.VT == nil || len(c.VT.PlainHistory) == 0 {
-		return -1
-	}
-	return len(c.VT.PlainHistory) - 1
-}
-
-// plainScrollBottom returns the effective bottom for PlainHistory rendering.
-// In scroll mode it uses the frozen anchor; otherwise the live length.
-func (c *Client) plainScrollBottom() int {
-	if c.IsScrollMode() && c.PlainAnchorLen > 0 {
-		return c.PlainAnchorLen - 1
-	}
-	return c.plainBottomRow()
+	return y
 }
 
 // scrollbackScrollBottom returns the effective bottom for midterm scrollback rendering.
@@ -690,9 +661,6 @@ func (c *Client) scrollMaxOffset() (int, bool) {
 		return 0, false
 	}
 	bottom := c.scrollbackScrollBottom()
-	if pb := c.plainScrollBottom(); pb > bottom {
-		bottom = pb
-	}
 	maxOffset := bottom - c.VT.ChildRows + 1
 	if maxOffset < 0 {
 		maxOffset = 0

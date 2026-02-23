@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/creack/pty"
 	"github.com/vito/midterm"
@@ -49,12 +48,8 @@ type VT struct {
 	ScrollHistory    []string
 	scrollHistoryMax int
 
-	// PlainHistory stores ANSI-stripped logical output lines captured directly
-	// from PTY bytes as a fallback scrollback source for repaint-heavy TUIs.
-	PlainHistory    []string
-	plainLine       []rune
-	plainMaxLines   int
-	plainParseState int
+	// scanState tracks the ANSI parser state for ScanPTYOutput.
+	scanState int
 }
 
 // SetupScrollCapture installs the OnScrollback callback on VT.Vt so that
@@ -136,7 +131,7 @@ func (vt *VT) PipeOutput(onData func()) {
 			if vt.Scrollback != nil {
 				vt.Scrollback.Write(buf[:n])
 			}
-			vt.CapturePlainHistory(buf[:n])
+			vt.ScanPTYOutput(buf[:n])
 			onData()
 			vt.Mu.Unlock()
 		}
@@ -147,110 +142,57 @@ func (vt *VT) PipeOutput(onData func()) {
 }
 
 const (
-	plainParseNormal = iota
-	plainParseEsc
-	plainParseCSI
-	plainParseOSC
-	plainParseOSCEsc
+	scanNormal = iota
+	scanEsc
+	scanCSI
+	scanOSC
+	scanOSCEsc
 )
 
-// CapturePlainHistory appends ANSI-stripped output lines to PlainHistory.
-func (vt *VT) CapturePlainHistory(data []byte) {
-	if vt.plainMaxLines <= 0 {
-		vt.plainMaxLines = 50000
+// ScanPTYOutput scans child output for escape sequences that affect scroll
+// behavior. Currently detects DECSTBM (CSI...r) to set ScrollRegionUsed.
+func (vt *VT) ScanPTYOutput(data []byte) {
+	if vt.ScrollRegionUsed {
+		return // already detected, no need to keep scanning
 	}
-	for len(data) > 0 {
-		r, sz := utf8.DecodeRune(data)
-		if r == utf8.RuneError && sz == 1 {
-			// treat invalid byte as a single-byte rune
-			r = rune(data[0])
-		}
-		data = data[sz:]
-
-		switch vt.plainParseState {
-		case plainParseEsc:
-			switch r {
-			case '[':
-				vt.plainParseState = plainParseCSI
-			case ']':
-				vt.plainParseState = plainParseOSC
-			default:
-				vt.plainParseState = plainParseNormal
-			}
-			continue
-		case plainParseCSI:
-			// CSI sequence ends with a final byte in 0x40-0x7E.
-			if r >= 0x40 && r <= 0x7E {
-				// Cursor-position commands (H, f) and erase-display (J)
-				// indicate the app is repositioning/clearing. Discard any
-				// accumulated text so TUI repaints don't corrupt history.
-				if r == 'H' || r == 'f' || r == 'J' {
-					vt.plainLine = vt.plainLine[:0]
-				}
-				// DECSTBM (CSI...r) = Set Scrolling Region. Track that
-				// the child uses scroll regions so we prefer ScrollHistory.
-				if r == 'r' {
-					vt.ScrollRegionUsed = true
-				}
-				vt.plainParseState = plainParseNormal
-			}
-			continue
-		case plainParseOSC:
-			// OSC ends with BEL or ST (ESC \).
-			if r == 0x07 {
-				vt.plainParseState = plainParseNormal
-			} else if r == 0x1B {
-				vt.plainParseState = plainParseOSCEsc
-			}
-			continue
-		case plainParseOSCEsc:
-			if r == '\\' {
-				vt.plainParseState = plainParseNormal
-			} else if r == 0x1B {
-				vt.plainParseState = plainParseOSCEsc
+	for _, b := range data {
+		switch vt.scanState {
+		case scanEsc:
+			if b == '[' {
+				vt.scanState = scanCSI
+			} else if b == ']' {
+				vt.scanState = scanOSC
 			} else {
-				vt.plainParseState = plainParseOSC
+				vt.scanState = scanNormal
 			}
-			continue
-		}
-
-		// plainParseNormal
-		switch r {
-		case 0x1B:
-			vt.plainParseState = plainParseEsc
-		case '\r':
-			// Carriage return moves to column 0; do not clear eagerly.
-			// Clearing here turns CRLF output into empty history lines.
-		case '\n':
-			vt.appendPlainLine(string(vt.plainLine))
-			vt.plainLine = vt.plainLine[:0]
-		case 0x08, 0x7F:
-			if len(vt.plainLine) > 0 {
-				vt.plainLine = vt.plainLine[:len(vt.plainLine)-1]
+		case scanCSI:
+			if b >= 0x40 && b <= 0x7E {
+				if b == 'r' {
+					vt.ScrollRegionUsed = true
+					return
+				}
+				vt.scanState = scanNormal
 			}
-		case '\t':
-			vt.plainLine = append(vt.plainLine, ' ', ' ', ' ', ' ')
+		case scanOSC:
+			if b == 0x07 {
+				vt.scanState = scanNormal
+			} else if b == 0x1B {
+				vt.scanState = scanOSCEsc
+			}
+		case scanOSCEsc:
+			if b == '\\' {
+				vt.scanState = scanNormal
+			} else if b == 0x1B {
+				vt.scanState = scanOSCEsc
+			} else {
+				vt.scanState = scanOSC
+			}
 		default:
-			if r >= 0x20 {
-				vt.plainLine = append(vt.plainLine, r)
+			if b == 0x1B {
+				vt.scanState = scanEsc
 			}
 		}
 	}
-}
-
-func (vt *VT) appendPlainLine(line string) {
-	vt.PlainHistory = append(vt.PlainHistory, line)
-	if len(vt.PlainHistory) > vt.plainMaxLines {
-		trim := len(vt.PlainHistory) - vt.plainMaxLines
-		vt.PlainHistory = vt.PlainHistory[trim:]
-	}
-}
-
-// ResetPlainHistory clears the fallback plain scrollback parser state.
-func (vt *VT) ResetPlainHistory() {
-	vt.PlainHistory = nil
-	vt.plainLine = nil
-	vt.plainParseState = plainParseNormal
 }
 
 // RespondOSCColors responds to OSC 10/11 color queries from the child.
