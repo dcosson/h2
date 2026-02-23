@@ -469,6 +469,8 @@ func (c *Client) HandleCSI(remaining []byte) (consumed int, handled bool) {
 				c.setMode(ModeMenu)
 				c.RenderBar()
 			}
+		} else if c.Mode == ModeNormal || c.Mode == ModePassthrough {
+			c.writePTYOrHang(append([]byte{0x1B, '['}, remaining[:i+1]...))
 		}
 	case '~':
 		// xterm modifyOtherKeys format: CSI 27;<modifiers>;<code> ~
@@ -478,9 +480,18 @@ func (c *Client) HandleCSI(remaining []byte) (consumed int, handled bool) {
 				c.setMode(ModeMenu)
 				c.RenderBar()
 			}
+		} else if c.Mode == ModeNormal || c.Mode == ModePassthrough {
+			// Pass through unhandled ~ sequences (PageUp, PageDown, etc.)
+			c.writePTYOrHang(append([]byte{0x1B, '['}, remaining[:i+1]...))
 		}
 	case 'M', 'm':
 		c.HandleSGRMouse(remaining[:i], final == 'M')
+	default:
+		// Pass through unhandled CSI sequences (Home, End, etc.) in
+		// normal and passthrough modes.
+		if c.Mode == ModeNormal || c.Mode == ModePassthrough {
+			c.writePTYOrHang(append([]byte{0x1B, '['}, remaining[:i+1]...))
+		}
 	}
 
 	return totalConsumed, true
