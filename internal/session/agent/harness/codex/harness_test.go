@@ -79,11 +79,11 @@ func TestBuildCommandArgs_FullAuto(t *testing.T) {
 	}
 }
 
-func TestBuildCommandArgs_Suggest(t *testing.T) {
+func TestBuildCommandArgs_UnknownPermissionMode_DefaultsToFullAuto(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
 	args := h.BuildCommandArgs(harness.CommandArgsConfig{PermissionMode: "suggest"})
-	if len(args) != 1 || args[0] != "--suggest" {
-		t.Fatalf("expected [--suggest], got %v", args)
+	if len(args) != 1 || args[0] != "--full-auto" {
+		t.Fatalf("expected [--full-auto] for unknown permission mode, got %v", args)
 	}
 }
 
@@ -123,6 +123,132 @@ func TestBuildCommandArgs_IgnoresUnsupported(t *testing.T) {
 	})
 	if len(args) != 0 {
 		t.Fatalf("expected [] (unsupported fields ignored, ask=default), got %v", args)
+	}
+}
+
+// --- ApprovalPolicy tests ---
+
+func TestBuildCommandArgs_ApprovalPolicy_Plan(t *testing.T) {
+	h := New(harness.HarnessConfig{}, nil)
+	args := h.BuildCommandArgs(harness.CommandArgsConfig{ApprovalPolicy: "plan"})
+	// plan → untrusted approval + read-only sandbox (default for plan mode).
+	expected := []string{"--ask-for-approval", "untrusted", "--sandbox", "read-only"}
+	if len(args) != len(expected) {
+		t.Fatalf("expected %v, got %v", expected, args)
+	}
+	for i, want := range expected {
+		if args[i] != want {
+			t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
+		}
+	}
+}
+
+func TestBuildCommandArgs_ApprovalPolicy_Confirm(t *testing.T) {
+	h := New(harness.HarnessConfig{}, nil)
+	args := h.BuildCommandArgs(harness.CommandArgsConfig{ApprovalPolicy: "confirm"})
+	expected := []string{"--ask-for-approval", "untrusted"}
+	if len(args) != len(expected) {
+		t.Fatalf("expected %v, got %v", expected, args)
+	}
+	for i, want := range expected {
+		if args[i] != want {
+			t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
+		}
+	}
+}
+
+func TestBuildCommandArgs_ApprovalPolicy_AutoEdit(t *testing.T) {
+	h := New(harness.HarnessConfig{}, nil)
+	args := h.BuildCommandArgs(harness.CommandArgsConfig{ApprovalPolicy: "auto-edit"})
+	expected := []string{"--ask-for-approval", "on-request"}
+	if len(args) != len(expected) {
+		t.Fatalf("expected %v, got %v", expected, args)
+	}
+	for i, want := range expected {
+		if args[i] != want {
+			t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
+		}
+	}
+}
+
+func TestBuildCommandArgs_ApprovalPolicy_Auto(t *testing.T) {
+	h := New(harness.HarnessConfig{}, nil)
+	args := h.BuildCommandArgs(harness.CommandArgsConfig{ApprovalPolicy: "auto"})
+	expected := []string{"--ask-for-approval", "never"}
+	if len(args) != len(expected) {
+		t.Fatalf("expected %v, got %v", expected, args)
+	}
+	for i, want := range expected {
+		if args[i] != want {
+			t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
+		}
+	}
+}
+
+func TestBuildCommandArgs_CodexSandboxMode(t *testing.T) {
+	h := New(harness.HarnessConfig{}, nil)
+	args := h.BuildCommandArgs(harness.CommandArgsConfig{CodexSandboxMode: "workspace-write"})
+	expected := []string{"--sandbox", "workspace-write"}
+	if len(args) != len(expected) {
+		t.Fatalf("expected %v, got %v", expected, args)
+	}
+	for i, want := range expected {
+		if args[i] != want {
+			t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
+		}
+	}
+}
+
+func TestBuildCommandArgs_ApprovalPolicy_WithSandbox(t *testing.T) {
+	h := New(harness.HarnessConfig{}, nil)
+	args := h.BuildCommandArgs(harness.CommandArgsConfig{
+		ApprovalPolicy:   "auto",
+		CodexSandboxMode: "danger-full-access",
+	})
+	expected := []string{"--ask-for-approval", "never", "--sandbox", "danger-full-access"}
+	if len(args) != len(expected) {
+		t.Fatalf("expected %v, got %v", expected, args)
+	}
+	for i, want := range expected {
+		if args[i] != want {
+			t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
+		}
+	}
+}
+
+func TestBuildCommandArgs_ApprovalPolicy_PlanWithSandboxOverride(t *testing.T) {
+	h := New(harness.HarnessConfig{}, nil)
+	// Plan + explicit sandbox override should use the override, not the plan default.
+	args := h.BuildCommandArgs(harness.CommandArgsConfig{
+		ApprovalPolicy:   "plan",
+		CodexSandboxMode: "workspace-write",
+	})
+	expected := []string{"--ask-for-approval", "untrusted", "--sandbox", "workspace-write"}
+	if len(args) != len(expected) {
+		t.Fatalf("expected %v, got %v", expected, args)
+	}
+	for i, want := range expected {
+		if args[i] != want {
+			t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
+		}
+	}
+}
+
+func TestBuildCommandArgs_ApprovalPolicy_OverridesPermissionMode(t *testing.T) {
+	h := New(harness.HarnessConfig{}, nil)
+	// When ApprovalPolicy is set, PermissionMode should be ignored.
+	args := h.BuildCommandArgs(harness.CommandArgsConfig{
+		PermissionMode: "full-auto",
+		ApprovalPolicy: "confirm",
+	})
+	expected := []string{"--ask-for-approval", "untrusted"}
+	if len(args) != len(expected) {
+		t.Fatalf("expected %v, got %v", expected, args)
+	}
+	for i, want := range expected {
+		if args[i] != want {
+			t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
+		}
 	}
 }
 

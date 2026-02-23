@@ -166,3 +166,44 @@ func TestForkDaemonOpts_AllNewFields(t *testing.T) {
 		t.Fatalf("DisallowedTools not preserved: got %v", opts.DisallowedTools)
 	}
 }
+
+func TestRunDaemonOpts_ApprovalPolicyFields(t *testing.T) {
+	opts := RunDaemonOpts{
+		Name:             "test-agent",
+		SessionID:        "test-uuid",
+		Command:          "codex",
+		Instructions:     "Do work",
+		ApprovalPolicy:   "auto",
+		CodexSandboxMode: "danger-full-access",
+	}
+
+	s := New(opts.Name, opts.Command, opts.Args)
+	s.SessionID = opts.SessionID
+	s.Instructions = opts.Instructions
+	s.ApprovalPolicy = opts.ApprovalPolicy
+	s.CodexSandboxMode = opts.CodexSandboxMode
+
+	if s.ApprovalPolicy != "auto" {
+		t.Fatalf("ApprovalPolicy not stored: got %q", s.ApprovalPolicy)
+	}
+	if s.CodexSandboxMode != "danger-full-access" {
+		t.Fatalf("CodexSandboxMode not stored: got %q", s.CodexSandboxMode)
+	}
+}
+
+func TestForkDaemonOpts_ApprovalPolicyFields(t *testing.T) {
+	opts := ForkDaemonOpts{
+		Name:             "test-agent",
+		SessionID:        "test-uuid",
+		Command:          "codex",
+		ApprovalPolicy:   "auto-edit",
+		CodexSandboxMode: "workspace-write",
+	}
+
+	if opts.ApprovalPolicy != "auto-edit" {
+		t.Fatalf("ApprovalPolicy not preserved: got %q", opts.ApprovalPolicy)
+	}
+	if opts.CodexSandboxMode != "workspace-write" {
+		t.Fatalf("CodexSandboxMode not preserved: got %q", opts.CodexSandboxMode)
+	}
+}

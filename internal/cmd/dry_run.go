@@ -107,12 +107,14 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 		PrependArgs:     prependArgs,
 		ExtraArgs:       extraArgs,
 		SessionID:       "<generated-uuid>",
-		Instructions:    role.Instructions,
-		SystemPrompt:    role.SystemPrompt,
-		Model:           roleCfg.Model,
-		PermissionMode:  role.PermissionMode,
-		AllowedTools:    role.Permissions.Allow,
-		DisallowedTools: role.Permissions.Deny,
+		Instructions:     role.Instructions,
+		SystemPrompt:     role.SystemPrompt,
+		Model:            roleCfg.Model,
+		PermissionMode:   role.PermissionMode,
+		ApprovalPolicy:   role.ApprovalPolicy,
+		CodexSandboxMode: role.CodexSandboxMode,
+		AllowedTools:     role.Permissions.Allow,
+		DisallowedTools:  role.Permissions.Deny,
 	})
 
 	return &ResolvedAgentConfig{

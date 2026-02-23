@@ -91,6 +91,22 @@ var ValidPermissionModes = []string{
 	"default", "delegate", "acceptEdits", "plan", "dontAsk", "bypassPermissions",
 }
 
+// ValidApprovalPolicies lists valid values for the approval_policy field.
+// This is a unified field that maps to each harness's native approval flags.
+var ValidApprovalPolicies = []string{
+	"plan",      // read-only, no modifications
+	"confirm",   // ask for approval on every action
+	"auto-edit", // auto-approve edits, confirm commands
+	"auto",      // auto-approve everything
+}
+
+// ValidCodexSandboxModes lists valid values for the codex_sandbox_mode field.
+var ValidCodexSandboxModes = []string{
+	"read-only",           // can only read (Codex default)
+	"workspace-write",     // write to project dir only
+	"danger-full-access",  // no filesystem restrictions
+}
+
 // AgentHarnessConfig holds harness-specific configuration nested under agent_harness.
 type AgentHarnessConfig struct {
 	HarnessType     string `yaml:"harness_type,omitempty"`
@@ -114,6 +130,8 @@ type Role struct {
 	ClaudeCodeConfigPathPrefix string `yaml:"claude_code_config_path_prefix,omitempty"` // default: <H2Dir>/claude-config
 	CodexConfigPath            string `yaml:"codex_config_path,omitempty"`              // explicit path override
 	CodexConfigPathPrefix      string `yaml:"codex_config_path_prefix,omitempty"`       // default: <H2Dir>/codex-config
+	ApprovalPolicy             string `yaml:"approval_policy,omitempty"`                // unified: plan | confirm | auto-edit | auto
+	CodexSandboxMode           string `yaml:"codex_sandbox_mode,omitempty"`             // read-only | workspace-write | danger-full-access
 
 	// Legacy nested harness config retained for backward compatibility with
 	// historical role files that used a mapping under agent_harness.
@@ -151,6 +169,8 @@ func (r *Role) UnmarshalYAML(value *yaml.Node) error {
 		ClaudeCodeConfigPathPrefix string                 `yaml:"claude_code_config_path_prefix,omitempty"`
 		CodexConfigPath            string                 `yaml:"codex_config_path,omitempty"`
 		CodexConfigPathPrefix      string                 `yaml:"codex_config_path_prefix,omitempty"`
+		ApprovalPolicy             string                 `yaml:"approval_policy,omitempty"`
+		CodexSandboxMode           string                 `yaml:"codex_sandbox_mode,omitempty"`
 		AgentTypeLegacy            string                 `yaml:"agent_type,omitempty"`
 		ModelLegacy                string                 `yaml:"model,omitempty"`
 		ClaudeConfigDirLegacy      string                 `yaml:"claude_config_dir,omitempty"`
@@ -179,6 +199,8 @@ func (r *Role) UnmarshalYAML(value *yaml.Node) error {
 	r.ClaudeCodeConfigPathPrefix = aux.ClaudeCodeConfigPathPrefix
 	r.CodexConfigPath = aux.CodexConfigPath
 	r.CodexConfigPathPrefix = aux.CodexConfigPathPrefix
+	r.ApprovalPolicy = aux.ApprovalPolicy
+	r.CodexSandboxMode = aux.CodexSandboxMode
 	r.AgentTypeLegacy = aux.AgentTypeLegacy
 	r.ModelLegacy = aux.ModelLegacy
 	r.ClaudeConfigDirLegacy = aux.ClaudeConfigDirLegacy
@@ -567,6 +589,32 @@ func (r *Role) Validate() error {
 		if !valid {
 			return fmt.Errorf("invalid permission_mode %q; valid values: %s",
 				r.PermissionMode, strings.Join(ValidPermissionModes, ", "))
+		}
+	}
+	if r.ApprovalPolicy != "" {
+		valid := false
+		for _, p := range ValidApprovalPolicies {
+			if r.ApprovalPolicy == p {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return fmt.Errorf("invalid approval_policy %q; valid values: %s",
+				r.ApprovalPolicy, strings.Join(ValidApprovalPolicies, ", "))
+		}
+	}
+	if r.CodexSandboxMode != "" {
+		valid := false
+		for _, m := range ValidCodexSandboxModes {
+			if r.CodexSandboxMode == m {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return fmt.Errorf("invalid codex_sandbox_mode %q; valid values: %s",
+				r.CodexSandboxMode, strings.Join(ValidCodexSandboxModes, ", "))
 		}
 	}
 	// working_dir and worktree are mutually exclusive (working_dir "." or empty is allowed).

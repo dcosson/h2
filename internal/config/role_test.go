@@ -1296,6 +1296,114 @@ permission_mode: invalid_mode
 	}
 }
 
+// --- ApprovalPolicy validation tests ---
+
+func TestValidate_ApprovalPolicy_Valid(t *testing.T) {
+	for _, policy := range ValidApprovalPolicies {
+		role := &Role{Name: "test", Instructions: "Do stuff", ApprovalPolicy: policy}
+		if err := role.Validate(); err != nil {
+			t.Errorf("expected no error for approval_policy %q, got: %v", policy, err)
+		}
+	}
+}
+
+func TestValidate_ApprovalPolicy_Invalid(t *testing.T) {
+	role := &Role{Name: "test", Instructions: "Do stuff", ApprovalPolicy: "yolo"}
+	err := role.Validate()
+	if err == nil {
+		t.Fatal("expected error for invalid approval_policy")
+	}
+	if !strings.Contains(err.Error(), "invalid approval_policy") {
+		t.Errorf("expected 'invalid approval_policy' in error, got: %v", err)
+	}
+}
+
+func TestValidate_ApprovalPolicy_Empty(t *testing.T) {
+	role := &Role{Name: "test", Instructions: "Do stuff", ApprovalPolicy: ""}
+	if err := role.Validate(); err != nil {
+		t.Fatalf("empty approval_policy should be valid, got: %v", err)
+	}
+}
+
+func TestValidate_CodexSandboxMode_Valid(t *testing.T) {
+	for _, mode := range ValidCodexSandboxModes {
+		role := &Role{Name: "test", Instructions: "Do stuff", CodexSandboxMode: mode}
+		if err := role.Validate(); err != nil {
+			t.Errorf("expected no error for codex_sandbox_mode %q, got: %v", mode, err)
+		}
+	}
+}
+
+func TestValidate_CodexSandboxMode_Invalid(t *testing.T) {
+	role := &Role{Name: "test", Instructions: "Do stuff", CodexSandboxMode: "yolo"}
+	err := role.Validate()
+	if err == nil {
+		t.Fatal("expected error for invalid codex_sandbox_mode")
+	}
+	if !strings.Contains(err.Error(), "invalid codex_sandbox_mode") {
+		t.Errorf("expected 'invalid codex_sandbox_mode' in error, got: %v", err)
+	}
+}
+
+func TestValidate_CodexSandboxMode_Empty(t *testing.T) {
+	role := &Role{Name: "test", Instructions: "Do stuff", CodexSandboxMode: ""}
+	if err := role.Validate(); err != nil {
+		t.Fatalf("empty codex_sandbox_mode should be valid, got: %v", err)
+	}
+}
+
+func TestLoadRoleFrom_ApprovalPolicyField(t *testing.T) {
+	yaml := `
+name: test
+instructions: Do stuff.
+approval_policy: auto-edit
+codex_sandbox_mode: workspace-write
+`
+	path := writeTempFile(t, "approval.yaml", yaml)
+	role, err := LoadRoleFrom(path)
+	if err != nil {
+		t.Fatalf("LoadRoleFrom: %v", err)
+	}
+	if role.ApprovalPolicy != "auto-edit" {
+		t.Errorf("ApprovalPolicy = %q, want %q", role.ApprovalPolicy, "auto-edit")
+	}
+	if role.CodexSandboxMode != "workspace-write" {
+		t.Errorf("CodexSandboxMode = %q, want %q", role.CodexSandboxMode, "workspace-write")
+	}
+}
+
+func TestLoadRoleFrom_InvalidApprovalPolicy(t *testing.T) {
+	yaml := `
+name: bad
+instructions: Do stuff.
+approval_policy: invalid_policy
+`
+	path := writeTempFile(t, "bad-approval.yaml", yaml)
+	_, err := LoadRoleFrom(path)
+	if err == nil {
+		t.Fatal("expected error for invalid approval_policy")
+	}
+	if !strings.Contains(err.Error(), "invalid approval_policy") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadRoleFrom_InvalidCodexSandboxMode(t *testing.T) {
+	yaml := `
+name: bad
+instructions: Do stuff.
+codex_sandbox_mode: invalid_mode
+`
+	path := writeTempFile(t, "bad-sandbox.yaml", yaml)
+	_, err := LoadRoleFrom(path)
+	if err == nil {
+		t.Fatal("expected error for invalid codex_sandbox_mode")
+	}
+	if !strings.Contains(err.Error(), "invalid codex_sandbox_mode") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 // --- Backward compat tests for agent_harness config ---
 
 func TestGetHarnessType_Default(t *testing.T) {

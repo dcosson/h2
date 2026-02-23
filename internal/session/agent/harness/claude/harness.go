@@ -85,8 +85,20 @@ func (h *ClaudeCodeHarness) BuildCommandArgs(cfg harness.CommandArgsConfig) []st
 	if cfg.Model != "" {
 		roleArgs = append(roleArgs, "--model", cfg.Model)
 	}
-	if cfg.PermissionMode != "" {
-		roleArgs = append(roleArgs, "--permission-mode", cfg.PermissionMode)
+	switch cfg.ApprovalPolicy {
+	case "plan":
+		roleArgs = append(roleArgs, "--permission-mode", "plan")
+	case "confirm":
+		roleArgs = append(roleArgs, "--permission-mode", "default")
+	case "auto-edit":
+		roleArgs = append(roleArgs, "--permission-mode", "acceptEdits")
+	case "auto":
+		roleArgs = append(roleArgs, "--permission-mode", "bypassPermissions")
+	default:
+		// Fall back to direct PermissionMode passthrough.
+		if cfg.PermissionMode != "" {
+			roleArgs = append(roleArgs, "--permission-mode", cfg.PermissionMode)
+		}
 	}
 	if len(cfg.AllowedTools) > 0 {
 		roleArgs = append(roleArgs, "--allowedTools", strings.Join(cfg.AllowedTools, ","))

@@ -43,6 +43,8 @@ type Session struct {
 	SystemPrompt     string   // Replaces default system prompt, passed via --system-prompt
 	Model            string   // Model selection, passed via --model
 	PermissionMode   string   // Permission mode, passed via --permission-mode
+	ApprovalPolicy   string   // Unified approval policy: plan | confirm | auto-edit | auto
+	CodexSandboxMode string   // Codex sandbox: read-only | workspace-write | danger-full-access
 	AllowedTools     []string // Allowed tools, passed via --allowedTools (comma-joined)
 	DisallowedTools  []string // Disallowed tools, passed via --disallowedTools (comma-joined)
 	Queue            *message.MessageQueue
@@ -276,15 +278,17 @@ func resolveFullHarness(command, roleName string, log *activitylog.Logger) (harn
 // role flags via BuildCommandArgs.
 func (s *Session) childArgs() []string {
 	return s.harness.BuildCommandArgs(harness.CommandArgsConfig{
-		PrependArgs:     s.prependArgs,
-		ExtraArgs:       s.Args,
-		SessionID:       s.SessionID,
-		Instructions:    s.Instructions,
-		SystemPrompt:    s.SystemPrompt,
-		Model:           s.Model,
-		PermissionMode:  s.PermissionMode,
-		AllowedTools:    s.AllowedTools,
-		DisallowedTools: s.DisallowedTools,
+		PrependArgs:      s.prependArgs,
+		ExtraArgs:        s.Args,
+		SessionID:        s.SessionID,
+		Instructions:     s.Instructions,
+		SystemPrompt:     s.SystemPrompt,
+		Model:            s.Model,
+		PermissionMode:   s.PermissionMode,
+		ApprovalPolicy:   s.ApprovalPolicy,
+		CodexSandboxMode: s.CodexSandboxMode,
+		AllowedTools:     s.AllowedTools,
+		DisallowedTools:  s.DisallowedTools,
 	})
 }
 

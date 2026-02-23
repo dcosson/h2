@@ -80,16 +80,36 @@ func (h *CodexHarness) BuildCommandArgs(cfg harness.CommandArgsConfig) []string 
 	if cfg.Model != "" {
 		roleArgs = append(roleArgs, "--model", cfg.Model)
 	}
-	switch cfg.PermissionMode {
-	case "full-auto":
-		roleArgs = append(roleArgs, "--full-auto")
-	case "suggest":
-		roleArgs = append(roleArgs, "--suggest")
-	case "ask":
-		// --ask is the default for Codex, no flag needed.
-	default:
-		// Default to full-auto for h2-managed agents.
-		roleArgs = append(roleArgs, "--full-auto")
+	if cfg.ApprovalPolicy != "" || cfg.CodexSandboxMode != "" {
+		// Granular settings: use explicit Codex flags.
+		switch cfg.ApprovalPolicy {
+		case "plan":
+			roleArgs = append(roleArgs, "--ask-for-approval", "untrusted")
+			// Also default to read-only sandbox for plan mode unless overridden.
+			if cfg.CodexSandboxMode == "" {
+				roleArgs = append(roleArgs, "--sandbox", "read-only")
+			}
+		case "confirm":
+			roleArgs = append(roleArgs, "--ask-for-approval", "untrusted")
+		case "auto-edit":
+			roleArgs = append(roleArgs, "--ask-for-approval", "on-request")
+		case "auto":
+			roleArgs = append(roleArgs, "--ask-for-approval", "never")
+		}
+		if cfg.CodexSandboxMode != "" {
+			roleArgs = append(roleArgs, "--sandbox", cfg.CodexSandboxMode)
+		}
+	} else {
+		// Fall back to PermissionMode → combo flag mapping.
+		switch cfg.PermissionMode {
+		case "full-auto":
+			roleArgs = append(roleArgs, "--full-auto")
+		case "ask":
+			// --ask is the default for Codex, no flag needed.
+		default:
+			// Default to full-auto for h2-managed agents.
+			roleArgs = append(roleArgs, "--full-auto")
+		}
 	}
 	return harness.CombineArgs(cfg, roleArgs)
 }

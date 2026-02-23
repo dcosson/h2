@@ -21,6 +21,8 @@ func newDaemonCmd() *cobra.Command {
 	var systemPrompt string
 	var model string
 	var permissionMode string
+	var approvalPolicy string
+	var codexSandboxMode string
 	var allowedTools []string
 	var disallowedTools []string
 	var heartbeatIdleTimeout string
@@ -62,20 +64,22 @@ func newDaemonCmd() *cobra.Command {
 			}
 
 			err := session.RunDaemon(session.RunDaemonOpts{
-				Name:            name,
-				SessionID:       sessionID,
-				Command:         args[0],
-				Args:            args[1:],
-				RoleName:        roleName,
-				SessionDir:      sessionDir,
-				Instructions:    instructions,
-				SystemPrompt:    systemPrompt,
-				Model:           model,
-				PermissionMode:  permissionMode,
-				AllowedTools:    allowedTools,
-				DisallowedTools: disallowedTools,
-				Heartbeat:       heartbeat,
-				Overrides:       overrideMap,
+				Name:             name,
+				SessionID:        sessionID,
+				Command:          args[0],
+				Args:             args[1:],
+				RoleName:         roleName,
+				SessionDir:       sessionDir,
+				Instructions:     instructions,
+				SystemPrompt:     systemPrompt,
+				Model:            model,
+				PermissionMode:   permissionMode,
+				ApprovalPolicy:   approvalPolicy,
+				CodexSandboxMode: codexSandboxMode,
+				AllowedTools:     allowedTools,
+				DisallowedTools:  disallowedTools,
+				Heartbeat:        heartbeat,
+				Overrides:        overrideMap,
 			})
 			if err != nil {
 				if _, ok := err.(*exec.ExitError); ok {
@@ -95,6 +99,8 @@ func newDaemonCmd() *cobra.Command {
 	cmd.Flags().StringVar(&systemPrompt, "system-prompt", "", "System prompt to pass via --system-prompt")
 	cmd.Flags().StringVar(&model, "model", "", "Model selection to pass via --model")
 	cmd.Flags().StringVar(&permissionMode, "permission-mode", "", "Permission mode to pass via --permission-mode")
+	cmd.Flags().StringVar(&approvalPolicy, "approval-policy", "", "Unified approval policy (plan, confirm, auto-edit, auto)")
+	cmd.Flags().StringVar(&codexSandboxMode, "codex-sandbox-mode", "", "Codex sandbox mode (read-only, workspace-write, danger-full-access)")
 	cmd.Flags().StringArrayVar(&allowedTools, "allowed-tool", nil, "Allowed tool (repeatable)")
 	cmd.Flags().StringArrayVar(&disallowedTools, "disallowed-tool", nil, "Disallowed tool (repeatable)")
 	cmd.Flags().StringVar(&heartbeatIdleTimeout, "heartbeat-idle-timeout", "", "Heartbeat idle timeout duration")

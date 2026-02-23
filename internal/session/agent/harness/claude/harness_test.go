@@ -77,6 +77,94 @@ func TestBuildCommandArgs_AllFields(t *testing.T) {
 	}
 }
 
+func TestBuildCommandArgs_ApprovalPolicy_Plan(t *testing.T) {
+	h := New(harness.HarnessConfig{}, nil)
+	args := h.BuildCommandArgs(harness.CommandArgsConfig{ApprovalPolicy: "plan"})
+	expected := []string{"--permission-mode", "plan"}
+	if len(args) != len(expected) {
+		t.Fatalf("expected %v, got %v", expected, args)
+	}
+	for i, want := range expected {
+		if args[i] != want {
+			t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
+		}
+	}
+}
+
+func TestBuildCommandArgs_ApprovalPolicy_Confirm(t *testing.T) {
+	h := New(harness.HarnessConfig{}, nil)
+	args := h.BuildCommandArgs(harness.CommandArgsConfig{ApprovalPolicy: "confirm"})
+	expected := []string{"--permission-mode", "default"}
+	if len(args) != len(expected) {
+		t.Fatalf("expected %v, got %v", expected, args)
+	}
+	for i, want := range expected {
+		if args[i] != want {
+			t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
+		}
+	}
+}
+
+func TestBuildCommandArgs_ApprovalPolicy_AutoEdit(t *testing.T) {
+	h := New(harness.HarnessConfig{}, nil)
+	args := h.BuildCommandArgs(harness.CommandArgsConfig{ApprovalPolicy: "auto-edit"})
+	expected := []string{"--permission-mode", "acceptEdits"}
+	if len(args) != len(expected) {
+		t.Fatalf("expected %v, got %v", expected, args)
+	}
+	for i, want := range expected {
+		if args[i] != want {
+			t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
+		}
+	}
+}
+
+func TestBuildCommandArgs_ApprovalPolicy_Auto(t *testing.T) {
+	h := New(harness.HarnessConfig{}, nil)
+	args := h.BuildCommandArgs(harness.CommandArgsConfig{ApprovalPolicy: "auto"})
+	expected := []string{"--permission-mode", "bypassPermissions"}
+	if len(args) != len(expected) {
+		t.Fatalf("expected %v, got %v", expected, args)
+	}
+	for i, want := range expected {
+		if args[i] != want {
+			t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
+		}
+	}
+}
+
+func TestBuildCommandArgs_ApprovalPolicy_OverridesPermissionMode(t *testing.T) {
+	h := New(harness.HarnessConfig{}, nil)
+	// ApprovalPolicy takes precedence over PermissionMode.
+	args := h.BuildCommandArgs(harness.CommandArgsConfig{
+		PermissionMode: "plan",
+		ApprovalPolicy: "auto",
+	})
+	expected := []string{"--permission-mode", "bypassPermissions"}
+	if len(args) != len(expected) {
+		t.Fatalf("expected %v, got %v", expected, args)
+	}
+	for i, want := range expected {
+		if args[i] != want {
+			t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
+		}
+	}
+}
+
+func TestBuildCommandArgs_PermissionMode_FallbackWhenNoApprovalPolicy(t *testing.T) {
+	h := New(harness.HarnessConfig{}, nil)
+	args := h.BuildCommandArgs(harness.CommandArgsConfig{PermissionMode: "dontAsk"})
+	expected := []string{"--permission-mode", "dontAsk"}
+	if len(args) != len(expected) {
+		t.Fatalf("expected %v, got %v", expected, args)
+	}
+	for i, want := range expected {
+		if args[i] != want {
+			t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
+		}
+	}
+}
+
 func TestBuildCommandArgs_Empty(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
 	args := h.BuildCommandArgs(harness.CommandArgsConfig{})
