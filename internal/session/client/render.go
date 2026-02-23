@@ -56,7 +56,7 @@ func (c *Client) renderLiveView(buf *bytes.Buffer) {
 		startRow = 0
 	}
 	for i := 0; i < c.VT.ChildRows; i++ {
-		fmt.Fprintf(buf, "\033[%d;1H", i+1)
+		fmt.Fprintf(buf, "\033[%d;1H\033[2K", i+1)
 		c.RenderLineFrom(buf, c.VT.Vt, startRow+i)
 	}
 }
@@ -127,18 +127,25 @@ func (c *Client) renderScrollIndicator(buf *bytes.Buffer) {
 	indicator := "(scrolling)"
 	if c.DebugScroll {
 		maxOffset, _ := c.scrollMaxOffset()
+		mode := "sb"
+		if c.hasScrollHistory() {
+			mode = "hist"
+		}
+		sbLen, sbCurY := 0, 0
+		if c.VT.Scrollback != nil {
+			sbLen = len(c.VT.Scrollback.Content)
+			sbCurY = c.VT.Scrollback.Cursor.Y
+		}
 		indicator = fmt.Sprintf(
-			"(scrolling off=%d/%d hist=%d sb=%d child=%d)",
+			"(scroll %s off=%d/%d hist=%d sb=%d curY=%d child=%d sr=%v)",
+			mode,
 			c.ScrollOffset,
 			maxOffset,
 			len(c.VT.ScrollHistory),
-			func() int {
-				if c.VT.Scrollback != nil {
-					return len(c.VT.Scrollback.Content)
-				}
-				return 0
-			}(),
+			sbLen,
+			sbCurY,
 			c.VT.ChildRows,
+			c.VT.ScrollRegionUsed,
 		)
 	}
 	col := c.VT.Cols - len(indicator) + 1
@@ -149,11 +156,34 @@ func (c *Client) renderScrollIndicator(buf *bytes.Buffer) {
 }
 
 // RenderLineFrom writes one row of the given terminal to buf.
+// This uses explicit SGR resets between format regions to prevent
+// background colors from bleeding across regions (midterm's RenderLine
+// does not reset between regions).
 func (c *Client) RenderLineFrom(buf *bytes.Buffer, vt *midterm.Terminal, row int) {
 	if row >= len(vt.Content) {
 		return
 	}
-	_ = vt.RenderLine(buf, row)
+	line := vt.Content[row]
+	var pos int
+	var lastFormat midterm.Format
+	for region := range vt.Format.Regions(row) {
+		f := region.F
+		if f != lastFormat {
+			buf.WriteString("\033[0m")
+			buf.WriteString(f.Render())
+			lastFormat = f
+		}
+		end := pos + region.Size
+		if pos < len(line) {
+			contentEnd := end
+			if contentEnd > len(line) {
+				contentEnd = len(line)
+			}
+			buf.WriteString(string(line[pos:contentEnd]))
+		}
+		pos = end
+	}
+	buf.WriteString("\033[0m")
 }
 
 // RenderLine writes one row of the primary virtual terminal to buf.
