@@ -722,14 +722,26 @@ func (c *Client) HandleSGRMouse(params []byte, press bool) {
 			c.ShowSelectHint()
 		}
 	case 64: // scroll up
-		if c.IsScrollMode() {
+		if c.VT != nil && c.VT.AltScrollEnabled {
+			for i := 0; i < scrollStep; i++ {
+				if !c.writePTYOrHang([]byte("\033[A")) {
+					break
+				}
+			}
+		} else if c.IsScrollMode() {
 			c.ScrollUp(scrollStep)
 		} else {
 			c.EnterScrollMode()
 			c.ScrollUp(scrollStep)
 		}
 	case 65: // scroll down
-		if c.IsScrollMode() {
+		if c.VT != nil && c.VT.AltScrollEnabled {
+			for i := 0; i < scrollStep; i++ {
+				if !c.writePTYOrHang([]byte("\033[B")) {
+					break
+				}
+			}
+		} else if c.IsScrollMode() {
 			c.ScrollDown(scrollStep)
 		}
 	}

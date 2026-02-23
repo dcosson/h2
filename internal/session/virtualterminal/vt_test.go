@@ -109,17 +109,16 @@ func TestScanPTYOutput_NoScrollRegionForNormalApps(t *testing.T) {
 	}
 }
 
-func TestScanPTYOutput_StopsAfterDetection(t *testing.T) {
+func TestScanPTYOutput_ContinuesScanningAfterScrollRegion(t *testing.T) {
 	vt := &VT{}
 	vt.ScanPTYOutput([]byte("\033[1;20r"))
 	if !vt.ScrollRegionUsed {
 		t.Fatal("expected ScrollRegionUsed=true")
 	}
-	// Subsequent calls should be a no-op (early return).
-	vt.scanState = 99 // corrupt state to verify early return
-	vt.ScanPTYOutput([]byte("\033[m"))
-	if vt.scanState != 99 {
-		t.Fatal("expected scanState unchanged after ScrollRegionUsed=true")
+	// After ScrollRegionUsed is set, scanner should still detect ?1007h.
+	vt.ScanPTYOutput([]byte("\033[?1007h"))
+	if !vt.AltScrollEnabled {
+		t.Fatal("expected AltScrollEnabled=true after ?1007h")
 	}
 }
 
@@ -169,5 +168,100 @@ func TestScanPTYOutput_BareResetScrollRegion(t *testing.T) {
 	vt.ScanPTYOutput([]byte("\033[r"))
 	if !vt.ScrollRegionUsed {
 		t.Fatal("expected ScrollRegionUsed=true for bare CSI r")
+	}
+}
+
+// --- ScanPTYOutput (alternate scroll detection) ---
+
+func TestScanPTYOutput_DetectsAltScrollEnable(t *testing.T) {
+	vt := &VT{}
+	vt.ScanPTYOutput([]byte("\033[?1007h"))
+	if !vt.AltScrollEnabled {
+		t.Fatal("expected AltScrollEnabled=true after ?1007h")
+	}
+}
+
+func TestScanPTYOutput_DetectsAltScrollDisable(t *testing.T) {
+	vt := &VT{}
+	vt.AltScrollEnabled = true
+	vt.ScanPTYOutput([]byte("\033[?1007l"))
+	if vt.AltScrollEnabled {
+		t.Fatal("expected AltScrollEnabled=false after ?1007l")
+	}
+}
+
+func TestScanPTYOutput_AltScrollToggle(t *testing.T) {
+	vt := &VT{}
+	vt.ScanPTYOutput([]byte("\033[?1007h"))
+	if !vt.AltScrollEnabled {
+		t.Fatal("expected AltScrollEnabled=true")
+	}
+	vt.ScanPTYOutput([]byte("\033[?1007l"))
+	if vt.AltScrollEnabled {
+		t.Fatal("expected AltScrollEnabled=false after disable")
+	}
+}
+
+func TestScanPTYOutput_AltScrollSplitAcrossChunks(t *testing.T) {
+	vt := &VT{}
+	// Split ESC [ ? 1 0 0 7 h across two chunks.
+	vt.ScanPTYOutput([]byte("\033[?10"))
+	if vt.AltScrollEnabled {
+		t.Fatal("should not enable mid-sequence")
+	}
+	vt.ScanPTYOutput([]byte("07h"))
+	if !vt.AltScrollEnabled {
+		t.Fatal("expected AltScrollEnabled=true after completing ?1007h across chunks")
+	}
+}
+
+func TestScanPTYOutput_IgnoresOtherPrivateModes(t *testing.T) {
+	vt := &VT{}
+	// ?1049h (alt screen) should not affect AltScrollEnabled.
+	vt.ScanPTYOutput([]byte("\033[?1049h"))
+	if vt.AltScrollEnabled {
+		t.Fatal("expected AltScrollEnabled=false for ?1049h")
+	}
+}
+
+func TestScanPTYOutput_AltScrollAfterScrollRegion(t *testing.T) {
+	vt := &VT{}
+	// DECSTBM first, then ?1007h in the same chunk.
+	vt.ScanPTYOutput([]byte("\033[1;20r\033[?1007h"))
+	if !vt.ScrollRegionUsed {
+		t.Fatal("expected ScrollRegionUsed=true")
+	}
+	if !vt.AltScrollEnabled {
+		t.Fatal("expected AltScrollEnabled=true")
+	}
+}
+
+func TestScanPTYOutput_PrivateModeWithSemicolon(t *testing.T) {
+	vt := &VT{}
+	// Compound private mode: ?1000;1006h — semicolon should bail out.
+	vt.ScanPTYOutput([]byte("\033[?1000;1006h"))
+	if vt.AltScrollEnabled {
+		t.Fatal("compound private mode should not set AltScrollEnabled")
+	}
+}
+
+func TestResetScanState(t *testing.T) {
+	vt := &VT{}
+	vt.ScrollRegionUsed = true
+	vt.AltScrollEnabled = true
+	vt.scanState = scanCSI
+	vt.scanCSIPrivateNum = 42
+	vt.ResetScanState()
+	if vt.ScrollRegionUsed {
+		t.Fatal("expected ScrollRegionUsed=false after reset")
+	}
+	if vt.AltScrollEnabled {
+		t.Fatal("expected AltScrollEnabled=false after reset")
+	}
+	if vt.scanState != scanNormal {
+		t.Fatal("expected scanState=scanNormal after reset")
+	}
+	if vt.scanCSIPrivateNum != 0 {
+		t.Fatal("expected scanCSIPrivateNum=0 after reset")
 	}
 }

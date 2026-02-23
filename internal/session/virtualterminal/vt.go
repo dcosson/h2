@@ -42,6 +42,11 @@ type VT struct {
 	// over VT.Scrollback for scrollback rendering.
 	ScrollRegionUsed bool
 
+	// AltScrollEnabled is set when the child sends CSI ? 1007 h (enable
+	// alternate scroll mode). When true, mouse scroll events are converted
+	// to arrow key sequences instead of entering h2's scroll mode.
+	AltScrollEnabled bool
+
 	// ScrollHistory stores ANSI-formatted lines that scrolled off the top of
 	// VT.Vt via midterm's OnScrollback callback. This captures scrollback from
 	// apps that use scroll regions (e.g. codex inline viewport).
@@ -49,7 +54,8 @@ type VT struct {
 	scrollHistoryMax int
 
 	// scanState tracks the ANSI parser state for ScanPTYOutput.
-	scanState int
+	scanState         int
+	scanCSIPrivateNum int // accumulates mode number during CSI ? <num> h/l parsing
 }
 
 // SetupScrollCapture installs the OnScrollback callback on VT.Vt so that
@@ -145,18 +151,21 @@ const (
 	scanNormal = iota
 	scanEsc
 	scanCSI
+	scanCSIPrivate // after ESC [ ?
 	scanOSC
 	scanOSCEsc
 )
 
 // ScanPTYOutput scans child output for escape sequences that affect scroll
-// behavior. Currently detects DECSTBM (CSI...r) to set ScrollRegionUsed.
+// behavior. Detects DECSTBM (CSI...r) to set ScrollRegionUsed, and
+// DEC private mode 1007 (CSI?1007h/l) to toggle AltScrollEnabled.
 func (vt *VT) ScanPTYOutput(data []byte) {
-	if vt.ScrollRegionUsed {
-		return // already detected, no need to keep scanning
-	}
 	for _, b := range data {
 		switch vt.scanState {
+		case scanNormal:
+			if b == 0x1B {
+				vt.scanState = scanEsc
+			}
 		case scanEsc:
 			if b == '[' {
 				vt.scanState = scanCSI
@@ -166,11 +175,31 @@ func (vt *VT) ScanPTYOutput(data []byte) {
 				vt.scanState = scanNormal
 			}
 		case scanCSI:
-			if b >= 0x40 && b <= 0x7E {
+			if b == '?' {
+				vt.scanCSIPrivateNum = 0
+				vt.scanState = scanCSIPrivate
+			} else if b >= 0x40 && b <= 0x7E {
 				if b == 'r' {
 					vt.ScrollRegionUsed = true
-					return
 				}
+				vt.scanState = scanNormal
+			}
+			// Parameter/intermediate bytes (0x20-0x3F) stay in scanCSI.
+		case scanCSIPrivate:
+			if b >= '0' && b <= '9' {
+				vt.scanCSIPrivateNum = vt.scanCSIPrivateNum*10 + int(b-'0')
+			} else if b == 'h' {
+				if vt.scanCSIPrivateNum == 1007 {
+					vt.AltScrollEnabled = true
+				}
+				vt.scanState = scanNormal
+			} else if b == 'l' {
+				if vt.scanCSIPrivateNum == 1007 {
+					vt.AltScrollEnabled = false
+				}
+				vt.scanState = scanNormal
+			} else {
+				// Semicolon or unexpected byte: bail.
 				vt.scanState = scanNormal
 			}
 		case scanOSC:
@@ -187,12 +216,17 @@ func (vt *VT) ScanPTYOutput(data []byte) {
 			} else {
 				vt.scanState = scanOSC
 			}
-		default:
-			if b == 0x1B {
-				vt.scanState = scanEsc
-			}
 		}
 	}
+}
+
+// ResetScanState resets the ANSI parser state and detected flags for a new
+// child process.
+func (vt *VT) ResetScanState() {
+	vt.scanState = scanNormal
+	vt.scanCSIPrivateNum = 0
+	vt.ScrollRegionUsed = false
+	vt.AltScrollEnabled = false
 }
 
 // RespondOSCColors responds to OSC 10/11 color queries from the child.

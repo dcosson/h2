@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"io"
+	"os"
 	"testing"
 
 	"github.com/vito/midterm"
@@ -1321,5 +1322,113 @@ func TestScrollHistory_FallsBackToScrollbackWhenEmpty(t *testing.T) {
 	output := out.String()
 	if !bytes.Contains([]byte(output), []byte("sb-line")) {
 		t.Fatalf("expected output to contain Scrollback content when ScrollHistory is empty")
+	}
+}
+
+// newTestClientWithPTY creates a test client with a pipe as the PTY so
+// writePTYOrHang works. Returns the client and a reader for the PTY output.
+func newTestClientWithPTY(childRows, cols int) (*Client, *os.File) {
+	r, w, _ := os.Pipe()
+	vt := &virtualterminal.VT{
+		Rows:      childRows + 2,
+		Cols:      cols,
+		ChildRows: childRows,
+		Vt:        midterm.NewTerminal(childRows, cols),
+		Output:    io.Discard,
+		Ptm:       w,
+	}
+	sb := midterm.NewTerminal(childRows, cols)
+	sb.AutoResizeY = true
+	sb.AppendOnly = true
+	vt.Scrollback = sb
+	c := &Client{
+		VT:     vt,
+		Output: io.Discard,
+		Mode:   ModeNormal,
+	}
+	return c, r
+}
+
+func TestHandleSGRMouse_AltScrollUp_SendsArrowKeys(t *testing.T) {
+	c, r := newTestClientWithPTY(10, 80)
+	defer r.Close()
+	defer c.VT.Ptm.Close()
+
+	c.VT.AltScrollEnabled = true
+	c.HandleSGRMouse([]byte("<64;1;1"), true)
+
+	// Should NOT enter scroll mode.
+	if c.IsScrollMode() {
+		t.Fatal("expected NOT to enter scroll mode when AltScrollEnabled")
+	}
+	if c.Mode != ModeNormal {
+		t.Fatalf("expected ModeNormal, got %d", c.Mode)
+	}
+
+	// Read what was written to the PTY.
+	buf := make([]byte, 256)
+	n, _ := r.Read(buf)
+	got := string(buf[:n])
+	// scrollStep=3, so expect 3 arrow up sequences.
+	want := "\033[A\033[A\033[A"
+	if got != want {
+		t.Fatalf("expected PTY output %q, got %q", want, got)
+	}
+}
+
+func TestHandleSGRMouse_AltScrollDown_SendsArrowKeys(t *testing.T) {
+	c, r := newTestClientWithPTY(10, 80)
+	defer r.Close()
+	defer c.VT.Ptm.Close()
+
+	c.VT.AltScrollEnabled = true
+	c.HandleSGRMouse([]byte("<65;1;1"), true)
+
+	if c.IsScrollMode() {
+		t.Fatal("expected NOT to enter scroll mode when AltScrollEnabled")
+	}
+
+	buf := make([]byte, 256)
+	n, _ := r.Read(buf)
+	got := string(buf[:n])
+	want := "\033[B\033[B\033[B"
+	if got != want {
+		t.Fatalf("expected PTY output %q, got %q", want, got)
+	}
+}
+
+func TestHandleSGRMouse_AltScrollDisabled_NormalBehavior(t *testing.T) {
+	o := newTestClient(10, 80)
+	for i := 0; i < 20; i++ {
+		o.VT.Scrollback.Write([]byte("line\n"))
+	}
+	o.VT.AltScrollEnabled = false
+
+	o.HandleSGRMouse([]byte("<64;1;1"), true)
+	if !o.IsScrollMode() {
+		t.Fatal("expected scroll mode when AltScrollEnabled is false")
+	}
+}
+
+func TestHandleSGRMouse_AltScrollInPassthrough(t *testing.T) {
+	c, r := newTestClientWithPTY(10, 80)
+	defer r.Close()
+	defer c.VT.Ptm.Close()
+
+	c.Mode = ModePassthrough
+	c.VT.AltScrollEnabled = true
+	c.HandleSGRMouse([]byte("<64;1;1"), true)
+
+	// Should stay in passthrough, not enter scroll mode.
+	if c.Mode != ModePassthrough {
+		t.Fatalf("expected ModePassthrough, got %d", c.Mode)
+	}
+
+	buf := make([]byte, 256)
+	n, _ := r.Read(buf)
+	got := string(buf[:n])
+	want := "\033[A\033[A\033[A"
+	if got != want {
+		t.Fatalf("expected PTY output %q, got %q", want, got)
 	}
 }
