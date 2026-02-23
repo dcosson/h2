@@ -700,9 +700,12 @@ func (c *Client) scrollMaxOffset() (int, bool) {
 	return maxOffset, true
 }
 
-// hasScrollHistory returns true if ScrollHistory has captured lines.
+// hasScrollHistory returns true if ScrollHistory should be used for scrollback.
+// This is only preferred when the child uses scroll regions (DECSTBM), which
+// breaks the AppendOnly Scrollback terminal. For apps without scroll regions
+// (e.g. Claude Code), Scrollback works better.
 func (c *Client) hasScrollHistory() bool {
-	return c.VT != nil && len(c.VT.ScrollHistory) > 0
+	return c.VT != nil && c.VT.ScrollRegionUsed && len(c.VT.ScrollHistory) > 0
 }
 
 // scrollHistoryLen returns the ScrollHistory length to use for rendering.

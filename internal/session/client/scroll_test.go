@@ -391,6 +391,8 @@ func TestRenderScrollView_UsesScrollHistoryWhenAvailable(t *testing.T) {
 	var out bytes.Buffer
 	o.Output = &out
 
+	// Mark that scroll regions are used (e.g. codex).
+	o.VT.ScrollRegionUsed = true
 	// Populate ScrollHistory with captured lines.
 	o.VT.ScrollHistory = []string{
 		"history-line-0",
@@ -1214,6 +1216,7 @@ func TestRenderSelectHint_PassthroughScrollMode(t *testing.T) {
 
 func TestScrollMaxOffset_WithScrollHistory(t *testing.T) {
 	o := newTestClient(10, 80)
+	o.VT.ScrollRegionUsed = true
 	// With 25 ScrollHistory lines, max offset should be 25
 	// (total = 25 history + 10 live = 35, max = 35 - 10 = 25).
 	o.VT.ScrollHistory = make([]string, 25)
@@ -1231,6 +1234,7 @@ func TestScrollMaxOffset_WithScrollHistory(t *testing.T) {
 
 func TestScrollHistoryAnchor_FrozenInScrollMode(t *testing.T) {
 	o := newTestClient(10, 80)
+	o.VT.ScrollRegionUsed = true
 	o.VT.ScrollHistory = make([]string, 20)
 	for i := range o.VT.ScrollHistory {
 		o.VT.ScrollHistory[i] = "line"
@@ -1256,6 +1260,7 @@ func TestRenderScrollViewHistory_ShowsHistoryAndLive(t *testing.T) {
 	var out bytes.Buffer
 	o.Output = &out
 
+	o.VT.ScrollRegionUsed = true
 	// Populate ScrollHistory.
 	o.VT.ScrollHistory = []string{
 		"scroll-line-0",
@@ -1273,6 +1278,31 @@ func TestRenderScrollViewHistory_ShowsHistoryAndLive(t *testing.T) {
 	output := out.String()
 	if !bytes.Contains([]byte(output), []byte("scroll-line-0")) {
 		t.Fatalf("expected output to contain ScrollHistory line, got: %q", output)
+	}
+}
+
+func TestScrollHistory_IgnoredWithoutScrollRegion(t *testing.T) {
+	// When ScrollRegionUsed is false (e.g. Claude Code), ScrollHistory
+	// should NOT be used even if it has content.
+	o := newTestClient(10, 80)
+	o.VT.ScrollHistory = make([]string, 25)
+	for i := range o.VT.ScrollHistory {
+		o.VT.ScrollHistory[i] = "line"
+	}
+	// ScrollRegionUsed is false (default).
+	if o.hasScrollHistory() {
+		t.Fatal("expected hasScrollHistory=false when ScrollRegionUsed is false")
+	}
+	// scrollMaxOffset should fall through to Scrollback path.
+	for i := 0; i < 30; i++ {
+		o.VT.Scrollback.Write([]byte("sb\n"))
+	}
+	maxOff, ok := o.scrollMaxOffset()
+	if !ok {
+		t.Fatal("expected ok=true from Scrollback path")
+	}
+	if maxOff == 25 {
+		t.Fatal("maxOffset should NOT be based on ScrollHistory when ScrollRegionUsed is false")
 	}
 }
 

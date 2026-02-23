@@ -38,6 +38,11 @@ type VT struct {
 	ChildHung   bool
 	ExitError   error
 
+	// ScrollRegionUsed is set when the child process sends DECSTBM (CSI...r),
+	// indicating it uses scroll regions. When true, ScrollHistory is preferred
+	// over VT.Scrollback for scrollback rendering.
+	ScrollRegionUsed bool
+
 	// ScrollHistory stores ANSI-formatted lines that scrolled off the top of
 	// VT.Vt via midterm's OnScrollback callback. This captures scrollback from
 	// apps that use scroll regions (e.g. codex inline viewport).
@@ -181,6 +186,11 @@ func (vt *VT) CapturePlainHistory(data []byte) {
 				// accumulated text so TUI repaints don't corrupt history.
 				if r == 'H' || r == 'f' || r == 'J' {
 					vt.plainLine = vt.plainLine[:0]
+				}
+				// DECSTBM (CSI...r) = Set Scrolling Region. Track that
+				// the child uses scroll regions so we prefer ScrollHistory.
+				if r == 'r' {
+					vt.ScrollRegionUsed = true
 				}
 				vt.plainParseState = plainParseNormal
 			}

@@ -223,3 +223,24 @@ func TestCapturePlainHistory_MaxLines(t *testing.T) {
 		t.Fatalf("expected 10 lines (trimmed), got %d", len(vt.PlainHistory))
 	}
 }
+
+func TestCapturePlainHistory_DetectsScrollRegion(t *testing.T) {
+	vt := &VT{}
+	if vt.ScrollRegionUsed {
+		t.Fatal("expected ScrollRegionUsed=false initially")
+	}
+	// Send DECSTBM: CSI 1;20 r
+	vt.CapturePlainHistory([]byte("\033[1;20r"))
+	if !vt.ScrollRegionUsed {
+		t.Fatal("expected ScrollRegionUsed=true after DECSTBM")
+	}
+}
+
+func TestCapturePlainHistory_NoScrollRegionForNormalApps(t *testing.T) {
+	vt := &VT{}
+	// Normal output with SGR colors, cursor positioning, but no scroll regions.
+	vt.CapturePlainHistory([]byte("\033[31mhello\033[0m\r\n\033[5;1Hworld\n"))
+	if vt.ScrollRegionUsed {
+		t.Fatal("expected ScrollRegionUsed=false without DECSTBM")
+	}
+}
