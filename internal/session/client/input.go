@@ -474,6 +474,11 @@ func (c *Client) HandleCSI(remaining []byte) (consumed int, handled bool) {
 		}
 	case 'H', 'F':
 		// CSI H = Home, CSI F = End (also used for cursor position with params).
+		if params == "" && final == 'H' && c.Mode == ModeNormal {
+			c.EnterScrollMode()
+			c.ScrollUp(1 << 20) // clamps to max
+			break
+		}
 		if c.IsScrollMode() && params == "" {
 			if final == 'H' {
 				c.ScrollUp(1 << 20) // clamps to max
@@ -488,6 +493,15 @@ func (c *Client) HandleCSI(remaining []byte) (consumed int, handled bool) {
 	case '~':
 		// CSI 5~ = PageUp, CSI 6~ = PageDown.
 		// CSI 27;5;13~ = xterm Ctrl+Enter (modifyOtherKeys format).
+		if params == "5" && c.Mode == ModeNormal {
+			c.EnterScrollMode()
+			page := c.VT.ChildRows
+			if page < 1 {
+				page = 1
+			}
+			c.ScrollUp(page)
+			break
+		}
 		if c.IsScrollMode() && (params == "5" || params == "6") {
 			page := c.VT.ChildRows
 			if page < 1 {

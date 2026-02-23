@@ -599,6 +599,41 @@ func TestHandleScrollBytes_EndExitsScrollMode(t *testing.T) {
 	}
 }
 
+func TestPageUp_EntersScrollModeFromNormal(t *testing.T) {
+	o := newTestClient(10, 80)
+	for i := 0; i < 30; i++ {
+		o.VT.Scrollback.Write([]byte("line\n"))
+	}
+
+	// ESC [ 5 ~ = Page Up in normal mode
+	buf := []byte{0x1B, '[', '5', '~'}
+	o.HandleDefaultBytes(buf, 0, len(buf))
+	if !o.IsScrollMode() {
+		t.Fatal("expected PageUp to enter scroll mode from normal mode")
+	}
+	if o.ScrollOffset != o.VT.ChildRows {
+		t.Fatalf("expected offset %d (one page), got %d", o.VT.ChildRows, o.ScrollOffset)
+	}
+}
+
+func TestHome_EntersScrollModeFromNormal(t *testing.T) {
+	o := newTestClient(10, 80)
+	for i := 0; i < 30; i++ {
+		o.VT.Scrollback.Write([]byte("line\n"))
+	}
+
+	// ESC [ H = Home in normal mode (no params)
+	buf := []byte{0x1B, '[', 'H'}
+	o.HandleDefaultBytes(buf, 0, len(buf))
+	if !o.IsScrollMode() {
+		t.Fatal("expected Home to enter scroll mode from normal mode")
+	}
+	maxOffset, _ := o.scrollMaxOffset()
+	if o.ScrollOffset != maxOffset {
+		t.Fatalf("expected offset %d (max), got %d", maxOffset, o.ScrollOffset)
+	}
+}
+
 // --- RenderLiveView anchors to cursor ---
 
 func TestRenderLiveView_AnchorsToCursor(t *testing.T) {
