@@ -16,12 +16,17 @@ type terminalColorHints struct {
 	OscFg     string `json:"osc_fg,omitempty"`
 	OscBg     string `json:"osc_bg,omitempty"`
 	ColorFGBG string `json:"colorfgbg,omitempty"`
+	Term      string `json:"term,omitempty"`
+	ColorTerm string `json:"colorterm,omitempty"`
 }
 
 // detectTerminalColorHints captures current terminal colors for OSC 10/11
-// responses and a COLORFGBG hint for fallback palette selection.
-func detectTerminalColorHints() (oscFg, oscBg, colorfgbg string) {
-	// Explicit overrides win.
+// responses, a COLORFGBG hint for fallback palette selection, and TERM/COLORTERM
+// for terminal capability detection.
+func detectTerminalColorHints() terminalColorHints {
+	var hints terminalColorHints
+
+	// Explicit overrides win (applied at the end).
 	overrideFg := os.Getenv("H2_OSC_FG")
 	overrideBg := os.Getenv("H2_OSC_BG")
 	overrideColorFGBG := os.Getenv("H2_COLORFGBG")
@@ -29,48 +34,45 @@ func detectTerminalColorHints() (oscFg, oscBg, colorfgbg string) {
 	if term.IsTerminal(int(os.Stdout.Fd())) {
 		output := termenv.NewOutput(os.Stdout)
 		if fg := output.ForegroundColor(); fg != nil {
-			oscFg = virtualterminal.ColorToX11(fg)
+			hints.OscFg = virtualterminal.ColorToX11(fg)
 		}
 		if bg := output.BackgroundColor(); bg != nil {
-			oscBg = virtualterminal.ColorToX11(bg)
+			hints.OscBg = virtualterminal.ColorToX11(bg)
 		}
 
-		colorfgbg = os.Getenv("COLORFGBG")
-		if colorfgbg == "" {
+		hints.ColorFGBG = os.Getenv("COLORFGBG")
+		if hints.ColorFGBG == "" {
 			// Keep a simple, widely used fallback format when COLORFGBG is unset.
 			if output.HasDarkBackground() {
-				colorfgbg = "15;0"
+				hints.ColorFGBG = "15;0"
 			} else {
-				colorfgbg = "0;15"
+				hints.ColorFGBG = "0;15"
 			}
 		}
 
-		_ = persistTerminalColorHints(terminalColorHints{
-			OscFg:     oscFg,
-			OscBg:     oscBg,
-			ColorFGBG: colorfgbg,
-		})
+		hints.Term = os.Getenv("TERM")
+		hints.ColorTerm = os.Getenv("COLORTERM")
+
+		_ = persistTerminalColorHints(hints)
 	} else if cached, ok := loadTerminalColorHints(); ok {
-		oscFg = cached.OscFg
-		oscBg = cached.OscBg
-		colorfgbg = cached.ColorFGBG
+		hints = cached
 	}
 
-	if colorfgbg == "" {
-		colorfgbg = os.Getenv("COLORFGBG")
+	if hints.ColorFGBG == "" {
+		hints.ColorFGBG = os.Getenv("COLORFGBG")
 	}
 
 	if overrideFg != "" {
-		oscFg = overrideFg
+		hints.OscFg = overrideFg
 	}
 	if overrideBg != "" {
-		oscBg = overrideBg
+		hints.OscBg = overrideBg
 	}
 	if overrideColorFGBG != "" {
-		colorfgbg = overrideColorFGBG
+		hints.ColorFGBG = overrideColorFGBG
 	}
 
-	return oscFg, oscBg, colorfgbg
+	return hints
 }
 
 // refreshTerminalColorHintsCache updates terminal color hints on disk when this

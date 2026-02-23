@@ -202,6 +202,8 @@ type ForkDaemonOpts struct {
 	OscFg           string   // startup terminal foreground color (X11 rgb)
 	OscBg           string   // startup terminal background color (X11 rgb)
 	ColorFGBG       string   // startup COLORFGBG hint
+	Term            string   // TERM value from launching terminal
+	ColorTerm       string   // COLORTERM value from launching terminal
 }
 
 // ForkDaemon starts a daemon in a background process by re-execing with
@@ -272,6 +274,12 @@ func ForkDaemon(opts ForkDaemonOpts) error {
 	}
 	if opts.ColorFGBG != "" {
 		env = append(env, "H2_COLORFGBG="+opts.ColorFGBG)
+	}
+	if opts.Term != "" {
+		env = append(env, "H2_TERM="+opts.Term)
+	}
+	if opts.ColorTerm != "" {
+		env = append(env, "H2_COLORTERM="+opts.ColorTerm)
 	}
 	cmd.Env = env
 

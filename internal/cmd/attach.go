@@ -44,16 +44,16 @@ func doAttach(name string) error {
 	if err != nil {
 		return fmt.Errorf("get terminal size: %w", err)
 	}
-	oscFg, oscBg, colorfgbg := detectTerminalColorHints()
+	colorHints := detectTerminalColorHints()
 
 	// Send attach handshake.
 	if err := message.SendRequest(conn, &message.Request{
 		Type:      "attach",
 		Cols:      cols,
 		Rows:      rows,
-		OscFg:     oscFg,
-		OscBg:     oscBg,
-		ColorFGBG: colorfgbg,
+		OscFg:     colorHints.OscFg,
+		OscBg:     colorHints.OscBg,
+		ColorFGBG: colorHints.ColorFGBG,
 	}); err != nil {
 		return fmt.Errorf("send attach request: %w", err)
 	}

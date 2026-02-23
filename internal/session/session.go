@@ -434,6 +434,23 @@ func (s *Session) RunDaemon() error {
 			_ = os.Setenv("COLORFGBG", c)
 		}
 	}
+	// Ensure TERM and COLORTERM are set for the child PTY. Use the cached
+	// values from the launching terminal, falling back to safe defaults
+	// (h2's VT is xterm-compatible and passes through 24-bit color).
+	if os.Getenv("TERM") == "" {
+		t := os.Getenv("H2_TERM")
+		if t == "" {
+			t = "xterm-256color"
+		}
+		_ = os.Setenv("TERM", t)
+	}
+	if os.Getenv("COLORTERM") == "" {
+		ct := os.Getenv("H2_COLORTERM")
+		if ct == "" {
+			ct = "truecolor"
+		}
+		_ = os.Setenv("COLORTERM", ct)
+	}
 	s.VT.ChildRows = s.VT.Rows - 2 // default ReservedRows
 	s.VT.Vt = midterm.NewTerminal(s.VT.ChildRows, s.VT.Cols)
 	s.VT.SetupScrollCapture()

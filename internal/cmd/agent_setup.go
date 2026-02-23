@@ -109,7 +109,7 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 	}
 
 	sessionID := uuid.New().String()
-	oscFg, oscBg, colorfgbg := detectTerminalColorHints()
+	colorHints := detectTerminalColorHints()
 
 	// Fork the daemon.
 	roleCfg := roleHarnessConfig(role)
@@ -129,9 +129,11 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 		CWD:             agentCWD,
 		Pod:             pod,
 		Overrides:       overrides,
-		OscFg:           oscFg,
-		OscBg:           oscBg,
-		ColorFGBG:       colorfgbg,
+		OscFg:           colorHints.OscFg,
+		OscBg:           colorHints.OscBg,
+		ColorFGBG:       colorHints.ColorFGBG,
+		Term:            colorHints.Term,
+		ColorTerm:       colorHints.ColorTerm,
 	}); err != nil {
 		return err
 	}
