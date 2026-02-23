@@ -472,8 +472,34 @@ func (c *Client) HandleCSI(remaining []byte) (consumed int, handled bool) {
 		} else if c.Mode == ModeNormal || c.Mode == ModePassthrough {
 			c.writePTYOrHang(append([]byte{0x1B, '['}, remaining[:i+1]...))
 		}
+	case 'H', 'F':
+		// CSI H = Home, CSI F = End (also used for cursor position with params).
+		if c.IsScrollMode() && params == "" {
+			if final == 'H' {
+				c.ScrollUp(1 << 20) // clamps to max
+			} else {
+				c.ScrollDown(1 << 20) // exits scroll mode
+			}
+			break
+		}
+		if c.Mode == ModeNormal || c.Mode == ModePassthrough {
+			c.writePTYOrHang(append([]byte{0x1B, '['}, remaining[:i+1]...))
+		}
 	case '~':
-		// xterm modifyOtherKeys format: CSI 27;<modifiers>;<code> ~
+		// CSI 5~ = PageUp, CSI 6~ = PageDown.
+		// CSI 27;5;13~ = xterm Ctrl+Enter (modifyOtherKeys format).
+		if c.IsScrollMode() && (params == "5" || params == "6") {
+			page := c.VT.ChildRows
+			if page < 1 {
+				page = 1
+			}
+			if params == "5" {
+				c.ScrollUp(page)
+			} else {
+				c.ScrollDown(page)
+			}
+			break
+		}
 		if params == "27;5;13" {
 			// Ctrl+Enter — open menu in normal mode.
 			if c.Mode == ModeNormal {

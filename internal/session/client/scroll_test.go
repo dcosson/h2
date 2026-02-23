@@ -531,6 +531,74 @@ func TestHandleScrollBytes_ArrowDownScrolls(t *testing.T) {
 	}
 }
 
+func TestHandleScrollBytes_PageUpScrolls(t *testing.T) {
+	o := newTestClient(10, 80)
+	for i := 0; i < 50; i++ {
+		o.VT.Scrollback.Write([]byte("line\n"))
+	}
+	o.EnterScrollMode()
+
+	// ESC [ 5 ~ = Page Up
+	buf := []byte{0x1B, '[', '5', '~'}
+	o.HandleScrollBytes(buf, 0, len(buf))
+	if o.ScrollOffset != o.VT.ChildRows {
+		t.Fatalf("expected offset %d (one page), got %d", o.VT.ChildRows, o.ScrollOffset)
+	}
+}
+
+func TestHandleScrollBytes_PageDownScrolls(t *testing.T) {
+	o := newTestClient(10, 80)
+	for i := 0; i < 50; i++ {
+		o.VT.Scrollback.Write([]byte("line\n"))
+	}
+	o.EnterScrollMode()
+	o.ScrollUp(20)
+
+	// ESC [ 6 ~ = Page Down
+	buf := []byte{0x1B, '[', '6', '~'}
+	o.HandleScrollBytes(buf, 0, len(buf))
+	if o.ScrollOffset != 20-o.VT.ChildRows {
+		t.Fatalf("expected offset %d, got %d", 20-o.VT.ChildRows, o.ScrollOffset)
+	}
+}
+
+func TestHandleScrollBytes_HomeScrollsToTop(t *testing.T) {
+	o := newTestClient(10, 80)
+	for i := 0; i < 50; i++ {
+		o.VT.Scrollback.Write([]byte("line\n"))
+	}
+	o.EnterScrollMode()
+
+	// ESC [ H = Home
+	buf := []byte{0x1B, '[', 'H'}
+	o.HandleScrollBytes(buf, 0, len(buf))
+
+	maxOffset, _ := o.scrollMaxOffset()
+	if o.ScrollOffset != maxOffset {
+		t.Fatalf("expected offset %d (max), got %d", maxOffset, o.ScrollOffset)
+	}
+}
+
+func TestHandleScrollBytes_EndExitsScrollMode(t *testing.T) {
+	o := newTestClient(10, 80)
+	for i := 0; i < 50; i++ {
+		o.VT.Scrollback.Write([]byte("line\n"))
+	}
+	o.EnterScrollMode()
+	o.ScrollUp(20)
+
+	// ESC [ F = End
+	buf := []byte{0x1B, '[', 'F'}
+	o.HandleScrollBytes(buf, 0, len(buf))
+
+	if o.IsScrollMode() {
+		t.Fatal("expected End to exit scroll mode")
+	}
+	if o.ScrollOffset != 0 {
+		t.Fatalf("expected offset 0, got %d", o.ScrollOffset)
+	}
+}
+
 // --- RenderLiveView anchors to cursor ---
 
 func TestRenderLiveView_AnchorsToCursor(t *testing.T) {
