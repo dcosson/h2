@@ -56,8 +56,9 @@ func (c *Client) renderLiveView(buf *bytes.Buffer) {
 		startRow = 0
 	}
 	for i := 0; i < c.VT.ChildRows; i++ {
-		fmt.Fprintf(buf, "\033[%d;1H\033[2K", i+1)
+		fmt.Fprintf(buf, "\033[%d;1H", i+1)
 		c.RenderLineFrom(buf, c.VT.Vt, startRow+i)
+		buf.WriteString("\033[0m\033[K") // erase trailing stale content with default bg
 	}
 }
 
@@ -81,11 +82,12 @@ func (c *Client) renderScrollView(buf *bytes.Buffer) {
 		startRow = 0
 	}
 	for i := 0; i < c.VT.ChildRows; i++ {
-		fmt.Fprintf(buf, "\033[%d;1H\033[2K", i+1)
+		fmt.Fprintf(buf, "\033[%d;1H", i+1)
 		row := startRow + i
 		if row >= 0 && row < len(sb.Content) {
 			c.RenderLineFrom(buf, sb, row)
 		}
+		buf.WriteString("\033[0m\033[K")
 	}
 	c.renderScrollIndicator(buf)
 }
@@ -104,20 +106,20 @@ func (c *Client) renderScrollViewHistory(buf *bytes.Buffer) {
 	}
 
 	for i := 0; i < c.VT.ChildRows; i++ {
-		fmt.Fprintf(buf, "\033[%d;1H\033[2K", i+1)
+		fmt.Fprintf(buf, "\033[%d;1H", i+1)
 		row := startRow + i
-		if row < 0 || row >= totalRows {
-			continue
+		if row >= 0 && row < totalRows {
+			if row < histLen {
+				// Render from ScrollHistory (ANSI-formatted string).
+				line := c.VT.ScrollHistory[row]
+				buf.WriteString(line)
+			} else {
+				// Render from live VT.Vt content.
+				vtRow := row - histLen
+				c.RenderLineFrom(buf, c.VT.Vt, vtRow)
+			}
 		}
-		if row < histLen {
-			// Render from ScrollHistory (ANSI-formatted string).
-			line := c.VT.ScrollHistory[row]
-			buf.WriteString(line)
-		} else {
-			// Render from live VT.Vt content.
-			vtRow := row - histLen
-			c.RenderLineFrom(buf, c.VT.Vt, vtRow)
-		}
+		buf.WriteString("\033[0m\033[K")
 	}
 	c.renderScrollIndicator(buf)
 }
