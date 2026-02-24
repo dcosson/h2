@@ -4,12 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	"h2/internal/config"
 	"h2/internal/session"
+	"h2/internal/socketdir"
 	"h2/internal/tmpl"
 )
 
@@ -89,25 +91,33 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 				}
 
 				// Build template context for role rendering.
-				agentName := name
-				if agentName == "" {
-					agentName = session.GenerateName()
-					name = agentName
-				}
 				ctx := &tmpl.Context{
-					AgentName: agentName,
-					RoleName:  roleName,
-					PodName:   pod,
-					H2Dir:     config.ConfigDir(),
-					Var:       vars,
+					RoleName: roleName,
+					PodName:  pod,
+					H2Dir:    config.ConfigDir(),
+					Var:      vars,
 				}
 
-				// When --pod is specified, check pod roles first then global.
+				// Create name template functions with collision avoidance.
+				existingNames := getExistingAgentNames()
+				nameFuncs := tmpl.NameFuncs(session.GenerateName, existingNames)
+
+				// Load the role with two-pass agent name resolution.
 				var role *config.Role
 				if pod != "" {
+					// Pod roles use existing flow — pods handle their own name resolution.
+					agentName := name
+					if agentName == "" {
+						agentName = session.GenerateName()
+					}
+					ctx.AgentName = agentName
+					name = agentName
 					role, err = config.LoadPodRoleRendered(roleName, ctx)
 				} else {
-					role, err = config.LoadRoleRendered(roleName, ctx)
+					rolePath := filepath.Join(config.RolesDir(), roleName+".yaml")
+					role, name, err = config.LoadRoleWithNameResolution(
+						rolePath, ctx, nameFuncs, name, session.GenerateName,
+					)
 				}
 				if err != nil {
 					if errors.Is(err, os.ErrNotExist) {
@@ -187,4 +197,17 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 	cmd.Flags().StringArrayVar(&varFlags, "var", nil, "Set template variable (key=value, repeatable)")
 
 	return cmd
+}
+
+// getExistingAgentNames returns the names of currently running agents.
+func getExistingAgentNames() []string {
+	entries, err := socketdir.ListByType(socketdir.TypeAgent)
+	if err != nil {
+		return nil
+	}
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name
+	}
+	return names
 }

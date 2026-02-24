@@ -1415,6 +1415,192 @@ func TestGetCodexConfigDir(t *testing.T) {
 	}
 }
 
+// --- LoadRoleWithNameResolution tests ---
+
+func TestLoadRoleWithNameResolution_CLINameSkipsTwoPass(t *testing.T) {
+	yaml := `
+role_name: test
+agent_name: ignored-template-name
+instructions: |
+  You are {{ .AgentName }}.
+`
+	path := writeTempFile(t, "cli-name.yaml", yaml)
+	ctx := &tmpl.Context{RoleName: "test", H2Dir: "/tmp/h2"}
+
+	role, name, err := LoadRoleWithNameResolution(path, ctx, nil, "cli-provided", func() string {
+		t.Fatal("generateFallback should not be called when CLI name is provided")
+		return ""
+	})
+	if err != nil {
+		t.Fatalf("LoadRoleWithNameResolution: %v", err)
+	}
+	if name != "cli-provided" {
+		t.Errorf("name = %q, want %q", name, "cli-provided")
+	}
+	if !strings.Contains(role.Instructions, "cli-provided") {
+		t.Errorf("instructions should contain CLI name: %q", role.Instructions)
+	}
+}
+
+func TestLoadRoleWithNameResolution_AgentNameFromRole(t *testing.T) {
+	yaml := `
+role_name: test
+agent_name: my-static-agent
+instructions: |
+  You are {{ .AgentName }}.
+`
+	path := writeTempFile(t, "static-name.yaml", yaml)
+	ctx := &tmpl.Context{RoleName: "test", H2Dir: "/tmp/h2"}
+
+	role, name, err := LoadRoleWithNameResolution(path, ctx, nil, "", func() string {
+		t.Fatal("generateFallback should not be called when agent_name is set")
+		return ""
+	})
+	if err != nil {
+		t.Fatalf("LoadRoleWithNameResolution: %v", err)
+	}
+	if name != "my-static-agent" {
+		t.Errorf("name = %q, want %q", name, "my-static-agent")
+	}
+	if !strings.Contains(role.Instructions, "my-static-agent") {
+		t.Errorf("instructions should contain resolved name: %q", role.Instructions)
+	}
+}
+
+func TestLoadRoleWithNameResolution_RandomName(t *testing.T) {
+	yaml := `
+role_name: test
+agent_name: '{{ randomName }}'
+instructions: |
+  You are {{ .AgentName }}.
+`
+	path := writeTempFile(t, "random-name.yaml", yaml)
+	ctx := &tmpl.Context{RoleName: "test", H2Dir: "/tmp/h2"}
+	nameFuncs := tmpl.NameFuncs(func() string { return "bright-hare" }, nil)
+
+	role, name, err := LoadRoleWithNameResolution(path, ctx, nameFuncs, "", func() string {
+		t.Fatal("generateFallback should not be called when agent_name uses randomName")
+		return ""
+	})
+	if err != nil {
+		t.Fatalf("LoadRoleWithNameResolution: %v", err)
+	}
+	if name != "bright-hare" {
+		t.Errorf("name = %q, want %q", name, "bright-hare")
+	}
+	if !strings.Contains(role.Instructions, "bright-hare") {
+		t.Errorf("instructions should contain random name: %q", role.Instructions)
+	}
+}
+
+func TestLoadRoleWithNameResolution_AutoIncrement(t *testing.T) {
+	yaml := `
+role_name: test
+agent_name: '{{ autoIncrement "worker" }}'
+instructions: |
+  You are {{ .AgentName }}.
+`
+	path := writeTempFile(t, "autoincr-name.yaml", yaml)
+	ctx := &tmpl.Context{RoleName: "test", H2Dir: "/tmp/h2"}
+	nameFuncs := tmpl.NameFuncs(nil, []string{"worker-1", "worker-3"})
+
+	role, name, err := LoadRoleWithNameResolution(path, ctx, nameFuncs, "", func() string {
+		t.Fatal("generateFallback should not be called")
+		return ""
+	})
+	if err != nil {
+		t.Fatalf("LoadRoleWithNameResolution: %v", err)
+	}
+	if name != "worker-4" {
+		t.Errorf("name = %q, want %q", name, "worker-4")
+	}
+	if !strings.Contains(role.Instructions, "worker-4") {
+		t.Errorf("instructions should contain auto-incremented name: %q", role.Instructions)
+	}
+}
+
+func TestLoadRoleWithNameResolution_FallbackWhenNoAgentName(t *testing.T) {
+	yaml := `
+role_name: test
+instructions: |
+  You are {{ .AgentName }}.
+`
+	path := writeTempFile(t, "no-agent-name.yaml", yaml)
+	ctx := &tmpl.Context{RoleName: "test", H2Dir: "/tmp/h2"}
+
+	fallbackCalled := false
+	role, name, err := LoadRoleWithNameResolution(path, ctx, nil, "", func() string {
+		fallbackCalled = true
+		return "fallback-name"
+	})
+	if err != nil {
+		t.Fatalf("LoadRoleWithNameResolution: %v", err)
+	}
+	if !fallbackCalled {
+		t.Error("expected generateFallback to be called")
+	}
+	if name != "fallback-name" {
+		t.Errorf("name = %q, want %q", name, "fallback-name")
+	}
+	if !strings.Contains(role.Instructions, "fallback-name") {
+		t.Errorf("instructions should contain fallback name: %q", role.Instructions)
+	}
+}
+
+func TestLoadRoleWithNameResolution_CircularReference(t *testing.T) {
+	yaml := `
+role_name: test
+agent_name: '{{ .AgentName }}-suffix'
+instructions: test
+`
+	path := writeTempFile(t, "circular.yaml", yaml)
+	ctx := &tmpl.Context{RoleName: "test", H2Dir: "/tmp/h2"}
+
+	_, _, err := LoadRoleWithNameResolution(path, ctx, nil, "", func() string { return "x" })
+	if err == nil {
+		t.Fatal("expected error for circular agent_name reference")
+	}
+	if !strings.Contains(err.Error(), "circular reference") {
+		t.Errorf("error = %q, want it to mention 'circular reference'", err.Error())
+	}
+}
+
+func TestLoadRoleWithNameResolution_NameFuncsCached(t *testing.T) {
+	// Both passes should get the same randomName value (caching).
+	yaml := `
+role_name: test
+agent_name: '{{ randomName }}'
+instructions: |
+  You are {{ .AgentName }} running {{ randomName }}.
+`
+	path := writeTempFile(t, "cached-funcs.yaml", yaml)
+	ctx := &tmpl.Context{RoleName: "test", H2Dir: "/tmp/h2"}
+
+	calls := 0
+	nameFuncs := tmpl.NameFuncs(func() string {
+		calls++
+		return "cached-name"
+	}, nil)
+
+	role, name, err := LoadRoleWithNameResolution(path, ctx, nameFuncs, "", func() string {
+		return "unused"
+	})
+	if err != nil {
+		t.Fatalf("LoadRoleWithNameResolution: %v", err)
+	}
+	if name != "cached-name" {
+		t.Errorf("name = %q, want %q", name, "cached-name")
+	}
+	// randomName in instructions should also be "cached-name" (cached).
+	if !strings.Contains(role.Instructions, "cached-name running cached-name") {
+		t.Errorf("instructions should use cached name: %q", role.Instructions)
+	}
+	// Generator should only be called once (cached).
+	if calls != 1 {
+		t.Errorf("expected 1 generate call (cached), got %d", calls)
+	}
+}
+
 func writeTempFile(t *testing.T, name, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)

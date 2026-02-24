@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"text/template"
 	"time"
 
 	"h2/internal/tmpl"
@@ -389,6 +390,159 @@ func LoadRoleRenderedFrom(path string, ctx *tmpl.Context) (*Role, error) {
 	}
 
 	return &role, nil
+}
+
+// agentNamePlaceholder is used during the first render pass to detect
+// whether the role template references {{ .AgentName }}.
+const agentNamePlaceholder = "<AGENT_NAME_PLACEHOLDER>"
+
+// LoadRoleWithNameResolution loads a role using two-pass rendering to resolve
+// the agent_name field. This allows agent_name to use template functions like
+// {{ randomName }} or {{ autoIncrement "worker" }} whose results are then
+// available as {{ .AgentName }} in the rest of the template.
+//
+// Resolution order:
+//  1. If cliName is non-empty, it is used directly (no two-pass needed).
+//  2. The role's agent_name field is rendered via a first pass with a
+//     placeholder AgentName and the provided nameFuncs. The resolved
+//     agent_name is extracted and used as AgentName for the second pass.
+//  3. If agent_name is empty after pass 1, generateFallback() is called.
+//
+// Returns the final Role and the resolved agent name.
+func LoadRoleWithNameResolution(
+	path string,
+	ctx *tmpl.Context,
+	nameFuncs template.FuncMap,
+	cliName string,
+	generateFallback func() string,
+) (*Role, string, error) {
+	// Fast path: CLI name provided, no two-pass needed.
+	if cliName != "" {
+		renderCtx := *ctx
+		renderCtx.AgentName = cliName
+		role, err := loadRoleRenderedFromWithFuncs(path, &renderCtx, nameFuncs)
+		if err != nil {
+			return nil, "", err
+		}
+		return role, cliName, nil
+	}
+
+	// Read the raw file and prepare template vars (shared across both passes).
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, "", fmt.Errorf("read role file: %w", err)
+	}
+
+	defs, remaining, err := tmpl.ParseVarDefs(string(data))
+	if err != nil {
+		return nil, "", fmt.Errorf("parse variables in role %q: %w", path, err)
+	}
+
+	vars := mergeVarDefaults(ctx.Var, defs)
+	if err := tmpl.ValidateVars(defs, vars); err != nil {
+		return nil, "", fmt.Errorf("role %q: %w", filepath.Base(path), err)
+	}
+
+	// --- Pass 1: render with placeholder AgentName to extract agent_name ---
+	pass1Ctx := *ctx
+	pass1Ctx.AgentName = agentNamePlaceholder
+	pass1Ctx.Var = vars
+
+	pass1Rendered, err := tmpl.RenderWithExtraFuncs(remaining, &pass1Ctx, nameFuncs)
+	if err != nil {
+		return nil, "", fmt.Errorf("template error in role %q (pass 1): %w", filepath.Base(path), err)
+	}
+
+	var pass1Role Role
+	if err := yaml.Unmarshal([]byte(pass1Rendered), &pass1Role); err != nil {
+		return nil, "", fmt.Errorf("parse role YAML %q (pass 1): %w", path, err)
+	}
+
+	// Resolve the agent name.
+	resolvedName := pass1Role.AgentName
+	if strings.Contains(resolvedName, agentNamePlaceholder) {
+		return nil, "", fmt.Errorf("role %q: agent_name must not reference {{ .AgentName }} (circular reference)", filepath.Base(path))
+	}
+	if resolvedName == "" {
+		resolvedName = generateFallback()
+	}
+
+	// --- Pass 2: re-render with the resolved AgentName ---
+	pass2Ctx := *ctx
+	pass2Ctx.AgentName = resolvedName
+	pass2Ctx.Var = vars
+
+	pass2Rendered, err := tmpl.RenderWithExtraFuncs(remaining, &pass2Ctx, nameFuncs)
+	if err != nil {
+		return nil, "", fmt.Errorf("template error in role %q (pass 2): %w", filepath.Base(path), err)
+	}
+
+	var role Role
+	if err := yaml.Unmarshal([]byte(pass2Rendered), &role); err != nil {
+		return nil, "", fmt.Errorf("parse role YAML %q (pass 2): %w", path, err)
+	}
+
+	role.Variables = defs
+	if err := role.Validate(); err != nil {
+		return nil, "", fmt.Errorf("invalid role %q: %w", path, err)
+	}
+
+	return &role, resolvedName, nil
+}
+
+// loadRoleRenderedFromWithFuncs is like LoadRoleRenderedFrom but uses extra template functions.
+func loadRoleRenderedFromWithFuncs(path string, ctx *tmpl.Context, extraFuncs template.FuncMap) (*Role, error) {
+	if ctx == nil {
+		return LoadRoleFrom(path)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read role file: %w", err)
+	}
+
+	defs, remaining, err := tmpl.ParseVarDefs(string(data))
+	if err != nil {
+		return nil, fmt.Errorf("parse variables in role %q: %w", path, err)
+	}
+
+	vars := mergeVarDefaults(ctx.Var, defs)
+	if err := tmpl.ValidateVars(defs, vars); err != nil {
+		return nil, fmt.Errorf("role %q: %w", filepath.Base(path), err)
+	}
+
+	renderCtx := *ctx
+	renderCtx.Var = vars
+	rendered, err := tmpl.RenderWithExtraFuncs(remaining, &renderCtx, extraFuncs)
+	if err != nil {
+		return nil, fmt.Errorf("template error in role %q (%s): %w", filepath.Base(path), path, err)
+	}
+
+	var role Role
+	if err := yaml.Unmarshal([]byte(rendered), &role); err != nil {
+		return nil, fmt.Errorf("parse rendered role YAML %q: %w", path, err)
+	}
+
+	role.Variables = defs
+	if err := role.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid role %q: %w", path, err)
+	}
+
+	return &role, nil
+}
+
+// mergeVarDefaults creates a new map with provided vars + defaults for missing ones.
+func mergeVarDefaults(provided map[string]string, defs map[string]tmpl.VarDef) map[string]string {
+	vars := make(map[string]string, len(provided)+len(defs))
+	for k, v := range provided {
+		vars[k] = v
+	}
+	for name, def := range defs {
+		if _, ok := vars[name]; !ok && def.Default != nil {
+			vars[name] = *def.Default
+		}
+	}
+	return vars
 }
 
 // ListRoles returns all available roles from ~/.h2/roles/.
