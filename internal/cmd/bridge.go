@@ -79,10 +79,12 @@ to route to an existing agent without spawning a new session.`,
 			}
 
 			// Setup and fork the concierge session from the role.
+			rootDir, _ := config.RootDir()
 			ctx := &tmpl.Context{
 				AgentName: conciergeSessionName,
 				RoleName:  roleName,
 				H2Dir:     config.ConfigDir(),
+				H2RootDir: rootDir,
 			}
 			role, err := config.LoadRoleRendered(roleName, ctx)
 			if err != nil {

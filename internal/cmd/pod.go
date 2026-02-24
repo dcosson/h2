@@ -44,9 +44,11 @@ func newPodLaunchCmd() *cobra.Command {
 			}
 
 			// Phase 1: Load and render pod template.
+			rootDir, _ := config.RootDir()
 			podCtx := &tmpl.Context{
-				H2Dir: config.ConfigDir(),
-				Var:   cliVars,
+				H2Dir:     config.ConfigDir(),
+				H2RootDir: rootDir,
+				Var:       cliVars,
 			}
 			pt, err := config.LoadPodTemplateRendered(templateName, podCtx)
 			if err != nil {
@@ -114,6 +116,7 @@ func newPodLaunchCmd() *cobra.Command {
 					Index:     agent.Index,
 					Count:     agent.Count,
 					H2Dir:     config.ConfigDir(),
+					H2RootDir: rootDir,
 					Var:       mergedVars,
 				}
 
@@ -151,6 +154,7 @@ func newPodLaunchCmd() *cobra.Command {
 
 // podDryRun resolves all agent configs in a pod and prints them without launching.
 func podDryRun(templateName string, pod string, expanded []config.ExpandedAgent, cliVars map[string]string) error {
+	rootDir, _ := config.RootDir()
 	var resolved []*ResolvedAgentConfig
 
 	for _, agent := range expanded {
@@ -176,6 +180,7 @@ func podDryRun(templateName string, pod string, expanded []config.ExpandedAgent,
 			Index:     agent.Index,
 			Count:     agent.Count,
 			H2Dir:     config.ConfigDir(),
+			H2RootDir: rootDir,
 			Var:       mergedVars,
 		}
 

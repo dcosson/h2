@@ -684,10 +684,12 @@ func listRolesFromDir(dir string) ([]*Role, error) {
 
 		path := filepath.Join(dir, entry.Name())
 		// Try rendered load with stub name functions (handles template files).
+		rootDir, _ := RootDir()
 		ctx := &tmpl.Context{
 			RoleName:  roleName,
 			AgentName: "<name>",
 			H2Dir:     ConfigDir(),
+			H2RootDir: rootDir,
 		}
 		role, err := loadRoleRenderedFromWithFuncs(path, ctx, listStubFuncs)
 		if err != nil {

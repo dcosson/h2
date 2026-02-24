@@ -91,11 +91,13 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 				}
 
 				// Build template context for role rendering.
+				rootDir, _ := config.RootDir()
 				ctx := &tmpl.Context{
-					RoleName: roleName,
-					PodName:  pod,
-					H2Dir:    config.ConfigDir(),
-					Var:      vars,
+					RoleName:  roleName,
+					PodName:   pod,
+					H2Dir:     config.ConfigDir(),
+					H2RootDir: rootDir,
+					Var:       vars,
 				}
 
 				// Create name template functions with collision avoidance.

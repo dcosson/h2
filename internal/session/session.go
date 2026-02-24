@@ -220,9 +220,11 @@ func resolveFullHarness(command, roleName string, log *activitylog.Logger) (harn
 	// If we have a role name, load the role to get proper config
 	// (claude_config_dir, harness_type, model, etc.).
 	if roleName != "" {
+		rootDir, _ := config.RootDir()
 		ctx := &tmpl.Context{
-			RoleName: roleName,
-			H2Dir:    config.ConfigDir(),
+			RoleName:  roleName,
+			H2Dir:     config.ConfigDir(),
+			H2RootDir: rootDir,
 		}
 		if role, err := config.LoadRoleRendered(roleName, ctx); err == nil {
 			ht := harness.CanonicalName(role.GetHarnessType())

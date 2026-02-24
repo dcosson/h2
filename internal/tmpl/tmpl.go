@@ -29,6 +29,7 @@ type Context struct {
 	Index     int
 	Count     int
 	H2Dir     string
+	H2RootDir string
 	Var       map[string]string
 }
 
