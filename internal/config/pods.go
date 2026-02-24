@@ -66,38 +66,7 @@ func LoadPodRoleRendered(name string, ctx *tmpl.Context) (*Role, error) {
 
 // ListPodRoles returns roles from <h2-dir>/pods/roles/.
 func ListPodRoles() ([]*Role, error) {
-	dir := PodRolesDir()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("read pod roles dir: %w", err)
-	}
-
-	var roles []*Role
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
-			continue
-		}
-		path := filepath.Join(dir, entry.Name())
-		roleName := strings.TrimSuffix(entry.Name(), ".yaml")
-		// Try rendered load first (handles template files like role init generates).
-		ctx := &tmpl.Context{
-			RoleName: roleName,
-			H2Dir:    ConfigDir(),
-		}
-		role, err := LoadRoleRenderedFrom(path, ctx)
-		if err != nil {
-			// Fallback to plain load (handles roles with required vars).
-			role, err = LoadRoleFrom(path)
-			if err != nil {
-				continue
-			}
-		}
-		roles = append(roles, role)
-	}
-	return roles, nil
+	return listRolesFromDir(PodRolesDir())
 }
 
 // PodTemplate defines a set of agents to launch together as a pod.

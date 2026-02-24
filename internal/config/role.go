@@ -108,17 +108,36 @@ var ValidCodexSandboxModes = []string{
 
 // PermissionReviewAgent configures the AI permission reviewer.
 type PermissionReviewAgent struct {
-	Enabled      *bool  `yaml:"enabled,omitempty"` // defaults to true if instructions are set
-	Instructions string `yaml:"instructions,omitempty"`
+	Enabled              *bool  `yaml:"enabled,omitempty"` // defaults to true if instructions are set
+	Instructions         string `yaml:"instructions,omitempty"`
+	InstructionsIntro    string `yaml:"instructions_intro,omitempty"`
+	InstructionsBody     string `yaml:"instructions_body,omitempty"`
+	InstructionsAdditional1 string `yaml:"instructions_additional_1,omitempty"`
+	InstructionsAdditional2 string `yaml:"instructions_additional_2,omitempty"`
+	InstructionsAdditional3 string `yaml:"instructions_additional_3,omitempty"`
 }
 
 // IsEnabled returns whether the permission review agent is enabled.
-// Defaults to true when instructions are present.
+// Defaults to true when any instructions are present.
 func (pa *PermissionReviewAgent) IsEnabled() bool {
 	if pa.Enabled != nil {
 		return *pa.Enabled
 	}
-	return pa.Instructions != ""
+	return pa.GetInstructions() != ""
+}
+
+// GetInstructions returns the assembled instructions string.
+// If any of the split fields (instructions_intro, instructions_body, etc.) are set,
+// they are concatenated with newlines. Otherwise falls back to the single instructions field.
+func (pa *PermissionReviewAgent) GetInstructions() string {
+	return assembleInstructions(
+		pa.Instructions,
+		pa.InstructionsIntro,
+		pa.InstructionsBody,
+		pa.InstructionsAdditional1,
+		pa.InstructionsAdditional2,
+		pa.InstructionsAdditional3,
+	)
 }
 
 // Role defines a named configuration bundle for an h2 agent.
@@ -141,6 +160,11 @@ type Role struct {
 	Worktree             *WorktreeConfig         `yaml:"worktree,omitempty"`                // git worktree settings
 	SystemPrompt         string                  `yaml:"system_prompt,omitempty"`           // replaces Claude's entire default system prompt (--system-prompt)
 	Instructions         string                  `yaml:"instructions,omitempty"`            // appended to default system prompt (--append-system-prompt)
+	InstructionsIntro       string               `yaml:"instructions_intro,omitempty"`      // split instructions: intro
+	InstructionsBody        string               `yaml:"instructions_body,omitempty"`       // split instructions: body
+	InstructionsAdditional1 string               `yaml:"instructions_additional_1,omitempty"` // split instructions: additional 1
+	InstructionsAdditional2 string               `yaml:"instructions_additional_2,omitempty"` // split instructions: additional 2
+	InstructionsAdditional3 string               `yaml:"instructions_additional_3,omitempty"` // split instructions: additional 3
 	PermissionMode       string                  `yaml:"permission_mode,omitempty"`         // Claude Code --permission-mode flag
 	CodexSandboxMode     string                  `yaml:"codex_sandbox_mode,omitempty"`      // Codex --sandbox flag
 	CodexAskForApproval  string                  `yaml:"codex_ask_for_approval,omitempty"`  // Codex --ask-for-approval flag
@@ -180,6 +204,55 @@ func (r *Role) ResolveWorkingDir(invocationCWD string) (string, error) {
 		return "", fmt.Errorf("resolve h2 dir for working_dir: %w", err)
 	}
 	return filepath.Join(h2Dir, dir), nil
+}
+
+// GetInstructions returns the assembled instructions string.
+// If any of the split fields (instructions_intro, instructions_body, etc.) are set,
+// they are concatenated with newlines. Otherwise falls back to the single instructions field.
+func (r *Role) GetInstructions() string {
+	return assembleInstructions(
+		r.Instructions,
+		r.InstructionsIntro,
+		r.InstructionsBody,
+		r.InstructionsAdditional1,
+		r.InstructionsAdditional2,
+		r.InstructionsAdditional3,
+	)
+}
+
+// hasSplitInstructions returns true if any of the split instruction parts are set.
+func hasSplitInstructions(intro, body, add1, add2, add3 string) bool {
+	for _, p := range []string{intro, body, add1, add2, add3} {
+		if strings.TrimSpace(p) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// assembleInstructions concatenates split instruction parts with newlines.
+// If any split parts are set, they are used. Otherwise falls back to the single field.
+func assembleInstructions(single, intro, body, add1, add2, add3 string) string {
+	parts := []string{intro, body, add1, add2, add3}
+	var nonEmpty []string
+	for _, p := range parts {
+		if strings.TrimSpace(p) != "" {
+			nonEmpty = append(nonEmpty, strings.TrimRight(p, "\n"))
+		}
+	}
+	if len(nonEmpty) > 0 {
+		return strings.Join(nonEmpty, "\n")
+	}
+	return single
+}
+
+// validateInstructionsMutualExclusivity checks that single instructions and split instruction
+// fields are not both set. Returns an error with the given context label if both are set.
+func validateInstructionsMutualExclusivity(label, single, intro, body, add1, add2, add3 string) error {
+	if strings.TrimSpace(single) != "" && hasSplitInstructions(intro, body, add1, add2, add3) {
+		return fmt.Errorf("%s: instructions and split instruction fields (instructions_intro, instructions_body, etc.) are mutually exclusive", label)
+	}
+	return nil
 }
 
 // GetHarnessType returns the canonical harness type name, defaulting to "claude_code".
@@ -304,9 +377,19 @@ func (r *Role) IsRoleAuthenticated() (bool, error) {
 	return IsClaudeConfigAuthenticated(r.GetClaudeConfigDir())
 }
 
-// LoadRole loads a role by name from ~/.h2/roles/<name>.yaml.
+// resolveRolePath finds the role file for the given name, trying .yaml.tmpl first, then .yaml.
+// Returns the path and whether it's a template file.
+func resolveRolePath(dir, name string) (string, bool) {
+	tmplPath := filepath.Join(dir, name+".yaml.tmpl")
+	if _, err := os.Stat(tmplPath); err == nil {
+		return tmplPath, true
+	}
+	return filepath.Join(dir, name+".yaml"), false
+}
+
+// LoadRole loads a role by name from ~/.h2/roles/<name>.yaml or <name>.yaml.tmpl.
 func LoadRole(name string) (*Role, error) {
-	path := filepath.Join(RolesDir(), name+".yaml")
+	path, _ := resolveRolePath(RolesDir(), name)
 	return LoadRoleFrom(path)
 }
 
@@ -330,9 +413,10 @@ func LoadRoleFrom(path string) (*Role, error) {
 }
 
 // LoadRoleRendered loads a role by name, rendering it with the given template context.
+// Tries <name>.yaml.tmpl first, then <name>.yaml.
 // If ctx is nil, behaves like LoadRole (no rendering — backward compat).
 func LoadRoleRendered(name string, ctx *tmpl.Context) (*Role, error) {
-	path := filepath.Join(RolesDir(), name+".yaml")
+	path, _ := resolveRolePath(RolesDir(), name)
 	return LoadRoleRenderedFrom(path, ctx)
 }
 
@@ -545,9 +629,39 @@ func mergeVarDefaults(provided map[string]string, defs map[string]tmpl.VarDef) m
 	return vars
 }
 
-// ListRoles returns all available roles from ~/.h2/roles/.
-func ListRoles() ([]*Role, error) {
-	dir := RolesDir()
+// roleFileExtensions lists recognized role file extensions in priority order.
+var roleFileExtensions = []string{".yaml.tmpl", ".yaml"}
+
+// isRoleFile checks if a filename has a recognized role file extension.
+func isRoleFile(name string) bool {
+	for _, ext := range roleFileExtensions {
+		if strings.HasSuffix(name, ext) {
+			return true
+		}
+	}
+	return false
+}
+
+// roleNameFromFile extracts the role name from a filename by removing the extension.
+func roleNameFromFile(name string) string {
+	for _, ext := range roleFileExtensions {
+		if strings.HasSuffix(name, ext) {
+			return strings.TrimSuffix(name, ext)
+		}
+	}
+	return name
+}
+
+// listStubFuncs provides stub template functions for listing roles.
+// These are needed because templates may reference functions like randomName
+// or autoIncrement that are only fully functional during agent launch.
+var listStubFuncs = template.FuncMap{
+	"randomName":    func() string { return "<name>" },
+	"autoIncrement": func(prefix string) int { return 0 },
+}
+
+// listRolesFromDir scans a directory for role files (.yaml and .yaml.tmpl) and loads them.
+func listRolesFromDir(dir string) ([]*Role, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -556,19 +670,26 @@ func ListRoles() ([]*Role, error) {
 		return nil, fmt.Errorf("read roles dir: %w", err)
 	}
 
+	seen := make(map[string]bool) // track role names to avoid duplicates
 	var roles []*Role
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+		if entry.IsDir() || !isRoleFile(entry.Name()) {
 			continue
 		}
-		path := filepath.Join(dir, entry.Name())
-		roleName := strings.TrimSuffix(entry.Name(), ".yaml")
-		// Try rendered load first (handles template files like role init generates).
-		ctx := &tmpl.Context{
-			RoleName: roleName,
-			H2Dir:    ConfigDir(),
+		roleName := roleNameFromFile(entry.Name())
+		if seen[roleName] {
+			continue // .yaml.tmpl was already loaded (processed first alphabetically)
 		}
-		role, err := LoadRoleRenderedFrom(path, ctx)
+		seen[roleName] = true
+
+		path := filepath.Join(dir, entry.Name())
+		// Try rendered load with stub name functions (handles template files).
+		ctx := &tmpl.Context{
+			RoleName:  roleName,
+			AgentName: "<name>",
+			H2Dir:     ConfigDir(),
+		}
+		role, err := loadRoleRenderedFromWithFuncs(path, ctx, listStubFuncs)
 		if err != nil {
 			// Fallback to plain load (handles roles with required vars).
 			role, err = LoadRoleFrom(path)
@@ -579,6 +700,11 @@ func ListRoles() ([]*Role, error) {
 		roles = append(roles, role)
 	}
 	return roles, nil
+}
+
+// ListRoles returns all available roles from ~/.h2/roles/.
+func ListRoles() ([]*Role, error) {
+	return listRolesFromDir(RolesDir())
 }
 
 // Validate checks that a role has the minimum required fields.
@@ -623,6 +749,22 @@ func (r *Role) Validate() error {
 		if !valid {
 			return fmt.Errorf("invalid codex_ask_for_approval %q; valid values: %s",
 				r.CodexAskForApproval, strings.Join(ValidCodexAskForApproval, ", "))
+		}
+	}
+	// instructions and split instruction fields are mutually exclusive.
+	if err := validateInstructionsMutualExclusivity("role",
+		r.Instructions, r.InstructionsIntro, r.InstructionsBody,
+		r.InstructionsAdditional1, r.InstructionsAdditional2, r.InstructionsAdditional3,
+	); err != nil {
+		return err
+	}
+	if r.PermissionReviewAgent != nil {
+		if err := validateInstructionsMutualExclusivity("permission_review_agent",
+			r.PermissionReviewAgent.Instructions,
+			r.PermissionReviewAgent.InstructionsIntro, r.PermissionReviewAgent.InstructionsBody,
+			r.PermissionReviewAgent.InstructionsAdditional1, r.PermissionReviewAgent.InstructionsAdditional2, r.PermissionReviewAgent.InstructionsAdditional3,
+		); err != nil {
+			return err
 		}
 	}
 	// working_dir and worktree are mutually exclusive (working_dir "." or empty is allowed).

@@ -107,7 +107,7 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 		PrependArgs:         prependArgs,
 		ExtraArgs:           extraArgs,
 		SessionID:           "<generated-uuid>",
-		Instructions:        role.Instructions,
+		Instructions:        role.GetInstructions(),
 		SystemPrompt:        role.SystemPrompt,
 		Model:               roleCfg.Model,
 		PermissionMode:      role.PermissionMode,
@@ -164,8 +164,8 @@ func printDryRun(rc *ResolvedAgentConfig) {
 	fmt.Println()
 
 	// Instructions (truncated with line count).
-	if role.Instructions != "" {
-		lines := strings.Split(role.Instructions, "\n")
+	if instr := role.GetInstructions(); instr != "" {
+		lines := strings.Split(instr, "\n")
 		fmt.Printf("Instructions: (%d lines)\n", len(lines))
 		const maxLines = 10
 		for i, line := range lines {

@@ -1160,6 +1160,48 @@ func TestValidate_BothInstructionsAndSystemPrompt(t *testing.T) {
 	}
 }
 
+func TestValidate_SplitInstructionsOnly(t *testing.T) {
+	role := &Role{RoleName: "test", InstructionsIntro: "Intro", InstructionsBody: "Body"}
+	if err := role.Validate(); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+}
+
+func TestValidate_InstructionsAndSplitMutuallyExclusive(t *testing.T) {
+	role := &Role{RoleName: "test", Instructions: "Do stuff", InstructionsIntro: "Intro"}
+	err := role.Validate()
+	if err == nil {
+		t.Fatal("expected error when both instructions and split fields are set")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("expected mutually exclusive error, got: %v", err)
+	}
+}
+
+func TestValidate_PermissionReviewAgentInstructionsMutuallyExclusive(t *testing.T) {
+	role := &Role{
+		RoleName: "test",
+		PermissionReviewAgent: &PermissionReviewAgent{
+			Instructions:      "single",
+			InstructionsIntro: "intro",
+		},
+	}
+	err := role.Validate()
+	if err == nil {
+		t.Fatal("expected error when permission_review_agent has both instructions and split fields")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("expected mutually exclusive error, got: %v", err)
+	}
+}
+
+func TestValidate_NeitherInstructionsNorSplit(t *testing.T) {
+	role := &Role{RoleName: "test"}
+	if err := role.Validate(); err != nil {
+		t.Fatalf("expected no error when neither is set, got: %v", err)
+	}
+}
+
 func TestValidate_PermissionMode_Valid(t *testing.T) {
 	for _, mode := range ValidPermissionModes {
 		role := &Role{RoleName: "test", PermissionMode: mode}

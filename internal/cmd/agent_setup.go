@@ -115,7 +115,7 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 		Command:             h.Command(),
 		RoleName:            role.RoleName,
 		SessionDir:          sessionDir,
-		Instructions:        role.Instructions,
+		Instructions:        role.GetInstructions(),
 		SystemPrompt:        role.SystemPrompt,
 		Model:               roleCfg.Model,
 		PermissionMode:      role.PermissionMode,

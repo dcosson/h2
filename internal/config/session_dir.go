@@ -59,7 +59,7 @@ func SetupSessionDir(agentName string, role *Role) (string, error) {
 	// Write permission-reviewer.md if permission_review_agent is configured.
 	if role.PermissionReviewAgent != nil && role.PermissionReviewAgent.IsEnabled() {
 		reviewerPath := filepath.Join(sessionDir, "permission-reviewer.md")
-		if err := os.WriteFile(reviewerPath, []byte(role.PermissionReviewAgent.Instructions), 0o644); err != nil {
+		if err := os.WriteFile(reviewerPath, []byte(role.PermissionReviewAgent.GetInstructions()), 0o644); err != nil {
 			return "", fmt.Errorf("write permission-reviewer.md: %w", err)
 		}
 	}
