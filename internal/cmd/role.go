@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"h2/internal/config"
+	"h2/internal/tmpl"
 	s "h2/internal/termstyle"
 )
 
@@ -67,7 +69,15 @@ func printRoleList(roles []*config.Role) {
 		if desc == "" {
 			desc = "(no description)"
 		}
-		fmt.Printf("  %-16s %s\n", r.RoleName, desc)
+		varInfo := ""
+		if n := len(r.Variables); n > 0 {
+			if n == 1 {
+				varInfo = " (1 variable)"
+			} else {
+				varInfo = fmt.Sprintf(" (%d variables)", n)
+			}
+		}
+		fmt.Printf("  %-16s %s%s\n", r.RoleName, desc, varInfo)
 	}
 }
 
@@ -77,7 +87,7 @@ func newRoleShowCmd() *cobra.Command {
 		Short: "Display a role's configuration",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			role, err := config.LoadRole(args[0])
+			role, varDefs, err := config.LoadRoleForDisplay(args[0])
 			if err != nil {
 				return err
 			}
@@ -110,8 +120,42 @@ func newRoleShowCmd() *cobra.Command {
 				fmt.Printf("\nPermission Review Agent: enabled\n")
 			}
 
+			if len(varDefs) > 0 {
+				printVariables(varDefs)
+			}
+
 			return nil
 		},
+	}
+}
+
+// printVariables displays variable definitions in a formatted section.
+func printVariables(defs map[string]tmpl.VarDef) {
+	// Sort variable names for deterministic output.
+	names := make([]string, 0, len(defs))
+	for name := range defs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	fmt.Printf("\nVariables:\n")
+	for _, name := range names {
+		def := defs[name]
+		desc := def.Description
+		if desc != "" {
+			desc = fmt.Sprintf("%q", desc)
+		}
+		var defVal string
+		if def.Default != nil {
+			defVal = fmt.Sprintf("(default: %q)", *def.Default)
+		} else {
+			defVal = "(required)"
+		}
+		if desc != "" {
+			fmt.Printf("  %-16s %s %s\n", name, desc, defVal)
+		} else {
+			fmt.Printf("  %-16s %s\n", name, defVal)
+		}
 	}
 }
 
@@ -164,7 +208,7 @@ func newRoleCheckCmd() *cobra.Command {
 		Short: "Validate a role file",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			role, err := config.LoadRole(args[0])
+			role, _, err := config.LoadRoleForDisplay(args[0])
 			if err != nil {
 				return err
 			}

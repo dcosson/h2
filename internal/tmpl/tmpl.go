@@ -161,6 +161,54 @@ func ValidateVars(defs map[string]VarDef, provided map[string]string) error {
 	return fmt.Errorf("%s", buf.String())
 }
 
+// ValidateNoUnknownVars checks that all keys in provided exist in defs.
+// Returns a descriptive error listing unknown variables and available ones.
+// If defs is nil or empty, validation is skipped (untyped templates accept any vars).
+func ValidateNoUnknownVars(defs map[string]VarDef, provided map[string]string) error {
+	if len(defs) == 0 {
+		return nil
+	}
+	var unknown []string
+	for name := range provided {
+		if _, ok := defs[name]; !ok {
+			unknown = append(unknown, name)
+		}
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+
+	sort.Strings(unknown)
+
+	var buf strings.Builder
+	fmt.Fprintf(&buf, "unknown variables provided:\n\n")
+	for _, name := range unknown {
+		fmt.Fprintf(&buf, "  %s\n", name)
+	}
+
+	var available []string
+	for name := range defs {
+		available = append(available, name)
+	}
+	sort.Strings(available)
+
+	if len(available) > 0 {
+		buf.WriteString("\nAvailable variables:\n")
+		for _, name := range available {
+			desc := defs[name].Description
+			if desc != "" {
+				fmt.Fprintf(&buf, "  %-16s — %s\n", name, desc)
+			} else {
+				fmt.Fprintf(&buf, "  %s\n", name)
+			}
+		}
+	} else {
+		buf.WriteString("\nThis template defines no variables.\n")
+	}
+
+	return fmt.Errorf("%s", buf.String())
+}
+
 // funcMap returns the custom template functions.
 func funcMap() template.FuncMap {
 	return template.FuncMap{

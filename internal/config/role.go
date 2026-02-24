@@ -508,6 +508,20 @@ func LoadRoleWithNameResolution(
 ) (*Role, string, error) {
 	// Fast path: CLI name provided, no two-pass needed.
 	if cliName != "" {
+		// Validate unknown vars before rendering (typo protection).
+		if ctx != nil && len(ctx.Var) > 0 {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return nil, "", fmt.Errorf("read role file: %w", err)
+			}
+			defs, _, err := tmpl.ParseVarDefs(string(data))
+			if err != nil {
+				return nil, "", fmt.Errorf("parse variables in role %q: %w", path, err)
+			}
+			if err := tmpl.ValidateNoUnknownVars(defs, ctx.Var); err != nil {
+				return nil, "", fmt.Errorf("role %q: %w", filepath.Base(path), err)
+			}
+		}
 		renderCtx := *ctx
 		renderCtx.AgentName = cliName
 		role, err := loadRoleRenderedFromWithFuncs(path, &renderCtx, nameFuncs)
@@ -530,6 +544,10 @@ func LoadRoleWithNameResolution(
 
 	vars := mergeVarDefaults(ctx.Var, defs)
 	if err := tmpl.ValidateVars(defs, vars); err != nil {
+		return nil, "", fmt.Errorf("role %q: %w", filepath.Base(path), err)
+	}
+	// Reject unknown variables (typo protection).
+	if err := tmpl.ValidateNoUnknownVars(defs, ctx.Var); err != nil {
 		return nil, "", fmt.Errorf("role %q: %w", filepath.Base(path), err)
 	}
 
@@ -713,6 +731,53 @@ func listRolesFromDir(dir string) ([]*Role, error) {
 // ListRoles returns all available roles from ~/.h2/roles/.
 func ListRoles() ([]*Role, error) {
 	return listRolesFromDir(RolesDir())
+}
+
+// LoadRoleForDisplay loads a role for display purposes (e.g., `h2 role show`).
+// It renders templates with stub values so that template files can be parsed
+// and displayed. The returned role has Variables populated from the template's
+// variable definitions. Returns the role and a map of variable definitions.
+func LoadRoleForDisplay(name string) (*Role, map[string]tmpl.VarDef, error) {
+	path, _ := resolveRolePath(RolesDir(), name)
+	return loadRoleForDisplay(path, name)
+}
+
+// loadRoleForDisplay loads a role for display from a specific path.
+func loadRoleForDisplay(path, roleName string) (*Role, map[string]tmpl.VarDef, error) {
+	// Read the raw file to extract variable definitions.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read role file: %w", err)
+	}
+
+	defs, _, err := tmpl.ParseVarDefs(string(data))
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse variables in role %q: %w", path, err)
+	}
+
+	// Try rendered load with stub context (handles template files).
+	rootDir, _ := RootDir()
+	ctx := &tmpl.Context{
+		RoleName:  roleName,
+		AgentName: "<name>",
+		H2Dir:     ConfigDir(),
+		H2RootDir: rootDir,
+	}
+	role, err := loadRoleRenderedFromWithFuncs(path, ctx, listStubFuncs)
+	if err != nil {
+		// Fallback to plain load (handles roles with required vars).
+		role, err = LoadRoleFrom(path)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	// Ensure Variables is populated from defs (may not be if fallback was used).
+	if role.Variables == nil && len(defs) > 0 {
+		role.Variables = defs
+	}
+
+	return role, defs, nil
 }
 
 // Validate checks that a role has the minimum required fields.

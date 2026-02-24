@@ -55,6 +55,11 @@ func newPodLaunchCmd() *cobra.Command {
 				return fmt.Errorf("load template %q: %w", templateName, err)
 			}
 
+			// Reject unknown CLI variables (typo protection).
+			if err := tmpl.ValidateNoUnknownVars(pt.Variables, cliVars); err != nil {
+				return fmt.Errorf("pod template %q: %w", templateName, err)
+			}
+
 			// Use --pod flag, or template's pod_name, or template file name.
 			pod := podName
 			if pod == "" {

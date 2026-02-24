@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"text/template"
 
 	"h2/internal/tmpl"
 
@@ -1274,4 +1275,112 @@ instructions: |
 	if ctx.Var["other"] != "val" {
 		t.Error("original var should be preserved")
 	}
+}
+
+func TestLoadRoleWithNameResolution_RejectsUnknownVars(t *testing.T) {
+	h2Dir := setupTestH2Dir(t)
+
+	roleContent := `variables:
+  agent_harness:
+    description: "Agent harness to use"
+    default: "claude_code"
+  agent_model:
+    description: "Model"
+    default: "sonnet"
+
+role_name: test-role
+agent_harness: {{ .Var.agent_harness }}
+agent_model: {{ .Var.agent_model }}
+instructions: |
+  Test instructions.
+`
+	rolePath := filepath.Join(h2Dir, "roles", "test-role.yaml.tmpl")
+	os.WriteFile(rolePath, []byte(roleContent), 0o644)
+
+	stubFuncs := template.FuncMap{
+		"randomName":    func() string { return "test-agent" },
+		"autoIncrement": func(prefix string) int { return 1 },
+	}
+
+	t.Run("typo in var name is rejected", func(t *testing.T) {
+		ctx := &tmpl.Context{
+			RoleName:  "test-role",
+			H2Dir:     h2Dir,
+			H2RootDir: h2Dir,
+			Var:       map[string]string{"agent_harnesss": "codex"},
+		}
+		_, _, err := LoadRoleWithNameResolution(
+			rolePath, ctx, stubFuncs, "test-agent", func() string { return "fallback" },
+		)
+		if err == nil {
+			t.Fatal("expected error for unknown var 'agent_harnesss'")
+		}
+		if !strings.Contains(err.Error(), "agent_harnesss") {
+			t.Errorf("error should mention the unknown var, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "unknown") {
+			t.Errorf("error should say 'unknown', got: %v", err)
+		}
+	})
+
+	t.Run("typo in var name rejected on two-pass path", func(t *testing.T) {
+		ctx := &tmpl.Context{
+			RoleName:  "test-role",
+			H2Dir:     h2Dir,
+			H2RootDir: h2Dir,
+			Var:       map[string]string{"agent_harnesss": "codex"},
+		}
+		_, _, err := LoadRoleWithNameResolution(
+			rolePath, ctx, stubFuncs, "", func() string { return "fallback" },
+		)
+		if err == nil {
+			t.Fatal("expected error for unknown var 'agent_harnesss' on two-pass path")
+		}
+		if !strings.Contains(err.Error(), "agent_harnesss") {
+			t.Errorf("error should mention the unknown var, got: %v", err)
+		}
+	})
+
+	t.Run("valid vars pass", func(t *testing.T) {
+		ctx := &tmpl.Context{
+			RoleName:  "test-role",
+			H2Dir:     h2Dir,
+			H2RootDir: h2Dir,
+			Var:       map[string]string{"agent_harness": "codex"},
+		}
+		role, name, err := LoadRoleWithNameResolution(
+			rolePath, ctx, stubFuncs, "test-agent", func() string { return "fallback" },
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if role.AgentHarness != "codex" {
+			t.Errorf("expected agent_harness=codex, got %q", role.AgentHarness)
+		}
+		if name != "test-agent" {
+			t.Errorf("expected name=test-agent, got %q", name)
+		}
+	})
+
+	t.Run("no vars defined skips validation", func(t *testing.T) {
+		plainContent := `role_name: plain-role
+instructions: |
+  Plain instructions.
+`
+		plainPath := filepath.Join(h2Dir, "roles", "plain-role.yaml")
+		os.WriteFile(plainPath, []byte(plainContent), 0o644)
+
+		ctx := &tmpl.Context{
+			RoleName:  "plain-role",
+			H2Dir:     h2Dir,
+			H2RootDir: h2Dir,
+			Var:       map[string]string{"anything": "goes"},
+		}
+		_, _, err := LoadRoleWithNameResolution(
+			plainPath, ctx, stubFuncs, "test-agent", func() string { return "fallback" },
+		)
+		if err != nil {
+			t.Fatalf("expected no error when role defines no vars, got: %v", err)
+		}
+	})
 }

@@ -232,6 +232,225 @@ func TestRoleInitThenList_ShowsRole(t *testing.T) {
 	}
 }
 
+func TestRoleShowCmd_PlainYAML(t *testing.T) {
+	h2Dir := setupRoleTestH2Dir(t)
+
+	roleContent := `role_name: simple
+description: A simple role
+agent_model: sonnet
+instructions: |
+  You are a simple agent.
+`
+	os.WriteFile(filepath.Join(h2Dir, "roles", "simple.yaml"), []byte(roleContent), 0o644)
+
+	output := captureStdout(func() {
+		cmd := newRoleShowCmd()
+		cmd.SetArgs([]string{"simple"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("role show failed: %v", err)
+		}
+	})
+
+	checks := []string{
+		"Role:        simple",
+		"Model:       sonnet",
+		"Description: A simple role",
+		"You are a simple agent.",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Errorf("output should contain %q, got:\n%s", check, output)
+		}
+	}
+	// No Variables section for a role without variables.
+	if strings.Contains(output, "Variables:") {
+		t.Errorf("output should not contain Variables section, got:\n%s", output)
+	}
+}
+
+func TestRoleShowCmd_TemplateFile(t *testing.T) {
+	h2Dir := setupRoleTestH2Dir(t)
+
+	roleContent := `variables:
+  agent_harness:
+    description: "Agent harness to use"
+    default: "claude_code"
+  agent_model:
+    description: "Agent model to use"
+    default: "sonnet"
+  working_dir:
+    description: "Working directory"
+    default: "."
+
+role_name: {{ .RoleName }}
+description: A default agent
+agent_harness: {{ .Var.agent_harness }}
+agent_model: {{ .Var.agent_model }}
+working_dir: {{ .Var.working_dir }}
+instructions: |
+  You are {{ .AgentName }}.
+`
+	os.WriteFile(filepath.Join(h2Dir, "roles", "default.yaml.tmpl"), []byte(roleContent), 0o644)
+
+	output := captureStdout(func() {
+		cmd := newRoleShowCmd()
+		cmd.SetArgs([]string{"default"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("role show failed: %v", err)
+		}
+	})
+
+	// Should render the template and show role info.
+	checks := []string{
+		"Role:        default",
+		"Description: A default agent",
+		"Model:       sonnet",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Errorf("output should contain %q, got:\n%s", check, output)
+		}
+	}
+
+	// Should show Variables section.
+	varChecks := []string{
+		"Variables:",
+		"agent_harness",
+		`"Agent harness to use"`,
+		`(default: "claude_code")`,
+		"agent_model",
+		`"Agent model to use"`,
+		"working_dir",
+		`(default: ".")`,
+	}
+	for _, check := range varChecks {
+		if !strings.Contains(output, check) {
+			t.Errorf("output should contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestRoleShowCmd_VariablesSection(t *testing.T) {
+	h2Dir := setupRoleTestH2Dir(t)
+
+	roleContent := `variables:
+  team:
+    description: "Team name"
+  env:
+    description: "Environment"
+    default: "dev"
+
+role_name: testrole
+instructions: |
+  Team: {{ .Var.team }}, Env: {{ .Var.env }}
+`
+	os.WriteFile(filepath.Join(h2Dir, "roles", "testrole.yaml.tmpl"), []byte(roleContent), 0o644)
+
+	output := captureStdout(func() {
+		cmd := newRoleShowCmd()
+		cmd.SetArgs([]string{"testrole"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("role show failed: %v", err)
+		}
+	})
+
+	// Required var should show "(required)".
+	if !strings.Contains(output, "(required)") {
+		t.Errorf("output should show (required) for team var, got:\n%s", output)
+	}
+	// Optional var should show default.
+	if !strings.Contains(output, `(default: "dev")`) {
+		t.Errorf("output should show default value for env var, got:\n%s", output)
+	}
+}
+
+func TestRoleListCmd_ShowsVariableCount(t *testing.T) {
+	h2Dir := setupRoleTestH2Dir(t)
+
+	// Role with 2 variables.
+	roleContent := `variables:
+  team:
+    description: "Team"
+  env:
+    description: "Env"
+    default: "dev"
+
+role_name: configurable
+description: A configurable role
+instructions: |
+  Team: {{ .Var.team }}
+`
+	os.WriteFile(filepath.Join(h2Dir, "roles", "configurable.yaml.tmpl"), []byte(roleContent), 0o644)
+
+	// Role with 1 variable.
+	roleContent2 := `variables:
+  mode:
+    description: "Mode"
+    default: "normal"
+
+role_name: simple
+description: A simple role
+instructions: |
+  Mode: {{ .Var.mode }}
+`
+	os.WriteFile(filepath.Join(h2Dir, "roles", "simple.yaml.tmpl"), []byte(roleContent2), 0o644)
+
+	// Plain role with no variables.
+	roleContent3 := `role_name: plain
+description: A plain role
+instructions: |
+  Hello.
+`
+	os.WriteFile(filepath.Join(h2Dir, "roles", "plain.yaml"), []byte(roleContent3), 0o644)
+
+	output := captureStdout(func() {
+		cmd := newRoleListCmd()
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("role list failed: %v", err)
+		}
+	})
+
+	// Check variable counts.
+	if !strings.Contains(output, "(2 variables)") {
+		t.Errorf("output should contain '(2 variables)', got:\n%s", output)
+	}
+	if !strings.Contains(output, "(1 variable)") {
+		t.Errorf("output should contain '(1 variable)', got:\n%s", output)
+	}
+	// Plain role should NOT have variable info.
+	plainLine := ""
+	for _, line := range strings.Split(output, "\n") {
+		if strings.Contains(line, "plain") {
+			plainLine = line
+			break
+		}
+	}
+	if strings.Contains(plainLine, "variable") {
+		t.Errorf("plain role should not show variable count, got line: %s", plainLine)
+	}
+}
+
+func TestRoleCheckCmd_TemplateFile(t *testing.T) {
+	h2Dir := setupRoleTestH2Dir(t)
+
+	roleContent := `variables:
+  env:
+    description: "Environment"
+    default: "dev"
+
+role_name: checkme
+instructions: |
+  Env: {{ .Var.env }}
+`
+	os.WriteFile(filepath.Join(h2Dir, "roles", "checkme.yaml.tmpl"), []byte(roleContent), 0o644)
+
+	cmd := newRoleCheckCmd()
+	cmd.SetArgs([]string{"checkme"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("role check should succeed for template file: %v", err)
+	}
+}
+
 func TestOldDollarBraceRolesStillLoad(t *testing.T) {
 	// Old roles with ${name} syntax should load fine — ${name} is just literal text.
 	yamlContent := `

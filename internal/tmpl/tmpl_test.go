@@ -932,6 +932,120 @@ agents:
 	})
 }
 
+// --- Section 5: Unknown Variable Validation ---
+
+func TestValidateNoUnknownVars(t *testing.T) {
+	tests := []struct {
+		name     string
+		defs     map[string]VarDef
+		provided map[string]string
+		wantErr  bool
+		errParts []string
+	}{
+		{
+			name:     "no extra vars",
+			defs:     map[string]VarDef{"team": {Description: "Team"}},
+			provided: map[string]string{"team": "backend"},
+			wantErr:  false,
+		},
+		{
+			name:     "single unknown var",
+			defs:     map[string]VarDef{"team": {Description: "Team"}},
+			provided: map[string]string{"team": "backend", "teaam": "typo"},
+			wantErr:  true,
+			errParts: []string{"teaam", "team"},
+		},
+		{
+			name:     "multiple unknown vars",
+			defs:     map[string]VarDef{"team": {Description: "Team"}},
+			provided: map[string]string{"teaam": "x", "env": "y"},
+			wantErr:  true,
+			errParts: []string{"teaam", "env"},
+		},
+		{
+			name:     "empty provided",
+			defs:     map[string]VarDef{"team": {Description: "Team"}},
+			provided: map[string]string{},
+			wantErr:  false,
+		},
+		{
+			name:     "nil defs skips validation",
+			defs:     nil,
+			provided: map[string]string{"anything": "x"},
+			wantErr:  false,
+		},
+		{
+			name:     "nil defs empty provided",
+			defs:     nil,
+			provided: map[string]string{},
+			wantErr:  false,
+		},
+		{
+			name:     "empty defs skips validation",
+			defs:     map[string]VarDef{},
+			provided: map[string]string{"x": "1"},
+			wantErr:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateNoUnknownVars(tt.defs, tt.provided)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateNoUnknownVars() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil {
+				for _, part := range tt.errParts {
+					if !strings.Contains(err.Error(), part) {
+						t.Errorf("error %q does not contain %q", err.Error(), part)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestValidateNoUnknownVars_ErrorFormat(t *testing.T) {
+	t.Run("lists unknown vars and available vars", func(t *testing.T) {
+		defs := map[string]VarDef{
+			"agent_harness": {Description: "Harness", Default: strPtr("claude_code")},
+			"agent_model":   {Description: "Model"},
+		}
+		err := ValidateNoUnknownVars(defs, map[string]string{"agent_harnesss": "codex"})
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "agent_harnesss") {
+			t.Error("error should contain the unknown var name")
+		}
+		if !strings.Contains(msg, "unknown") {
+			t.Error("error should say 'unknown'")
+		}
+		// Should list available vars.
+		if !strings.Contains(msg, "agent_harness") {
+			t.Error("error should list available var 'agent_harness'")
+		}
+		if !strings.Contains(msg, "agent_model") {
+			t.Error("error should list available var 'agent_model'")
+		}
+	})
+
+	t.Run("unknown vars sorted alphabetically", func(t *testing.T) {
+		defs := map[string]VarDef{"a": {}}
+		err := ValidateNoUnknownVars(defs, map[string]string{"zebra": "1", "alpha": "2"})
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		msg := err.Error()
+		alphaIdx := strings.Index(msg, "alpha")
+		zebraIdx := strings.Index(msg, "zebra")
+		if alphaIdx > zebraIdx {
+			t.Error("unknown vars should be sorted alphabetically")
+		}
+	})
+}
+
 // --- Helpers ---
 
 func strPtr(s string) *string {
