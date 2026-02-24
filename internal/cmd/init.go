@@ -41,11 +41,11 @@ func newInitCmd() *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:   "init [dir]",
+		Use:   "init <dir>",
 		Short: "Initialize an h2 directory",
 		Long: `Create an h2 directory with the standard structure.
 
-Use --global or omit dir to initialize ~/.h2/.
+Use --global to initialize ~/.h2/, or pass a directory path.
 
 Use --generate to regenerate specific config files in an existing h2 directory:
   h2 init <path> --generate roles         # regenerate roles/default.yaml
@@ -56,9 +56,13 @@ Use --generate to regenerate specific config files in an existing h2 directory:
 Use --force with --generate to overwrite existing files.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if !global && len(args) == 0 {
+				return fmt.Errorf("specify a directory path or use --global")
+			}
+
 			var dir string
 			switch {
-			case global || len(args) == 0:
+			case global:
 				home, err := os.UserHomeDir()
 				if err != nil {
 					return fmt.Errorf("cannot determine home directory: %w", err)

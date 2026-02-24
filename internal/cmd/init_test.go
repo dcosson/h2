@@ -155,33 +155,20 @@ func TestInitCmd_Global(t *testing.T) {
 	}
 }
 
-func TestInitCmd_NoArgs_InitsGlobal(t *testing.T) {
-	fakeHome := setupFakeHome(t)
+func TestInitCmd_NoArgs_RequiresDirOrGlobal(t *testing.T) {
+	setupFakeHome(t)
 
 	cmd := newInitCmd()
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetArgs([]string{})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("init with no args failed: %v", err)
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when no args and no --global")
 	}
-
-	h2Dir := filepath.Join(fakeHome, ".h2")
-	if !config.IsH2Dir(h2Dir) {
-		t.Error("expected ~/.h2 to be an h2 directory")
-	}
-
-	// No args should register as "root" prefix.
-	routes, err := config.ReadRoutes(h2Dir)
-	if err != nil {
-		t.Fatalf("ReadRoutes: %v", err)
-	}
-	if len(routes) != 1 {
-		t.Fatalf("expected 1 route, got %d", len(routes))
-	}
-	if routes[0].Prefix != "root" {
-		t.Errorf("prefix = %q, want %q", routes[0].Prefix, "root")
+	if !strings.Contains(err.Error(), "--global") {
+		t.Errorf("expected error mentioning --global, got: %v", err)
 	}
 }
 
