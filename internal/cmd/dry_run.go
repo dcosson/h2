@@ -101,6 +101,12 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 		prependArgs = launchCfg.PrependArgs
 	}
 
+	// Resolve additional dirs.
+	additionalDirs, err := role.ResolveAdditionalDirs(agentCWD)
+	if err != nil {
+		return nil, fmt.Errorf("resolve additional_dirs: %w", err)
+	}
+
 	// Build the complete child args via BuildCommandArgs.
 	roleCfg := roleHarnessConfig(role)
 	childArgs := h.BuildCommandArgs(harness.CommandArgsConfig{
@@ -113,6 +119,7 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 		PermissionMode:      role.PermissionMode,
 		CodexSandboxMode:    role.CodexSandboxMode,
 		CodexAskForApproval: role.CodexAskForApproval,
+		AdditionalDirs:      additionalDirs,
 	})
 
 	return &ResolvedAgentConfig{

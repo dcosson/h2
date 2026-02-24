@@ -85,6 +85,9 @@ func (h *CodexHarness) BuildCommandArgs(cfg harness.CommandArgsConfig) []string 
 	if cfg.CodexSandboxMode != "" {
 		roleArgs = append(roleArgs, "--sandbox", cfg.CodexSandboxMode)
 	}
+	for _, dir := range cfg.AdditionalDirs {
+		roleArgs = append(roleArgs, "--add-dir", dir)
+	}
 	// When nothing is set, let Codex use its own defaults.
 	return harness.CombineArgs(cfg, roleArgs)
 }

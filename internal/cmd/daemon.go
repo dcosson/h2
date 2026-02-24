@@ -26,6 +26,7 @@ func newDaemonCmd() *cobra.Command {
 	var heartbeatIdleTimeout string
 	var heartbeatMessage string
 	var heartbeatCondition string
+	var additionalDirs []string
 	var overrides []string
 
 	cmd := &cobra.Command{
@@ -74,6 +75,7 @@ func newDaemonCmd() *cobra.Command {
 				PermissionMode:      permissionMode,
 				CodexSandboxMode:    codexSandboxMode,
 				CodexAskForApproval: codexAskForApproval,
+				AdditionalDirs:      additionalDirs,
 				Heartbeat:           heartbeat,
 				Overrides:           overrideMap,
 			})
@@ -100,6 +102,7 @@ func newDaemonCmd() *cobra.Command {
 	cmd.Flags().StringVar(&heartbeatIdleTimeout, "heartbeat-idle-timeout", "", "Heartbeat idle timeout duration")
 	cmd.Flags().StringVar(&heartbeatMessage, "heartbeat-message", "", "Heartbeat nudge message")
 	cmd.Flags().StringVar(&heartbeatCondition, "heartbeat-condition", "", "Heartbeat condition command")
+	cmd.Flags().StringArrayVar(&additionalDirs, "additional-dir", nil, "Additional directories (--add-dir)")
 	cmd.Flags().StringArrayVar(&overrides, "override", nil, "Override key=value pairs (internal)")
 
 	return cmd

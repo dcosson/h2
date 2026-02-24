@@ -109,6 +109,10 @@ func newRoleShowCmd() *cobra.Command {
 				fmt.Printf("Codex Ask For Approval: %s\n", role.CodexAskForApproval)
 			}
 
+			if len(role.AdditionalDirs) > 0 {
+				fmt.Printf("Additional Dirs: %s\n", strings.Join(role.AdditionalDirs, ", "))
+			}
+
 			if instr := role.GetInstructions(); instr != "" {
 				fmt.Printf("\nInstructions:\n")
 				for _, line := range strings.Split(strings.TrimRight(instr, "\n"), "\n") {

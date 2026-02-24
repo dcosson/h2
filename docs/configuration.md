@@ -115,6 +115,7 @@ A **role** is a named YAML file in `~/.h2/roles/` that defines how to launch an 
 | `instructions` | string | | Appended to default system prompt (`--append-system-prompt`) |
 | **Runtime** | | | |
 | `working_dir` | string | `.` | Agent working directory (absolute, relative to h2 dir, or `.` for invocation CWD) |
+| `additional_dirs` | list | | Extra directories passed via `--add-dir` to Claude Code and Codex |
 | `worktree` | object | | Git worktree settings (mutually exclusive with `working_dir`) |
 | `heartbeat` | object | | Idle nudge configuration |
 | `hooks` | yaml node | | Merged into Claude Code settings.json hooks |
@@ -148,6 +149,7 @@ When enabled, h2 writes the instructions to `permission-reviewer.md` in the agen
 | Model | `--model <value>` | `--model <value>` |
 | Instructions | `--append-system-prompt <value>` | `-c instructions=<json>` |
 | System prompt | `--system-prompt <value>` | n/a |
+| Additional dirs | `--add-dir <path>` (repeated) | `--add-dir <path>` (repeated) |
 | Review agent | Written to session dir as `permission-reviewer.md` | Not yet supported |
 
 ### Examples
@@ -184,6 +186,19 @@ instructions: |
 role_name: helper
 instructions: |
   You are a helpful assistant.
+```
+
+**Role with additional directories:**
+
+```yaml
+role_name: full-stack
+agent_harness: claude_code
+working_dir: ./frontend
+additional_dirs:
+  - ./backend
+  - ./shared-libs
+instructions: |
+  You are a full-stack agent with access to frontend, backend, and shared libs.
 ```
 
 **Role with a fixed agent name:**

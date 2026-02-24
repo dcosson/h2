@@ -44,7 +44,8 @@ type Session struct {
 	Model               string // Model selection, passed via --model
 	PermissionMode      string // Claude Code --permission-mode
 	CodexSandboxMode    string // Codex --sandbox
-	CodexAskForApproval string // Codex --ask-for-approval
+	CodexAskForApproval string   // Codex --ask-for-approval
+	AdditionalDirs      []string // extra dirs passed via --add-dir
 	Queue            *message.MessageQueue
 	AgentName        string
 	harness          harness.Harness
@@ -283,6 +284,7 @@ func (s *Session) childArgs() []string {
 		PermissionMode:      s.PermissionMode,
 		CodexSandboxMode:    s.CodexSandboxMode,
 		CodexAskForApproval: s.CodexAskForApproval,
+		AdditionalDirs:      s.AdditionalDirs,
 	})
 }
 

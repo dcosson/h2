@@ -107,9 +107,10 @@ type CommandArgsConfig struct {
 	Instructions        string
 	SystemPrompt        string
 	Model               string
-	PermissionMode      string // Claude Code --permission-mode
-	CodexSandboxMode    string // Codex --sandbox
-	CodexAskForApproval string // Codex --ask-for-approval
+	PermissionMode      string   // Claude Code --permission-mode
+	CodexSandboxMode    string   // Codex --sandbox
+	CodexAskForApproval string   // Codex --ask-for-approval
+	AdditionalDirs      []string // --add-dir (both Claude Code and Codex)
 }
 
 // CombineArgs assembles the complete child process argument list from

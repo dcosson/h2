@@ -157,6 +157,7 @@ type Role struct {
 	CodexConfigPathPrefix      string `yaml:"codex_config_path_prefix,omitempty"`       // default: <H2Dir>/codex-config
 
 	WorkingDir           string                  `yaml:"working_dir,omitempty"`             // agent CWD (default ".")
+	AdditionalDirs       []string                `yaml:"additional_dirs,omitempty"`         // extra dirs passed via --add-dir
 	Worktree             *WorktreeConfig         `yaml:"worktree,omitempty"`                // git worktree settings
 	SystemPrompt         string                  `yaml:"system_prompt,omitempty"`           // replaces Claude's entire default system prompt (--system-prompt)
 	Instructions         string                  `yaml:"instructions,omitempty"`            // appended to default system prompt (--append-system-prompt)
@@ -204,6 +205,29 @@ func (r *Role) ResolveWorkingDir(invocationCWD string) (string, error) {
 		return "", fmt.Errorf("resolve h2 dir for working_dir: %w", err)
 	}
 	return filepath.Join(h2Dir, dir), nil
+}
+
+// ResolveAdditionalDirs returns absolute paths for additional directories.
+// Relative paths are resolved against the h2 dir. Absolute paths are used as-is.
+func (r *Role) ResolveAdditionalDirs(invocationCWD string) ([]string, error) {
+	if len(r.AdditionalDirs) == 0 {
+		return nil, nil
+	}
+	h2Dir, err := ResolveDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve h2 dir for additional_dirs: %w", err)
+	}
+	resolved := make([]string, 0, len(r.AdditionalDirs))
+	for _, dir := range r.AdditionalDirs {
+		if dir == "" || dir == "." {
+			resolved = append(resolved, invocationCWD)
+		} else if filepath.IsAbs(dir) {
+			resolved = append(resolved, dir)
+		} else {
+			resolved = append(resolved, filepath.Join(h2Dir, dir))
+		}
+	}
+	return resolved, nil
 }
 
 // GetInstructions returns the assembled instructions string.

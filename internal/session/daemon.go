@@ -38,12 +38,13 @@ type RunDaemonOpts struct {
 	Args                []string
 	RoleName            string
 	SessionDir          string
-	Instructions        string // role instructions → --append-system-prompt
-	SystemPrompt        string // replaces default system prompt → --system-prompt
-	Model               string // model selection → --model
-	PermissionMode      string // Claude Code --permission-mode
-	CodexSandboxMode    string // Codex --sandbox
-	CodexAskForApproval string // Codex --ask-for-approval
+	Instructions        string   // role instructions → --append-system-prompt
+	SystemPrompt        string   // replaces default system prompt → --system-prompt
+	Model               string   // model selection → --model
+	PermissionMode      string   // Claude Code --permission-mode
+	CodexSandboxMode    string   // Codex --sandbox
+	CodexAskForApproval string   // Codex --ask-for-approval
+	AdditionalDirs      []string // extra dirs passed via --add-dir
 	Heartbeat           DaemonHeartbeat
 	Overrides           map[string]string // --override key=value pairs for metadata
 }
@@ -61,6 +62,7 @@ func RunDaemon(opts RunDaemonOpts) error {
 	s.PermissionMode = opts.PermissionMode
 	s.CodexSandboxMode = opts.CodexSandboxMode
 	s.CodexAskForApproval = opts.CodexAskForApproval
+	s.AdditionalDirs = opts.AdditionalDirs
 	s.HeartbeatIdleTimeout = opts.Heartbeat.IdleTimeout
 	s.HeartbeatMessage = opts.Heartbeat.Message
 	s.HeartbeatCondition = opts.Heartbeat.Condition
@@ -197,6 +199,7 @@ type ForkDaemonOpts struct {
 	CodexAskForApproval string // Codex --ask-for-approval
 	Heartbeat           DaemonHeartbeat
 	CWD                 string   // working directory for the child process
+	AdditionalDirs      []string // extra dirs passed via --add-dir
 	Pod                 string   // pod name (set as H2_POD env var)
 	Overrides           []string // --override key=value pairs (recorded in session metadata)
 	OscFg               string   // startup terminal foreground color (X11 rgb)
@@ -245,6 +248,9 @@ func ForkDaemon(opts ForkDaemonOpts) error {
 	}
 	if opts.CodexAskForApproval != "" {
 		daemonArgs = append(daemonArgs, "--codex-ask-for-approval", opts.CodexAskForApproval)
+	}
+	for _, dir := range opts.AdditionalDirs {
+		daemonArgs = append(daemonArgs, "--additional-dir", dir)
 	}
 	for _, ov := range opts.Overrides {
 		daemonArgs = append(daemonArgs, "--override", ov)

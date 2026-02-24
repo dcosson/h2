@@ -114,6 +114,23 @@ func TestBuildCommandArgs_SessionIDFirst(t *testing.T) {
 	}
 }
 
+func TestBuildCommandArgs_AdditionalDirs(t *testing.T) {
+	h := New(harness.HarnessConfig{}, nil)
+	args := h.BuildCommandArgs(harness.CommandArgsConfig{
+		AdditionalDirs: []string{"/tmp/extra", "/home/project"},
+	})
+	// Should produce --add-dir /tmp/extra --add-dir /home/project.
+	found := 0
+	for i, arg := range args {
+		if arg == "--add-dir" && i+1 < len(args) {
+			found++
+		}
+	}
+	if found != 2 {
+		t.Errorf("expected 2 --add-dir flags, got %d: %v", found, args)
+	}
+}
+
 func TestBuildCommandArgs_NoSessionID(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
 	args := h.BuildCommandArgs(harness.CommandArgsConfig{Instructions: "Do stuff"})

@@ -104,6 +104,13 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 		}
 	}
 
+	// Resolve additional dirs.
+	cwd, _ := os.Getwd()
+	additionalDirs, err := role.ResolveAdditionalDirs(cwd)
+	if err != nil {
+		return fmt.Errorf("resolve additional_dirs: %w", err)
+	}
+
 	sessionID := uuid.New().String()
 	colorHints := detectTerminalColorHints()
 
@@ -121,6 +128,7 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 		PermissionMode:      role.PermissionMode,
 		CodexSandboxMode:    role.CodexSandboxMode,
 		CodexAskForApproval: role.CodexAskForApproval,
+		AdditionalDirs:      additionalDirs,
 		Heartbeat:           heartbeat,
 		CWD:                 agentCWD,
 		Pod:                 pod,
