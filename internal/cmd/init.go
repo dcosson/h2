@@ -96,6 +96,8 @@ Use --force with --generate to overwrite existing files.`,
 
 // runFullInit performs a full h2 directory initialization.
 func runFullInit(cmd *cobra.Command, abs, prefix string, out io.Writer) error {
+	// --- Pre-flight validation (all checks before any writes) ---
+
 	if config.IsH2Dir(abs) {
 		return fmt.Errorf("%s is already an h2 directory", abs)
 	}
@@ -105,6 +107,26 @@ func runFullInit(cmd *cobra.Command, abs, prefix string, out io.Writer) error {
 	if err := checkDirSafeForInit(abs); err != nil {
 		return err
 	}
+
+	rootDir, err := config.RootDir()
+	if err != nil {
+		return fmt.Errorf("resolve root h2 dir: %w", err)
+	}
+
+	var explicitPrefix string
+	if cmd.Flags().Changed("prefix") {
+		explicitPrefix = prefix
+		if err := config.ValidatePrefix(explicitPrefix); err != nil {
+			return fmt.Errorf("invalid prefix: %w", err)
+		}
+	}
+
+	// Verify the route can be registered before creating any files.
+	if err := config.CheckRouteAvailable(rootDir, explicitPrefix, abs); err != nil {
+		return err
+	}
+
+	// --- All validation passed, start writing ---
 
 	fmt.Fprintf(out, "Creating h2 directory at %s...\n", abs)
 
@@ -145,17 +167,7 @@ func runFullInit(cmd *cobra.Command, abs, prefix string, out io.Writer) error {
 	fmt.Fprintf(out, "  Wrote claude-config/default/CLAUDE.md\n")
 	fmt.Fprintf(out, "  Symlinked codex-config/default/AGENTS.md -> ../../claude-config/default/CLAUDE.md\n")
 
-	// Register this h2 directory in the routes registry.
-	rootDir, err := config.RootDir()
-	if err != nil {
-		return fmt.Errorf("resolve root h2 dir: %w", err)
-	}
-
-	var explicitPrefix string
-	if cmd.Flags().Changed("prefix") {
-		explicitPrefix = prefix
-	}
-
+	// Register this h2 directory in the routes registry (pre-flight check already passed).
 	resolvedPrefix, err := config.RegisterRouteWithAutoPrefix(rootDir, explicitPrefix, abs)
 	if err != nil {
 		return fmt.Errorf("register route: %w", err)
