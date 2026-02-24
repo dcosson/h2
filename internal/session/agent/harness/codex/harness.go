@@ -79,28 +79,11 @@ func (h *CodexHarness) BuildCommandArgs(cfg harness.CommandArgsConfig) []string 
 	if cfg.Model != "" {
 		roleArgs = append(roleArgs, "--model", cfg.Model)
 	}
-	if cfg.ApprovalPolicy != "" || cfg.CodexSandboxMode != "" {
-		// Granular settings: use explicit Codex flags.
-		switch cfg.ApprovalPolicy {
-		case "plan":
-			roleArgs = append(roleArgs, "--ask-for-approval", "untrusted")
-			// Also default to read-only sandbox for plan mode unless overridden.
-			if cfg.CodexSandboxMode == "" {
-				roleArgs = append(roleArgs, "--sandbox", "read-only")
-			}
-		case "confirm":
-			roleArgs = append(roleArgs, "--ask-for-approval", "untrusted")
-		case "auto-edit":
-			roleArgs = append(roleArgs, "--ask-for-approval", "on-request")
-		case "auto":
-			roleArgs = append(roleArgs, "--ask-for-approval", "never")
-		}
-		if cfg.CodexSandboxMode != "" {
-			roleArgs = append(roleArgs, "--sandbox", cfg.CodexSandboxMode)
-		}
-	} else if cfg.PermissionMode == "full-auto" {
-		// Legacy PermissionMode passthrough.
-		roleArgs = append(roleArgs, "--full-auto")
+	if cfg.CodexAskForApproval != "" {
+		roleArgs = append(roleArgs, "--ask-for-approval", cfg.CodexAskForApproval)
+	}
+	if cfg.CodexSandboxMode != "" {
+		roleArgs = append(roleArgs, "--sandbox", cfg.CodexSandboxMode)
 	}
 	// When nothing is set, let Codex use its own defaults.
 	return harness.CombineArgs(cfg, roleArgs)

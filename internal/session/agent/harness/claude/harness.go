@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/google/uuid"
 
@@ -84,26 +83,8 @@ func (h *ClaudeCodeHarness) BuildCommandArgs(cfg harness.CommandArgsConfig) []st
 	if cfg.Model != "" {
 		roleArgs = append(roleArgs, "--model", cfg.Model)
 	}
-	switch cfg.ApprovalPolicy {
-	case "plan":
-		roleArgs = append(roleArgs, "--permission-mode", "plan")
-	case "confirm":
-		roleArgs = append(roleArgs, "--permission-mode", "default")
-	case "auto-edit":
-		roleArgs = append(roleArgs, "--permission-mode", "acceptEdits")
-	case "auto":
-		roleArgs = append(roleArgs, "--permission-mode", "bypassPermissions")
-	default:
-		// Fall back to direct PermissionMode passthrough.
-		if cfg.PermissionMode != "" {
-			roleArgs = append(roleArgs, "--permission-mode", cfg.PermissionMode)
-		}
-	}
-	if len(cfg.AllowedTools) > 0 {
-		roleArgs = append(roleArgs, "--allowedTools", strings.Join(cfg.AllowedTools, ","))
-	}
-	if len(cfg.DisallowedTools) > 0 {
-		roleArgs = append(roleArgs, "--disallowedTools", strings.Join(cfg.DisallowedTools, ","))
+	if cfg.PermissionMode != "" {
+		roleArgs = append(roleArgs, "--permission-mode", cfg.PermissionMode)
 	}
 	return harness.CombineArgs(cfg, roleArgs)
 }

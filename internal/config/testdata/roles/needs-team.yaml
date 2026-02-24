@@ -1,4 +1,4 @@
-name: needs-team
+role_name: needs-team
 variables:
   team:
     description: "Team name"

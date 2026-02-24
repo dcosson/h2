@@ -81,8 +81,8 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 		envVars["H2_DIR"] = h2Dir
 	}
 	envVars["H2_ACTOR"] = name
-	if role.Name != "" {
-		envVars["H2_ROLE"] = role.Name
+	if role.RoleName != "" {
+		envVars["H2_ROLE"] = role.RoleName
 	}
 	if sessionDir != "" {
 		envVars["H2_SESSION_DIR"] = sessionDir
@@ -104,17 +104,15 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 	// Build the complete child args via BuildCommandArgs.
 	roleCfg := roleHarnessConfig(role)
 	childArgs := h.BuildCommandArgs(harness.CommandArgsConfig{
-		PrependArgs:     prependArgs,
-		ExtraArgs:       extraArgs,
-		SessionID:       "<generated-uuid>",
-		Instructions:     role.Instructions,
-		SystemPrompt:     role.SystemPrompt,
-		Model:            roleCfg.Model,
-		PermissionMode:   role.PermissionMode,
-		ApprovalPolicy:   role.ApprovalPolicy,
-		CodexSandboxMode: role.CodexSandboxMode,
-		AllowedTools:     role.Permissions.Allow,
-		DisallowedTools:  role.Permissions.Deny,
+		PrependArgs:         prependArgs,
+		ExtraArgs:           extraArgs,
+		SessionID:           "<generated-uuid>",
+		Instructions:        role.Instructions,
+		SystemPrompt:        role.SystemPrompt,
+		Model:               roleCfg.Model,
+		PermissionMode:      role.PermissionMode,
+		CodexSandboxMode:    role.CodexSandboxMode,
+		CodexAskForApproval: role.CodexAskForApproval,
 	})
 
 	return &ResolvedAgentConfig{
@@ -138,7 +136,7 @@ func printDryRun(rc *ResolvedAgentConfig) {
 	role := rc.Role
 
 	fmt.Printf("Agent: %s\n", rc.Name)
-	fmt.Printf("Role: %s\n", role.Name)
+	fmt.Printf("Role: %s\n", role.RoleName)
 	if role.Description != "" {
 		fmt.Printf("Description: %s\n", role.Description)
 	}
@@ -230,20 +228,10 @@ func printDryRun(rc *ResolvedAgentConfig) {
 		}
 	}
 
-	// Permissions.
-	perms := role.Permissions
-	if len(perms.Allow) > 0 || len(perms.Deny) > 0 || perms.Agent != nil {
+	// Permission review agent.
+	if role.PermissionReviewAgent != nil && role.PermissionReviewAgent.IsEnabled() {
 		fmt.Println()
-		fmt.Println("Permissions:")
-		if len(perms.Allow) > 0 {
-			fmt.Printf("  Allow: %s\n", strings.Join(perms.Allow, ", "))
-		}
-		if len(perms.Deny) > 0 {
-			fmt.Printf("  Deny: %s\n", strings.Join(perms.Deny, ", "))
-		}
-		if perms.Agent != nil {
-			fmt.Printf("  Agent Reviewer: %v\n", perms.Agent.IsEnabled())
-		}
+		fmt.Printf("Permission Review Agent: enabled\n")
 	}
 
 	// Heartbeat.
@@ -294,7 +282,7 @@ func printPodDryRun(templateName string, pod string, agents []*ResolvedAgentConf
 	// Collect roles used.
 	roleSet := make(map[string]bool)
 	for _, rc := range agents {
-		roleSet[rc.Role.Name] = true
+		roleSet[rc.Role.RoleName] = true
 	}
 	var roles []string
 	for r := range roleSet {

@@ -1,4 +1,4 @@
-name: pod-aware
+role_name: pod-aware
 instructions: |
   You are {{ .AgentName }}.
   Index: {{ .Index }}, Count: {{ .Count }}.

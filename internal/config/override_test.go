@@ -6,7 +6,7 @@ import (
 )
 
 func TestApplyOverrides_SimpleString(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test"}
+	role := &Role{RoleName: "test", Instructions: "test"}
 	err := ApplyOverrides(role, []string{"working_dir=/workspace/project"})
 	if err != nil {
 		t.Fatalf("ApplyOverrides: %v", err)
@@ -17,10 +17,10 @@ func TestApplyOverrides_SimpleString(t *testing.T) {
 }
 
 func TestApplyOverrides_MultipleStrings(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test"}
+	role := &Role{RoleName: "test", Instructions: "test"}
 	err := ApplyOverrides(role, []string{
 		"working_dir=/workspace",
-		"model=opus",
+		"agent_model=opus",
 		"description=My agent",
 	})
 	if err != nil {
@@ -39,7 +39,7 @@ func TestApplyOverrides_MultipleStrings(t *testing.T) {
 
 func TestApplyOverrides_NestedBool(t *testing.T) {
 	role := &Role{
-		Name:         "test",
+		RoleName:     "test",
 		Instructions: "test",
 		Worktree:     &WorktreeConfig{ProjectDir: "/tmp/repo", Name: "test-wt"},
 	}
@@ -54,7 +54,7 @@ func TestApplyOverrides_NestedBool(t *testing.T) {
 
 func TestApplyOverrides_NestedBoolFalse(t *testing.T) {
 	role := &Role{
-		Name:         "test",
+		RoleName:     "test",
 		Instructions: "test",
 		Worktree:     &WorktreeConfig{ProjectDir: "/tmp/repo", Name: "test-wt", UseDetachedHead: true},
 	}
@@ -68,7 +68,7 @@ func TestApplyOverrides_NestedBoolFalse(t *testing.T) {
 }
 
 func TestApplyOverrides_AutoInitNilWorktree(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test"}
+	role := &Role{RoleName: "test", Instructions: "test"}
 	if role.Worktree != nil {
 		t.Fatal("precondition: Worktree should be nil")
 	}
@@ -85,7 +85,7 @@ func TestApplyOverrides_AutoInitNilWorktree(t *testing.T) {
 }
 
 func TestApplyOverrides_AutoInitNilHeartbeat(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test"}
+	role := &Role{RoleName: "test", Instructions: "test"}
 	err := ApplyOverrides(role, []string{"heartbeat.message=nudge"})
 	if err != nil {
 		t.Fatalf("ApplyOverrides: %v", err)
@@ -99,7 +99,7 @@ func TestApplyOverrides_AutoInitNilHeartbeat(t *testing.T) {
 }
 
 func TestApplyOverrides_InvalidKey(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test"}
+	role := &Role{RoleName: "test", Instructions: "test"}
 	err := ApplyOverrides(role, []string{"nonexistent_field=value"})
 	if err == nil {
 		t.Fatal("expected error for unknown key")
@@ -110,7 +110,7 @@ func TestApplyOverrides_InvalidKey(t *testing.T) {
 }
 
 func TestApplyOverrides_InvalidNestedKey(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test"}
+	role := &Role{RoleName: "test", Instructions: "test"}
 	err := ApplyOverrides(role, []string{"worktree.nonexistent=value"})
 	if err == nil {
 		t.Fatal("expected error for unknown nested key")
@@ -122,7 +122,7 @@ func TestApplyOverrides_InvalidNestedKey(t *testing.T) {
 
 func TestApplyOverrides_TypeMismatch_BoolField(t *testing.T) {
 	role := &Role{
-		Name:         "test",
+		RoleName:     "test",
 		Instructions: "test",
 		Worktree:     &WorktreeConfig{ProjectDir: "/tmp/repo", Name: "test-wt"},
 	}
@@ -135,11 +135,11 @@ func TestApplyOverrides_TypeMismatch_BoolField(t *testing.T) {
 	}
 }
 
-func TestApplyOverrides_NonOverridable_Name(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test"}
-	err := ApplyOverrides(role, []string{"name=hacked"})
+func TestApplyOverrides_NonOverridable_RoleName(t *testing.T) {
+	role := &Role{RoleName: "test", Instructions: "test"}
+	err := ApplyOverrides(role, []string{"role_name=hacked"})
 	if err == nil {
-		t.Fatal("expected error for non-overridable field 'name'")
+		t.Fatal("expected error for non-overridable field 'role_name'")
 	}
 	if !strings.Contains(err.Error(), "cannot be overridden") {
 		t.Errorf("error = %q, want it to contain 'cannot be overridden'", err.Error())
@@ -147,23 +147,15 @@ func TestApplyOverrides_NonOverridable_Name(t *testing.T) {
 }
 
 func TestApplyOverrides_NonOverridable_Instructions(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test"}
+	role := &Role{RoleName: "test", Instructions: "test"}
 	err := ApplyOverrides(role, []string{"instructions=hacked"})
 	if err == nil {
 		t.Fatal("expected error for non-overridable field 'instructions'")
 	}
 }
 
-func TestApplyOverrides_NonOverridable_Permissions(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test"}
-	err := ApplyOverrides(role, []string{"permissions=hacked"})
-	if err == nil {
-		t.Fatal("expected error for non-overridable field 'permissions'")
-	}
-}
-
 func TestApplyOverrides_NonOverridable_Hooks(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test"}
+	role := &Role{RoleName: "test", Instructions: "test"}
 	err := ApplyOverrides(role, []string{"hooks=hacked"})
 	if err == nil {
 		t.Fatal("expected error for non-overridable field 'hooks'")
@@ -171,7 +163,7 @@ func TestApplyOverrides_NonOverridable_Hooks(t *testing.T) {
 }
 
 func TestApplyOverrides_NonOverridable_Settings(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test"}
+	role := &Role{RoleName: "test", Instructions: "test"}
 	err := ApplyOverrides(role, []string{"settings=hacked"})
 	if err == nil {
 		t.Fatal("expected error for non-overridable field 'settings'")
@@ -179,7 +171,7 @@ func TestApplyOverrides_NonOverridable_Settings(t *testing.T) {
 }
 
 func TestApplyOverrides_BadFormat_NoEquals(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test"}
+	role := &Role{RoleName: "test", Instructions: "test"}
 	err := ApplyOverrides(role, []string{"justakeynovalue"})
 	if err == nil {
 		t.Fatal("expected error for missing '='")
@@ -187,7 +179,7 @@ func TestApplyOverrides_BadFormat_NoEquals(t *testing.T) {
 }
 
 func TestApplyOverrides_EmptySlice(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test"}
+	role := &Role{RoleName: "test", Instructions: "test"}
 	err := ApplyOverrides(role, nil)
 	if err != nil {
 		t.Fatalf("ApplyOverrides with nil: %v", err)
@@ -199,7 +191,7 @@ func TestApplyOverrides_EmptySlice(t *testing.T) {
 }
 
 func TestApplyOverrides_ValueWithEquals(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test"}
+	role := &Role{RoleName: "test", Instructions: "test"}
 	err := ApplyOverrides(role, []string{"working_dir=/path/with=equals"})
 	if err != nil {
 		t.Fatalf("ApplyOverrides: %v", err)
@@ -210,7 +202,7 @@ func TestApplyOverrides_ValueWithEquals(t *testing.T) {
 }
 
 func TestApplyOverrides_NestedStringField(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test"}
+	role := &Role{RoleName: "test", Instructions: "test"}
 	err := ApplyOverrides(role, []string{"worktree.branch_from=develop"})
 	if err != nil {
 		t.Fatalf("ApplyOverrides: %v", err)
@@ -224,7 +216,7 @@ func TestApplyOverrides_NestedStringField(t *testing.T) {
 }
 
 func TestApplyOverrides_AgentModel(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test"}
+	role := &Role{RoleName: "test", Instructions: "test"}
 	err := ApplyOverrides(role, []string{"agent_model=sonnet"})
 	if err != nil {
 		t.Fatalf("ApplyOverrides: %v", err)
@@ -238,7 +230,7 @@ func TestApplyOverrides_AgentModel(t *testing.T) {
 }
 
 func TestApplyOverrides_AgentHarness(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test"}
+	role := &Role{RoleName: "test", Instructions: "test"}
 	err := ApplyOverrides(role, []string{"agent_harness=codex"})
 	if err != nil {
 		t.Fatalf("ApplyOverrides: %v", err)
@@ -248,19 +240,8 @@ func TestApplyOverrides_AgentHarness(t *testing.T) {
 	}
 }
 
-func TestApplyOverrides_LegacyModelStillWorks(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test"}
-	err := ApplyOverrides(role, []string{"model=opus"})
-	if err != nil {
-		t.Fatalf("ApplyOverrides: %v", err)
-	}
-	if role.GetModel() != "opus" {
-		t.Errorf("GetModel() = %q, want %q", role.GetModel(), "opus")
-	}
-}
-
 func TestParseOverrides(t *testing.T) {
-	overrides := []string{"working_dir=/workspace", "model=opus"}
+	overrides := []string{"working_dir=/workspace", "agent_model=opus"}
 	m, err := ParseOverrides(overrides)
 	if err != nil {
 		t.Fatalf("ParseOverrides: %v", err)
@@ -271,8 +252,8 @@ func TestParseOverrides(t *testing.T) {
 	if m["working_dir"] != "/workspace" {
 		t.Errorf("working_dir = %q, want %q", m["working_dir"], "/workspace")
 	}
-	if m["model"] != "opus" {
-		t.Errorf("model = %q, want %q", m["model"], "opus")
+	if m["agent_model"] != "opus" {
+		t.Errorf("agent_model = %q, want %q", m["agent_model"], "opus")
 	}
 }
 

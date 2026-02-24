@@ -333,7 +333,7 @@ agents:
 	os.WriteFile(filepath.Join(h2Root, "pods", "templates", "vartest.yaml"), []byte(tmplContent), 0o644)
 
 	// Create the default role so it can be loaded.
-	roleContent := "name: default\ninstructions: |\n  test\n"
+	roleContent := "role_name: default\ninstructions: |\n  test\n"
 	os.WriteFile(filepath.Join(h2Root, "roles", "default.yaml"), []byte(roleContent), 0o644)
 
 	cmd := newPodLaunchCmd()
@@ -374,7 +374,7 @@ agents:
 `
 	os.WriteFile(filepath.Join(h2Root, "pods", "templates", "override.yaml"), []byte(tmplContent), 0o644)
 
-	roleContent := "name: default\ninstructions: |\n  test\n"
+	roleContent := "role_name: default\ninstructions: |\n  test\n"
 	os.WriteFile(filepath.Join(h2Root, "roles", "default.yaml"), []byte(roleContent), 0o644)
 
 	cmd := newPodLaunchCmd()

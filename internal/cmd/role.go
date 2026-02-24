@@ -67,7 +67,7 @@ func printRoleList(roles []*config.Role) {
 		if desc == "" {
 			desc = "(no description)"
 		}
-		fmt.Printf("  %-16s %s\n", r.Name, desc)
+		fmt.Printf("  %-16s %s\n", r.RoleName, desc)
 	}
 }
 
@@ -82,30 +82,32 @@ func newRoleShowCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Printf("Name:        %s\n", role.Name)
+			fmt.Printf("Role:        %s\n", role.RoleName)
 			if role.GetModel() != "" {
 				fmt.Printf("Model:       %s\n", role.GetModel())
 			}
 			if role.Description != "" {
 				fmt.Printf("Description: %s\n", role.Description)
 			}
-
-			fmt.Printf("\nInstructions:\n")
-			for _, line := range strings.Split(strings.TrimRight(role.Instructions, "\n"), "\n") {
-				fmt.Printf("  %s\n", line)
+			if role.PermissionMode != "" {
+				fmt.Printf("Permission Mode: %s\n", role.PermissionMode)
+			}
+			if role.CodexSandboxMode != "" {
+				fmt.Printf("Codex Sandbox: %s\n", role.CodexSandboxMode)
+			}
+			if role.CodexAskForApproval != "" {
+				fmt.Printf("Codex Ask For Approval: %s\n", role.CodexAskForApproval)
 			}
 
-			if len(role.Permissions.Allow) > 0 || len(role.Permissions.Deny) > 0 {
-				fmt.Printf("\nPermissions:\n")
-				if len(role.Permissions.Allow) > 0 {
-					fmt.Printf("  Allow: %s\n", strings.Join(role.Permissions.Allow, ", "))
+			if role.Instructions != "" {
+				fmt.Printf("\nInstructions:\n")
+				for _, line := range strings.Split(strings.TrimRight(role.Instructions, "\n"), "\n") {
+					fmt.Printf("  %s\n", line)
 				}
-				if len(role.Permissions.Deny) > 0 {
-					fmt.Printf("  Deny:  %s\n", strings.Join(role.Permissions.Deny, ", "))
-				}
-				if role.Permissions.Agent != nil && role.Permissions.Agent.IsEnabled() {
-					fmt.Printf("  Agent: enabled\n")
-				}
+			}
+
+			if role.PermissionReviewAgent != nil && role.PermissionReviewAgent.IsEnabled() {
+				fmt.Printf("\nPermission Review Agent: enabled\n")
 			}
 
 			return nil
@@ -162,7 +164,7 @@ func roleTemplate(name string) string {
 }
 
 func defaultRoleTemplate() string {
-	return `name: "{{ .RoleName }}"
+	return `role_name: "{{ .RoleName }}"
 description: "A {{ .RoleName }} agent for h2"
 
 # Agent harness configuration
@@ -216,19 +218,8 @@ instructions: |
 
   # Add role-specific instructions here.
 
-permissions:
-  allow:
-    - "Read"
-    - "Glob"
-    - "Grep"
-    - "Bash(h2 *)"  # Allow h2 commands
-  # Optional: explicitly deny specific dangerous operations
-  # deny:
-  #   - "Bash(rm -rf /)"       # System-wide deletion
-  #   - "Bash(curl * .env *)"  # Exfiltrating secrets
-
-  # AI permission reviewer - delegates permission decisions to haiku agent
-  agent:
+# AI permission reviewer - delegates permission decisions to a fast model
+permission_review_agent:
     instructions: |
       You are reviewing permission requests for the {{ .RoleName }} agent in h2.
 
@@ -258,7 +249,7 @@ permissions:
 }
 
 func conciergeRoleTemplate() string {
-	return `name: "{{ .RoleName }}"
+	return `role_name: "{{ .RoleName }}"
 description: "The concierge agent — your primary interface in h2"
 
 # Agent harness configuration
@@ -340,19 +331,8 @@ instructions: |
   - h2 send <name> "msg" - Send message to agent or user
   - h2 whoami            - Check your agent name
 
-permissions:
-  allow:
-    - "Read"
-    - "Glob"
-    - "Grep"
-    - "Bash(h2 *)"  # Allow h2 commands
-  # Optional: explicitly deny specific dangerous operations
-  # deny:
-  #   - "Bash(rm -rf /)"       # System-wide deletion
-  #   - "Bash(curl * .env *)"  # Exfiltrating secrets
-
-  # AI permission reviewer - delegates permission decisions to haiku agent
-  agent:
+# AI permission reviewer - delegates permission decisions to a fast model
+permission_review_agent:
     instructions: |
       You are reviewing permission requests for the {{ .RoleName }} (concierge) agent in h2.
 
@@ -392,16 +372,14 @@ func newRoleCheckCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Printf("Role %q is valid.\n", role.Name)
+			fmt.Printf("Role %q is valid.\n", role.RoleName)
 
 			fmt.Printf("  Harness type: %s\n", role.GetHarnessType())
 			if role.GetModel() != "" {
 				fmt.Printf("  Model:       %s\n", role.GetModel())
 			}
-			fmt.Printf("  Allow rules: %d\n", len(role.Permissions.Allow))
-			fmt.Printf("  Deny rules:  %d\n", len(role.Permissions.Deny))
-			if role.Permissions.Agent != nil && role.Permissions.Agent.IsEnabled() {
-				fmt.Printf("  Agent:       enabled\n")
+			if role.PermissionReviewAgent != nil && role.PermissionReviewAgent.IsEnabled() {
+				fmt.Printf("  Review Agent: enabled\n")
 			}
 			return nil
 		},

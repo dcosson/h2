@@ -691,55 +691,6 @@ func TestChildArgs_PermissionMode(t *testing.T) {
 	}
 }
 
-func TestChildArgs_AllowedTools(t *testing.T) {
-	s := New("test", "claude", nil)
-	s.SessionID = "test-uuid"
-	s.AllowedTools = []string{"Bash", "Read", "Write"}
-
-	args := s.childArgs()
-
-	if len(args) != 4 {
-		t.Fatalf("expected 4 args, got %d: %v", len(args), args)
-	}
-	if args[2] != "--allowedTools" || args[3] != "Bash,Read,Write" {
-		t.Fatalf("expected --allowedTools comma-joined, got %v", args[2:])
-	}
-}
-
-func TestChildArgs_DisallowedTools(t *testing.T) {
-	s := New("test", "claude", nil)
-	s.SessionID = "test-uuid"
-	s.DisallowedTools = []string{"Bash", "Edit"}
-
-	args := s.childArgs()
-
-	if len(args) != 4 {
-		t.Fatalf("expected 4 args, got %d: %v", len(args), args)
-	}
-	if args[2] != "--disallowedTools" || args[3] != "Bash,Edit" {
-		t.Fatalf("expected --disallowedTools comma-joined, got %v", args[2:])
-	}
-}
-
-func TestChildArgs_EmptyToolListsOmitted(t *testing.T) {
-	s := New("test", "claude", nil)
-	s.SessionID = "test-uuid"
-	s.AllowedTools = []string{}
-	s.DisallowedTools = nil
-
-	args := s.childArgs()
-
-	// Should only have --session-id, <uuid>
-	if len(args) != 2 {
-		t.Fatalf("expected 2 args, got %d: %v", len(args), args)
-	}
-	for _, arg := range args {
-		if arg == "--allowedTools" || arg == "--disallowedTools" {
-			t.Fatalf("tool flags should not be present for empty lists, found %q", arg)
-		}
-	}
-}
-
 func TestChildArgs_AllFieldsCombined(t *testing.T) {
 	s := New("test", "claude", []string{"--verbose"})
 	s.SessionID = "test-uuid"
@@ -747,14 +698,12 @@ func TestChildArgs_AllFieldsCombined(t *testing.T) {
 	s.Instructions = "Extra instructions"
 	s.Model = "claude-opus-4-6"
 	s.PermissionMode = "plan"
-	s.AllowedTools = []string{"Bash", "Read"}
-	s.DisallowedTools = []string{"Write"}
 
 	args := s.childArgs()
 
 	// --verbose (base args), then all role args from BuildCommandArgs:
 	// --session-id, <uuid>, --system-prompt, <p>, --append-system-prompt, <i>,
-	// --model, <m>, --permission-mode, <pm>, --allowedTools, <at>, --disallowedTools, <dt>
+	// --model, <m>, --permission-mode, <pm>
 	expected := []string{
 		"--verbose",
 		"--session-id", "test-uuid",
@@ -762,8 +711,6 @@ func TestChildArgs_AllFieldsCombined(t *testing.T) {
 		"--append-system-prompt", "Extra instructions",
 		"--model", "claude-opus-4-6",
 		"--permission-mode", "plan",
-		"--allowedTools", "Bash,Read",
-		"--disallowedTools", "Write",
 	}
 	if len(args) != len(expected) {
 		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)

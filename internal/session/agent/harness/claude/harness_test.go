@@ -45,18 +45,16 @@ func TestDisplayCommand(t *testing.T) {
 	}
 }
 
-// --- Config tests (from ClaudeCodeType) ---
+// --- Config tests ---
 
 func TestBuildCommandArgs_AllFields(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
 	args := h.BuildCommandArgs(harness.CommandArgsConfig{
-		SessionID:       "test-uuid-123",
-		SystemPrompt:    "Custom prompt",
-		Instructions:    "Extra instructions",
-		Model:           "claude-opus-4-6",
-		PermissionMode:  "plan",
-		AllowedTools:    []string{"Bash", "Read"},
-		DisallowedTools: []string{"Write"},
+		SessionID:      "test-uuid-123",
+		SystemPrompt:   "Custom prompt",
+		Instructions:   "Extra instructions",
+		Model:          "claude-opus-4-6",
+		PermissionMode: "plan",
 	})
 	expected := []string{
 		"--session-id", "test-uuid-123",
@@ -64,8 +62,6 @@ func TestBuildCommandArgs_AllFields(t *testing.T) {
 		"--append-system-prompt", "Extra instructions",
 		"--model", "claude-opus-4-6",
 		"--permission-mode", "plan",
-		"--allowedTools", "Bash,Read",
-		"--disallowedTools", "Write",
 	}
 	if len(args) != len(expected) {
 		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
@@ -77,81 +73,7 @@ func TestBuildCommandArgs_AllFields(t *testing.T) {
 	}
 }
 
-func TestBuildCommandArgs_ApprovalPolicy_Plan(t *testing.T) {
-	h := New(harness.HarnessConfig{}, nil)
-	args := h.BuildCommandArgs(harness.CommandArgsConfig{ApprovalPolicy: "plan"})
-	expected := []string{"--permission-mode", "plan"}
-	if len(args) != len(expected) {
-		t.Fatalf("expected %v, got %v", expected, args)
-	}
-	for i, want := range expected {
-		if args[i] != want {
-			t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
-		}
-	}
-}
-
-func TestBuildCommandArgs_ApprovalPolicy_Confirm(t *testing.T) {
-	h := New(harness.HarnessConfig{}, nil)
-	args := h.BuildCommandArgs(harness.CommandArgsConfig{ApprovalPolicy: "confirm"})
-	expected := []string{"--permission-mode", "default"}
-	if len(args) != len(expected) {
-		t.Fatalf("expected %v, got %v", expected, args)
-	}
-	for i, want := range expected {
-		if args[i] != want {
-			t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
-		}
-	}
-}
-
-func TestBuildCommandArgs_ApprovalPolicy_AutoEdit(t *testing.T) {
-	h := New(harness.HarnessConfig{}, nil)
-	args := h.BuildCommandArgs(harness.CommandArgsConfig{ApprovalPolicy: "auto-edit"})
-	expected := []string{"--permission-mode", "acceptEdits"}
-	if len(args) != len(expected) {
-		t.Fatalf("expected %v, got %v", expected, args)
-	}
-	for i, want := range expected {
-		if args[i] != want {
-			t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
-		}
-	}
-}
-
-func TestBuildCommandArgs_ApprovalPolicy_Auto(t *testing.T) {
-	h := New(harness.HarnessConfig{}, nil)
-	args := h.BuildCommandArgs(harness.CommandArgsConfig{ApprovalPolicy: "auto"})
-	expected := []string{"--permission-mode", "bypassPermissions"}
-	if len(args) != len(expected) {
-		t.Fatalf("expected %v, got %v", expected, args)
-	}
-	for i, want := range expected {
-		if args[i] != want {
-			t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
-		}
-	}
-}
-
-func TestBuildCommandArgs_ApprovalPolicy_OverridesPermissionMode(t *testing.T) {
-	h := New(harness.HarnessConfig{}, nil)
-	// ApprovalPolicy takes precedence over PermissionMode.
-	args := h.BuildCommandArgs(harness.CommandArgsConfig{
-		PermissionMode: "plan",
-		ApprovalPolicy: "auto",
-	})
-	expected := []string{"--permission-mode", "bypassPermissions"}
-	if len(args) != len(expected) {
-		t.Fatalf("expected %v, got %v", expected, args)
-	}
-	for i, want := range expected {
-		if args[i] != want {
-			t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
-		}
-	}
-}
-
-func TestBuildCommandArgs_PermissionMode_FallbackWhenNoApprovalPolicy(t *testing.T) {
+func TestBuildCommandArgs_PermissionMode(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
 	args := h.BuildCommandArgs(harness.CommandArgsConfig{PermissionMode: "dontAsk"})
 	expected := []string{"--permission-mode", "dontAsk"}
@@ -246,7 +168,7 @@ func TestEnsureConfigDir_EmptyConfigDir(t *testing.T) {
 	}
 }
 
-// --- Launch tests (from ClaudeCodeAdapter) ---
+// --- Launch tests ---
 
 func TestPrepareForLaunch(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
@@ -298,7 +220,7 @@ func TestPrepareForLaunch_WithSessionID(t *testing.T) {
 	}
 }
 
-// --- Runtime tests (from ClaudeCodeAdapter) ---
+// --- Runtime tests ---
 
 func TestHandleHookEvent_EmitsStateChange(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)

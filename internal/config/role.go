@@ -91,161 +91,74 @@ var ValidPermissionModes = []string{
 	"default", "delegate", "acceptEdits", "plan", "dontAsk", "bypassPermissions",
 }
 
-// ValidApprovalPolicies lists valid values for the approval_policy field.
-// This is a unified field that maps to each harness's native approval flags.
-var ValidApprovalPolicies = []string{
-	"plan",      // read-only, no modifications
-	"confirm",   // ask for approval on every action
-	"auto-edit", // auto-approve edits, confirm commands
-	"auto",      // auto-approve everything
+// ValidCodexAskForApproval lists valid values for permissions.codex.ask_for_approval.
+var ValidCodexAskForApproval = []string{
+	"untrusted",  // ask for approval on every action (Codex default)
+	"on-request", // model decides when to ask
+	"never",      // never ask for approval
 }
 
-// ValidCodexSandboxModes lists valid values for the codex_sandbox_mode field.
+// ValidCodexSandboxModes lists valid values for permissions.codex.sandbox.
 var ValidCodexSandboxModes = []string{
-	"read-only",           // can only read (Codex default)
-	"workspace-write",     // write to project dir only
-	"danger-full-access",  // no filesystem restrictions
+	"read-only",          // can only read (Codex default)
+	"workspace-write",    // write to project dir only
+	"danger-full-access", // no filesystem restrictions
 }
 
-// AgentHarnessConfig holds harness-specific configuration nested under agent_harness.
-type AgentHarnessConfig struct {
-	HarnessType     string `yaml:"harness_type,omitempty"`
-	Model           string `yaml:"model,omitempty"`
-	Command         string `yaml:"command,omitempty"`           // generic only
-	ClaudeConfigDir string `yaml:"claude_config_dir,omitempty"` // claude_code only
-	CodexConfigDir  string `yaml:"codex_config_dir,omitempty"`  // codex only
+// PermissionReviewAgent configures the AI permission reviewer.
+type PermissionReviewAgent struct {
+	Enabled      *bool  `yaml:"enabled,omitempty"` // defaults to true if instructions are set
+	Instructions string `yaml:"instructions,omitempty"`
+}
+
+// IsEnabled returns whether the permission review agent is enabled.
+// Defaults to true when instructions are present.
+func (pa *PermissionReviewAgent) IsEnabled() bool {
+	if pa.Enabled != nil {
+		return *pa.Enabled
+	}
+	return pa.Instructions != ""
 }
 
 // Role defines a named configuration bundle for an h2 agent.
 type Role struct {
-	Name        string `yaml:"name"`
+	RoleName    string `yaml:"role_name"`
+	AgentName   string `yaml:"agent_name,omitempty"` // agent name when launched; supports templates
 	Description string `yaml:"description,omitempty"`
 
-	// New flattened harness fields.
+	// Harness fields.
 	AgentHarness               string `yaml:"agent_harness,omitempty"`                  // claude_code | codex | generic
-	AgentModel                 string `yaml:"agent_model,omitempty"`                    // explicit model; empty => harness default
+	AgentModel                 string `yaml:"agent_model,omitempty"`                    // explicit model; empty => agent app's own default
 	AgentHarnessCommand        string `yaml:"agent_harness_command,omitempty"`          // command override for any harness
 	AgentAccountProfile        string `yaml:"agent_account_profile,omitempty"`          // default account profile name ("default")
 	ClaudeCodeConfigPath       string `yaml:"claude_code_config_path,omitempty"`        // explicit path override
 	ClaudeCodeConfigPathPrefix string `yaml:"claude_code_config_path_prefix,omitempty"` // default: <H2Dir>/claude-config
 	CodexConfigPath            string `yaml:"codex_config_path,omitempty"`              // explicit path override
 	CodexConfigPathPrefix      string `yaml:"codex_config_path_prefix,omitempty"`       // default: <H2Dir>/codex-config
-	ApprovalPolicy             string `yaml:"approval_policy,omitempty"`                // unified: plan | confirm | auto-edit | auto
-	CodexSandboxMode           string `yaml:"codex_sandbox_mode,omitempty"`             // read-only | workspace-write | danger-full-access
 
-	// Legacy nested harness config retained for backward compatibility with
-	// historical role files that used a mapping under agent_harness.
-	LegacyAgentHarness *AgentHarnessConfig `yaml:"-"`
-
-	// Deprecated top-level fields (backward compat — use agent_harness instead).
-	AgentTypeLegacy       string `yaml:"agent_type,omitempty"`
-	ModelLegacy           string `yaml:"model,omitempty"`
-	ClaudeConfigDirLegacy string `yaml:"claude_config_dir,omitempty"`
-
-	WorkingDir     string                 `yaml:"working_dir,omitempty"`     // agent CWD (default ".")
-	Worktree       *WorktreeConfig        `yaml:"worktree,omitempty"`        // git worktree settings
-	SystemPrompt   string                 `yaml:"system_prompt,omitempty"`   // replaces Claude's entire default system prompt (--system-prompt)
-	Instructions   string                 `yaml:"instructions"`              // appended to default system prompt (--append-system-prompt)
-	PermissionMode string                 `yaml:"permission_mode,omitempty"` // Claude CLI --permission-mode flag
-	Permissions    Permissions            `yaml:"permissions,omitempty"`
-	Heartbeat      *HeartbeatConfig       `yaml:"heartbeat,omitempty"`
-	Hooks          yaml.Node              `yaml:"hooks,omitempty"`     // passed through as-is to settings.json
-	Settings       yaml.Node              `yaml:"settings,omitempty"`  // extra settings.json keys
-	Variables      map[string]tmpl.VarDef `yaml:"variables,omitempty"` // template variable definitions
+	WorkingDir           string                  `yaml:"working_dir,omitempty"`             // agent CWD (default ".")
+	Worktree             *WorktreeConfig         `yaml:"worktree,omitempty"`                // git worktree settings
+	SystemPrompt         string                  `yaml:"system_prompt,omitempty"`           // replaces Claude's entire default system prompt (--system-prompt)
+	Instructions         string                  `yaml:"instructions,omitempty"`            // appended to default system prompt (--append-system-prompt)
+	PermissionMode       string                  `yaml:"permission_mode,omitempty"`         // Claude Code --permission-mode flag
+	CodexSandboxMode     string                  `yaml:"codex_sandbox_mode,omitempty"`      // Codex --sandbox flag
+	CodexAskForApproval  string                  `yaml:"codex_ask_for_approval,omitempty"`  // Codex --ask-for-approval flag
+	PermissionReviewAgent *PermissionReviewAgent  `yaml:"permission_review_agent,omitempty"` // AI permission reviewer
+	Heartbeat            *HeartbeatConfig         `yaml:"heartbeat,omitempty"`
+	Hooks                yaml.Node                `yaml:"hooks,omitempty"`     // passed through as-is to settings.json
+	Settings             yaml.Node                `yaml:"settings,omitempty"`  // extra settings.json keys
+	Variables            map[string]tmpl.VarDef   `yaml:"variables,omitempty"` // template variable definitions
 }
 
-// UnmarshalYAML supports both new and legacy role harness layouts:
-// 1) new scalar:   agent_harness: codex
-// 2) legacy map:   agent_harness: { harness_type, model, command, ... }
+// UnmarshalYAML decodes a role from YAML.
 func (r *Role) UnmarshalYAML(value *yaml.Node) error {
-	type roleAlias struct {
-		Name                       string                 `yaml:"name"`
-		Description                string                 `yaml:"description,omitempty"`
-		AgentHarness               yaml.Node              `yaml:"agent_harness,omitempty"`
-		AgentModel                 string                 `yaml:"agent_model,omitempty"`
-		AgentHarnessCommand        string                 `yaml:"agent_harness_command,omitempty"`
-		AgentAccountProfile        string                 `yaml:"agent_account_profile,omitempty"`
-		ClaudeCodeConfigPath       string                 `yaml:"claude_code_config_path,omitempty"`
-		ClaudeCodeConfigPathPrefix string                 `yaml:"claude_code_config_path_prefix,omitempty"`
-		CodexConfigPath            string                 `yaml:"codex_config_path,omitempty"`
-		CodexConfigPathPrefix      string                 `yaml:"codex_config_path_prefix,omitempty"`
-		ApprovalPolicy             string                 `yaml:"approval_policy,omitempty"`
-		CodexSandboxMode           string                 `yaml:"codex_sandbox_mode,omitempty"`
-		AgentTypeLegacy            string                 `yaml:"agent_type,omitempty"`
-		ModelLegacy                string                 `yaml:"model,omitempty"`
-		ClaudeConfigDirLegacy      string                 `yaml:"claude_config_dir,omitempty"`
-		WorkingDir                 string                 `yaml:"working_dir,omitempty"`
-		Worktree                   *WorktreeConfig        `yaml:"worktree,omitempty"`
-		SystemPrompt               string                 `yaml:"system_prompt,omitempty"`
-		Instructions               string                 `yaml:"instructions"`
-		PermissionMode             string                 `yaml:"permission_mode,omitempty"`
-		Permissions                Permissions            `yaml:"permissions,omitempty"`
-		Heartbeat                  *HeartbeatConfig       `yaml:"heartbeat,omitempty"`
-		Hooks                      yaml.Node              `yaml:"hooks,omitempty"`
-		Settings                   yaml.Node              `yaml:"settings,omitempty"`
-		Variables                  map[string]tmpl.VarDef `yaml:"variables,omitempty"`
-	}
+	// Use an alias type to avoid infinite recursion.
+	type roleAlias Role
 	var aux roleAlias
 	if err := value.Decode(&aux); err != nil {
 		return err
 	}
-
-	r.Name = aux.Name
-	r.Description = aux.Description
-	r.AgentModel = aux.AgentModel
-	r.AgentHarnessCommand = aux.AgentHarnessCommand
-	r.AgentAccountProfile = aux.AgentAccountProfile
-	r.ClaudeCodeConfigPath = aux.ClaudeCodeConfigPath
-	r.ClaudeCodeConfigPathPrefix = aux.ClaudeCodeConfigPathPrefix
-	r.CodexConfigPath = aux.CodexConfigPath
-	r.CodexConfigPathPrefix = aux.CodexConfigPathPrefix
-	r.ApprovalPolicy = aux.ApprovalPolicy
-	r.CodexSandboxMode = aux.CodexSandboxMode
-	r.AgentTypeLegacy = aux.AgentTypeLegacy
-	r.ModelLegacy = aux.ModelLegacy
-	r.ClaudeConfigDirLegacy = aux.ClaudeConfigDirLegacy
-	r.WorkingDir = aux.WorkingDir
-	r.Worktree = aux.Worktree
-	r.SystemPrompt = aux.SystemPrompt
-	r.Instructions = aux.Instructions
-	r.PermissionMode = aux.PermissionMode
-	r.Permissions = aux.Permissions
-	r.Heartbeat = aux.Heartbeat
-	r.Hooks = aux.Hooks
-	r.Settings = aux.Settings
-	r.Variables = aux.Variables
-
-	// Parse agent_harness (scalar new format, mapping legacy format).
-	switch aux.AgentHarness.Kind {
-	case 0:
-		// omitted
-	case yaml.ScalarNode:
-		r.AgentHarness = aux.AgentHarness.Value
-	case yaml.MappingNode:
-		var legacy AgentHarnessConfig
-		if err := aux.AgentHarness.Decode(&legacy); err != nil {
-			return fmt.Errorf("parse legacy agent_harness mapping: %w", err)
-		}
-		r.LegacyAgentHarness = &legacy
-		if r.AgentHarness == "" {
-			r.AgentHarness = legacy.HarnessType
-		}
-		if r.AgentModel == "" {
-			r.AgentModel = legacy.Model
-		}
-		if r.AgentHarnessCommand == "" {
-			r.AgentHarnessCommand = legacy.Command
-		}
-		if r.ClaudeCodeConfigPath == "" {
-			r.ClaudeCodeConfigPath = legacy.ClaudeConfigDir
-		}
-		if r.CodexConfigPath == "" {
-			r.CodexConfigPath = legacy.CodexConfigDir
-		}
-	default:
-		return fmt.Errorf("agent_harness must be a string or mapping")
-	}
-
+	*r = Role(aux)
 	return nil
 }
 
@@ -269,8 +182,6 @@ func (r *Role) ResolveWorkingDir(invocationCWD string) (string, error) {
 }
 
 // GetHarnessType returns the canonical harness type name, defaulting to "claude_code".
-// Checks AgentHarness.HarnessType first, then falls back to legacy AgentType
-// (mapping "claude" → "claude_code").
 func (r *Role) GetHarnessType() string {
 	if r.AgentHarness != "" {
 		if r.AgentHarness == "claude" {
@@ -278,51 +189,26 @@ func (r *Role) GetHarnessType() string {
 		}
 		return r.AgentHarness
 	}
-	if r.LegacyAgentHarness != nil && r.LegacyAgentHarness.HarnessType != "" {
-		return r.LegacyAgentHarness.HarnessType
-	}
-	if r.AgentTypeLegacy != "" {
-		if r.AgentTypeLegacy == "claude" {
-			return "claude_code"
-		}
-		return r.AgentTypeLegacy
-	}
 	return "claude_code"
 }
 
 // GetAgentType returns the command name for this role's agent type.
-// Defaults to "claude". Maps canonical harness type names back to
-// command names: "claude_code" → "claude".
 func (r *Role) GetAgentType() string {
 	if r.AgentHarnessCommand != "" {
 		return r.AgentHarnessCommand
 	}
-	if r.LegacyAgentHarness != nil && r.LegacyAgentHarness.Command != "" {
-		return r.LegacyAgentHarness.Command
-	}
 	return ""
 }
 
-// GetModel returns the explicit configured model, checking flattened config first,
-// then falling back to the legacy top-level field.
+// GetModel returns the explicit configured model, or empty string for the agent app's own default.
 func (r *Role) GetModel() string {
-	if r.AgentModel != "" {
-		return r.AgentModel
-	}
-	if r.LegacyAgentHarness != nil && r.LegacyAgentHarness.Model != "" {
-		return r.LegacyAgentHarness.Model
-	}
-	return r.ModelLegacy
+	return r.AgentModel
 }
 
-// GetCodexConfigDir returns the Codex config directory from the nested config.
-// Returns empty string if not set.
+// GetCodexConfigDir returns the Codex config directory.
 func (r *Role) GetCodexConfigDir() string {
 	if r.CodexConfigPath != "" {
 		return r.CodexConfigPath
-	}
-	if r.LegacyAgentHarness != nil && r.LegacyAgentHarness.CodexConfigDir != "" {
-		return r.LegacyAgentHarness.CodexConfigDir
 	}
 	prefix := r.CodexConfigPathPrefix
 	if prefix == "" {
@@ -339,27 +225,6 @@ func (r *Role) GetAgentAccountProfile() string {
 	return "default"
 }
 
-// Permissions defines the permission configuration for a role.
-type Permissions struct {
-	Allow []string         `yaml:"allow,omitempty"`
-	Deny  []string         `yaml:"deny,omitempty"`
-	Agent *PermissionAgent `yaml:"agent,omitempty"`
-}
-
-// PermissionAgent configures the AI permission reviewer.
-type PermissionAgent struct {
-	Enabled      *bool  `yaml:"enabled,omitempty"` // defaults to true if instructions are set
-	Instructions string `yaml:"instructions,omitempty"`
-}
-
-// IsEnabled returns whether the permission agent is enabled.
-// Defaults to true when instructions are present.
-func (pa *PermissionAgent) IsEnabled() bool {
-	if pa.Enabled != nil {
-		return *pa.Enabled
-	}
-	return pa.Instructions != ""
-}
 
 // RolesDir returns the directory where role files are stored (~/.h2/roles/).
 func RolesDir() string {
@@ -372,19 +237,11 @@ func DefaultClaudeConfigDir() string {
 }
 
 // GetClaudeConfigDir returns the Claude config directory for this role.
-// Checks AgentHarness.ClaudeConfigDir first, then legacy ClaudeConfigDirLegacy.
-// If not specified in either, returns the default shared config dir.
 // If set to "~/" (the home directory), returns "" to indicate that
 // CLAUDE_CONFIG_DIR should not be overridden (use system default).
 func (r *Role) GetClaudeConfigDir() string {
 	if r.ClaudeCodeConfigPath != "" {
 		return expandClaudeConfigDir(r.ClaudeCodeConfigPath)
-	}
-	if r.LegacyAgentHarness != nil && r.LegacyAgentHarness.ClaudeConfigDir != "" {
-		return expandClaudeConfigDir(r.LegacyAgentHarness.ClaudeConfigDir)
-	}
-	if r.ClaudeConfigDirLegacy != "" {
-		return expandClaudeConfigDir(r.ClaudeConfigDirLegacy)
 	}
 	prefix := r.ClaudeCodeConfigPathPrefix
 	if prefix == "" {
@@ -572,11 +429,8 @@ func ListRoles() ([]*Role, error) {
 
 // Validate checks that a role has the minimum required fields.
 func (r *Role) Validate() error {
-	if r.Name == "" {
-		return fmt.Errorf("name is required")
-	}
-	if r.Instructions == "" && r.SystemPrompt == "" {
-		return fmt.Errorf("at least one of instructions or system_prompt is required")
+	if r.RoleName == "" {
+		return fmt.Errorf("role_name is required")
 	}
 	if r.PermissionMode != "" {
 		valid := false
@@ -591,19 +445,6 @@ func (r *Role) Validate() error {
 				r.PermissionMode, strings.Join(ValidPermissionModes, ", "))
 		}
 	}
-	if r.ApprovalPolicy != "" {
-		valid := false
-		for _, p := range ValidApprovalPolicies {
-			if r.ApprovalPolicy == p {
-				valid = true
-				break
-			}
-		}
-		if !valid {
-			return fmt.Errorf("invalid approval_policy %q; valid values: %s",
-				r.ApprovalPolicy, strings.Join(ValidApprovalPolicies, ", "))
-		}
-	}
 	if r.CodexSandboxMode != "" {
 		valid := false
 		for _, m := range ValidCodexSandboxModes {
@@ -615,6 +456,19 @@ func (r *Role) Validate() error {
 		if !valid {
 			return fmt.Errorf("invalid codex_sandbox_mode %q; valid values: %s",
 				r.CodexSandboxMode, strings.Join(ValidCodexSandboxModes, ", "))
+		}
+	}
+	if r.CodexAskForApproval != "" {
+		valid := false
+		for _, v := range ValidCodexAskForApproval {
+			if r.CodexAskForApproval == v {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return fmt.Errorf("invalid codex_ask_for_approval %q; valid values: %s",
+				r.CodexAskForApproval, strings.Join(ValidCodexAskForApproval, ", "))
 		}
 	}
 	// working_dir and worktree are mutually exclusive (working_dir "." or empty is allowed).

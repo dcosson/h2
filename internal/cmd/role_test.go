@@ -74,8 +74,8 @@ func TestRoleTemplate_RenderedIsValidRole(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadRoleFrom rendered %q: %v", name, err)
 		}
-		if role.Name != name {
-			t.Errorf("role.Name = %q, want %q", role.Name, name)
+		if role.RoleName != name {
+			t.Errorf("role.RoleName = %q, want %q", role.RoleName, name)
 		}
 		if !strings.HasSuffix(role.GetClaudeConfigDir(), "/claude-config/default") {
 			t.Errorf("role.GetClaudeConfigDir() = %q, want suffix %q", role.GetClaudeConfigDir(), "/claude-config/default")
@@ -161,7 +161,7 @@ func TestRoleInitCmd_RefusesOverwrite(t *testing.T) {
 
 	// Create a role file first.
 	rolePath := filepath.Join(h2Dir, "roles", "default.yaml")
-	if err := os.WriteFile(rolePath, []byte("name: default\n"), 0o644); err != nil {
+	if err := os.WriteFile(rolePath, []byte("role_name: default\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -192,7 +192,7 @@ func TestRoleInitThenList_ShowsRole(t *testing.T) {
 
 	found := false
 	for _, r := range roles {
-		if r.Name == "default" {
+		if r.RoleName == "default" {
 			found = true
 			break
 		}
@@ -205,7 +205,7 @@ func TestRoleInitThenList_ShowsRole(t *testing.T) {
 func TestOldDollarBraceRolesStillLoad(t *testing.T) {
 	// Old roles with ${name} syntax should load fine — ${name} is just literal text.
 	yamlContent := `
-name: old-style
+role_name: old-style
 instructions: |
   You are ${name}, a ${name} agent.
 `

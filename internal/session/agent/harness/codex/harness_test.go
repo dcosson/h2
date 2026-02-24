@@ -43,7 +43,7 @@ func TestDisplayCommand(t *testing.T) {
 	}
 }
 
-// --- Config tests (from CodexType) ---
+// --- Config tests ---
 
 func TestBuildCommandArgs_Instructions(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
@@ -71,68 +71,43 @@ func TestBuildCommandArgs_Model(t *testing.T) {
 	}
 }
 
-func TestBuildCommandArgs_FullAuto(t *testing.T) {
-	h := New(harness.HarnessConfig{}, nil)
-	args := h.BuildCommandArgs(harness.CommandArgsConfig{PermissionMode: "full-auto"})
-	if len(args) != 1 || args[0] != "--full-auto" {
-		t.Fatalf("expected [--full-auto], got %v", args)
-	}
-}
-
-func TestBuildCommandArgs_UnknownPermissionMode_Ignored(t *testing.T) {
-	h := New(harness.HarnessConfig{}, nil)
-	args := h.BuildCommandArgs(harness.CommandArgsConfig{PermissionMode: "suggest"})
-	if len(args) != 0 {
-		t.Fatalf("expected [] for unknown permission mode (let Codex default), got %v", args)
-	}
-}
-
-func TestBuildCommandArgs_Ask(t *testing.T) {
-	h := New(harness.HarnessConfig{}, nil)
-	args := h.BuildCommandArgs(harness.CommandArgsConfig{PermissionMode: "ask"})
-	if len(args) != 0 {
-		t.Fatalf("expected [] for ask mode (default), got %v", args)
-	}
-}
-
 func TestBuildCommandArgs_EmptyConfig_NoFlags(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
 	args := h.BuildCommandArgs(harness.CommandArgsConfig{})
 	if len(args) != 0 {
-		t.Fatalf("expected [] for empty config (let Codex default), got %v", args)
+		t.Fatalf("expected [] for empty config, got %v", args)
 	}
 }
 
 func TestBuildCommandArgs_IgnoresSessionID(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
-	args := h.BuildCommandArgs(harness.CommandArgsConfig{SessionID: "some-uuid", PermissionMode: "ask"})
+	args := h.BuildCommandArgs(harness.CommandArgsConfig{SessionID: "some-uuid"})
 	for _, arg := range args {
 		if arg == "--session-id" {
 			t.Fatal("Codex should not include --session-id")
 		}
+	}
+	if len(args) != 0 {
+		t.Fatalf("expected [] for session-id-only config, got %v", args)
 	}
 }
 
 func TestBuildCommandArgs_IgnoresUnsupported(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
 	args := h.BuildCommandArgs(harness.CommandArgsConfig{
-		SystemPrompt:    "Should be ignored",
-		AllowedTools:    []string{"Bash"},
-		DisallowedTools: []string{"Write"},
-		PermissionMode:  "ask",
+		SystemPrompt: "Should be ignored",
 	})
 	if len(args) != 0 {
-		t.Fatalf("expected [] (unsupported fields ignored, ask=default), got %v", args)
+		t.Fatalf("expected [] (unsupported fields ignored), got %v", args)
 	}
 }
 
-// --- ApprovalPolicy tests ---
+// --- CodexAskForApproval passthrough tests ---
 
-func TestBuildCommandArgs_ApprovalPolicy_Plan(t *testing.T) {
+func TestBuildCommandArgs_CodexAskForApproval(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
-	args := h.BuildCommandArgs(harness.CommandArgsConfig{ApprovalPolicy: "plan"})
-	// plan → untrusted approval + read-only sandbox (default for plan mode).
-	expected := []string{"--ask-for-approval", "untrusted", "--sandbox", "read-only"}
+	args := h.BuildCommandArgs(harness.CommandArgsConfig{CodexAskForApproval: "never"})
+	expected := []string{"--ask-for-approval", "never"}
 	if len(args) != len(expected) {
 		t.Fatalf("expected %v, got %v", expected, args)
 	}
@@ -143,23 +118,9 @@ func TestBuildCommandArgs_ApprovalPolicy_Plan(t *testing.T) {
 	}
 }
 
-func TestBuildCommandArgs_ApprovalPolicy_Confirm(t *testing.T) {
+func TestBuildCommandArgs_CodexAskForApproval_OnRequest(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
-	args := h.BuildCommandArgs(harness.CommandArgsConfig{ApprovalPolicy: "confirm"})
-	expected := []string{"--ask-for-approval", "untrusted"}
-	if len(args) != len(expected) {
-		t.Fatalf("expected %v, got %v", expected, args)
-	}
-	for i, want := range expected {
-		if args[i] != want {
-			t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
-		}
-	}
-}
-
-func TestBuildCommandArgs_ApprovalPolicy_AutoEdit(t *testing.T) {
-	h := New(harness.HarnessConfig{}, nil)
-	args := h.BuildCommandArgs(harness.CommandArgsConfig{ApprovalPolicy: "auto-edit"})
+	args := h.BuildCommandArgs(harness.CommandArgsConfig{CodexAskForApproval: "on-request"})
 	expected := []string{"--ask-for-approval", "on-request"}
 	if len(args) != len(expected) {
 		t.Fatalf("expected %v, got %v", expected, args)
@@ -171,10 +132,10 @@ func TestBuildCommandArgs_ApprovalPolicy_AutoEdit(t *testing.T) {
 	}
 }
 
-func TestBuildCommandArgs_ApprovalPolicy_Auto(t *testing.T) {
+func TestBuildCommandArgs_CodexAskForApproval_Untrusted(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
-	args := h.BuildCommandArgs(harness.CommandArgsConfig{ApprovalPolicy: "auto"})
-	expected := []string{"--ask-for-approval", "never"}
+	args := h.BuildCommandArgs(harness.CommandArgsConfig{CodexAskForApproval: "untrusted"})
+	expected := []string{"--ask-for-approval", "untrusted"}
 	if len(args) != len(expected) {
 		t.Fatalf("expected %v, got %v", expected, args)
 	}
@@ -199,49 +160,13 @@ func TestBuildCommandArgs_CodexSandboxMode(t *testing.T) {
 	}
 }
 
-func TestBuildCommandArgs_ApprovalPolicy_WithSandbox(t *testing.T) {
+func TestBuildCommandArgs_CodexAskForApproval_WithSandbox(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
 	args := h.BuildCommandArgs(harness.CommandArgsConfig{
-		ApprovalPolicy:   "auto",
-		CodexSandboxMode: "danger-full-access",
+		CodexAskForApproval: "never",
+		CodexSandboxMode:    "danger-full-access",
 	})
 	expected := []string{"--ask-for-approval", "never", "--sandbox", "danger-full-access"}
-	if len(args) != len(expected) {
-		t.Fatalf("expected %v, got %v", expected, args)
-	}
-	for i, want := range expected {
-		if args[i] != want {
-			t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
-		}
-	}
-}
-
-func TestBuildCommandArgs_ApprovalPolicy_PlanWithSandboxOverride(t *testing.T) {
-	h := New(harness.HarnessConfig{}, nil)
-	// Plan + explicit sandbox override should use the override, not the plan default.
-	args := h.BuildCommandArgs(harness.CommandArgsConfig{
-		ApprovalPolicy:   "plan",
-		CodexSandboxMode: "workspace-write",
-	})
-	expected := []string{"--ask-for-approval", "untrusted", "--sandbox", "workspace-write"}
-	if len(args) != len(expected) {
-		t.Fatalf("expected %v, got %v", expected, args)
-	}
-	for i, want := range expected {
-		if args[i] != want {
-			t.Errorf("arg[%d] = %q, want %q", i, args[i], want)
-		}
-	}
-}
-
-func TestBuildCommandArgs_ApprovalPolicy_OverridesPermissionMode(t *testing.T) {
-	h := New(harness.HarnessConfig{}, nil)
-	// When ApprovalPolicy is set, PermissionMode should be ignored.
-	args := h.BuildCommandArgs(harness.CommandArgsConfig{
-		PermissionMode: "full-auto",
-		ApprovalPolicy: "confirm",
-	})
-	expected := []string{"--ask-for-approval", "untrusted"}
 	if len(args) != len(expected) {
 		t.Fatalf("expected %v, got %v", expected, args)
 	}
@@ -256,7 +181,7 @@ func TestBuildCommandEnvVars_ReturnsNil(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
 	envVars := h.BuildCommandEnvVars("/home/user/.h2")
 	if envVars != nil {
-		t.Fatalf("expected nil env vars for codex, got %v", envVars)
+		t.Fatalf("expected nil env vars for codex without configDir, got %v", envVars)
 	}
 }
 
@@ -267,7 +192,7 @@ func TestEnsureConfigDir_Noop(t *testing.T) {
 	}
 }
 
-// --- Launch tests (from CodexAdapter) ---
+// --- Launch tests ---
 
 func TestPrepareForLaunch(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)

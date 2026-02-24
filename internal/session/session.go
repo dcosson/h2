@@ -39,14 +39,12 @@ type Session struct {
 	SessionID        string   // Claude Code session ID (UUID), set for claude commands
 	RoleName         string   // Role name, if launched with --role
 	SessionDir       string   // Session directory path (~/.h2/sessions/<name>/)
-	Instructions     string   // Role instructions, passed via --append-system-prompt
-	SystemPrompt     string   // Replaces default system prompt, passed via --system-prompt
-	Model            string   // Model selection, passed via --model
-	PermissionMode   string   // Permission mode, passed via --permission-mode
-	ApprovalPolicy   string   // Unified approval policy: plan | confirm | auto-edit | auto
-	CodexSandboxMode string   // Codex sandbox: read-only | workspace-write | danger-full-access
-	AllowedTools     []string // Allowed tools, passed via --allowedTools (comma-joined)
-	DisallowedTools  []string // Disallowed tools, passed via --disallowedTools (comma-joined)
+	Instructions        string // Role instructions, passed via --append-system-prompt
+	SystemPrompt        string // Replaces default system prompt, passed via --system-prompt
+	Model               string // Model selection, passed via --model
+	PermissionMode      string // Claude Code --permission-mode
+	CodexSandboxMode    string // Codex --sandbox
+	CodexAskForApproval string // Codex --ask-for-approval
 	Queue            *message.MessageQueue
 	AgentName        string
 	harness          harness.Harness
@@ -274,17 +272,15 @@ func resolveFullHarness(command, roleName string, log *activitylog.Logger) (harn
 // role flags via BuildCommandArgs.
 func (s *Session) childArgs() []string {
 	return s.harness.BuildCommandArgs(harness.CommandArgsConfig{
-		PrependArgs:      s.prependArgs,
-		ExtraArgs:        s.Args,
-		SessionID:        s.SessionID,
-		Instructions:     s.Instructions,
-		SystemPrompt:     s.SystemPrompt,
-		Model:            s.Model,
-		PermissionMode:   s.PermissionMode,
-		ApprovalPolicy:   s.ApprovalPolicy,
-		CodexSandboxMode: s.CodexSandboxMode,
-		AllowedTools:     s.AllowedTools,
-		DisallowedTools:  s.DisallowedTools,
+		PrependArgs:         s.prependArgs,
+		ExtraArgs:           s.Args,
+		SessionID:           s.SessionID,
+		Instructions:        s.Instructions,
+		SystemPrompt:        s.SystemPrompt,
+		Model:               s.Model,
+		PermissionMode:      s.PermissionMode,
+		CodexSandboxMode:    s.CodexSandboxMode,
+		CodexAskForApproval: s.CodexAskForApproval,
 	})
 }
 

@@ -12,25 +12,18 @@ import (
 
 func TestLoadRoleFrom_FullRole(t *testing.T) {
 	yaml := `
-name: architect
+role_name: architect
 description: "Designs systems"
-model: opus
+agent_model: opus
 instructions: |
   You are an architect agent.
   Design system architecture.
-permissions:
-  allow:
-    - "Read"
-    - "Glob"
-    - "Write(docs/**)"
-  deny:
-    - "Bash(rm -rf *)"
-  agent:
-    enabled: true
-    instructions: |
-      You are reviewing permissions for an architect.
-      ALLOW: read-only tools
-      DENY: destructive operations
+permission_review_agent:
+  enabled: true
+  instructions: |
+    You are reviewing permissions for an architect.
+    ALLOW: read-only tools
+    DENY: destructive operations
 `
 	path := writeTempFile(t, "architect.yaml", yaml)
 
@@ -39,8 +32,8 @@ permissions:
 		t.Fatalf("LoadRoleFrom: %v", err)
 	}
 
-	if role.Name != "architect" {
-		t.Errorf("Name = %q, want %q", role.Name, "architect")
+	if role.RoleName != "architect" {
+		t.Errorf("RoleName = %q, want %q", role.RoleName, "architect")
 	}
 	if role.Description != "Designs systems" {
 		t.Errorf("Description = %q, want %q", role.Description, "Designs systems")
@@ -48,32 +41,22 @@ permissions:
 	if role.GetModel() != "opus" {
 		t.Errorf("GetModel() = %q, want %q", role.GetModel(), "opus")
 	}
-	if len(role.Permissions.Allow) != 3 {
-		t.Errorf("Allow len = %d, want 3", len(role.Permissions.Allow))
+	if role.PermissionReviewAgent == nil {
+		t.Fatal("PermissionReviewAgent is nil")
 	}
-	if len(role.Permissions.Deny) != 1 {
-		t.Errorf("Deny len = %d, want 1", len(role.Permissions.Deny))
+	if !role.PermissionReviewAgent.IsEnabled() {
+		t.Error("PermissionReviewAgent should be enabled")
 	}
-	if role.Permissions.Agent == nil {
-		t.Fatal("Agent is nil")
-	}
-	if !role.Permissions.Agent.IsEnabled() {
-		t.Error("Agent should be enabled")
-	}
-	if role.Permissions.Agent.Instructions == "" {
-		t.Error("Agent instructions should not be empty")
+	if role.PermissionReviewAgent.Instructions == "" {
+		t.Error("PermissionReviewAgent instructions should not be empty")
 	}
 }
 
 func TestLoadRoleFrom_MinimalRole(t *testing.T) {
 	yaml := `
-name: coder
+role_name: coder
 instructions: |
   You are a coding agent.
-permissions:
-  allow:
-    - "Read"
-    - "Bash"
 `
 	path := writeTempFile(t, "coder.yaml", yaml)
 
@@ -82,19 +65,19 @@ permissions:
 		t.Fatalf("LoadRoleFrom: %v", err)
 	}
 
-	if role.Name != "coder" {
-		t.Errorf("Name = %q, want %q", role.Name, "coder")
+	if role.RoleName != "coder" {
+		t.Errorf("RoleName = %q, want %q", role.RoleName, "coder")
 	}
 	if role.GetModel() != "" {
 		t.Errorf("GetModel() = %q, want empty", role.GetModel())
 	}
-	if role.Permissions.Agent != nil {
-		t.Error("Agent should be nil for minimal role")
+	if role.PermissionReviewAgent != nil {
+		t.Error("PermissionReviewAgent should be nil for minimal role")
 	}
 }
 
 func TestLoadRoleFrom_ValidationError(t *testing.T) {
-	// Missing name.
+	// Missing role_name.
 	yaml := `
 instructions: |
   Some instructions.
@@ -102,41 +85,33 @@ instructions: |
 	path := writeTempFile(t, "bad.yaml", yaml)
 	_, err := LoadRoleFrom(path)
 	if err == nil {
-		t.Fatal("expected error for missing name")
-	}
-
-	// Missing instructions.
-	yaml2 := `name: test`
-	path2 := writeTempFile(t, "bad2.yaml", yaml2)
-	_, err2 := LoadRoleFrom(path2)
-	if err2 == nil {
-		t.Fatal("expected error for missing instructions")
+		t.Fatal("expected error for missing role_name")
 	}
 }
 
-func TestPermissionAgent_IsEnabled(t *testing.T) {
+func TestPermissionReviewAgent_IsEnabled(t *testing.T) {
 	// Explicit enabled: true
 	tr := true
-	pa := &PermissionAgent{Enabled: &tr, Instructions: "test"}
+	pa := &PermissionReviewAgent{Enabled: &tr, Instructions: "test"}
 	if !pa.IsEnabled() {
 		t.Error("should be enabled when Enabled=true")
 	}
 
 	// Explicit enabled: false
 	fa := false
-	pa2 := &PermissionAgent{Enabled: &fa, Instructions: "test"}
+	pa2 := &PermissionReviewAgent{Enabled: &fa, Instructions: "test"}
 	if pa2.IsEnabled() {
 		t.Error("should be disabled when Enabled=false")
 	}
 
 	// Implicit: instructions present → enabled
-	pa3 := &PermissionAgent{Instructions: "test"}
+	pa3 := &PermissionReviewAgent{Instructions: "test"}
 	if !pa3.IsEnabled() {
 		t.Error("should be enabled when instructions present")
 	}
 
 	// Implicit: no instructions → disabled
-	pa4 := &PermissionAgent{}
+	pa4 := &PermissionReviewAgent{}
 	if pa4.IsEnabled() {
 		t.Error("should be disabled when no instructions")
 	}
@@ -149,13 +124,13 @@ func TestListRoles(t *testing.T) {
 
 	// Write two valid role files.
 	os.WriteFile(filepath.Join(rolesDir, "architect.yaml"), []byte(`
-name: architect
+role_name: architect
 instructions: |
   Architect agent.
 `), 0o644)
 
 	os.WriteFile(filepath.Join(rolesDir, "coder.yaml"), []byte(`
-name: coder
+role_name: coder
 instructions: |
   Coder agent.
 `), 0o644)
@@ -190,15 +165,11 @@ func TestSetupSessionDir(t *testing.T) {
 	setupFakeHome(t)
 
 	role := &Role{
-		Name:         "architect",
-		ModelLegacy:  "opus",
+		RoleName:     "architect",
+		AgentModel:   "opus",
 		Instructions: "You are an architect agent.\nDesign systems.\n",
-		Permissions: Permissions{
-			Allow: []string{"Read", "Glob", "Write(docs/**)"},
-			Deny:  []string{"Bash(rm -rf *)"},
-			Agent: &PermissionAgent{
-				Instructions: "Review permissions for architect.\nALLOW: read-only\n",
-			},
+		PermissionReviewAgent: &PermissionReviewAgent{
+			Instructions: "Review permissions for architect.\nALLOW: read-only\n",
 		},
 	}
 
@@ -217,8 +188,8 @@ func TestSetupSessionDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read permission-reviewer.md: %v", err)
 	}
-	if string(reviewerData) != role.Permissions.Agent.Instructions {
-		t.Errorf("permission-reviewer.md content = %q, want %q", string(reviewerData), role.Permissions.Agent.Instructions)
+	if string(reviewerData) != role.PermissionReviewAgent.Instructions {
+		t.Errorf("permission-reviewer.md content = %q, want %q", string(reviewerData), role.PermissionReviewAgent.Instructions)
 	}
 
 	// No .claude subdir should be created.
@@ -270,11 +241,8 @@ func TestSetupSessionDir_NoAgent(t *testing.T) {
 	setupFakeHome(t)
 
 	role := &Role{
-		Name:         "coder",
+		RoleName:     "coder",
 		Instructions: "Code stuff.\n",
-		Permissions: Permissions{
-			Allow: []string{"Read", "Bash"},
-		},
 	}
 
 	sessionDir, err := SetupSessionDir("coder-1", role)
@@ -387,43 +355,42 @@ func TestRole_GetClaudeConfigDir(t *testing.T) {
 	t.Setenv("H2_ACTOR", "")
 
 	tests := []struct {
-		name            string
-		claudeConfigDir string
-		want            string
+		name             string
+		claudeConfigPath string
+		want             string
 	}{
 		{
-			name:            "default when not specified",
-			claudeConfigDir: "",
-			want:            filepath.Join(h2Dir, "claude-config", "default"),
+			name:             "default when not specified",
+			claudeConfigPath: "",
+			want:             filepath.Join(h2Dir, "claude-config", "default"),
 		},
 		{
-			name:            "absolute path",
-			claudeConfigDir: "/custom/path/to/config",
-			want:            "/custom/path/to/config",
+			name:             "absolute path",
+			claudeConfigPath: "/custom/path/to/config",
+			want:             "/custom/path/to/config",
 		},
 		{
-			name:            "tilde expansion",
-			claudeConfigDir: "~/my-claude-config",
-			want:            "/Users/testuser/my-claude-config",
+			name:             "tilde expansion",
+			claudeConfigPath: "~/my-claude-config",
+			want:             "/Users/testuser/my-claude-config",
 		},
 		{
-			name:            "relative path within h2",
-			claudeConfigDir: "/Users/testuser/.h2/claude-config/custom",
-			want:            "/Users/testuser/.h2/claude-config/custom",
+			name:             "relative path within h2",
+			claudeConfigPath: "/Users/testuser/.h2/claude-config/custom",
+			want:             "/Users/testuser/.h2/claude-config/custom",
 		},
 		{
-			name:            "tilde only means system default",
-			claudeConfigDir: "~/",
-			want:            "",
+			name:             "tilde only means system default",
+			claudeConfigPath: "~/",
+			want:             "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			role := &Role{
-				Name:                  "test",
-				ClaudeConfigDirLegacy: tt.claudeConfigDir,
-				Instructions:          "test",
+				RoleName:             "test",
+				ClaudeCodeConfigPath: tt.claudeConfigPath,
 			}
 			got := role.GetClaudeConfigDir()
 			if got != tt.want {
@@ -435,7 +402,7 @@ func TestRole_GetClaudeConfigDir(t *testing.T) {
 
 func TestLoadRoleFrom_WithHeartbeat(t *testing.T) {
 	yaml := `
-name: scheduler
+role_name: scheduler
 instructions: |
   You are a scheduler agent.
 heartbeat:
@@ -466,7 +433,7 @@ heartbeat:
 
 func TestLoadRoleFrom_HeartbeatOptional(t *testing.T) {
 	yaml := `
-name: simple
+role_name: simple
 instructions: |
   A simple agent.
 `
@@ -515,7 +482,7 @@ func TestHeartbeatConfig_ParseIdleTimeout(t *testing.T) {
 }
 
 func TestResolveWorkingDir_Default(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test"}
+	role := &Role{RoleName: "test"}
 	got, err := role.ResolveWorkingDir("/my/cwd")
 	if err != nil {
 		t.Fatalf("ResolveWorkingDir: %v", err)
@@ -526,7 +493,7 @@ func TestResolveWorkingDir_Default(t *testing.T) {
 }
 
 func TestResolveWorkingDir_Dot(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test", WorkingDir: "."}
+	role := &Role{RoleName: "test", WorkingDir: "."}
 	got, err := role.ResolveWorkingDir("/my/cwd")
 	if err != nil {
 		t.Fatalf("ResolveWorkingDir: %v", err)
@@ -537,7 +504,7 @@ func TestResolveWorkingDir_Dot(t *testing.T) {
 }
 
 func TestResolveWorkingDir_Absolute(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test", WorkingDir: "/some/absolute/path"}
+	role := &Role{RoleName: "test", WorkingDir: "/some/absolute/path"}
 	got, err := role.ResolveWorkingDir("/my/cwd")
 	if err != nil {
 		t.Fatalf("ResolveWorkingDir: %v", err)
@@ -556,7 +523,7 @@ func TestResolveWorkingDir_Relative(t *testing.T) {
 	WriteMarker(h2Dir)
 	t.Setenv("H2_DIR", h2Dir)
 
-	role := &Role{Name: "test", Instructions: "test", WorkingDir: "projects/myapp"}
+	role := &Role{RoleName: "test", WorkingDir: "projects/myapp"}
 	got, err := role.ResolveWorkingDir("/my/cwd")
 	if err != nil {
 		t.Fatalf("ResolveWorkingDir: %v", err)
@@ -569,7 +536,7 @@ func TestResolveWorkingDir_Relative(t *testing.T) {
 
 func TestResolveWorkingDir_FromYAML(t *testing.T) {
 	yaml := `
-name: worker
+role_name: worker
 instructions: |
   A worker agent.
 working_dir: /workspace/project
@@ -587,10 +554,9 @@ working_dir: /workspace/project
 func TestValidate_WorktreeAndWorkingDirMutualExclusivity(t *testing.T) {
 	// worktree + non-trivial working_dir should fail.
 	role := &Role{
-		Name:         "test",
-		Instructions: "test",
-		WorkingDir:   "projects/myapp",
-		Worktree:     &WorktreeConfig{ProjectDir: "/tmp/repo", Name: "test-wt"},
+		RoleName:   "test",
+		WorkingDir: "projects/myapp",
+		Worktree:   &WorktreeConfig{ProjectDir: "/tmp/repo", Name: "test-wt"},
 	}
 	err := role.Validate()
 	if err == nil {
@@ -602,10 +568,9 @@ func TestValidate_WorktreeAndWorkingDirMutualExclusivity(t *testing.T) {
 
 	// worktree + working_dir="." should be OK.
 	role2 := &Role{
-		Name:         "test",
-		Instructions: "test",
-		WorkingDir:   ".",
-		Worktree:     &WorktreeConfig{ProjectDir: "/tmp/repo", Name: "test-wt"},
+		RoleName:   "test",
+		WorkingDir: ".",
+		Worktree:   &WorktreeConfig{ProjectDir: "/tmp/repo", Name: "test-wt"},
 	}
 	if err := role2.Validate(); err != nil {
 		t.Errorf("worktree + working_dir='.' should be allowed: %v", err)
@@ -613,9 +578,8 @@ func TestValidate_WorktreeAndWorkingDirMutualExclusivity(t *testing.T) {
 
 	// worktree + empty working_dir should be OK.
 	role3 := &Role{
-		Name:         "test",
-		Instructions: "test",
-		Worktree:     &WorktreeConfig{ProjectDir: "/tmp/repo", Name: "test-wt"},
+		RoleName: "test",
+		Worktree: &WorktreeConfig{ProjectDir: "/tmp/repo", Name: "test-wt"},
 	}
 	if err := role3.Validate(); err != nil {
 		t.Errorf("worktree + empty working_dir should be allowed: %v", err)
@@ -624,9 +588,8 @@ func TestValidate_WorktreeAndWorkingDirMutualExclusivity(t *testing.T) {
 
 func TestValidate_WorktreeMissingProjectDir(t *testing.T) {
 	role := &Role{
-		Name:         "test",
-		Instructions: "test",
-		Worktree:     &WorktreeConfig{Name: "test-wt"},
+		RoleName: "test",
+		Worktree: &WorktreeConfig{Name: "test-wt"},
 	}
 	err := role.Validate()
 	if err == nil {
@@ -639,9 +602,8 @@ func TestValidate_WorktreeMissingProjectDir(t *testing.T) {
 
 func TestValidate_WorktreeMissingName(t *testing.T) {
 	role := &Role{
-		Name:         "test",
-		Instructions: "test",
-		Worktree:     &WorktreeConfig{ProjectDir: "/tmp/repo"},
+		RoleName: "test",
+		Worktree: &WorktreeConfig{ProjectDir: "/tmp/repo"},
 	}
 	err := role.Validate()
 	if err == nil {
@@ -655,8 +617,8 @@ func TestValidate_WorktreeMissingName(t *testing.T) {
 func TestLoadRoleFrom_QuotedTemplateValues(t *testing.T) {
 	// Quoted {{ }} values should be valid YAML and parse correctly.
 	yaml := `
-name: "{{ .RoleName }}"
-claude_config_dir: "{{ .H2Dir }}/claude-config/default"
+role_name: "{{ .RoleName }}"
+claude_code_config_path: "{{ .H2Dir }}/claude-config/default"
 instructions: |
   You are a {{ .RoleName }} agent.
 `
@@ -666,11 +628,11 @@ instructions: |
 	if err != nil {
 		t.Fatalf("LoadRoleFrom: %v", err)
 	}
-	if role.Name != "{{ .RoleName }}" {
-		t.Errorf("Name = %q, want %q", role.Name, "{{ .RoleName }}")
+	if role.RoleName != "{{ .RoleName }}" {
+		t.Errorf("RoleName = %q, want %q", role.RoleName, "{{ .RoleName }}")
 	}
-	if role.ClaudeConfigDirLegacy != "{{ .H2Dir }}/claude-config/default" {
-		t.Errorf("ClaudeConfigDirLegacy = %q, want %q", role.ClaudeConfigDirLegacy, "{{ .H2Dir }}/claude-config/default")
+	if role.ClaudeCodeConfigPath != "{{ .H2Dir }}/claude-config/default" {
+		t.Errorf("ClaudeCodeConfigPath = %q, want %q", role.ClaudeCodeConfigPath, "{{ .H2Dir }}/claude-config/default")
 	}
 }
 
@@ -678,7 +640,7 @@ instructions: |
 
 func TestLoadRoleRenderedFrom_BasicRendering(t *testing.T) {
 	yamlContent := `
-name: coder
+role_name: coder
 variables:
   team:
     description: "Team name"
@@ -712,7 +674,7 @@ instructions: |
 
 func TestLoadRoleRenderedFrom_WorktreeRendering(t *testing.T) {
 	yamlContent := `
-name: coder
+role_name: coder
 instructions: |
   Work on ticket.
 worktree:
@@ -744,7 +706,7 @@ worktree:
 
 func TestLoadRoleRenderedFrom_WorkingDirRendering(t *testing.T) {
 	yamlContent := `
-name: coder
+role_name: coder
 instructions: |
   Work on project.
 working_dir: "/projects/{{ .Var.project }}"
@@ -764,10 +726,10 @@ working_dir: "/projects/{{ .Var.project }}"
 
 func TestLoadRoleRenderedFrom_ModelRendering(t *testing.T) {
 	yamlContent := `
-name: coder
+role_name: coder
 instructions: |
   Code.
-model: "{{ .Var.model }}"
+agent_model: "{{ .Var.model }}"
 `
 	path := writeTempFile(t, "model.yaml", yamlContent)
 	ctx := &tmpl.Context{Var: map[string]string{"model": "haiku"}}
@@ -784,7 +746,7 @@ model: "{{ .Var.model }}"
 
 func TestLoadRoleRenderedFrom_HeartbeatRendering(t *testing.T) {
 	yamlContent := `
-name: scheduler
+role_name: scheduler
 instructions: |
   Schedule.
 heartbeat:
@@ -809,7 +771,7 @@ heartbeat:
 
 func TestLoadRoleRenderedFrom_RequiredVarMissing(t *testing.T) {
 	yamlContent := `
-name: coder
+role_name: coder
 variables:
   team:
     description: "Team name"
@@ -830,7 +792,7 @@ instructions: |
 
 func TestLoadRoleRenderedFrom_RequiredVarProvided(t *testing.T) {
 	yamlContent := `
-name: coder
+role_name: coder
 variables:
   team:
     description: "Team name"
@@ -851,7 +813,7 @@ instructions: |
 
 func TestLoadRoleRenderedFrom_NilContext(t *testing.T) {
 	yamlContent := `
-name: coder
+role_name: coder
 instructions: |
   Hello {{ .AgentName }}.
 `
@@ -870,7 +832,7 @@ instructions: |
 func TestLoadRoleRenderedFrom_BackwardCompat(t *testing.T) {
 	// Role with no template expressions and no variables section.
 	yamlContent := `
-name: simple
+role_name: simple
 instructions: |
   A simple static role.
 `
@@ -881,8 +843,8 @@ instructions: |
 	if err != nil {
 		t.Fatalf("LoadRoleRenderedFrom: %v", err)
 	}
-	if role.Name != "simple" {
-		t.Errorf("Name = %q, want %q", role.Name, "simple")
+	if role.RoleName != "simple" {
+		t.Errorf("RoleName = %q, want %q", role.RoleName, "simple")
 	}
 	if !strings.Contains(role.Instructions, "simple static role") {
 		t.Errorf("Instructions should be unchanged, got: %s", role.Instructions)
@@ -891,7 +853,7 @@ instructions: |
 
 func TestLoadRoleRenderedFrom_Conditionals(t *testing.T) {
 	yamlContent := `
-name: coder
+role_name: coder
 instructions: |
   You are {{ .AgentName }}.
   {{ if .PodName }}You are in pod {{ .PodName }}.{{ else }}Standalone.{{ end }}
@@ -921,7 +883,7 @@ instructions: |
 
 func TestLoadRoleRenderedFrom_StandaloneZeroValues(t *testing.T) {
 	yamlContent := `
-name: pod-aware
+role_name: pod-aware
 instructions: |
   Index: {{ .Index }}, Count: {{ .Count }}.
   {{ if .PodName }}In pod.{{ else }}Not in pod.{{ end }}
@@ -946,7 +908,7 @@ instructions: |
 
 func TestLoadRoleRenderedFrom_VariablesFieldPopulated(t *testing.T) {
 	yamlContent := `
-name: coder
+role_name: coder
 variables:
   team:
     description: "Team name"
@@ -980,11 +942,11 @@ instructions: |
 func TestOverrideBeatsTemplateRenderedValue(t *testing.T) {
 	// Template renders working_dir to /foo, override sets it to /bar.
 	yamlContent := `
-name: coder
+role_name: coder
 instructions: |
   Work.
 working_dir: "/projects/{{ .Var.project }}"
-model: "{{ .Var.model }}"
+agent_model: "{{ .Var.model }}"
 `
 	path := writeTempFile(t, "override.yaml", yamlContent)
 	ctx := &tmpl.Context{Var: map[string]string{"project": "foo", "model": "opus"}}
@@ -1003,7 +965,7 @@ model: "{{ .Var.model }}"
 	}
 
 	// Apply overrides — these should win over template-rendered values.
-	err = ApplyOverrides(role, []string{"working_dir=/bar", "model=haiku"})
+	err = ApplyOverrides(role, []string{"working_dir=/bar", "agent_model=haiku"})
 	if err != nil {
 		t.Fatalf("ApplyOverrides: %v", err)
 	}
@@ -1025,21 +987,21 @@ func TestListRoles_WithTemplatedRoles(t *testing.T) {
 
 	// Write a static role.
 	os.WriteFile(filepath.Join(rolesDir, "static.yaml"), []byte(`
-name: static
+role_name: static
 instructions: |
   A static agent.
 `), 0o644)
 
 	// Write a templated role with {{ }} expressions.
 	os.WriteFile(filepath.Join(rolesDir, "templated.yaml"), []byte(`
-name: templated
+role_name: templated
 instructions: |
   You are {{ .AgentName }} on team {{ .Var.team }}.
 `), 0o644)
 
 	// Write a templated role with variables section.
 	os.WriteFile(filepath.Join(rolesDir, "parameterized.yaml"), []byte(`
-name: parameterized
+role_name: parameterized
 variables:
   team:
     description: "Team"
@@ -1073,12 +1035,12 @@ instructions: |
 
 	// Verify templated role has raw template expressions in instructions.
 	for _, role := range roles {
-		if role.Name == "templated" {
+		if role.RoleName == "templated" {
 			if !strings.Contains(role.Instructions, "{{ .AgentName }}") {
 				t.Error("templated role instructions should contain raw {{ .AgentName }}")
 			}
 		}
-		if role.Name == "parameterized" {
+		if role.RoleName == "parameterized" {
 			if !strings.Contains(role.Instructions, "{{ .Var.team }}") {
 				t.Error("parameterized role instructions should contain raw {{ .Var.team }}")
 			}
@@ -1140,8 +1102,8 @@ func TestE2E_StaticRole_BackwardCompat(t *testing.T) {
 		t.Fatalf("LoadRoleFrom: %v", err)
 	}
 
-	if roleRendered.Name != roleStatic.Name {
-		t.Errorf("Name mismatch: rendered=%q, static=%q", roleRendered.Name, roleStatic.Name)
+	if roleRendered.RoleName != roleStatic.RoleName {
+		t.Errorf("Name mismatch: rendered=%q, static=%q", roleRendered.RoleName, roleStatic.RoleName)
 	}
 	if roleRendered.Instructions != roleStatic.Instructions {
 		t.Errorf("Instructions mismatch: rendered=%q, static=%q", roleRendered.Instructions, roleStatic.Instructions)
@@ -1178,40 +1140,29 @@ func TestE2E_PodAwareRole_StandaloneZeroValues(t *testing.T) {
 // --- Validate tests for system_prompt and permission_mode ---
 
 func TestValidate_InstructionsOnly(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "Do stuff"}
+	role := &Role{RoleName: "test", Instructions: "Do stuff"}
 	if err := role.Validate(); err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 }
 
 func TestValidate_SystemPromptOnly(t *testing.T) {
-	role := &Role{Name: "test", SystemPrompt: "You are a custom agent."}
+	role := &Role{RoleName: "test", SystemPrompt: "You are a custom agent."}
 	if err := role.Validate(); err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 }
 
 func TestValidate_BothInstructionsAndSystemPrompt(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "Do stuff", SystemPrompt: "Custom prompt"}
+	role := &Role{RoleName: "test", Instructions: "Do stuff", SystemPrompt: "Custom prompt"}
 	if err := role.Validate(); err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 }
 
-func TestValidate_NeitherInstructionsNorSystemPrompt(t *testing.T) {
-	role := &Role{Name: "test"}
-	err := role.Validate()
-	if err == nil {
-		t.Fatal("expected error when both instructions and system_prompt are empty")
-	}
-	if !strings.Contains(err.Error(), "at least one of instructions or system_prompt") {
-		t.Errorf("unexpected error message: %v", err)
-	}
-}
-
 func TestValidate_PermissionMode_Valid(t *testing.T) {
 	for _, mode := range ValidPermissionModes {
-		role := &Role{Name: "test", Instructions: "Do stuff", PermissionMode: mode}
+		role := &Role{RoleName: "test", PermissionMode: mode}
 		if err := role.Validate(); err != nil {
 			t.Errorf("expected no error for permission_mode %q, got: %v", mode, err)
 		}
@@ -1219,7 +1170,7 @@ func TestValidate_PermissionMode_Valid(t *testing.T) {
 }
 
 func TestValidate_PermissionMode_Invalid(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "Do stuff", PermissionMode: "yolo"}
+	role := &Role{RoleName: "test", PermissionMode: "yolo"}
 	err := role.Validate()
 	if err == nil {
 		t.Fatal("expected error for invalid permission_mode")
@@ -1237,7 +1188,7 @@ func TestValidate_PermissionMode_Invalid(t *testing.T) {
 }
 
 func TestValidate_PermissionMode_Empty(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "Do stuff", PermissionMode: ""}
+	role := &Role{RoleName: "test", PermissionMode: ""}
 	if err := role.Validate(); err != nil {
 		t.Fatalf("empty permission_mode should be valid, got: %v", err)
 	}
@@ -1245,7 +1196,7 @@ func TestValidate_PermissionMode_Empty(t *testing.T) {
 
 func TestLoadRoleFrom_SystemPromptField(t *testing.T) {
 	yaml := `
-name: custom
+role_name: custom
 system_prompt: |
   You are a completely custom agent with no default behavior.
 `
@@ -1264,7 +1215,7 @@ system_prompt: |
 
 func TestLoadRoleFrom_PermissionModeField(t *testing.T) {
 	yaml := `
-name: permissive
+role_name: permissive
 instructions: |
   Do stuff.
 permission_mode: bypassPermissions
@@ -1281,7 +1232,7 @@ permission_mode: bypassPermissions
 
 func TestLoadRoleFrom_InvalidPermissionMode(t *testing.T) {
 	yaml := `
-name: bad
+role_name: bad
 instructions: |
   Do stuff.
 permission_mode: invalid_mode
@@ -1296,38 +1247,38 @@ permission_mode: invalid_mode
 	}
 }
 
-// --- ApprovalPolicy validation tests ---
+// --- CodexAskForApproval validation tests ---
 
-func TestValidate_ApprovalPolicy_Valid(t *testing.T) {
-	for _, policy := range ValidApprovalPolicies {
-		role := &Role{Name: "test", Instructions: "Do stuff", ApprovalPolicy: policy}
+func TestValidate_CodexAskForApproval_Valid(t *testing.T) {
+	for _, val := range ValidCodexAskForApproval {
+		role := &Role{RoleName: "test", CodexAskForApproval: val}
 		if err := role.Validate(); err != nil {
-			t.Errorf("expected no error for approval_policy %q, got: %v", policy, err)
+			t.Errorf("expected no error for codex_ask_for_approval %q, got: %v", val, err)
 		}
 	}
 }
 
-func TestValidate_ApprovalPolicy_Invalid(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "Do stuff", ApprovalPolicy: "yolo"}
+func TestValidate_CodexAskForApproval_Invalid(t *testing.T) {
+	role := &Role{RoleName: "test", CodexAskForApproval: "yolo"}
 	err := role.Validate()
 	if err == nil {
-		t.Fatal("expected error for invalid approval_policy")
+		t.Fatal("expected error for invalid codex_ask_for_approval")
 	}
-	if !strings.Contains(err.Error(), "invalid approval_policy") {
-		t.Errorf("expected 'invalid approval_policy' in error, got: %v", err)
+	if !strings.Contains(err.Error(), "invalid codex_ask_for_approval") {
+		t.Errorf("expected 'invalid codex_ask_for_approval' in error, got: %v", err)
 	}
 }
 
-func TestValidate_ApprovalPolicy_Empty(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "Do stuff", ApprovalPolicy: ""}
+func TestValidate_CodexAskForApproval_Empty(t *testing.T) {
+	role := &Role{RoleName: "test", CodexAskForApproval: ""}
 	if err := role.Validate(); err != nil {
-		t.Fatalf("empty approval_policy should be valid, got: %v", err)
+		t.Fatalf("empty codex_ask_for_approval should be valid, got: %v", err)
 	}
 }
 
 func TestValidate_CodexSandboxMode_Valid(t *testing.T) {
 	for _, mode := range ValidCodexSandboxModes {
-		role := &Role{Name: "test", Instructions: "Do stuff", CodexSandboxMode: mode}
+		role := &Role{RoleName: "test", CodexSandboxMode: mode}
 		if err := role.Validate(); err != nil {
 			t.Errorf("expected no error for codex_sandbox_mode %q, got: %v", mode, err)
 		}
@@ -1335,7 +1286,7 @@ func TestValidate_CodexSandboxMode_Valid(t *testing.T) {
 }
 
 func TestValidate_CodexSandboxMode_Invalid(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "Do stuff", CodexSandboxMode: "yolo"}
+	role := &Role{RoleName: "test", CodexSandboxMode: "yolo"}
 	err := role.Validate()
 	if err == nil {
 		t.Fatal("expected error for invalid codex_sandbox_mode")
@@ -1346,52 +1297,49 @@ func TestValidate_CodexSandboxMode_Invalid(t *testing.T) {
 }
 
 func TestValidate_CodexSandboxMode_Empty(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "Do stuff", CodexSandboxMode: ""}
+	role := &Role{RoleName: "test", CodexSandboxMode: ""}
 	if err := role.Validate(); err != nil {
 		t.Fatalf("empty codex_sandbox_mode should be valid, got: %v", err)
 	}
 }
 
-func TestLoadRoleFrom_ApprovalPolicyField(t *testing.T) {
+func TestLoadRoleFrom_CodexAskForApprovalField(t *testing.T) {
 	yaml := `
-name: test
-instructions: Do stuff.
-approval_policy: auto-edit
+role_name: test
+codex_ask_for_approval: on-request
 codex_sandbox_mode: workspace-write
 `
-	path := writeTempFile(t, "approval.yaml", yaml)
+	path := writeTempFile(t, "codex.yaml", yaml)
 	role, err := LoadRoleFrom(path)
 	if err != nil {
 		t.Fatalf("LoadRoleFrom: %v", err)
 	}
-	if role.ApprovalPolicy != "auto-edit" {
-		t.Errorf("ApprovalPolicy = %q, want %q", role.ApprovalPolicy, "auto-edit")
+	if role.CodexAskForApproval != "on-request" {
+		t.Errorf("CodexAskForApproval = %q, want %q", role.CodexAskForApproval, "on-request")
 	}
 	if role.CodexSandboxMode != "workspace-write" {
 		t.Errorf("CodexSandboxMode = %q, want %q", role.CodexSandboxMode, "workspace-write")
 	}
 }
 
-func TestLoadRoleFrom_InvalidApprovalPolicy(t *testing.T) {
+func TestLoadRoleFrom_InvalidCodexAskForApproval(t *testing.T) {
 	yaml := `
-name: bad
-instructions: Do stuff.
-approval_policy: invalid_policy
+role_name: bad
+codex_ask_for_approval: invalid_policy
 `
-	path := writeTempFile(t, "bad-approval.yaml", yaml)
+	path := writeTempFile(t, "bad-codex.yaml", yaml)
 	_, err := LoadRoleFrom(path)
 	if err == nil {
-		t.Fatal("expected error for invalid approval_policy")
+		t.Fatal("expected error for invalid codex_ask_for_approval")
 	}
-	if !strings.Contains(err.Error(), "invalid approval_policy") {
+	if !strings.Contains(err.Error(), "invalid codex_ask_for_approval") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
 func TestLoadRoleFrom_InvalidCodexSandboxMode(t *testing.T) {
 	yaml := `
-name: bad
-instructions: Do stuff.
+role_name: bad
 codex_sandbox_mode: invalid_mode
 `
 	path := writeTempFile(t, "bad-sandbox.yaml", yaml)
@@ -1404,58 +1352,24 @@ codex_sandbox_mode: invalid_mode
 	}
 }
 
-// --- Backward compat tests for agent_harness config ---
+// --- Harness config tests ---
 
 func TestGetHarnessType_Default(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test"}
+	role := &Role{RoleName: "test"}
 	if got := role.GetHarnessType(); got != "claude_code" {
 		t.Errorf("GetHarnessType() = %q, want %q", got, "claude_code")
 	}
 }
 
-func TestGetHarnessType_LegacyClaude(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test", AgentTypeLegacy: "claude"}
-	if got := role.GetHarnessType(); got != "claude_code" {
-		t.Errorf("GetHarnessType() = %q, want %q", got, "claude_code")
-	}
-}
-
-func TestGetHarnessType_LegacyCodex(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test", AgentTypeLegacy: "codex"}
+func TestGetHarnessType_ExplicitConfig(t *testing.T) {
+	role := &Role{RoleName: "test", AgentHarness: "codex"}
 	if got := role.GetHarnessType(); got != "codex" {
 		t.Errorf("GetHarnessType() = %q, want %q", got, "codex")
-	}
-}
-
-func TestGetHarnessType_NewConfig(t *testing.T) {
-	role := &Role{
-		Name:         "test",
-		Instructions: "test",
-		AgentHarness: "codex",
-	}
-	if got := role.GetHarnessType(); got != "codex" {
-		t.Errorf("GetHarnessType() = %q, want %q", got, "codex")
-	}
-}
-
-func TestGetHarnessType_NewOverridesLegacy(t *testing.T) {
-	role := &Role{
-		Name:            "test",
-		Instructions:    "test",
-		AgentTypeLegacy: "claude",
-		AgentHarness:    "codex",
-	}
-	if got := role.GetHarnessType(); got != "codex" {
-		t.Errorf("GetHarnessType() = %q, want %q (new should override legacy)", got, "codex")
 	}
 }
 
 func TestGetAgentType_MapsClaudeCodeToClaude(t *testing.T) {
-	role := &Role{
-		Name:         "test",
-		Instructions: "test",
-		AgentHarness: "claude_code",
-	}
+	role := &Role{RoleName: "test", AgentHarness: "claude_code"}
 	if got := role.GetAgentType(); got != "" {
 		t.Errorf("GetAgentType() = %q, want empty explicit command", got)
 	}
@@ -1463,8 +1377,7 @@ func TestGetAgentType_MapsClaudeCodeToClaude(t *testing.T) {
 
 func TestGetAgentType_GenericWithCommand(t *testing.T) {
 	role := &Role{
-		Name:                "test",
-		Instructions:        "test",
+		RoleName:            "test",
 		AgentHarness:        "generic",
 		AgentHarnessCommand: "/usr/local/bin/my-agent",
 	}
@@ -1473,162 +1386,32 @@ func TestGetAgentType_GenericWithCommand(t *testing.T) {
 	}
 }
 
-func TestGetModel_Legacy(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test", ModelLegacy: "opus"}
-	if got := role.GetModel(); got != "opus" {
-		t.Errorf("GetModel() = %q, want %q", got, "opus")
-	}
-}
-
-func TestGetModel_New(t *testing.T) {
-	role := &Role{
-		Name:         "test",
-		Instructions: "test",
-		AgentModel:   "sonnet",
-	}
+func TestGetModel(t *testing.T) {
+	role := &Role{RoleName: "test", AgentModel: "sonnet"}
 	if got := role.GetModel(); got != "sonnet" {
 		t.Errorf("GetModel() = %q, want %q", got, "sonnet")
 	}
 }
 
-func TestGetModel_NewOverridesLegacy(t *testing.T) {
-	role := &Role{
-		Name:         "test",
-		Instructions: "test",
-		ModelLegacy:  "opus",
-		AgentModel:   "sonnet",
-	}
-	if got := role.GetModel(); got != "sonnet" {
-		t.Errorf("GetModel() = %q, want %q (new should override legacy)", got, "sonnet")
-	}
-}
-
-func TestGetClaudeConfigDir_NewConfig(t *testing.T) {
-	role := &Role{
-		Name:                 "test",
-		Instructions:         "test",
-		ClaudeCodeConfigPath: "/new/config/dir",
-	}
+func TestGetClaudeConfigDir_ExplicitPath(t *testing.T) {
+	role := &Role{RoleName: "test", ClaudeCodeConfigPath: "/new/config/dir"}
 	if got := role.GetClaudeConfigDir(); got != "/new/config/dir" {
 		t.Errorf("GetClaudeConfigDir() = %q, want %q", got, "/new/config/dir")
 	}
 }
 
-func TestGetClaudeConfigDir_NewOverridesLegacy(t *testing.T) {
-	role := &Role{
-		Name:                  "test",
-		Instructions:          "test",
-		ClaudeConfigDirLegacy: "/old/config/dir",
-		ClaudeCodeConfigPath:  "/new/config/dir",
-	}
-	if got := role.GetClaudeConfigDir(); got != "/new/config/dir" {
-		t.Errorf("GetClaudeConfigDir() = %q, want %q (new should override legacy)", got, "/new/config/dir")
-	}
-}
-
 func TestGetCodexConfigDir(t *testing.T) {
 	// Not set → defaults to codex-config/default.
-	role := &Role{Name: "test", Instructions: "test"}
+	role := &Role{RoleName: "test"}
 	wantDefault := filepath.Join(ConfigDir(), "codex-config", "default")
 	if got := role.GetCodexConfigDir(); got != wantDefault {
 		t.Errorf("GetCodexConfigDir() = %q, want %q", got, wantDefault)
 	}
 
 	// Set via explicit codex path.
-	role2 := &Role{
-		Name:            "test",
-		Instructions:    "test",
-		CodexConfigPath: "/codex/config",
-	}
+	role2 := &Role{RoleName: "test", CodexConfigPath: "/codex/config"}
 	if got := role2.GetCodexConfigDir(); got != "/codex/config" {
 		t.Errorf("GetCodexConfigDir() = %q, want %q", got, "/codex/config")
-	}
-}
-
-func TestLoadRoleFrom_LegacyYAML(t *testing.T) {
-	// Old-format YAML with top-level agent_type, model, claude_config_dir.
-	yamlContent := `
-name: legacy-test
-agent_type: claude
-model: opus
-claude_config_dir: /custom/config
-instructions: |
-  A legacy role.
-`
-	path := writeTempFile(t, "legacy.yaml", yamlContent)
-	role, err := LoadRoleFrom(path)
-	if err != nil {
-		t.Fatalf("LoadRoleFrom: %v", err)
-	}
-
-	if role.GetHarnessType() != "claude_code" {
-		t.Errorf("GetHarnessType() = %q, want %q", role.GetHarnessType(), "claude_code")
-	}
-	if role.GetAgentType() != "" {
-		t.Errorf("GetAgentType() = %q, want empty explicit command", role.GetAgentType())
-	}
-	if role.GetModel() != "opus" {
-		t.Errorf("GetModel() = %q, want %q", role.GetModel(), "opus")
-	}
-	if role.GetClaudeConfigDir() != "/custom/config" {
-		t.Errorf("GetClaudeConfigDir() = %q, want %q", role.GetClaudeConfigDir(), "/custom/config")
-	}
-}
-
-func TestLoadRoleFrom_NewNestedYAML(t *testing.T) {
-	// New-format YAML with nested agent_harness section.
-	yamlContent := `
-name: new-test
-agent_harness:
-  harness_type: codex
-  model: o3-mini
-  codex_config_dir: /codex/config
-instructions: |
-  A new-format role.
-`
-	path := writeTempFile(t, "new.yaml", yamlContent)
-	role, err := LoadRoleFrom(path)
-	if err != nil {
-		t.Fatalf("LoadRoleFrom: %v", err)
-	}
-
-	if role.GetHarnessType() != "codex" {
-		t.Errorf("GetHarnessType() = %q, want %q", role.GetHarnessType(), "codex")
-	}
-	if role.GetAgentType() != "" {
-		t.Errorf("GetAgentType() = %q, want empty explicit command", role.GetAgentType())
-	}
-	if role.GetModel() != "o3-mini" {
-		t.Errorf("GetModel() = %q, want %q", role.GetModel(), "o3-mini")
-	}
-	if role.GetCodexConfigDir() != "/codex/config" {
-		t.Errorf("GetCodexConfigDir() = %q, want %q", role.GetCodexConfigDir(), "/codex/config")
-	}
-}
-
-func TestLoadRoleFrom_NewOverridesLegacyYAML(t *testing.T) {
-	// Both old and new format — new takes precedence.
-	yamlContent := `
-name: mixed-test
-agent_type: claude
-model: opus
-agent_harness:
-  harness_type: codex
-  model: o3-mini
-instructions: |
-  A mixed-format role.
-`
-	path := writeTempFile(t, "mixed.yaml", yamlContent)
-	role, err := LoadRoleFrom(path)
-	if err != nil {
-		t.Fatalf("LoadRoleFrom: %v", err)
-	}
-
-	if role.GetHarnessType() != "codex" {
-		t.Errorf("GetHarnessType() = %q, want %q (new should win)", role.GetHarnessType(), "codex")
-	}
-	if role.GetModel() != "o3-mini" {
-		t.Errorf("GetModel() = %q, want %q (new should win)", role.GetModel(), "o3-mini")
 	}
 }
 

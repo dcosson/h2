@@ -62,15 +62,15 @@ func setupTestH2Dir(t *testing.T) string {
 
 func writeRole(t *testing.T, dir, name string) {
 	t.Helper()
-	content := "name: " + name + "\ninstructions: |\n  Test role\n"
+	content := "role_name: " + name + "\ninstructions: |\n  Test role\n"
 	os.WriteFile(filepath.Join(dir, name+".yaml"), []byte(content), 0o644)
 }
 
 func TestLoadPodRole_PodRoleOverGlobal(t *testing.T) {
 	h2Dir := setupTestH2Dir(t)
 	// Create both a global and a pod role with same name but different descriptions.
-	globalContent := "name: builder\ndescription: global\ninstructions: |\n  global\n"
-	podContent := "name: builder\ndescription: pod-override\ninstructions: |\n  pod\n"
+	globalContent := "role_name: builder\ndescription: global\ninstructions: |\n  global\n"
+	podContent := "role_name: builder\ndescription: pod-override\ninstructions: |\n  pod\n"
 	os.WriteFile(filepath.Join(h2Dir, "roles", "builder.yaml"), []byte(globalContent), 0o644)
 	os.WriteFile(filepath.Join(h2Dir, "pods", "roles", "builder.yaml"), []byte(podContent), 0o644)
 
@@ -86,7 +86,7 @@ func TestLoadPodRole_PodRoleOverGlobal(t *testing.T) {
 func TestLoadPodRole_FallbackToGlobal(t *testing.T) {
 	h2Dir := setupTestH2Dir(t)
 	// Only global role, no pod role.
-	globalContent := "name: builder\ndescription: global-only\ninstructions: |\n  global\n"
+	globalContent := "role_name: builder\ndescription: global-only\ninstructions: |\n  global\n"
 	os.WriteFile(filepath.Join(h2Dir, "roles", "builder.yaml"), []byte(globalContent), 0o644)
 
 	role, err := LoadPodRole("builder")
@@ -123,7 +123,7 @@ func TestListPodRoles_ReturnsOnlyPodRoles(t *testing.T) {
 
 	// Should not include global role.
 	for _, r := range podRoles {
-		if r.Name == "global-role" {
+		if r.RoleName == "global-role" {
 			t.Error("ListPodRoles should not include global roles")
 		}
 	}
@@ -708,7 +708,7 @@ func TestExpandAndRender_PodVarsPassedToRole(t *testing.T) {
 	h2Dir := setupTestH2Dir(t)
 
 	// Create a role that requires "team" variable.
-	roleContent := `name: needs-team
+	roleContent := `role_name: needs-team
 variables:
   team:
     description: "Team name"
@@ -750,7 +750,7 @@ instructions: |
 func TestExpandAndRender_CLIOverridesPodVars(t *testing.T) {
 	h2Dir := setupTestH2Dir(t)
 
-	roleContent := `name: needs-team
+	roleContent := `role_name: needs-team
 variables:
   team:
     description: "Team name"
@@ -803,7 +803,7 @@ instructions: |
 func TestExpandAndRender_PodVarsAndRoleDefaults(t *testing.T) {
 	h2Dir := setupTestH2Dir(t)
 
-	roleContent := `name: multi-var
+	roleContent := `role_name: multi-var
 variables:
   team:
     description: "Team name"
@@ -851,7 +851,7 @@ instructions: |
 func TestExpandAndRender_CLIOverridesRoleDefaults(t *testing.T) {
 	h2Dir := setupTestH2Dir(t)
 
-	roleContent := `name: with-default
+	roleContent := `role_name: with-default
 variables:
   env:
     description: "Environment"
@@ -906,7 +906,7 @@ agents:
 func TestFullPipeline_RoleRenderedPerAgent(t *testing.T) {
 	h2Dir := setupTestH2Dir(t)
 
-	roleContent := `name: indexed
+	roleContent := `role_name: indexed
 instructions: |
   You are {{ .AgentName }}, agent {{ .Index }}/{{ .Count }} in pod {{ .PodName }}.
 `
@@ -956,7 +956,7 @@ instructions: |
 func TestFullPipeline_RoleFailureIdentifiesAgent(t *testing.T) {
 	h2Dir := setupTestH2Dir(t)
 
-	roleContent := `name: needs-team
+	roleContent := `role_name: needs-team
 variables:
   team:
     description: "Team name"
@@ -1102,7 +1102,7 @@ func TestE2E_PodVarsToRole(t *testing.T) {
 func TestLoadPodRoleRendered_PodRoleWithRendering(t *testing.T) {
 	h2Dir := setupTestH2Dir(t)
 
-	podRoleContent := `name: pod-coder
+	podRoleContent := `role_name: pod-coder
 instructions: |
   You are {{ .AgentName }} in pod {{ .PodName }}.
 `
@@ -1128,7 +1128,7 @@ instructions: |
 func TestLoadPodRoleRendered_FallbackToGlobalWithRendering(t *testing.T) {
 	h2Dir := setupTestH2Dir(t)
 
-	globalContent := `name: coding
+	globalContent := `role_name: coding
 instructions: |
   You are {{ .AgentName }}.
 `
@@ -1150,7 +1150,7 @@ instructions: |
 func TestLoadPodRoleRendered_NilContext(t *testing.T) {
 	h2Dir := setupTestH2Dir(t)
 
-	content := `name: basic
+	content := `role_name: basic
 instructions: |
   Static instructions.
 `
@@ -1243,7 +1243,7 @@ agents:
 func TestLoadRoleRenderedFrom_DoesNotMutateCTXVar(t *testing.T) {
 	h2Dir := setupTestH2Dir(t)
 
-	roleContent := `name: with-default
+	roleContent := `role_name: with-default
 variables:
   env:
     description: "Environment"

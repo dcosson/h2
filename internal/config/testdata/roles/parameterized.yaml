@@ -1,4 +1,4 @@
-name: parameterized
+role_name: parameterized
 variables:
   team:
     description: "Team name"
