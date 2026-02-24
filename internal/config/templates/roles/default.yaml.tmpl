@@ -25,6 +25,8 @@ description: "A {{ .RoleName }} agent for h2" # description is defined by the fi
 # codex_config_path_prefix: "{{ .H2Dir }}/codex-config"
 # codex_config_path: "" (defaults to prefix + account profile)
 
+agent_harness: "{{ .Var.agent_harness }}"
+
 {{ if eq .Var.agent_harness "codex" -}}
 # Codex model
 agent_model: "{{ if eq .Var.agent_model "<harness-default>" -}}gpt-5.3-codex{{- else -}}{{ .Var.agent_model }}{{- end }}"
