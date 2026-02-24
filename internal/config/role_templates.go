@@ -6,17 +6,17 @@ import (
 	"strings"
 )
 
-//go:embed templates/roles/default.yaml templates/roles/concierge.yaml templates/CLAUDE_AND_AGENTS.md
+//go:embed templates/roles/default.yaml.tmpl templates/roles/concierge.yaml.tmpl templates/CLAUDE_AND_AGENTS.md
 var Templates embed.FS
 
 // RoleTemplate returns the embedded YAML template for the given role name.
 // Falls back to "default" if no specific template exists for the name.
 func RoleTemplate(name string) string {
-	path := fmt.Sprintf("templates/roles/%s.yaml", name)
+	path := fmt.Sprintf("templates/roles/%s.yaml.tmpl", name)
 	data, err := Templates.ReadFile(path)
 	if err != nil {
 		// Fall back to default template.
-		data, err = Templates.ReadFile("templates/roles/default.yaml")
+		data, err = Templates.ReadFile("templates/roles/default.yaml.tmpl")
 		if err != nil {
 			panic(fmt.Sprintf("embedded default role template missing: %v", err))
 		}
