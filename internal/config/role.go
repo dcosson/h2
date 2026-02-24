@@ -387,6 +387,12 @@ func resolveRolePath(dir, name string) (string, bool) {
 	return filepath.Join(dir, name+".yaml"), false
 }
 
+// ResolveRolePath returns the path to a role file by name, checking .yaml.tmpl first then .yaml.
+func ResolveRolePath(name string) string {
+	path, _ := resolveRolePath(RolesDir(), name)
+	return path
+}
+
 // LoadRole loads a role by name from ~/.h2/roles/<name>.yaml or <name>.yaml.tmpl.
 func LoadRole(name string) (*Role, error) {
 	path, _ := resolveRolePath(RolesDir(), name)

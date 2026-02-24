@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -116,7 +115,7 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 					name = agentName
 					role, err = config.LoadPodRoleRendered(roleName, ctx)
 				} else {
-					rolePath := filepath.Join(config.RolesDir(), roleName+".yaml")
+					rolePath := config.ResolveRolePath(roleName)
 					role, name, err = config.LoadRoleWithNameResolution(
 						rolePath, ctx, nameFuncs, name, session.GenerateName,
 					)

@@ -36,7 +36,7 @@ func PodTemplatesDir() string {
 // Only called when --pod is specified. Without --pod, use LoadRole() (global only).
 func LoadPodRole(name string) (*Role, error) {
 	// Try pod-scoped role first.
-	podPath := filepath.Join(PodRolesDir(), name+".yaml")
+	podPath, _ := resolveRolePath(PodRolesDir(), name)
 	if _, err := os.Stat(podPath); err == nil {
 		return LoadRoleFrom(podPath)
 	}
@@ -47,7 +47,7 @@ func LoadPodRole(name string) (*Role, error) {
 // IsPodScopedRole returns true if the role exists under pods/roles/ (pod-scoped),
 // false if it would fall back to the global roles/ directory.
 func IsPodScopedRole(name string) bool {
-	podPath := filepath.Join(PodRolesDir(), name+".yaml")
+	podPath, _ := resolveRolePath(PodRolesDir(), name)
 	_, err := os.Stat(podPath)
 	return err == nil
 }
@@ -56,7 +56,7 @@ func IsPodScopedRole(name string) bool {
 // first then global roles. If ctx is nil, behaves like LoadPodRole.
 func LoadPodRoleRendered(name string, ctx *tmpl.Context) (*Role, error) {
 	// Try pod-scoped role first.
-	podPath := filepath.Join(PodRolesDir(), name+".yaml")
+	podPath, _ := resolveRolePath(PodRolesDir(), name)
 	if _, err := os.Stat(podPath); err == nil {
 		return LoadRoleRenderedFrom(podPath, ctx)
 	}
