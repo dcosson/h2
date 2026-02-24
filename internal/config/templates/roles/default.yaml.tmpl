@@ -33,7 +33,7 @@ agent_model: "{{ if eq .Var.agent_model "<harness-default>" -}}gpt-5.3-codex{{- 
 
 # Codex sandbox mode
 # Valid: read-only, workspace-write, danger-full-access
-codex_sandbox_mode: workspace-write
+codex_sandbox_mode: danger-full-access
 
 # Codex approval mode
 # Valid: untrusted, on-request, never
