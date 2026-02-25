@@ -22,39 +22,14 @@ var validInitStyles = map[string]struct{}{
 	initStyleMinimal:     {},
 }
 
-const minimalInstructionsMarkdown = `# Shared Agent Instructions
-
-Add your team or project instructions here.
-`
-
-const minimalDefaultRoleTemplate = `role_name: "{{ .RoleName }}"
-description: "A {{ .RoleName }} agent for h2"
-agent_harness: "claude_code"
-instructions: |
-  Follow instructions from CLAUDE.md / AGENTS.md.
-`
-
-const defaultConfigYAML = `# h2 configuration
-# See https://github.com/dcosson/h2 for documentation.
-#
-# users:
-#   yourname:
-#     bridges:
-#       telegram:
-#         bot_token: "123456:ABC-DEF"
-#         chat_id: 789
-#       macos_notify:
-#         enabled: true
-`
-
 // expectedRootDirFiles are files that live at H2_ROOT_DIR and may already
 // exist when initializing a directory. If the target dir contains only
 // these (plus the marker), we allow init to proceed.
 var expectedRootDirFiles = map[string]bool{
-	".h2-dir.txt":         true,
-	"routes.jsonl":        true,
+	".h2-dir.txt":          true,
+	"routes.jsonl":         true,
 	"terminal-colors.json": true,
-	"config.yaml":         true,
+	"config.yaml":          true,
 }
 
 func newInitCmd() *cobra.Command {
@@ -196,7 +171,7 @@ func runFullInit(cmd *cobra.Command, abs, prefix, style string, out io.Writer) e
 
 	// Write config.yaml.
 	configPath := filepath.Join(abs, "config.yaml")
-	if err := os.WriteFile(configPath, []byte(defaultConfigYAML), 0o644); err != nil {
+	if err := os.WriteFile(configPath, []byte(config.ConfigTemplate(style)), 0o644); err != nil {
 		return fmt.Errorf("write config.yaml: %w", err)
 	}
 	fmt.Fprintf(out, "  Wrote config.yaml\n")
@@ -242,9 +217,9 @@ func runGenerate(abs, what, style string, force bool, out io.Writer) error {
 	case "instructions":
 		return generateInstructions(abs, style, force, out)
 	case "config":
-		return generateConfig(abs, force, out)
+		return generateConfig(abs, style, force, out)
 	case "all":
-		if err := generateConfig(abs, force, out); err != nil {
+		if err := generateConfig(abs, style, force, out); err != nil {
 			return err
 		}
 		if err := generateInstructions(abs, style, force, out); err != nil {
@@ -258,7 +233,7 @@ func runGenerate(abs, what, style string, force bool, out io.Writer) error {
 
 // generateRoles regenerates the default role file.
 func generateRoles(abs, style string, force bool, out io.Writer) error {
-	content := roleTemplateForStyle(style, "default")
+	content := config.RoleTemplateWithStyle("default", style)
 	ext := config.RoleFileExtension(content)
 	fileName := "default" + ext
 	rolePath := filepath.Join(abs, "roles", fileName)
@@ -320,13 +295,13 @@ func generateInstructions(abs, style string, force bool, out io.Writer) error {
 		if _, err := os.Stat(sharedMDPath); err == nil {
 			fmt.Fprintf(out, "  Skipped account-profiles-shared/default/CLAUDE_AND_AGENTS.md (already exists, use --force to overwrite)\n")
 		} else {
-			if err := os.WriteFile(sharedMDPath, []byte(instructionsTemplateForStyle(style)), 0o644); err != nil {
+			if err := os.WriteFile(sharedMDPath, []byte(config.InstructionsTemplateWithStyle(style)), 0o644); err != nil {
 				return fmt.Errorf("write CLAUDE_AND_AGENTS.md: %w", err)
 			}
 			fmt.Fprintf(out, "  Wrote account-profiles-shared/default/CLAUDE_AND_AGENTS.md\n")
 		}
 	} else {
-		if err := os.WriteFile(sharedMDPath, []byte(instructionsTemplateForStyle(style)), 0o644); err != nil {
+		if err := os.WriteFile(sharedMDPath, []byte(config.InstructionsTemplateWithStyle(style)), 0o644); err != nil {
 			return fmt.Errorf("write CLAUDE_AND_AGENTS.md: %w", err)
 		}
 		fmt.Fprintf(out, "  Wrote account-profiles-shared/default/CLAUDE_AND_AGENTS.md\n")
@@ -376,7 +351,7 @@ func ensureSymlink(path, target string, force bool, out io.Writer, label string)
 }
 
 // generateConfig regenerates config.yaml.
-func generateConfig(abs string, force bool, out io.Writer) error {
+func generateConfig(abs, style string, force bool, out io.Writer) error {
 	configPath := filepath.Join(abs, "config.yaml")
 	if !force {
 		if _, err := os.Stat(configPath); err == nil {
@@ -384,7 +359,7 @@ func generateConfig(abs string, force bool, out io.Writer) error {
 			return nil
 		}
 	}
-	if err := os.WriteFile(configPath, []byte(defaultConfigYAML), 0o644); err != nil {
+	if err := os.WriteFile(configPath, []byte(config.ConfigTemplate(style)), 0o644); err != nil {
 		return fmt.Errorf("write config.yaml: %w", err)
 	}
 	fmt.Fprintf(out, "  Wrote config.yaml\n")
@@ -406,7 +381,7 @@ func writeInstructions(abs, style string) error {
 	if err := os.MkdirAll(sharedSkillsDir, 0o755); err != nil {
 		return fmt.Errorf("create shared profile skills dir: %w", err)
 	}
-	if err := os.WriteFile(sharedMDPath, []byte(instructionsTemplateForStyle(style)), 0o644); err != nil {
+	if err := os.WriteFile(sharedMDPath, []byte(config.InstructionsTemplateWithStyle(style)), 0o644); err != nil {
 		return fmt.Errorf("write CLAUDE_AND_AGENTS.md: %w", err)
 	}
 
@@ -428,24 +403,8 @@ func writeInstructions(abs, style string) error {
 	return nil
 }
 
-func instructionsTemplateForStyle(style string) string {
-	switch style {
-	case initStyleMinimal:
-		return minimalInstructionsMarkdown
-	default:
-		return config.InstructionsTemplate()
-	}
-}
-
-func roleTemplateForStyle(style, name string) string {
-	if style == initStyleMinimal && name == "default" {
-		return minimalDefaultRoleTemplate
-	}
-	return config.RoleTemplate(name)
-}
-
 func createRoleWithStyle(rolesDir, name, style string) (string, error) {
-	content := roleTemplateForStyle(style, name)
+	content := config.RoleTemplateWithStyle(name, style)
 	ext := config.RoleFileExtension(content)
 	path := filepath.Join(rolesDir, name+ext)
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {

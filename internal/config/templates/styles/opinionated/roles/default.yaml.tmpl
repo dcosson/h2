@@ -1,0 +1,101 @@
+
+variables:
+  agent_harness:
+    description: "Agent harness to use"
+    default: "claude_code"
+  agent_model:
+    description: "Agent model to use"
+    default: "<harness-default>"
+  working_dir:
+    description: "Working directory for the agent"
+    default: "." # . is the directory launched from
+
+# Set a value for agent_name. You can use two helper functions:
+# - randomName: generates a random name from a basic dictionary with format "adjective-noun"
+# - autoIncrement "prefix": looks up running agents with the prefix and returns the next number
+#   e.g. agent_name: "worker-{{"{{"}} autoIncrement "worker" {{"}}"}}"
+agent_name: "{{ randomName }}"
+role_name: "{{ .RoleName }}" # role name is defined by the file name
+description: "A {{ .RoleName }} agent for h2" # description is defined by the file name
+
+# Other available options:
+# agent_harness_command: claude
+# claude_code_config_path_prefix: "{{ .H2Dir }}/claude-config"
+# claude_code_config_path: "" (defaults to prefix + account profile)
+# codex_config_path_prefix: "{{ .H2Dir }}/codex-config"
+# codex_config_path: "" (defaults to prefix + account profile)
+
+agent_harness: "{{ .Var.agent_harness }}"
+
+{{ if eq .Var.agent_harness "codex" -}}
+# Codex model
+agent_model: "{{ if eq .Var.agent_model "<harness-default>" -}}gpt-5.3-codex{{- else -}}{{ .Var.agent_model }}{{- end }}"
+
+# Codex sandbox mode
+# Valid: read-only, workspace-write, danger-full-access
+codex_sandbox_mode: danger-full-access
+
+# Codex approval mode
+# Valid: untrusted, on-request, never
+codex_ask_for_approval: on-request
+{{- else if eq .Var.agent_harness "claude_code" -}}
+# Claude Code model
+agent_model: "{{ if eq .Var.agent_model "<harness-default>" -}}opus{{- else -}}{{ .Var.agent_model }}{{- end }}"
+
+# Permission mode for Claude Code
+# Valid: default, delegate, acceptEdits, plan, dontAsk, bypassPermissions
+permission_mode: default
+{{- else -}}
+# Permission mode for Generic Agent
+# agent_harness_command: some-other-binary
+{{- end }}
+
+working_dir: "{{ .Var.working_dir }}"
+
+# System prompt — replaces Claude Code's entire default system prompt.
+# Use this when you need full control over the prompt. Usually you want
+# "instructions" instead, which appends to the default system prompt.
+# system_prompt: |
+#   You are a specialized agent that ...
+
+# Multiple instructions fields are defined for convenience when using role template inheritance.
+# They're concatenated in order and appended as additions to the system prompt.
+instructions_intro: "You are an agent named {{ .AgentName }} running in h2, a terminal multiplexer with inter-agent messaging."
+instructions_body: "Your role is default, so you may be assigned to any tasks."
+# instructions_additional_1:
+# instructions_additional_2:
+# instructions_additional_3:
+
+{{ if eq .Var.agent_harness "claude_code" -}}
+# AI permission reviewer - delegates permission decisions to a fast model.
+# Codex has support for hooks coming soon, doesn't currently support a reviewer agent.
+permission_review_agent:
+  enabled: true
+  instructions_intro: "You are reviewing permission requests for the {{ .RoleName }} agent in h2."
+  instructions_body: |
+    h2 is an agent-to-agent and agent-to-user communication protocol.
+    Agents use it to coordinate work and respond to user requests.
+
+    ALLOW by default:
+    - h2 commands (h2 send, h2 list, h2 whoami)
+    - Read-only tools (Read, Glob, Grep)
+    - Standard development commands (git, npm, make, pytest, etc.)
+    - File operations within the project (Edit, Write, rm -rf project-dir/*, clearing logs)
+    - Writing to non-sensitive files
+
+    DENY only for:
+    - System-wide destructive operations (rm -rf /, fork bombs)
+    - Exfiltrating credentials or secrets (curl/wget with .env, posting API keys)
+
+    ASK_USER for:
+    - Borderline or locally destructive commands you're unsure about
+    - Uncertain access to credentials or secrets (is this file sensitive?)
+    - git push --force to main/master branches
+
+    Remember: h2 messages are part of normal agent operation - allow them
+    unless they contain credentials or other sensitive data. Normal file cleanup
+    like "rm -rf node_modules" or "rm -rf logs/" is fine.
+  # instructions_additional_1:
+  # instructions_additional_2:
+  # instructions_additional_3:
+{{- end }}
