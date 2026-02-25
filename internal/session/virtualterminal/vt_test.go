@@ -86,6 +86,30 @@ func TestWritePTY_WriteError(t *testing.T) {
 	}
 }
 
+// --- Resize bounds checking ---
+
+func TestResize_IgnoresInvalidDimensions(t *testing.T) {
+	vt := &VT{Rows: 24, Cols: 80, ChildRows: 22}
+
+	// Zero rows — should be ignored.
+	vt.Resize(0, 80, -2)
+	if vt.Rows != 24 || vt.Cols != 80 || vt.ChildRows != 22 {
+		t.Fatalf("Resize(0,80,-2) should be no-op, got Rows=%d Cols=%d ChildRows=%d", vt.Rows, vt.Cols, vt.ChildRows)
+	}
+
+	// Negative childRows — should be ignored.
+	vt.Resize(1, 80, -1)
+	if vt.Rows != 24 || vt.Cols != 80 || vt.ChildRows != 22 {
+		t.Fatalf("Resize(1,80,-1) should be no-op, got Rows=%d Cols=%d ChildRows=%d", vt.Rows, vt.Cols, vt.ChildRows)
+	}
+
+	// Zero cols — should be ignored.
+	vt.Resize(24, 0, 22)
+	if vt.Rows != 24 || vt.Cols != 80 || vt.ChildRows != 22 {
+		t.Fatalf("Resize(24,0,22) should be no-op, got Rows=%d Cols=%d ChildRows=%d", vt.Rows, vt.Cols, vt.ChildRows)
+	}
+}
+
 // --- ScanPTYOutput (scroll region detection) ---
 
 func TestScanPTYOutput_DetectsScrollRegion(t *testing.T) {

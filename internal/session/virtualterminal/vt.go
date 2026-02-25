@@ -251,7 +251,11 @@ func (vt *VT) RespondOSCColors(data []byte) {
 }
 
 // Resize updates dimensions and resizes the virtual terminal and PTY.
+// Dimensions must be positive; invalid values are silently ignored.
 func (vt *VT) Resize(totalRows, cols, childRows int) {
+	if totalRows <= 0 || cols <= 0 || childRows <= 0 {
+		return
+	}
 	vt.Rows = totalRows
 	vt.Cols = cols
 	vt.ChildRows = childRows

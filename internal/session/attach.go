@@ -169,7 +169,7 @@ func (d *Daemon) readClientInput(conn net.Conn, cl *client.Client) {
 			if err := json.Unmarshal(payload, &ctrl); err != nil {
 				continue
 			}
-			if ctrl.Type == "resize" {
+			if ctrl.Type == "resize" && ctrl.Rows >= 3 && ctrl.Cols >= 1 {
 				vt := s.VT
 				vt.Mu.Lock()
 				cl.TermRows = ctrl.Rows

@@ -153,7 +153,7 @@ func (c *Client) WatchResize(sigCh <-chan os.Signal) {
 		if c.DebugKeys {
 			minRows = 4
 		}
-		if err != nil || rows < minRows {
+		if err != nil || rows < minRows || cols < 1 {
 			continue
 		}
 

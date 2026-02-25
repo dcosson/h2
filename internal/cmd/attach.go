@@ -83,7 +83,7 @@ func doAttach(name string) error {
 	go func() {
 		for range sigCh {
 			cols, rows, err := term.GetSize(fd)
-			if err != nil {
+			if err != nil || rows < 3 || cols < 1 {
 				continue
 			}
 			ctrl, _ := json.Marshal(message.ResizeControl{
