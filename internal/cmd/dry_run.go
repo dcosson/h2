@@ -95,10 +95,14 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 		envVars["H2_POD"] = pod
 	}
 
-	// Capture PrependArgs from PrepareForLaunch in dry-run mode (no side effects).
+	// Capture launch config from PrepareForLaunch in dry-run mode (no side effects).
+	// This includes harness-provided prepend args and launch-time env vars.
 	var prependArgs []string
 	if launchCfg, err := h.PrepareForLaunch(name, "<generated-uuid>", true); err == nil {
 		prependArgs = launchCfg.PrependArgs
+		for k, v := range launchCfg.Env {
+			envVars[k] = v
+		}
 	}
 
 	// Resolve additional dirs.

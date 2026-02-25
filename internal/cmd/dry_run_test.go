@@ -920,6 +920,31 @@ func TestRunDryRun_CodexRoleShowsCodexHome(t *testing.T) {
 	}
 }
 
+func TestRunDryRun_ClaudeRoleShowsLaunchEnvVars(t *testing.T) {
+	h2Root := setupPodTestEnv(t)
+
+	roleContent := "role_name: claude-default\nagent_harness: claude_code\ninstructions: |\n  Work.\n"
+	os.WriteFile(filepath.Join(h2Root, "roles", "claude-default.yaml"), []byte(roleContent), 0o644)
+
+	output := captureStdout(func() {
+		cmd := newRunCmd()
+		cmd.SetArgs([]string{"--dry-run", "--role", "claude-default", "--name", "claude-agent"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	checks := []string{
+		"CLAUDE_CODE_ENABLE_TELEMETRY=1",
+		"OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:<PORT>",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Errorf("output should contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestRunDryRun_NoSideEffects(t *testing.T) {
 	h2Root := setupPodTestEnv(t)
 
