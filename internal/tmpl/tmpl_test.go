@@ -1046,6 +1046,167 @@ func TestValidateNoUnknownVars_ErrorFormat(t *testing.T) {
 	})
 }
 
+// --- Section 6: Inheritance Helpers ---
+
+func TestMergeVarDefs(t *testing.T) {
+	parent := map[string]VarDef{
+		"team": {Description: "Team (parent)"},
+		"env":  {Description: "Environment", Default: strPtr("dev")},
+	}
+	child := map[string]VarDef{
+		"team":    {Description: "Team (child)", Default: strPtr("platform")},
+		"service": {Description: "Service"},
+	}
+
+	merged := MergeVarDefs(parent, child)
+	if len(merged) != 3 {
+		t.Fatalf("got %d defs, want 3", len(merged))
+	}
+
+	if got := merged["team"].Description; got != "Team (child)" {
+		t.Errorf("team description = %q, want child override", got)
+	}
+	if merged["team"].Default == nil || *merged["team"].Default != "platform" {
+		t.Errorf("team default = %v, want %q", merged["team"].Default, "platform")
+	}
+	if got := merged["env"].Description; got != "Environment" {
+		t.Errorf("env description = %q, want parent value", got)
+	}
+	if got := merged["service"].Description; got != "Service" {
+		t.Errorf("service description = %q, want child value", got)
+	}
+
+	// Ensure input maps are not mutated.
+	if parent["team"].Default != nil {
+		t.Fatal("parent map should not be mutated")
+	}
+}
+
+func TestValidateChildCoversRequired(t *testing.T) {
+	t.Run("missing required parent var errors", func(t *testing.T) {
+		parent := map[string]VarDef{
+			"team": {Description: "Team name"},
+			"env":  {Default: strPtr("dev")},
+		}
+		child := map[string]VarDef{
+			"service": {Description: "Service name"},
+		}
+
+		err := ValidateChildCoversRequired(parent, child)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "team") {
+			t.Error("error should list missing required var 'team'")
+		}
+		if strings.Contains(msg, "env") {
+			t.Error("error should not include optional parent var 'env'")
+		}
+		if !strings.Contains(msg, "Team name") {
+			t.Error("error should include parent var description")
+		}
+	})
+
+	t.Run("child can satisfy required parent var by adding default", func(t *testing.T) {
+		parent := map[string]VarDef{
+			"team": {Description: "Team name"},
+		}
+		child := map[string]VarDef{
+			"team": {Description: "Team name", Default: strPtr("platform")},
+		}
+
+		if err := ValidateChildCoversRequired(parent, child); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("missing required vars are sorted", func(t *testing.T) {
+		parent := map[string]VarDef{
+			"zeta":  {Description: "Z"},
+			"alpha": {Description: "A"},
+		}
+		child := map[string]VarDef{}
+
+		err := ValidateChildCoversRequired(parent, child)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		msg := err.Error()
+		alphaIdx := strings.Index(msg, "alpha")
+		zetaIdx := strings.Index(msg, "zeta")
+		if alphaIdx > zetaIdx {
+			t.Error("missing vars should be sorted alphabetically")
+		}
+	})
+}
+
+func TestParseInherits(t *testing.T) {
+	t.Run("extracts inherits and removes section", func(t *testing.T) {
+		input := `role_name: backend
+inherits: coder
+instructions: |
+  Hello
+`
+		inherits, remaining, err := ParseInherits(input)
+		if err != nil {
+			t.Fatalf("ParseInherits: %v", err)
+		}
+		if inherits != "coder" {
+			t.Errorf("inherits = %q, want %q", inherits, "coder")
+		}
+		if strings.Contains(remaining, "inherits:") {
+			t.Error("remaining should not contain inherits section")
+		}
+		if !strings.Contains(remaining, "role_name: backend") {
+			t.Error("remaining should preserve other top-level keys")
+		}
+	})
+
+	t.Run("supports quoted and commented inherits value", func(t *testing.T) {
+		input := `inherits: "base-coder" # parent role
+role_name: child
+`
+		inherits, _, err := ParseInherits(input)
+		if err != nil {
+			t.Fatalf("ParseInherits: %v", err)
+		}
+		if inherits != "base-coder" {
+			t.Errorf("inherits = %q, want %q", inherits, "base-coder")
+		}
+	})
+
+	t.Run("missing inherits returns empty and unchanged text", func(t *testing.T) {
+		input := `role_name: child
+instructions: hi
+`
+		inherits, remaining, err := ParseInherits(input)
+		if err != nil {
+			t.Fatalf("ParseInherits: %v", err)
+		}
+		if inherits != "" {
+			t.Errorf("inherits = %q, want empty", inherits)
+		}
+		if remaining != input {
+			t.Error("remaining should be unchanged when inherits is missing")
+		}
+	})
+
+	t.Run("non-string inherits value errors", func(t *testing.T) {
+		input := `inherits:
+  parent: coder
+role_name: child
+`
+		_, _, err := ParseInherits(input)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "inherits must be a string") {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+}
+
 // --- Helpers ---
 
 func strPtr(s string) *string {
