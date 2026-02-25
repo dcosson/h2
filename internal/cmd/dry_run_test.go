@@ -900,6 +900,26 @@ func TestRunDryRun_WithPodEnvVars(t *testing.T) {
 	}
 }
 
+func TestRunDryRun_CodexRoleShowsCodexHome(t *testing.T) {
+	h2Root := setupPodTestEnv(t)
+
+	roleContent := "role_name: codex-default\nagent_harness: codex\ninstructions: |\n  Work.\n"
+	os.WriteFile(filepath.Join(h2Root, "roles", "codex-default.yaml"), []byte(roleContent), 0o644)
+
+	output := captureStdout(func() {
+		cmd := newRunCmd()
+		cmd.SetArgs([]string{"--dry-run", "--role", "codex-default", "--name", "codex-agent"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	want := "CODEX_HOME=" + filepath.Join(h2Root, "codex-config", "default")
+	if !strings.Contains(output, want) {
+		t.Errorf("output should contain %q, got:\n%s", want, output)
+	}
+}
+
 func TestRunDryRun_NoSideEffects(t *testing.T) {
 	h2Root := setupPodTestEnv(t)
 

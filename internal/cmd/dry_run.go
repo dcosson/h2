@@ -228,11 +228,13 @@ func printDryRun(rc *ResolvedAgentConfig) {
 	// Environment variables.
 	fmt.Println()
 	fmt.Println("Environment:")
-	envOrder := []string{"H2_DIR", "H2_ACTOR", "H2_ROLE", "H2_POD", "H2_SESSION_DIR", "CLAUDE_CONFIG_DIR"}
-	for _, key := range envOrder {
-		if val, ok := rc.EnvVars[key]; ok {
-			fmt.Printf("  %s=%s\n", key, val)
-		}
+	var envKeys []string
+	for k := range rc.EnvVars {
+		envKeys = append(envKeys, k)
+	}
+	sort.Strings(envKeys)
+	for _, key := range envKeys {
+		fmt.Printf("  %s=%s\n", key, rc.EnvVars[key])
 	}
 
 	// Permission review agent.
