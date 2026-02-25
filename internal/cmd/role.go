@@ -10,8 +10,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"h2/internal/config"
-	"h2/internal/tmpl"
 	s "h2/internal/termstyle"
+	"h2/internal/tmpl"
 )
 
 func newRoleCmd() *cobra.Command {
@@ -50,20 +50,20 @@ func newRoleListCmd() *cobra.Command {
 			if len(podRoles) > 0 {
 				if len(globalRoles) > 0 {
 					fmt.Printf("%s\n", s.Bold("Global roles"))
-					printRoleList(globalRoles)
+					printRoleList(globalRoles, config.RolesDir())
 				}
 				fmt.Printf("%s\n", s.Bold("Pod roles"))
-				printRoleList(podRoles)
+				printRoleList(podRoles, config.PodRolesDir())
 			} else {
 				// No pod roles — flat output (backward compatible).
-				printRoleList(globalRoles)
+				printRoleList(globalRoles, config.RolesDir())
 			}
 			return nil
 		},
 	}
 }
 
-func printRoleList(roles []*config.Role) {
+func printRoleList(roles []*config.Role, rolesDir string) {
 	for _, r := range roles {
 		desc := r.Description
 		if desc == "" {
@@ -77,7 +77,11 @@ func printRoleList(roles []*config.Role) {
 				varInfo = fmt.Sprintf(" (%d variables)", n)
 			}
 		}
-		fmt.Printf("  %-16s %s%s\n", r.RoleName, desc, varInfo)
+		inheritInfo := ""
+		if parent := directParentFromRoleFile(rolesDir, r.RoleName); parent != "" {
+			inheritInfo = fmt.Sprintf(" (inherits: %s)", parent)
+		}
+		fmt.Printf("  %-16s %s%s%s\n", r.RoleName, desc, varInfo, inheritInfo)
 	}
 }
 
@@ -87,12 +91,22 @@ func newRoleShowCmd() *cobra.Command {
 		Short: "Display a role's configuration",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			role, varDefs, err := config.LoadRoleForDisplay(args[0])
+			role, _, err := config.LoadRoleForDisplay(args[0])
+			if err != nil {
+				return err
+			}
+			meta, err := config.GetRoleInheritanceMetadata(args[0])
 			if err != nil {
 				return err
 			}
 
 			fmt.Printf("Role:        %s\n", role.RoleName)
+			if meta.DirectParent != "" {
+				fmt.Printf("Inherits:    %s\n", meta.DirectParent)
+			}
+			if len(meta.Chain) > 1 {
+				fmt.Printf("Chain:       %s\n", strings.Join(meta.Chain, " -> "))
+			}
 			if role.GetModel() != "" {
 				fmt.Printf("Model:       %s\n", role.GetModel())
 			}
@@ -124,8 +138,11 @@ func newRoleShowCmd() *cobra.Command {
 				fmt.Printf("\nPermission Review Agent: enabled\n")
 			}
 
-			if len(varDefs) > 0 {
-				printVariables(varDefs)
+			if len(role.Variables) > 0 {
+				printVariables(role.Variables, meta.ExposedVarOrigins)
+			}
+			if len(meta.HiddenVarOrigins) > 0 {
+				printHiddenInheritedVariables(meta.HiddenVarOrigins)
 			}
 
 			return nil
@@ -134,7 +151,7 @@ func newRoleShowCmd() *cobra.Command {
 }
 
 // printVariables displays variable definitions in a formatted section.
-func printVariables(defs map[string]tmpl.VarDef) {
+func printVariables(defs map[string]tmpl.VarDef, origins map[string]string) {
 	// Sort variable names for deterministic output.
 	names := make([]string, 0, len(defs))
 	for name := range defs {
@@ -155,12 +172,55 @@ func printVariables(defs map[string]tmpl.VarDef) {
 		} else {
 			defVal = "(required)"
 		}
+		origin := ""
+		if from := origins[name]; from != "" {
+			origin = fmt.Sprintf(" [from: %s]", from)
+		}
 		if desc != "" {
-			fmt.Printf("  %-16s %s %s\n", name, desc, defVal)
+			fmt.Printf("  %-16s %s %s%s\n", name, desc, defVal, origin)
 		} else {
-			fmt.Printf("  %-16s %s\n", name, defVal)
+			fmt.Printf("  %-16s %s%s\n", name, defVal, origin)
 		}
 	}
+}
+
+func printHiddenInheritedVariables(origins map[string]string) {
+	names := make([]string, 0, len(origins))
+	for name := range origins {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	fmt.Printf("\nInherited Variables (hidden from child contract):\n")
+	for _, name := range names {
+		fmt.Printf("  %-16s [from: %s]\n", name, origins[name])
+	}
+}
+
+func directParentFromRoleFile(rolesDir, roleName string) string {
+	path, ok := resolveRolePathForDir(rolesDir, roleName)
+	if !ok {
+		return ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	parent, _, err := tmpl.ParseInherits(string(data))
+	if err != nil {
+		return ""
+	}
+	return parent
+}
+
+func resolveRolePathForDir(dir, roleName string) (string, bool) {
+	for _, ext := range []string{".yaml.tmpl", ".yaml"} {
+		path := filepath.Join(dir, roleName+ext)
+		if _, err := os.Stat(path); err == nil {
+			return path, true
+		}
+	}
+	return "", false
 }
 
 func newRoleInitCmd() *cobra.Command {
@@ -212,12 +272,23 @@ func newRoleCheckCmd() *cobra.Command {
 		Short: "Validate a role file",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			meta, err := config.GetRoleInheritanceMetadata(args[0])
+			if err != nil {
+				return fmt.Errorf("role %q inheritance validation failed: %w", args[0], err)
+			}
+
 			role, _, err := config.LoadRoleForDisplay(args[0])
 			if err != nil {
 				return err
 			}
 
 			fmt.Printf("Role %q is valid.\n", role.RoleName)
+			if meta.DirectParent != "" {
+				fmt.Printf("  Inherits:    %s\n", meta.DirectParent)
+			}
+			if len(meta.Chain) > 1 {
+				fmt.Printf("  Chain:       %s\n", strings.Join(meta.Chain, " -> "))
+			}
 
 			fmt.Printf("  Harness type: %s\n", role.GetHarnessType())
 			if role.GetModel() != "" {

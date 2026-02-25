@@ -430,6 +430,86 @@ instructions: |
 	}
 }
 
+func TestRoleListCmd_ShowsInheritanceParent(t *testing.T) {
+	h2Dir := setupRoleTestH2Dir(t)
+
+	os.WriteFile(filepath.Join(h2Dir, "roles", "base.yaml"), []byte(`
+role_name: base
+description: Base role
+instructions: base
+`), 0o644)
+	os.WriteFile(filepath.Join(h2Dir, "roles", "child.yaml"), []byte(`
+role_name: child
+inherits: base
+description: Child role
+instructions: child
+`), 0o644)
+
+	output := captureStdout(func() {
+		cmd := newRoleListCmd()
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("role list failed: %v", err)
+		}
+	})
+	if !strings.Contains(output, "child") || !strings.Contains(output, "(inherits: base)") {
+		t.Fatalf("list output should include inheritance marker for child, got:\n%s", output)
+	}
+}
+
+func TestRoleShowCmd_ShowsInheritanceAndVariableOrigins(t *testing.T) {
+	h2Dir := setupRoleTestH2Dir(t)
+
+	os.WriteFile(filepath.Join(h2Dir, "roles", "base.yaml.tmpl"), []byte(`
+role_name: base
+variables:
+  team:
+    description: "Team"
+  model:
+    description: "Model"
+    default: "sonnet"
+instructions: |
+  Base {{ .Var.team }} {{ .Var.model }}
+`), 0o644)
+	os.WriteFile(filepath.Join(h2Dir, "roles", "child.yaml.tmpl"), []byte(`
+role_name: child
+inherits: base
+variables:
+  team:
+    description: "Team"
+    default: "platform"
+  service:
+    description: "Service"
+instructions: |
+  Child {{ .Var.service }}
+`), 0o644)
+
+	output := captureStdout(func() {
+		cmd := newRoleShowCmd()
+		cmd.SetArgs([]string{"child"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("role show failed: %v", err)
+		}
+	})
+
+	checks := []string{
+		"Role:        child",
+		"Inherits:    base",
+		"Chain:       base -> child",
+		"Variables:",
+		"team",
+		"[from: child]",
+		"service",
+		"Inherited Variables (hidden from child contract):",
+		"model",
+		"[from: base]",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("output should contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestRoleCheckCmd_TemplateFile(t *testing.T) {
 	h2Dir := setupRoleTestH2Dir(t)
 
@@ -448,6 +528,54 @@ instructions: |
 	cmd.SetArgs([]string{"checkme"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("role check should succeed for template file: %v", err)
+	}
+}
+
+func TestRoleCheckCmd_ValidatesInheritanceChain(t *testing.T) {
+	h2Dir := setupRoleTestH2Dir(t)
+
+	os.WriteFile(filepath.Join(h2Dir, "roles", "base.yaml"), []byte(`
+role_name: base
+instructions: base
+`), 0o644)
+	os.WriteFile(filepath.Join(h2Dir, "roles", "child.yaml"), []byte(`
+role_name: child
+inherits: base
+instructions: child
+`), 0o644)
+
+	output := captureStdout(func() {
+		cmd := newRoleCheckCmd()
+		cmd.SetArgs([]string{"child"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("role check should succeed: %v", err)
+		}
+	})
+	if !strings.Contains(output, "Inherits:    base") || !strings.Contains(output, "Chain:       base -> child") {
+		t.Fatalf("check output should include inheritance info, got:\n%s", output)
+	}
+}
+
+func TestRoleCheckCmd_InheritanceErrorActionable(t *testing.T) {
+	h2Dir := setupRoleTestH2Dir(t)
+
+	os.WriteFile(filepath.Join(h2Dir, "roles", "child.yaml"), []byte(`
+role_name: child
+inherits: missing-parent
+instructions: child
+`), 0o644)
+
+	cmd := newRoleCheckCmd()
+	cmd.SetArgs([]string{"child"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected inheritance validation error")
+	}
+	if !strings.Contains(err.Error(), "inheritance validation failed") {
+		t.Fatalf("error should be actionable, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "missing-parent") {
+		t.Fatalf("error should include missing parent name, got: %v", err)
 	}
 }
 

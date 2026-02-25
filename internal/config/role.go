@@ -486,6 +486,14 @@ type mergedRoleRender struct {
 	settingsPresent bool
 }
 
+// RoleInheritanceMetadata describes a role's inheritance chain and variable origins.
+type RoleInheritanceMetadata struct {
+	DirectParent      string
+	Chain             []string
+	ExposedVarOrigins map[string]string
+	HiddenVarOrigins  map[string]string
+}
+
 // LoadRoleWithNameResolution loads a role using two-pass rendering to resolve
 // the agent_name field. This allows agent_name to use template functions like
 // {{ randomName }} or {{ autoIncrement "worker" }} whose results are then
@@ -1104,6 +1112,76 @@ func loadRoleForDisplay(path, roleName string) (*Role, map[string]tmpl.VarDef, e
 	}
 
 	return role, defs, nil
+}
+
+// GetRoleInheritanceMetadata returns inheritance metadata for a global role.
+// It validates the full inheritance chain (including cycle/depth/parent resolution)
+// and reports variable origins for exposed and hidden inherited variables.
+func GetRoleInheritanceMetadata(name string) (*RoleInheritanceMetadata, error) {
+	path, _ := resolveRolePath(RolesDir(), name)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read role file: %w", err)
+	}
+	parent, _, err := tmpl.ParseInherits(string(data))
+	if err != nil {
+		return nil, fmt.Errorf("parse inherits in role %q: %w", path, err)
+	}
+
+	chain, err := resolveInheritanceChain(path, map[string]bool{}, 1)
+	if err != nil {
+		return nil, err
+	}
+
+	meta := &RoleInheritanceMetadata{
+		DirectParent:      parent,
+		Chain:             make([]string, 0, len(chain)),
+		ExposedVarOrigins: map[string]string{},
+		HiddenVarOrigins:  map[string]string{},
+	}
+	for _, level := range chain {
+		meta.Chain = append(meta.Chain, level.name)
+	}
+
+	renderDefs := map[string]tmpl.VarDef{}
+	lastOrigin := map[string]string{}
+	for _, level := range chain {
+		renderDefs = tmpl.MergeVarDefs(renderDefs, level.defs)
+		for name := range level.defs {
+			lastOrigin[name] = level.name
+		}
+	}
+
+	exposedDefs := copyVarDefs(renderDefs)
+	if len(chain) > 1 {
+		childDefs := chain[len(chain)-1].defs
+		exposedDefs = copyVarDefs(childDefs)
+
+		parentDefs := map[string]tmpl.VarDef{}
+		for i := 0; i < len(chain)-1; i++ {
+			parentDefs = tmpl.MergeVarDefs(parentDefs, chain[i].defs)
+		}
+		for name, def := range parentDefs {
+			if !def.Required() {
+				continue
+			}
+			if childDef, ok := childDefs[name]; ok {
+				exposedDefs[name] = childDef
+			}
+		}
+	}
+
+	for name := range exposedDefs {
+		meta.ExposedVarOrigins[name] = lastOrigin[name]
+	}
+	for name := range renderDefs {
+		if _, ok := exposedDefs[name]; ok {
+			continue
+		}
+		meta.HiddenVarOrigins[name] = lastOrigin[name]
+	}
+
+	return meta, nil
 }
 
 // Validate checks that a role has the minimum required fields.
