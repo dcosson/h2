@@ -187,6 +187,16 @@ Lists replace rather than append because:
 
 The `hooks` and `settings` fields are `yaml.Node` in the Role struct, which preserves arbitrary YAML structure. During the map-based deep merge, these are regular nested maps and merge naturally. After the deep merge, the final map is marshaled back to YAML and unmarshaled into the Role struct, which correctly populates the `yaml.Node` fields.
 
+Default behavior contract for `yaml.Node` round-tripping in inheritance:
+- Mapping content is merged recursively using map semantics.
+- Sequence content is replaced by child when the child provides the key.
+- Scalar values are replaced by child values.
+- Explicit `null` in child clears parent value.
+- Omitted key in child keeps parent value.
+- YAML comments are not preserved (acceptable loss).
+- YAML anchors/aliases are flattened to resolved values after marshal/unmarshal; alias identity is not preserved.
+- Custom YAML tags are preserved only if they survive generic unmarshal/marshal. If not, value semantics win over tag fidelity.
+
 ## Examples
 
 ### Base coder role (parent)
@@ -328,6 +338,8 @@ The existing `LoadRoleRenderedFrom` (used for simpler loading without name resol
 
 Pod templates reference roles by name. If a pod agent references a child role that inherits, the inheritance is resolved transparently — the pod doesn't need to know about the inheritance chain. Variable definitions exposed to `--var` follow the child's public contract (`exposedDefs`), not the full inherited render set.
 
+Constraint: roles in `pods/roles/` cannot be used as inheritance parents. `inherits` resolution is restricted to global roles only.
+
 ### `h2 role show` and `h2 role list`
 
 - `role show` should display the `inherits` field and show which variables come from the parent vs child
@@ -350,11 +362,24 @@ Pod templates reference roles by name. If a pod agent references a child role th
 - Deep merge: lists replace (not append)
 - Deep merge: omitted keys preserve parent value
 - Deep merge: explicit `null` overwrites parent value
+- Inherits resolution rejects pod-scoped parents (`pods/roles/*`)
 - Circular inheritance detection
 - Depth limit exceeded
 - Parent not found error
 - Two-pass AgentName resolution with inheritance
 - Template variable references resolve to child's values in parent's template
+
+### `yaml.Node` edge-case tests (`role_test.go`)
+- `hooks` map-map merge: parent and child mappings merge recursively.
+- `settings` sequence replacement: child list fully replaces parent list.
+- Scalar type replacement: parent map/scalar replaced by child scalar/map as provided.
+- Null clearing: child `hooks: null` (or nested key null) clears parent value.
+- Omitted-key preservation: parent `hooks.pre` remains when child only sets `hooks.post`.
+- Comment loss expectation: comments in parent/child are ignored in equality assertions.
+- Anchor/alias normalization: parent uses `&anchor`/`*alias`; merged output compares semantic value, not anchor identity.
+- Tag fallback behavior: tagged values (for example `!!str 123`) either preserve tag through round-trip or normalize to equivalent scalar; test asserts accepted semantic value path.
+- Heterogeneous sequence replacement: parent mixed-type list replaced exactly by child mixed-type list.
+- Nested shape change: parent mapping at key `x`, child sequence at `x` results in child sequence (type replacement).
 
 ### Integration tests
 - `h2 run --role child --dry-run` shows merged config
@@ -367,7 +392,8 @@ Pod templates reference roles by name. If a pod agent references a child role th
 Decisions in this draft:
 1. `inherits` supports multi-level chains, with max depth 10.
 2. `inherits` is static text only (not template-rendered).
+3. Pod-scoped roles (`pods/roles/*`) are not valid inheritance parents.
+4. `yaml.Node` merge behavior is semantic-first: preserve values and merge rules, not YAML presentation artifacts (comments/anchor identity).
 
 Open questions:
-1. **Should the child be able to inherit from a pod-scoped role?** Current design resolves via `resolveRolePath` which only checks the global roles dir. Pod roles live in `pods/roles/`. Probably fine to start with global-only and extend if needed.
-2. **What about `yaml.Node` deep merge edge cases?** The map-based merge handles nested maps naturally, but YAML anchors, tags, and comments may not survive round-trips. Need explicit tests.
+1. **Tag handling strictness**: Should we eventually fail hard when a custom YAML tag cannot be preserved, instead of accepting semantic normalization?
