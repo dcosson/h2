@@ -343,11 +343,63 @@ func generateInstructions(abs, style string, force bool, out io.Writer) error {
 }
 
 func generateSkills(abs, style string, force bool, out io.Writer) error {
+	claudeDir := filepath.Join(abs, "claude-config", "default")
+	codexDir := filepath.Join(abs, "codex-config", "default")
+	claudeSkillsPath := filepath.Join(claudeDir, "skills")
+	codexSkillsPath := filepath.Join(codexDir, "skills")
 	sharedSkillsDir := filepath.Join(abs, "account-profiles-shared", "default", "skills")
+	sharedSkillsTarget := filepath.Join("..", "..", "account-profiles-shared", "default", "skills")
+
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		return fmt.Errorf("create claude-config dir: %w", err)
+	}
+	if err := os.MkdirAll(codexDir, 0o755); err != nil {
+		return fmt.Errorf("create codex-config dir: %w", err)
+	}
+
+	// Preflight link destinations before touching shared skills content so
+	// generateSkills is fail-fast/atomic from the caller's perspective.
+	if err := validateSymlinkDestination(claudeSkillsPath, sharedSkillsTarget, force, "claude-config/default/skills"); err != nil {
+		return err
+	}
+	if err := validateSymlinkDestination(codexSkillsPath, sharedSkillsTarget, force, "codex-config/default/skills"); err != nil {
+		return err
+	}
+
 	if err := config.WriteSkillsTemplate(style, sharedSkillsDir, force); err != nil {
 		return fmt.Errorf("write shared skills: %w", err)
 	}
+	if err := ensureSymlink(claudeSkillsPath, sharedSkillsTarget, force, out, "claude-config/default/skills"); err != nil {
+		return err
+	}
+	if err := ensureSymlink(codexSkillsPath, sharedSkillsTarget, force, out, "codex-config/default/skills"); err != nil {
+		return err
+	}
 	fmt.Fprintf(out, "  Wrote account-profiles-shared/default/skills/\n")
+	return nil
+}
+
+func validateSymlinkDestination(path, target string, force bool, label string) error {
+	if existing, err := os.Readlink(path); err == nil {
+		if existing == target {
+			return nil
+		}
+		if !force {
+			return fmt.Errorf("%s points to %q (expected %q); use --force to overwrite", label, existing, target)
+		}
+		return nil
+	}
+
+	info, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("check %s: %w", label, err)
+	}
+	if info != nil && !force {
+		return fmt.Errorf("%s already exists; use --force to overwrite", label)
+	}
 	return nil
 }
 

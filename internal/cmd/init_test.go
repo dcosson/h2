@@ -992,6 +992,104 @@ func TestInitCmd_GenerateSkills(t *testing.T) {
 	}
 }
 
+func TestInitCmd_GenerateSkills_CreatesMissingSkillSymlinks(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	claudeSkills := filepath.Join(dir, "claude-config", "default", "skills")
+	codexSkills := filepath.Join(dir, "codex-config", "default", "skills")
+	if err := os.Remove(claudeSkills); err != nil {
+		t.Fatalf("remove claude skills symlink: %v", err)
+	}
+	if err := os.Remove(codexSkills); err != nil {
+		t.Fatalf("remove codex skills symlink: %v", err)
+	}
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--generate", "skills", "--style", "opinionated"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("--generate skills failed: %v", err)
+	}
+
+	want := filepath.Join("..", "..", "account-profiles-shared", "default", "skills")
+	for _, p := range []string{claudeSkills, codexSkills} {
+		target, err := os.Readlink(p)
+		if err != nil {
+			t.Fatalf("expected %s to be symlink: %v", p, err)
+		}
+		if target != want {
+			t.Fatalf("symlink %s target = %q, want %q", p, target, want)
+		}
+	}
+}
+
+func TestInitCmd_GenerateSkills_ConflictingSkillPathsFailBeforeWrite(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	sharedSkills := filepath.Join(dir, "account-profiles-shared", "default", "skills")
+	if err := os.RemoveAll(sharedSkills); err != nil {
+		t.Fatalf("remove shared skills: %v", err)
+	}
+	if err := os.MkdirAll(sharedSkills, 0o755); err != nil {
+		t.Fatalf("recreate shared skills dir: %v", err)
+	}
+
+	claudeSkills := filepath.Join(dir, "claude-config", "default", "skills")
+	if err := os.Remove(claudeSkills); err != nil {
+		t.Fatalf("remove claude skills symlink: %v", err)
+	}
+	if err := os.MkdirAll(claudeSkills, 0o755); err != nil {
+		t.Fatalf("create conflicting claude skills dir: %v", err)
+	}
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--generate", "skills", "--style", "opinionated"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected --generate skills to fail for conflicting skills path without --force")
+	}
+	if !strings.Contains(err.Error(), "use --force") {
+		t.Fatalf("expected force guidance error, got: %v", err)
+	}
+
+	entries, readErr := os.ReadDir(sharedSkills)
+	if readErr != nil {
+		t.Fatalf("read shared skills dir: %v", readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected shared skills to remain untouched on preflight failure, got %d entries", len(entries))
+	}
+}
+
+func TestInitCmd_GenerateSkills_ForceReplacesConflictingSkillPaths(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	claudeSkills := filepath.Join(dir, "claude-config", "default", "skills")
+	if err := os.Remove(claudeSkills); err != nil {
+		t.Fatalf("remove claude skills symlink: %v", err)
+	}
+	if err := os.MkdirAll(claudeSkills, 0o755); err != nil {
+		t.Fatalf("create conflicting claude skills dir: %v", err)
+	}
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--generate", "skills", "--style", "opinionated", "--force"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("--generate skills --force failed: %v", err)
+	}
+
+	want := filepath.Join("..", "..", "account-profiles-shared", "default", "skills")
+	target, err := os.Readlink(claudeSkills)
+	if err != nil {
+		t.Fatalf("expected claude skills path to be symlink after --force: %v", err)
+	}
+	if target != want {
+		t.Fatalf("claude skills symlink target = %q, want %q", target, want)
+	}
+}
+
 func TestInitCmd_Minimal_CommandPolicyMatchesBetweenClaudeAndCodex(t *testing.T) {
 	fakeHome := setupFakeHome(t)
 	dir := filepath.Join(fakeHome, "myh2-min-policy")
