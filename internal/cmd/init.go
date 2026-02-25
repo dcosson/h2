@@ -5,11 +5,34 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"h2/internal/config"
 )
+
+const (
+	initStyleOpinionated = "opinionated"
+	initStyleMinimal     = "minimal"
+)
+
+var validInitStyles = map[string]struct{}{
+	initStyleOpinionated: {},
+	initStyleMinimal:     {},
+}
+
+const minimalInstructionsMarkdown = `# Shared Agent Instructions
+
+Add your team or project instructions here.
+`
+
+const minimalDefaultRoleTemplate = `role_name: "{{ .RoleName }}"
+description: "A {{ .RoleName }} agent for h2"
+agent_harness: "claude_code"
+instructions: |
+  Follow instructions from CLAUDE.md / AGENTS.md.
+`
 
 const defaultConfigYAML = `# h2 configuration
 # See https://github.com/dcosson/h2 for documentation.
@@ -39,6 +62,7 @@ func newInitCmd() *cobra.Command {
 	var prefix string
 	var generate string
 	var force bool
+	var style string
 
 	cmd := &cobra.Command{
 		Use:   "init <dir>",
@@ -78,12 +102,16 @@ Use --force with --generate to overwrite existing files.`,
 			}
 
 			out := cmd.OutOrStdout()
-
-			if generate != "" {
-				return runGenerate(abs, generate, force, out)
+			resolvedStyle, err := resolveInitStyle(style)
+			if err != nil {
+				return err
 			}
 
-			return runFullInit(cmd, abs, prefix, out)
+			if generate != "" {
+				return runGenerate(abs, generate, resolvedStyle, force, out)
+			}
+
+			return runFullInit(cmd, abs, prefix, resolvedStyle, out)
 		},
 	}
 
@@ -91,11 +119,23 @@ Use --force with --generate to overwrite existing files.`,
 	cmd.Flags().StringVar(&prefix, "prefix", "", "Custom prefix for this h2 directory in the routes registry")
 	cmd.Flags().StringVar(&generate, "generate", "", "Regenerate specific config: roles, instructions, config, all")
 	cmd.Flags().BoolVar(&force, "force", false, "Overwrite existing files when using --generate")
+	cmd.Flags().StringVar(&style, "style", initStyleOpinionated, "Generation style: minimal, opinionated")
 	return cmd
 }
 
+func resolveInitStyle(style string) (string, error) {
+	s := strings.ToLower(strings.TrimSpace(style))
+	if s == "" {
+		s = initStyleOpinionated
+	}
+	if _, ok := validInitStyles[s]; !ok {
+		return "", fmt.Errorf("unknown --style %q; valid: minimal, opinionated", style)
+	}
+	return s, nil
+}
+
 // runFullInit performs a full h2 directory initialization.
-func runFullInit(cmd *cobra.Command, abs, prefix string, out io.Writer) error {
+func runFullInit(cmd *cobra.Command, abs, prefix, style string, out io.Writer) error {
 	// --- Pre-flight validation (all checks before any writes) ---
 
 	if config.IsH2Dir(abs) {
@@ -136,6 +176,7 @@ func runFullInit(cmd *cobra.Command, abs, prefix string, out io.Writer) error {
 		"sockets",
 		filepath.Join("claude-config", "default"),
 		filepath.Join("codex-config", "default"),
+		filepath.Join("account-profiles-shared", "default", "skills"),
 		"projects",
 		"worktrees",
 		filepath.Join("pods", "roles"),
@@ -161,11 +202,14 @@ func runFullInit(cmd *cobra.Command, abs, prefix string, out io.Writer) error {
 	fmt.Fprintf(out, "  Wrote config.yaml\n")
 
 	// Write CLAUDE.md and symlink AGENTS.md.
-	if err := writeInstructions(abs); err != nil {
+	if err := writeInstructions(abs, style); err != nil {
 		return fmt.Errorf("write instructions: %w", err)
 	}
-	fmt.Fprintf(out, "  Wrote claude-config/default/CLAUDE.md\n")
-	fmt.Fprintf(out, "  Symlinked codex-config/default/AGENTS.md -> ../../claude-config/default/CLAUDE.md\n")
+	fmt.Fprintf(out, "  Wrote account-profiles-shared/default/CLAUDE_AND_AGENTS.md\n")
+	fmt.Fprintf(out, "  Symlinked claude-config/default/CLAUDE.md -> ../../account-profiles-shared/default/CLAUDE_AND_AGENTS.md\n")
+	fmt.Fprintf(out, "  Symlinked codex-config/default/AGENTS.md -> ../../account-profiles-shared/default/CLAUDE_AND_AGENTS.md\n")
+	fmt.Fprintf(out, "  Symlinked claude-config/default/skills -> ../../account-profiles-shared/default/skills\n")
+	fmt.Fprintf(out, "  Symlinked codex-config/default/skills -> ../../account-profiles-shared/default/skills\n")
 
 	// Register this h2 directory in the routes registry (pre-flight check already passed).
 	resolvedPrefix, err := config.RegisterRouteWithAutoPrefix(rootDir, explicitPrefix, abs)
@@ -175,7 +219,7 @@ func runFullInit(cmd *cobra.Command, abs, prefix string, out io.Writer) error {
 
 	// Create the default role.
 	rolesDir := filepath.Join(abs, "roles")
-	rolePath, err := createRole(rolesDir, "default")
+	rolePath, err := createRoleWithStyle(rolesDir, "default", style)
 	if err != nil {
 		return fmt.Errorf("create default role: %w", err)
 	}
@@ -187,34 +231,34 @@ func runFullInit(cmd *cobra.Command, abs, prefix string, out io.Writer) error {
 }
 
 // runGenerate regenerates specific config files in an existing h2 directory.
-func runGenerate(abs, what string, force bool, out io.Writer) error {
+func runGenerate(abs, what, style string, force bool, out io.Writer) error {
 	if !config.IsH2Dir(abs) {
 		return fmt.Errorf("%s is not an h2 directory (--generate requires an existing h2 dir)", abs)
 	}
 
 	switch what {
 	case "roles":
-		return generateRoles(abs, force, out)
+		return generateRoles(abs, style, force, out)
 	case "instructions":
-		return generateInstructions(abs, force, out)
+		return generateInstructions(abs, style, force, out)
 	case "config":
 		return generateConfig(abs, force, out)
 	case "all":
 		if err := generateConfig(abs, force, out); err != nil {
 			return err
 		}
-		if err := generateInstructions(abs, force, out); err != nil {
+		if err := generateInstructions(abs, style, force, out); err != nil {
 			return err
 		}
-		return generateRoles(abs, force, out)
+		return generateRoles(abs, style, force, out)
 	default:
 		return fmt.Errorf("unknown --generate type %q; valid: roles, instructions, config, all", what)
 	}
 }
 
 // generateRoles regenerates the default role file.
-func generateRoles(abs string, force bool, out io.Writer) error {
-	content := config.RoleTemplate("default")
+func generateRoles(abs, style string, force bool, out io.Writer) error {
+	content := roleTemplateForStyle(style, "default")
 	ext := config.RoleFileExtension(content)
 	fileName := "default" + ext
 	rolePath := filepath.Join(abs, "roles", fileName)
@@ -247,64 +291,87 @@ func generateRoles(abs string, force bool, out io.Writer) error {
 }
 
 // generateInstructions regenerates CLAUDE.md and the AGENTS.md symlink.
-func generateInstructions(abs string, force bool, out io.Writer) error {
-	claudeMDPath := filepath.Join(abs, "claude-config", "default", "CLAUDE.md")
-	agentsMDPath := filepath.Join(abs, "codex-config", "default", "AGENTS.md")
+func generateInstructions(abs, style string, force bool, out io.Writer) error {
+	sharedDir := filepath.Join(abs, "account-profiles-shared", "default")
+	sharedMDPath := filepath.Join(sharedDir, "CLAUDE_AND_AGENTS.md")
+	sharedSkillsDir := filepath.Join(sharedDir, "skills")
+	claudeDir := filepath.Join(abs, "claude-config", "default")
+	codexDir := filepath.Join(abs, "codex-config", "default")
+	claudeMDPath := filepath.Join(claudeDir, "CLAUDE.md")
+	agentsMDPath := filepath.Join(codexDir, "AGENTS.md")
+	claudeSkillsPath := filepath.Join(claudeDir, "skills")
+	codexSkillsPath := filepath.Join(codexDir, "skills")
 
 	// Ensure directories exist.
-	if err := os.MkdirAll(filepath.Dir(claudeMDPath), 0o755); err != nil {
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		return fmt.Errorf("create claude-config dir: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(agentsMDPath), 0o755); err != nil {
+	if err := os.MkdirAll(codexDir, 0o755); err != nil {
 		return fmt.Errorf("create codex-config dir: %w", err)
+	}
+	if err := os.MkdirAll(sharedSkillsDir, 0o755); err != nil {
+		return fmt.Errorf("create shared profile skills dir: %w", err)
+	}
+	if err := os.MkdirAll(sharedDir, 0o755); err != nil {
+		return fmt.Errorf("create shared profile dir: %w", err)
 	}
 
 	if !force {
-		if _, err := os.Stat(claudeMDPath); err == nil {
-			fmt.Fprintf(out, "  Skipped claude-config/default/CLAUDE.md (already exists, use --force to overwrite)\n")
-			// Still check the symlink.
-			return ensureAgentsMDSymlink(abs, force, out)
+		if _, err := os.Stat(sharedMDPath); err == nil {
+			fmt.Fprintf(out, "  Skipped account-profiles-shared/default/CLAUDE_AND_AGENTS.md (already exists, use --force to overwrite)\n")
+		} else {
+			if err := os.WriteFile(sharedMDPath, []byte(instructionsTemplateForStyle(style)), 0o644); err != nil {
+				return fmt.Errorf("write CLAUDE_AND_AGENTS.md: %w", err)
+			}
+			fmt.Fprintf(out, "  Wrote account-profiles-shared/default/CLAUDE_AND_AGENTS.md\n")
 		}
+	} else {
+		if err := os.WriteFile(sharedMDPath, []byte(instructionsTemplateForStyle(style)), 0o644); err != nil {
+			return fmt.Errorf("write CLAUDE_AND_AGENTS.md: %w", err)
+		}
+		fmt.Fprintf(out, "  Wrote account-profiles-shared/default/CLAUDE_AND_AGENTS.md\n")
 	}
 
-	if err := os.WriteFile(claudeMDPath, []byte(config.InstructionsTemplate()), 0o644); err != nil {
-		return fmt.Errorf("write CLAUDE.md: %w", err)
+	sharedMDTarget := filepath.Join("..", "..", "account-profiles-shared", "default", "CLAUDE_AND_AGENTS.md")
+	sharedSkillsTarget := filepath.Join("..", "..", "account-profiles-shared", "default", "skills")
+	if err := ensureSymlink(claudeMDPath, sharedMDTarget, force, out, "claude-config/default/CLAUDE.md"); err != nil {
+		return err
 	}
-	fmt.Fprintf(out, "  Wrote claude-config/default/CLAUDE.md\n")
-
-	return ensureAgentsMDSymlink(abs, force, out)
+	if err := ensureSymlink(agentsMDPath, sharedMDTarget, force, out, "codex-config/default/AGENTS.md"); err != nil {
+		return err
+	}
+	if err := ensureSymlink(claudeSkillsPath, sharedSkillsTarget, force, out, "claude-config/default/skills"); err != nil {
+		return err
+	}
+	if err := ensureSymlink(codexSkillsPath, sharedSkillsTarget, force, out, "codex-config/default/skills"); err != nil {
+		return err
+	}
+	return nil
 }
 
-// ensureAgentsMDSymlink creates or recreates the AGENTS.md symlink.
-func ensureAgentsMDSymlink(abs string, force bool, out io.Writer) error {
-	agentsMDPath := filepath.Join(abs, "codex-config", "default", "AGENTS.md")
-	symlinkTarget := filepath.Join("..", "..", "claude-config", "default", "CLAUDE.md")
-
-	// Check if symlink already exists and points to the right place.
-	if existing, err := os.Readlink(agentsMDPath); err == nil {
-		if existing == symlinkTarget {
+// ensureSymlink creates or recreates a symlink.
+func ensureSymlink(path, target string, force bool, out io.Writer, label string) error {
+	if existing, err := os.Readlink(path); err == nil {
+		if existing == target {
 			if !force {
-				fmt.Fprintf(out, "  Skipped codex-config/default/AGENTS.md (symlink already correct)\n")
+				fmt.Fprintf(out, "  Skipped %s (symlink already correct)\n", label)
 				return nil
 			}
 		}
-		// Remove existing symlink (or file) before recreating.
-		os.Remove(agentsMDPath)
+		_ = os.Remove(path)
 	} else if !force {
-		// Check if it's a regular file (not a symlink).
-		if _, statErr := os.Stat(agentsMDPath); statErr == nil {
-			fmt.Fprintf(out, "  Skipped codex-config/default/AGENTS.md (already exists, use --force to overwrite)\n")
+		if _, statErr := os.Stat(path); statErr == nil {
+			fmt.Fprintf(out, "  Skipped %s (already exists, use --force to overwrite)\n", label)
 			return nil
 		}
 	} else {
-		// Force mode: remove whatever is there.
-		os.Remove(agentsMDPath)
+		_ = os.Remove(path)
 	}
 
-	if err := os.Symlink(symlinkTarget, agentsMDPath); err != nil {
-		return fmt.Errorf("symlink AGENTS.md: %w", err)
+	if err := os.Symlink(target, path); err != nil {
+		return fmt.Errorf("symlink %s: %w", label, err)
 	}
-	fmt.Fprintf(out, "  Symlinked codex-config/default/AGENTS.md -> %s\n", symlinkTarget)
+	fmt.Fprintf(out, "  Symlinked %s -> %s\n", label, target)
 	return nil
 }
 
@@ -324,20 +391,67 @@ func generateConfig(abs string, force bool, out io.Writer) error {
 	return nil
 }
 
-// writeInstructions writes CLAUDE.md and creates the AGENTS.md symlink.
-func writeInstructions(abs string) error {
-	claudeMDPath := filepath.Join(abs, "claude-config", "default", "CLAUDE.md")
-	if err := os.WriteFile(claudeMDPath, []byte(config.InstructionsTemplate()), 0o644); err != nil {
-		return fmt.Errorf("write CLAUDE.md: %w", err)
+// writeInstructions writes shared CLAUDE_AND_AGENTS.md and creates profile symlinks.
+func writeInstructions(abs, style string) error {
+	sharedDir := filepath.Join(abs, "account-profiles-shared", "default")
+	sharedMDPath := filepath.Join(sharedDir, "CLAUDE_AND_AGENTS.md")
+	sharedSkillsDir := filepath.Join(sharedDir, "skills")
+	claudeDir := filepath.Join(abs, "claude-config", "default")
+	codexDir := filepath.Join(abs, "codex-config", "default")
+	claudeMDPath := filepath.Join(claudeDir, "CLAUDE.md")
+	agentsMDPath := filepath.Join(codexDir, "AGENTS.md")
+	claudeSkillsPath := filepath.Join(claudeDir, "skills")
+	codexSkillsPath := filepath.Join(codexDir, "skills")
+
+	if err := os.MkdirAll(sharedSkillsDir, 0o755); err != nil {
+		return fmt.Errorf("create shared profile skills dir: %w", err)
+	}
+	if err := os.WriteFile(sharedMDPath, []byte(instructionsTemplateForStyle(style)), 0o644); err != nil {
+		return fmt.Errorf("write CLAUDE_AND_AGENTS.md: %w", err)
 	}
 
-	agentsMDPath := filepath.Join(abs, "codex-config", "default", "AGENTS.md")
-	symlinkTarget := filepath.Join("..", "..", "claude-config", "default", "CLAUDE.md")
-	if err := os.Symlink(symlinkTarget, agentsMDPath); err != nil {
+	sharedMDTarget := filepath.Join("..", "..", "account-profiles-shared", "default", "CLAUDE_AND_AGENTS.md")
+	sharedSkillsTarget := filepath.Join("..", "..", "account-profiles-shared", "default", "skills")
+	if err := os.Symlink(sharedMDTarget, claudeMDPath); err != nil {
+		return fmt.Errorf("symlink CLAUDE.md: %w", err)
+	}
+	if err := os.Symlink(sharedMDTarget, agentsMDPath); err != nil {
 		return fmt.Errorf("symlink AGENTS.md: %w", err)
+	}
+	if err := os.Symlink(sharedSkillsTarget, claudeSkillsPath); err != nil {
+		return fmt.Errorf("symlink claude skills dir: %w", err)
+	}
+	if err := os.Symlink(sharedSkillsTarget, codexSkillsPath); err != nil {
+		return fmt.Errorf("symlink codex skills dir: %w", err)
 	}
 
 	return nil
+}
+
+func instructionsTemplateForStyle(style string) string {
+	switch style {
+	case initStyleMinimal:
+		return minimalInstructionsMarkdown
+	default:
+		return config.InstructionsTemplate()
+	}
+}
+
+func roleTemplateForStyle(style, name string) string {
+	if style == initStyleMinimal && name == "default" {
+		return minimalDefaultRoleTemplate
+	}
+	return config.RoleTemplate(name)
+}
+
+func createRoleWithStyle(rolesDir, name, style string) (string, error) {
+	content := roleTemplateForStyle(style, name)
+	ext := config.RoleFileExtension(content)
+	path := filepath.Join(rolesDir, name+ext)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // checkDirSafeForInit checks whether the target directory is safe for init.
