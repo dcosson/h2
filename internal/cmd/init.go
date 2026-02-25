@@ -50,6 +50,7 @@ Use --generate to regenerate specific config files in an existing h2 directory:
   h2 init <path> --generate roles         # regenerate roles/default.yaml
   h2 init <path> --generate instructions  # regenerate CLAUDE.md + AGENTS.md symlink
   h2 init <path> --generate skills        # regenerate shared profile skills
+  h2 init <path> --generate harness-config # regenerate claude/codex policy files
   h2 init <path> --generate config        # regenerate config.yaml
   h2 init <path> --generate all           # regenerate all generated files
 
@@ -93,7 +94,7 @@ Use --force with --generate to overwrite existing files.`,
 
 	cmd.Flags().BoolVar(&global, "global", false, "Initialize ~/.h2/ as the h2 directory")
 	cmd.Flags().StringVar(&prefix, "prefix", "", "Custom prefix for this h2 directory in the routes registry")
-	cmd.Flags().StringVar(&generate, "generate", "", "Regenerate specific config: roles, instructions, skills, config, all")
+	cmd.Flags().StringVar(&generate, "generate", "", "Regenerate specific config: roles, instructions, skills, harness-config, config, all")
 	cmd.Flags().BoolVar(&force, "force", false, "Overwrite existing files when using --generate")
 	cmd.Flags().StringVar(&style, "style", initStyleOpinionated, "Generation style: minimal, opinionated")
 	return cmd
@@ -219,6 +220,8 @@ func runGenerate(abs, what, style string, force bool, out io.Writer) error {
 		return generateInstructions(abs, style, force, out)
 	case "skills":
 		return generateSkills(abs, style, force, out)
+	case "harness-config":
+		return generateHarnessPolicyFiles(abs, style, force, out)
 	case "config":
 		return generateConfig(abs, style, force, out)
 	case "all":
@@ -231,9 +234,12 @@ func runGenerate(abs, what, style string, force bool, out io.Writer) error {
 		if err := generateSkills(abs, style, force, out); err != nil {
 			return err
 		}
+		if err := generateHarnessPolicyFiles(abs, style, force, out); err != nil {
+			return err
+		}
 		return generateRoles(abs, style, force, out)
 	default:
-		return fmt.Errorf("unknown --generate type %q; valid: roles, instructions, skills, config, all", what)
+		return fmt.Errorf("unknown --generate type %q; valid: roles, instructions, skills, harness-config, config, all", what)
 	}
 }
 
@@ -284,13 +290,10 @@ func generateRoles(abs, style string, force bool, out io.Writer) error {
 func generateInstructions(abs, style string, force bool, out io.Writer) error {
 	sharedDir := filepath.Join(abs, "account-profiles-shared", "default")
 	sharedMDPath := filepath.Join(sharedDir, "CLAUDE_AND_AGENTS.md")
-	sharedSkillsDir := filepath.Join(sharedDir, "skills")
 	claudeDir := filepath.Join(abs, "claude-config", "default")
 	codexDir := filepath.Join(abs, "codex-config", "default")
 	claudeMDPath := filepath.Join(claudeDir, "CLAUDE.md")
 	agentsMDPath := filepath.Join(codexDir, "AGENTS.md")
-	claudeSkillsPath := filepath.Join(claudeDir, "skills")
-	codexSkillsPath := filepath.Join(codexDir, "skills")
 
 	// Ensure directories exist.
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
@@ -301,6 +304,14 @@ func generateInstructions(abs, style string, force bool, out io.Writer) error {
 	}
 	if err := os.MkdirAll(sharedDir, 0o755); err != nil {
 		return fmt.Errorf("create shared profile dir: %w", err)
+	}
+
+	sharedMDTarget := filepath.Join("..", "..", "account-profiles-shared", "default", "CLAUDE_AND_AGENTS.md")
+	if err := validateSymlinkDestination(claudeMDPath, sharedMDTarget, force, "claude-config/default/CLAUDE.md"); err != nil {
+		return err
+	}
+	if err := validateSymlinkDestination(agentsMDPath, sharedMDTarget, force, "codex-config/default/AGENTS.md"); err != nil {
+		return err
 	}
 
 	if !force {
@@ -319,24 +330,10 @@ func generateInstructions(abs, style string, force bool, out io.Writer) error {
 		fmt.Fprintf(out, "  Wrote account-profiles-shared/default/CLAUDE_AND_AGENTS.md\n")
 	}
 
-	sharedMDTarget := filepath.Join("..", "..", "account-profiles-shared", "default", "CLAUDE_AND_AGENTS.md")
-	sharedSkillsTarget := filepath.Join("..", "..", "account-profiles-shared", "default", "skills")
 	if err := ensureSymlink(claudeMDPath, sharedMDTarget, force, out, "claude-config/default/CLAUDE.md"); err != nil {
 		return err
 	}
 	if err := ensureSymlink(agentsMDPath, sharedMDTarget, force, out, "codex-config/default/AGENTS.md"); err != nil {
-		return err
-	}
-	if err := ensureSymlink(claudeSkillsPath, sharedSkillsTarget, force, out, "claude-config/default/skills"); err != nil {
-		return err
-	}
-	if err := ensureSymlink(codexSkillsPath, sharedSkillsTarget, force, out, "codex-config/default/skills"); err != nil {
-		return err
-	}
-	if err := config.WriteSkillsTemplate(style, sharedSkillsDir, force); err != nil {
-		return fmt.Errorf("write shared skills: %w", err)
-	}
-	if err := generateHarnessPolicyFiles(abs, style, force, out); err != nil {
 		return err
 	}
 	return nil

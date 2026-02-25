@@ -742,6 +742,82 @@ func TestInitCmd_GenerateInstructionsForce(t *testing.T) {
 	}
 }
 
+func TestInitCmd_GenerateInstructions_DoesNotWriteHarnessConfigOrSkills(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	for _, p := range []string{
+		filepath.Join(dir, "claude-config", "default", "settings.json"),
+		filepath.Join(dir, "codex-config", "default", "config.toml"),
+		filepath.Join(dir, "codex-config", "default", "requirements.toml"),
+	} {
+		if err := os.Remove(p); err != nil {
+			t.Fatalf("remove %s: %v", p, err)
+		}
+	}
+	sharedSkills := filepath.Join(dir, "account-profiles-shared", "default", "skills")
+	if err := os.RemoveAll(sharedSkills); err != nil {
+		t.Fatalf("remove shared skills: %v", err)
+	}
+	if err := os.MkdirAll(sharedSkills, 0o755); err != nil {
+		t.Fatalf("recreate shared skills dir: %v", err)
+	}
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--generate", "instructions"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("--generate instructions failed: %v", err)
+	}
+
+	for _, p := range []string{
+		filepath.Join(dir, "claude-config", "default", "settings.json"),
+		filepath.Join(dir, "codex-config", "default", "config.toml"),
+		filepath.Join(dir, "codex-config", "default", "requirements.toml"),
+	} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("expected %s to remain absent after --generate instructions, err=%v", p, err)
+		}
+	}
+	entries, err := os.ReadDir(sharedSkills)
+	if err != nil {
+		t.Fatalf("read shared skills dir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected shared skills to remain untouched by --generate instructions, got %d entries", len(entries))
+	}
+}
+
+func TestInitCmd_GenerateHarnessConfig(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	for _, p := range []string{
+		filepath.Join(dir, "claude-config", "default", "settings.json"),
+		filepath.Join(dir, "codex-config", "default", "config.toml"),
+		filepath.Join(dir, "codex-config", "default", "requirements.toml"),
+	} {
+		if err := os.Remove(p); err != nil {
+			t.Fatalf("remove %s: %v", p, err)
+		}
+	}
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--generate", "harness-config"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("--generate harness-config failed: %v", err)
+	}
+
+	for _, p := range []string{
+		filepath.Join(dir, "claude-config", "default", "settings.json"),
+		filepath.Join(dir, "codex-config", "default", "config.toml"),
+		filepath.Join(dir, "codex-config", "default", "requirements.toml"),
+	} {
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("expected harness config file %s to exist: %v", p, err)
+		}
+	}
+}
+
 func TestInitCmd_GenerateRoles(t *testing.T) {
 	fakeHome := setupFakeHome(t)
 	dir := initH2Dir(t, fakeHome)
@@ -879,7 +955,7 @@ func TestInitCmd_GenerateAll(t *testing.T) {
 	}
 
 	output := buf.String()
-	for _, phrase := range []string{"config.yaml", "CLAUDE_AND_AGENTS.md", "AGENTS.md", "default.yaml"} {
+	for _, phrase := range []string{"config.yaml", "CLAUDE_AND_AGENTS.md", "AGENTS.md", "settings.json", "requirements.toml", "default.yaml"} {
 		if !strings.Contains(output, phrase) {
 			t.Errorf("output missing %q\nfull output:\n%s", phrase, output)
 		}
