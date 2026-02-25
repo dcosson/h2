@@ -809,6 +809,71 @@ func TestInitCmd_GenerateInstructions_StyleMinimal(t *testing.T) {
 	}
 }
 
+func TestInitCmd_Opinionated_PopulatesSharedSkills(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := filepath.Join(fakeHome, "myh2-op")
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--style", "opinionated"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init --style opinionated failed: %v", err)
+	}
+
+	checks := []string{
+		filepath.Join(dir, "account-profiles-shared", "default", "skills", "shaping", "SKILL.md"),
+		filepath.Join(dir, "account-profiles-shared", "default", "skills", "stress-test", "SKILL.md"),
+	}
+	for _, p := range checks {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("expected opinionated skill file %s: %v", p, err)
+		}
+	}
+}
+
+func TestInitCmd_Minimal_LeavesSharedSkillsEmpty(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := filepath.Join(fakeHome, "myh2-min-skills")
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--style", "minimal"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init --style minimal failed: %v", err)
+	}
+
+	entries, err := os.ReadDir(filepath.Join(dir, "account-profiles-shared", "default", "skills"))
+	if err != nil {
+		t.Fatalf("read shared skills dir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("minimal style should keep shared skills empty, got %d entries", len(entries))
+	}
+}
+
+func TestInitCmd_GenerateSkills(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	sharedSkills := filepath.Join(dir, "account-profiles-shared", "default", "skills")
+	if err := os.RemoveAll(sharedSkills); err != nil {
+		t.Fatalf("remove shared skills: %v", err)
+	}
+	if err := os.MkdirAll(sharedSkills, 0o755); err != nil {
+		t.Fatalf("recreate shared skills dir: %v", err)
+	}
+
+	cmd := newInitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{dir, "--generate", "skills", "--style", "opinionated"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("--generate skills failed: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(sharedSkills, "shaping", "SKILL.md")); err != nil {
+		t.Fatalf("expected shaping skill after --generate skills: %v", err)
+	}
+}
+
 func TestInitCmd_GenerateInvalidType(t *testing.T) {
 	fakeHome := setupFakeHome(t)
 	dir := initH2Dir(t, fakeHome)

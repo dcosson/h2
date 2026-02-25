@@ -49,6 +49,7 @@ Use --global to initialize ~/.h2/, or pass a directory path.
 Use --generate to regenerate specific config files in an existing h2 directory:
   h2 init <path> --generate roles         # regenerate roles/default.yaml
   h2 init <path> --generate instructions  # regenerate CLAUDE.md + AGENTS.md symlink
+  h2 init <path> --generate skills        # regenerate shared profile skills
   h2 init <path> --generate config        # regenerate config.yaml
   h2 init <path> --generate all           # regenerate all generated files
 
@@ -92,7 +93,7 @@ Use --force with --generate to overwrite existing files.`,
 
 	cmd.Flags().BoolVar(&global, "global", false, "Initialize ~/.h2/ as the h2 directory")
 	cmd.Flags().StringVar(&prefix, "prefix", "", "Custom prefix for this h2 directory in the routes registry")
-	cmd.Flags().StringVar(&generate, "generate", "", "Regenerate specific config: roles, instructions, config, all")
+	cmd.Flags().StringVar(&generate, "generate", "", "Regenerate specific config: roles, instructions, skills, config, all")
 	cmd.Flags().BoolVar(&force, "force", false, "Overwrite existing files when using --generate")
 	cmd.Flags().StringVar(&style, "style", initStyleOpinionated, "Generation style: minimal, opinionated")
 	return cmd
@@ -216,6 +217,8 @@ func runGenerate(abs, what, style string, force bool, out io.Writer) error {
 		return generateRoles(abs, style, force, out)
 	case "instructions":
 		return generateInstructions(abs, style, force, out)
+	case "skills":
+		return generateSkills(abs, style, force, out)
 	case "config":
 		return generateConfig(abs, style, force, out)
 	case "all":
@@ -225,9 +228,12 @@ func runGenerate(abs, what, style string, force bool, out io.Writer) error {
 		if err := generateInstructions(abs, style, force, out); err != nil {
 			return err
 		}
+		if err := generateSkills(abs, style, force, out); err != nil {
+			return err
+		}
 		return generateRoles(abs, style, force, out)
 	default:
-		return fmt.Errorf("unknown --generate type %q; valid: roles, instructions, config, all", what)
+		return fmt.Errorf("unknown --generate type %q; valid: roles, instructions, skills, config, all", what)
 	}
 }
 
@@ -284,9 +290,6 @@ func generateInstructions(abs, style string, force bool, out io.Writer) error {
 	if err := os.MkdirAll(codexDir, 0o755); err != nil {
 		return fmt.Errorf("create codex-config dir: %w", err)
 	}
-	if err := os.MkdirAll(sharedSkillsDir, 0o755); err != nil {
-		return fmt.Errorf("create shared profile skills dir: %w", err)
-	}
 	if err := os.MkdirAll(sharedDir, 0o755); err != nil {
 		return fmt.Errorf("create shared profile dir: %w", err)
 	}
@@ -321,6 +324,18 @@ func generateInstructions(abs, style string, force bool, out io.Writer) error {
 	if err := ensureSymlink(codexSkillsPath, sharedSkillsTarget, force, out, "codex-config/default/skills"); err != nil {
 		return err
 	}
+	if err := config.WriteSkillsTemplate(style, sharedSkillsDir, force); err != nil {
+		return fmt.Errorf("write shared skills: %w", err)
+	}
+	return nil
+}
+
+func generateSkills(abs, style string, force bool, out io.Writer) error {
+	sharedSkillsDir := filepath.Join(abs, "account-profiles-shared", "default", "skills")
+	if err := config.WriteSkillsTemplate(style, sharedSkillsDir, force); err != nil {
+		return fmt.Errorf("write shared skills: %w", err)
+	}
+	fmt.Fprintf(out, "  Wrote account-profiles-shared/default/skills/\n")
 	return nil
 }
 
@@ -380,6 +395,9 @@ func writeInstructions(abs, style string) error {
 
 	if err := os.MkdirAll(sharedSkillsDir, 0o755); err != nil {
 		return fmt.Errorf("create shared profile skills dir: %w", err)
+	}
+	if err := config.WriteSkillsTemplate(style, sharedSkillsDir, false); err != nil {
+		return fmt.Errorf("write shared skills: %w", err)
 	}
 	if err := os.WriteFile(sharedMDPath, []byte(config.InstructionsTemplateWithStyle(style)), 0o644); err != nil {
 		return fmt.Errorf("write CLAUDE_AND_AGENTS.md: %w", err)
