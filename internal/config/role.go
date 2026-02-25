@@ -478,6 +478,14 @@ type inheritanceRenderPlan struct {
 	exposedDefs map[string]tmpl.VarDef
 }
 
+type mergedRoleRender struct {
+	data            map[string]interface{}
+	hooks           *yaml.Node
+	settings        *yaml.Node
+	hooksPresent    bool
+	settingsPresent bool
+}
+
 // LoadRoleWithNameResolution loads a role using two-pass rendering to resolve
 // the agent_name field. This allows agent_name to use template functions like
 // {{ randomName }} or {{ autoIncrement "worker" }} whose results are then
@@ -531,12 +539,12 @@ func LoadRoleWithNameResolution(
 	// Pass 1 to resolve agent_name from merged inherited output.
 	pass1Ctx := renderCtx
 	pass1Ctx.AgentName = agentNamePlaceholder
-	pass1Map, err := renderMergedRoleMap(plan.chain, &pass1Ctx, nameFuncs, filepath.Base(path), "pass 1")
+	pass1Merged, err := renderMergedRoleMap(plan.chain, &pass1Ctx, nameFuncs, filepath.Base(path), "pass 1")
 	if err != nil {
 		return nil, "", err
 	}
 
-	resolvedName, err := extractResolvedAgentName(pass1Map, filepath.Base(path))
+	resolvedName, err := extractResolvedAgentName(pass1Merged.data, filepath.Base(path))
 	if err != nil {
 		return nil, "", err
 	}
@@ -671,18 +679,24 @@ func resolveInheritanceChain(path string, seen map[string]bool, depth int) ([]in
 }
 
 func renderRoleFromPlan(plan *inheritanceRenderPlan, ctx *tmpl.Context, extraFuncs template.FuncMap, roleLabel string) (*Role, error) {
-	mergedMap, err := renderMergedRoleMap(plan.chain, ctx, extraFuncs, roleLabel, "")
+	merged, err := renderMergedRoleMap(plan.chain, ctx, extraFuncs, roleLabel, "")
 	if err != nil {
 		return nil, err
 	}
 
 	var role Role
-	roleYAML, err := yaml.Marshal(mergedMap)
+	roleYAML, err := yaml.Marshal(merged.data)
 	if err != nil {
 		return nil, fmt.Errorf("marshal merged role YAML %q: %w", roleLabel, err)
 	}
 	if err := yaml.Unmarshal(roleYAML, &role); err != nil {
 		return nil, fmt.Errorf("parse merged role YAML %q: %w", roleLabel, err)
+	}
+	if merged.hooksPresent && merged.hooks != nil {
+		role.Hooks = *cloneYAMLNode(merged.hooks)
+	}
+	if merged.settingsPresent && merged.settings != nil {
+		role.Settings = *cloneYAMLNode(merged.settings)
 	}
 
 	role.Variables = copyVarDefs(plan.exposedDefs)
@@ -693,8 +707,13 @@ func renderRoleFromPlan(plan *inheritanceRenderPlan, ctx *tmpl.Context, extraFun
 	return &role, nil
 }
 
-func renderMergedRoleMap(chain []inheritanceLevel, ctx *tmpl.Context, extraFuncs template.FuncMap, roleLabel, passLabel string) (map[string]interface{}, error) {
+func renderMergedRoleMap(chain []inheritanceLevel, ctx *tmpl.Context, extraFuncs template.FuncMap, roleLabel, passLabel string) (*mergedRoleRender, error) {
 	merged := map[string]interface{}{}
+	var mergedHooks *yaml.Node
+	var mergedSettings *yaml.Node
+	hooksPresent := false
+	settingsPresent := false
+
 	for _, level := range chain {
 		rendered, err := tmpl.RenderWithExtraFuncs(level.remaining, ctx, extraFuncs)
 		if err != nil {
@@ -712,11 +731,57 @@ func renderMergedRoleMap(chain []inheritanceLevel, ctx *tmpl.Context, extraFuncs
 			return nil, fmt.Errorf("parse rendered role YAML %q (%s): %w", roleLabel, level.path, err)
 		}
 
+		var renderedNode yaml.Node
+		if err := yaml.Unmarshal([]byte(rendered), &renderedNode); err != nil {
+			if passLabel != "" {
+				return nil, fmt.Errorf("parse rendered YAML node %q (%s, %s): %w", roleLabel, level.path, passLabel, err)
+			}
+			return nil, fmt.Errorf("parse rendered YAML node %q (%s): %w", roleLabel, level.path, err)
+		}
+		if err := rejectUnsupportedCustomTags(&renderedNode); err != nil {
+			if passLabel != "" {
+				return nil, fmt.Errorf("role %q (%s, %s): %w", roleLabel, level.path, passLabel, err)
+			}
+			return nil, fmt.Errorf("role %q (%s): %w", roleLabel, level.path, err)
+		}
+		if hooksNode, ok := extractTopLevelYAMLNode(&renderedNode, "hooks"); ok {
+			hooksPresent = true
+			if mergedHooks == nil {
+				mergedHooks = cloneYAMLNode(hooksNode)
+			} else {
+				mergedHooks = mergeYAMLNodes(mergedHooks, hooksNode)
+			}
+		}
+		if settingsNode, ok := extractTopLevelYAMLNode(&renderedNode, "settings"); ok {
+			settingsPresent = true
+			if mergedSettings == nil {
+				mergedSettings = cloneYAMLNode(settingsNode)
+			} else {
+				mergedSettings = mergeYAMLNodes(mergedSettings, settingsNode)
+			}
+		}
+
 		delete(roleMap, "inherits")
 		delete(roleMap, "variables")
+		delete(roleMap, "hooks")
+		delete(roleMap, "settings")
 		merged = deepMergeMaps(merged, roleMap)
 	}
-	return merged, nil
+
+	if hooksPresent {
+		merged["hooks"] = yamlNodeToInterface(mergedHooks)
+	}
+	if settingsPresent {
+		merged["settings"] = yamlNodeToInterface(mergedSettings)
+	}
+
+	return &mergedRoleRender{
+		data:            merged,
+		hooks:           mergedHooks,
+		settings:        mergedSettings,
+		hooksPresent:    hooksPresent,
+		settingsPresent: settingsPresent,
+	}, nil
 }
 
 func extractResolvedAgentName(rendered map[string]interface{}, roleLabel string) (string, error) {
@@ -754,6 +819,133 @@ func deepMergeMaps(base, overlay map[string]interface{}) map[string]interface{} 
 	}
 
 	return merged
+}
+
+func extractTopLevelYAMLNode(doc *yaml.Node, key string) (*yaml.Node, bool) {
+	if doc == nil || len(doc.Content) == 0 {
+		return nil, false
+	}
+	root := doc.Content[0]
+	if root == nil || root.Kind != yaml.MappingNode {
+		return nil, false
+	}
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		k := root.Content[i]
+		v := root.Content[i+1]
+		if k.Value == key {
+			return v, true
+		}
+	}
+	return nil, false
+}
+
+func mergeYAMLNodes(base, overlay *yaml.Node) *yaml.Node {
+	if overlay == nil {
+		return cloneYAMLNode(base)
+	}
+	if base == nil {
+		return cloneYAMLNode(overlay)
+	}
+
+	if base.Kind == yaml.MappingNode && overlay.Kind == yaml.MappingNode {
+		result := cloneYAMLNode(base)
+		indexByKey := map[string]int{}
+		for i := 0; i+1 < len(result.Content); i += 2 {
+			indexByKey[result.Content[i].Value] = i + 1
+		}
+		for i := 0; i+1 < len(overlay.Content); i += 2 {
+			k := overlay.Content[i]
+			v := overlay.Content[i+1]
+			if existingIdx, ok := indexByKey[k.Value]; ok {
+				result.Content[existingIdx] = mergeYAMLNodes(result.Content[existingIdx], v)
+				continue
+			}
+			result.Content = append(result.Content, cloneYAMLNode(k), cloneYAMLNode(v))
+		}
+		return result
+	}
+
+	// Scalar, sequence, null, and type/shape replacement: overlay wins.
+	return cloneYAMLNode(overlay)
+}
+
+func cloneYAMLNode(node *yaml.Node) *yaml.Node {
+	if node == nil {
+		return nil
+	}
+	cloned := *node
+	if len(node.Content) > 0 {
+		cloned.Content = make([]*yaml.Node, len(node.Content))
+		for i, child := range node.Content {
+			cloned.Content[i] = cloneYAMLNode(child)
+		}
+	}
+	return &cloned
+}
+
+func yamlNodeToInterface(node *yaml.Node) interface{} {
+	if node == nil {
+		return nil
+	}
+	var out interface{}
+	if err := node.Decode(&out); err != nil {
+		return nil
+	}
+	return out
+}
+
+func rejectUnsupportedCustomTags(doc *yaml.Node) error {
+	var paths []string
+	collectUnsupportedCustomTags(doc, "", false, &paths)
+	if len(paths) == 0 {
+		return nil
+	}
+	sort.Strings(paths)
+	return fmt.Errorf("custom YAML tags outside hooks/settings are not supported in role inheritance merge; unsupported tags at: %s", strings.Join(paths, ", "))
+}
+
+func collectUnsupportedCustomTags(node *yaml.Node, path string, allowCustom bool, paths *[]string) {
+	if node == nil {
+		return
+	}
+	if strings.HasPrefix(node.Tag, "!") && !strings.HasPrefix(node.Tag, "!!") && !allowCustom {
+		*paths = append(*paths, pathWithDefault(path))
+	}
+
+	switch node.Kind {
+	case yaml.DocumentNode:
+		for _, child := range node.Content {
+			collectUnsupportedCustomTags(child, path, allowCustom, paths)
+		}
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			k := node.Content[i]
+			v := node.Content[i+1]
+			childPath := appendPath(path, k.Value)
+			childAllow := allowCustom || path == "" && (k.Value == "hooks" || k.Value == "settings")
+			collectUnsupportedCustomTags(v, childPath, childAllow, paths)
+		}
+	case yaml.SequenceNode:
+		for idx, child := range node.Content {
+			collectUnsupportedCustomTags(child, fmt.Sprintf("%s[%d]", pathWithDefault(path), idx), allowCustom, paths)
+		}
+	case yaml.AliasNode:
+		collectUnsupportedCustomTags(node.Alias, path, allowCustom, paths)
+	}
+}
+
+func appendPath(path, next string) string {
+	if path == "" {
+		return next
+	}
+	return path + "." + next
+}
+
+func pathWithDefault(path string) string {
+	if path == "" {
+		return "<root>"
+	}
+	return path
 }
 
 func copyVarDefs(defs map[string]tmpl.VarDef) map[string]tmpl.VarDef {

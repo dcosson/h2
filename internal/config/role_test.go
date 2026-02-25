@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"h2/internal/tmpl"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestLoadRoleFrom_FullRole(t *testing.T) {
@@ -1888,6 +1890,255 @@ agent_name: '{{ randomName }}'
 	}
 }
 
+func TestLoadRoleRenderedFrom_InheritanceHooksOmittedKeyPreserved(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+hooks:
+  pre:
+    cmd: check
+settings:
+  shell: bash
+instructions: parent
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+hooks:
+  post:
+    cmd: done
+instructions: child
+`)
+
+	role, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err != nil {
+		t.Fatalf("LoadRoleRenderedFrom: %v", err)
+	}
+
+	var hooks map[string]interface{}
+	if err := role.Hooks.Decode(&hooks); err != nil {
+		t.Fatalf("decode hooks: %v", err)
+	}
+	if _, ok := hooks["pre"]; !ok {
+		t.Fatalf("expected parent hook key to be preserved: %#v", hooks)
+	}
+	if _, ok := hooks["post"]; !ok {
+		t.Fatalf("expected child hook key to be merged in: %#v", hooks)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceSettingsSequenceReplacement(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+settings:
+  allow:
+    - read
+    - write
+instructions: parent
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+settings:
+  allow:
+    - execute
+instructions: child
+`)
+
+	role, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err != nil {
+		t.Fatalf("LoadRoleRenderedFrom: %v", err)
+	}
+
+	var settings map[string]interface{}
+	if err := role.Settings.Decode(&settings); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	allow, ok := settings["allow"].([]interface{})
+	if !ok {
+		t.Fatalf("settings.allow = %#v, want sequence", settings["allow"])
+	}
+	if len(allow) != 1 || allow[0] != "execute" {
+		t.Fatalf("settings.allow = %#v, want [execute]", allow)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceHooksNullClearsParent(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+hooks:
+  pre:
+    cmd: check
+instructions: parent
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+hooks: null
+instructions: child
+`)
+
+	role, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err != nil {
+		t.Fatalf("LoadRoleRenderedFrom: %v", err)
+	}
+
+	var hooks interface{}
+	if err := role.Hooks.Decode(&hooks); err != nil {
+		t.Fatalf("decode hooks: %v", err)
+	}
+	if hooks != nil {
+		t.Fatalf("hooks should be nil after explicit null clear, got %#v", hooks)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceShapeTypeReplacement(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+settings:
+  x:
+    nested: value
+instructions: parent
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+settings:
+  x:
+    - a
+    - b
+instructions: child
+`)
+
+	role, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err != nil {
+		t.Fatalf("LoadRoleRenderedFrom: %v", err)
+	}
+	var settings map[string]interface{}
+	if err := role.Settings.Decode(&settings); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	x, ok := settings["x"].([]interface{})
+	if !ok {
+		t.Fatalf("settings.x = %#v, want replaced sequence", settings["x"])
+	}
+	if len(x) != 2 || x[0] != "a" || x[1] != "b" {
+		t.Fatalf("settings.x = %#v, want [a b]", x)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceAnchorAliasNormalization(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+settings:
+  defaults: &defs
+    retries: 3
+  applied: *defs
+instructions: parent
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+instructions: child
+`)
+
+	role, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err != nil {
+		t.Fatalf("LoadRoleRenderedFrom: %v", err)
+	}
+
+	var settings map[string]interface{}
+	if err := role.Settings.Decode(&settings); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	defaults, ok := settings["defaults"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("settings.defaults = %#v, want map", settings["defaults"])
+	}
+	applied, ok := settings["applied"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("settings.applied = %#v, want map", settings["applied"])
+	}
+	if defaults["retries"] != applied["retries"] {
+		t.Fatalf("anchor/alias semantic value mismatch: defaults=%#v applied=%#v", defaults, applied)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceStandardTagAllowed(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+settings:
+  str_number: !!str 123
+instructions: parent
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+instructions: child
+`)
+
+	role, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err != nil {
+		t.Fatalf("LoadRoleRenderedFrom: %v", err)
+	}
+
+	var settings map[string]interface{}
+	if err := role.Settings.Decode(&settings); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	if settings["str_number"] != "123" {
+		t.Fatalf("settings.str_number = %#v, want string 123", settings["str_number"])
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceCustomTagPreservedInHooks(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+hooks:
+  tagged: !customTag "v1"
+instructions: parent
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+instructions: child
+`)
+
+	role, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err != nil {
+		t.Fatalf("LoadRoleRenderedFrom: %v", err)
+	}
+	if !yamlNodeHasTag(&role.Hooks, "!customTag") {
+		t.Fatalf("expected custom tag !customTag to be preserved in hooks node")
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceCustomTagOutsideHooksSettingsFails(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+agent_model: !myTag "sonnet"
+instructions: child
+`)
+
+	_, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err == nil {
+		t.Fatal("expected deterministic custom-tag rejection error")
+	}
+	if !strings.Contains(err.Error(), "custom YAML tags outside hooks/settings are not supported") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "agent_model") {
+		t.Fatalf("error should include offending path: %v", err)
+	}
+}
+
 func setupInheritanceRolesEnv(t *testing.T) string {
 	t.Helper()
 	h2Dir := t.TempDir()
@@ -1911,6 +2162,24 @@ func writeRoleFile(t *testing.T, rolesDir, name, content string) string {
 		t.Fatalf("write role file %s: %v", name, err)
 	}
 	return path
+}
+
+func yamlNodeHasTag(node *yaml.Node, tag string) bool {
+	if node == nil {
+		return false
+	}
+	if node.Tag == tag {
+		return true
+	}
+	for _, child := range node.Content {
+		if yamlNodeHasTag(child, tag) {
+			return true
+		}
+	}
+	if node.Kind == yaml.AliasNode && node.Alias != nil {
+		return yamlNodeHasTag(node.Alias, tag)
+	}
+	return false
 }
 
 func writeTempFile(t *testing.T, name, content string) string {
