@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -38,6 +39,34 @@ func RoleTemplateWithStyle(name, style string) string {
 		}
 	}
 	return string(data)
+}
+
+// RoleTemplateNamesWithStyle returns available role template names for a style.
+// Unknown styles fall back to opinionated.
+func RoleTemplateNamesWithStyle(style string) []string {
+	root := fmt.Sprintf("templates/styles/%s/roles", normalizeTemplateStyle(style))
+	names := map[string]struct{}{}
+	_ = fs.WalkDir(Templates, root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		base := filepath.Base(path)
+		if strings.HasSuffix(base, ".yaml.tmpl") {
+			name := strings.TrimSuffix(base, ".yaml.tmpl")
+			names[name] = struct{}{}
+		}
+		return nil
+	})
+
+	if len(names) == 0 {
+		return []string{"default"}
+	}
+	out := make([]string, 0, len(names))
+	for name := range names {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // RoleFileExtension returns ".yaml.tmpl" if the content contains template syntax

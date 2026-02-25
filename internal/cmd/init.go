@@ -237,37 +237,46 @@ func runGenerate(abs, what, style string, force bool, out io.Writer) error {
 	}
 }
 
-// generateRoles regenerates the default role file.
+// generateRoles regenerates role files for the selected style.
 func generateRoles(abs, style string, force bool, out io.Writer) error {
-	content := config.RoleTemplateWithStyle("default", style)
-	ext := config.RoleFileExtension(content)
-	fileName := "default" + ext
-	rolePath := filepath.Join(abs, "roles", fileName)
-
-	if !force {
-		// Check both extensions.
-		for _, e := range []string{".yaml", ".yaml.tmpl"} {
-			p := filepath.Join(abs, "roles", "default"+e)
-			if _, err := os.Stat(p); err == nil {
-				fmt.Fprintf(out, "  Skipped roles/%s (already exists, use --force to overwrite)\n", filepath.Base(p))
-				return nil
-			}
-		}
-	} else {
-		// Force: remove old file with either extension.
-		for _, e := range []string{".yaml", ".yaml.tmpl"} {
-			os.Remove(filepath.Join(abs, "roles", "default"+e))
-		}
-	}
-
 	rolesDir := filepath.Join(abs, "roles")
 	if err := os.MkdirAll(rolesDir, 0o755); err != nil {
 		return fmt.Errorf("create roles dir: %w", err)
 	}
-	if err := os.WriteFile(rolePath, []byte(content), 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", fileName, err)
+
+	roleNames := config.RoleTemplateNamesWithStyle(style)
+	for _, roleName := range roleNames {
+		content := config.RoleTemplateWithStyle(roleName, style)
+		ext := config.RoleFileExtension(content)
+		fileName := roleName + ext
+		rolePath := filepath.Join(abs, "roles", fileName)
+
+		if !force {
+			// Check both extensions.
+			existing := ""
+			for _, e := range []string{".yaml", ".yaml.tmpl"} {
+				p := filepath.Join(abs, "roles", roleName+e)
+				if _, err := os.Stat(p); err == nil {
+					existing = filepath.Base(p)
+					break
+				}
+			}
+			if existing != "" {
+				fmt.Fprintf(out, "  Skipped roles/%s (already exists, use --force to overwrite)\n", existing)
+				continue
+			}
+		} else {
+			// Force: remove old file with either extension.
+			for _, e := range []string{".yaml", ".yaml.tmpl"} {
+				_ = os.Remove(filepath.Join(abs, "roles", roleName+e))
+			}
+		}
+
+		if err := os.WriteFile(rolePath, []byte(content), 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", fileName, err)
+		}
+		fmt.Fprintf(out, "  Wrote roles/%s\n", fileName)
 	}
-	fmt.Fprintf(out, "  Wrote roles/%s\n", fileName)
 	return nil
 }
 

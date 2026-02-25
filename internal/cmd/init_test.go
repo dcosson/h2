@@ -795,6 +795,47 @@ func TestInitCmd_GenerateRolesSkipsExisting(t *testing.T) {
 	}
 }
 
+func TestInitCmd_GenerateRoles_OpinionatedIncludesConcierge(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	for _, role := range []string{"default", "concierge"} {
+		for _, ext := range []string{".yaml", ".yaml.tmpl"} {
+			_ = os.Remove(filepath.Join(dir, "roles", role+ext))
+		}
+	}
+
+	cmd := newInitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{dir, "--generate", "roles", "--style", "opinionated", "--force"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("--generate roles --style opinionated --force failed: %v", err)
+	}
+
+	for _, role := range []string{"default", "concierge"} {
+		found := false
+		for _, ext := range []string{".yaml.tmpl", ".yaml"} {
+			if _, err := os.Stat(filepath.Join(dir, "roles", role+ext)); err == nil {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected %s role to be regenerated for opinionated style", role)
+		}
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Wrote roles/default.yaml") {
+		t.Errorf("output should mention default role write, got: %s", output)
+	}
+	if !strings.Contains(output, "Wrote roles/concierge.yaml") {
+		t.Errorf("output should mention concierge role write, got: %s", output)
+	}
+}
+
 func TestInitCmd_GenerateConfig(t *testing.T) {
 	fakeHome := setupFakeHome(t)
 	dir := initH2Dir(t, fakeHome)
