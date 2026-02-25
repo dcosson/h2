@@ -93,6 +93,7 @@ A **role** is a named YAML file in `~/.h2/roles/` that defines how to launch an 
 |---|---|---|---|
 | **Identity** | | | |
 | `role_name` | string | *(required)* | Role identifier (referenced by `h2 run --role`) |
+| `inherits` | string | | Optional parent role name (global roles only; static text, not templated) |
 | `agent_name` | string | *(auto-generated)* | Agent name when launched; empty = random name. Supports templates and name functions (see below). Overridden by `h2 run --name`. |
 | `description` | string | | Human-readable description |
 | **Agent harness** | | | |
@@ -123,6 +124,42 @@ A **role** is a named YAML file in `~/.h2/roles/` that defines how to launch an 
 | `variables` | map | | Template variable definitions for parameterized roles |
 
 All fields are optional except `role_name`.
+
+### Role inheritance
+
+Roles can inherit from a parent role by setting `inherits: <parent-role-name>`.
+
+```yaml
+role_name: backend-coder
+inherits: coder
+```
+
+Behavior:
+- Parent lookup is global-only (`~/.h2/roles/*.yaml{,.tmpl}`).
+- Multi-level inheritance is supported with max depth 10.
+- Child values overlay parent values with deep-merge semantics:
+  - scalars overwrite
+  - maps merge recursively
+  - lists replace
+  - explicit `null` clears
+  - omitted key preserves parent value
+- `variables` has two views:
+  - render-time contract: merged chain (used for template rendering)
+  - exposed contract: child-facing variable set (used for unknown-var validation and `role show`)
+
+Variable contract rules:
+- Child must redefine all required parent variables.
+- Child may make a required parent variable optional by adding a default.
+- Optional parent variables omitted by child are still available at render-time via inherited defaults, but are hidden from the child-facing exposed contract.
+
+`h2 role` UX:
+- `h2 role list` shows `(inherits: <parent>)` markers.
+- `h2 role show <name>` shows `Inherits`, `Chain`, variable origins, and inherited hidden vars.
+- `h2 role check <name>` validates the full inheritance chain and reports actionable inheritance errors.
+
+`yaml.Node` + tags:
+- `hooks` and `settings` merge via node-aware semantics with custom-tag preservation.
+- Custom YAML tags outside `hooks`/`settings` are rejected in inheritance merge with deterministic errors.
 
 ### Permission review agent
 

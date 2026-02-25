@@ -185,7 +185,7 @@ Lists replace rather than append because:
 
 ### `yaml.Node` Fields (hooks, settings)
 
-The `hooks` and `settings` fields are `yaml.Node` in the Role struct, which preserves arbitrary YAML structure. During the map-based deep merge, these are regular nested maps and merge naturally. After the deep merge, the final map is marshaled back to YAML and unmarshaled into the Role struct, which correctly populates the `yaml.Node` fields.
+The `hooks` and `settings` fields are `yaml.Node` in the Role struct, and are merged using a node-aware merge path (not plain map round-tripping) so tag-sensitive YAML can be preserved in those sections.
 
 Default behavior contract for `yaml.Node` round-tripping in inheritance:
 - Mapping content is merged recursively using map semantics.
@@ -194,9 +194,10 @@ Default behavior contract for `yaml.Node` round-tripping in inheritance:
 - Explicit `null` in child clears parent value.
 - Omitted key in child keeps parent value.
 - YAML comments are not preserved (acceptable loss).
-- YAML anchors/aliases are flattened to resolved values after marshal/unmarshal; alias identity is not preserved.
+- YAML anchors/aliases are normalized to semantic values; alias identity is not preserved.
 - Standard YAML tags are allowed (for example `!!str`, `!!int`) and follow normal yaml.v3 decoding behavior.
-- Custom YAML tags are allowed only if they can be preserved through inheritance merge round-trips; otherwise role loading fails with a clear error.
+- Custom YAML tags are preserved for `hooks`/`settings`.
+- Custom YAML tags outside `hooks`/`settings` are rejected with a deterministic error because inheritance merge cannot preserve them there.
 
 ## Examples
 
@@ -288,112 +289,76 @@ permission_review_agent:
 
 Here the parent's `instructions` field is preserved (rendered with the child's variable values), while only the `permission_review_agent` is overridden.
 
-## Implementation Plan
+## CLI Behavior
 
-### Files to modify
+### `h2 role list`
 
-| File | Changes |
-|---|---|
-| `internal/tmpl/tmpl.go` | Add `MergeVarDefs`, `extractInherits` (or reuse `extractYAMLSection`) |
-| `internal/tmpl/tmpl_test.go` | Tests for var def merging, inherits extraction |
-| `internal/config/role.go` | Add inheritance resolution to `LoadRoleWithNameResolution` and `LoadRoleRenderedFrom`; add `deepMergeMaps` helper; add `validateChildCoversParentRequired` |
-| `internal/config/role_test.go` | Tests for inheritance: single level, multi-level, circular detection, variable merging, YAML deep merge |
-| `internal/cmd/role.go` | Update `role show` and `role check` to display inheritance info |
-| `docs/configuration.md` | Document `inherits` field and variable merge semantics |
-| `docs/role-inheritance.md` | This document |
+- Inherited roles are marked inline: `child-role ... (inherits: parent-role)`.
+- Pod role listing is still grouped; inheritance markers are shown when present in pod role files too.
 
-### New functions
+### `h2 role show <name>`
 
-**`tmpl.go`:**
-- `MergeVarDefs(parent, child map[string]VarDef) map[string]VarDef` — overlay child on parent
-- `ValidateChildCoversRequired(parentDefs, childDefs map[string]VarDef) error` — ensure child defines all parent required vars
+- Displays:
+  - `Inherits: <direct-parent>` when inheritance is configured.
+  - `Chain: base -> ... -> child` for multi-level inheritance.
+  - `Variables` with origin tags (`[from: <role>]`) for the exposed child contract.
+  - `Inherited Variables (hidden from child contract)` for inherited optional vars used at render-time but not exposed to callers.
 
-**`role.go`:**
-- `resolveInheritanceChain(name string) ([]inheritanceLevel, error)` — resolves the full chain, detects cycles, enforces depth limit
-- `deepMergeMaps(base, overlay map[string]interface{}) map[string]interface{}` — recursive map merge
-- `loadRoleWithInheritance(path string, ctx *tmpl.Context, nameFuncs template.FuncMap, cliName string, generateFallback func() string) (*Role, string, error)` — the inheritance-aware entry point
+### `h2 role check <name>`
 
-**Data type:**
-```go
-type inheritanceLevel struct {
-    name      string           // role name
-    path      string           // file path
-    rawText   string           // raw file contents
-    varDefs   map[string]VarDef
-    remaining string           // template text with variables stripped
-}
-```
+- Validates the full inheritance graph first (parent resolution, cycle detection, depth limit, parser errors).
+- On failure, emits an actionable error:
+  - `role "<name>" inheritance validation failed: ...`
+- On success, prints inheritance metadata (`Inherits`, `Chain`) with the normal role validity summary.
 
-### Integration with existing two-pass system
+## Troubleshooting
 
-The current `LoadRoleWithNameResolution` is the main entry point for role loading at runtime. The inheritance logic slots in naturally:
+### Unknown parent role
 
-1. Extract `inherits` from the child's raw text (before template rendering)
-2. If `inherits` is set, resolve the full chain
-3. Merge variable defs across the chain
-4. Replace the single-template rendering in pass 1 and pass 2 with render-each-then-deep-merge
+Example:
+`role "child" inheritance validation failed: role "child" inherits unknown parent role "missing-parent"`
 
-The existing `LoadRoleRenderedFrom` (used for simpler loading without name resolution) should also support inheritance for consistency.
+Fix: create the parent role in `~/.h2/roles/` (as `.yaml.tmpl` or `.yaml`) or correct the `inherits` value.
 
-### Interaction with pods
+### Circular inheritance
 
-Pod templates reference roles by name. If a pod agent references a child role that inherits, the inheritance is resolved transparently — the pod doesn't need to know about the inheritance chain. Variable definitions exposed to `--var` follow the child's public contract (`exposedDefs`), not the full inherited render set.
+If role A inherits B and B inherits A (directly or transitively), loading fails with a circular inheritance error.
 
-Constraint: roles in `pods/roles/` cannot be used as inheritance parents. `inherits` resolution is restricted to global roles only.
+Fix: break the cycle so inheritance forms a DAG.
 
-### `h2 role show` and `h2 role list`
+### Inheritance depth limit
 
-- `role show` should display the `inherits` field and show which variables come from the parent vs child
-- `role list` should show inheritance chain if present (e.g., `backend-coder (inherits: coder)`)
-- `role check` should validate the full inheritance chain
+Inheritance depth is capped at 10.
 
-## Testing Plan
+Fix: flatten the hierarchy by collapsing intermediate roles.
 
-### Unit tests (`tmpl_test.go`)
-- `MergeVarDefs`: parent + child overlay, child adds new vars, child doesn't affect parent-only vars
-- `ValidateChildCoversRequired`: missing required parent var errors, adding defaults passes, new child vars pass
+### Required parent variable not redefined in child
 
-### Unit tests (`role_test.go`)
-- Single-level inheritance: child overrides scalar, map, list fields
-- Variable merge: child provides default for parent required var
-- Variable merge: child omits optional parent var (baked in)
-- Variable merge: child removes default from optional parent var (becomes required)
-- Variable merge: child introduces new variable
-- Deep merge: nested maps merge recursively
-- Deep merge: lists replace (not append)
-- Deep merge: omitted keys preserve parent value
-- Deep merge: explicit `null` overwrites parent value
-- Inherits resolution rejects pod-scoped parents (`pods/roles/*`)
-- Circular inheritance detection
-- Depth limit exceeded
-- Parent not found error
-- Two-pass AgentName resolution with inheritance
-- Template variable references resolve to child's values in parent's template
+If a parent required var is omitted in the child var definitions, load/check fails.
 
-### `yaml.Node` edge-case tests (`role_test.go`)
-- `hooks` map-map merge: parent and child mappings merge recursively.
-- `settings` sequence replacement: child list fully replaces parent list.
-- Scalar type replacement: parent map/scalar replaced by child scalar/map as provided.
-- Null clearing: child `hooks: null` (or nested key null) clears parent value.
-- Omitted-key preservation: parent `hooks.pre` remains when child only sets `hooks.post`.
-- Comment loss expectation: comments in parent/child are ignored in equality assertions.
-- Anchor/alias normalization: parent uses `&anchor`/`*alias`; merged output compares semantic value, not anchor identity.
-- Standard tag handling: values with standard tags (for example `!!str 123`) decode/merge as expected.
-- Custom tag preservation success: custom-tagged value remains custom-tagged after merge round-trip.
-- Custom tag preservation failure: if merge round-trip drops or rewrites a custom tag, loading fails with a deterministic validation error.
-- Heterogeneous sequence replacement: parent mixed-type list replaced exactly by child mixed-type list.
-- Nested shape change: parent mapping at key `x`, child sequence at `x` results in child sequence (type replacement).
+Fix: define that variable in the child `variables:` block (with or without a default).
 
-### Integration tests
-- `h2 run --role child --dry-run` shows merged config
-- `h2 role show child` shows inheritance info
-- `h2 role check child` validates full chain
-- `h2 run --role child --var missing_var=x` errors on unknown var (merged defs)
+### Custom YAML tags
 
-## Decisions and Open Questions
+- Custom tags are supported in `hooks` and `settings` and are preserved there.
+- Custom tags outside `hooks`/`settings` are rejected in inheritance merge with a deterministic error.
 
-Decisions in this draft:
-1. `inherits` supports multi-level chains, with max depth 10.
-2. `inherits` is static text only (not template-rendered).
-3. Pod-scoped roles (`pods/roles/*`) are not valid inheritance parents.
-4. `yaml.Node` merge behavior is semantic-first for YAML presentation artifacts (comments/anchor identity), while custom YAML tag identity is strict: if custom tags cannot be preserved, loading fails.
+Fix: move custom-tagged content into `hooks`/`settings`, or replace it with standard YAML tags/values.
+
+## Final Contract
+
+1. `inherits` supports multi-level static chains (not template-rendered), with max depth 10.
+2. Parent roles are resolved only from global roles (`~/.h2/roles`), not pod-scoped role directories.
+3. Variable contracts are split into:
+   - render-time defs (full chain)
+   - exposed defs (child contract shown/validated by CLI/API)
+4. Deep merge semantics:
+   - scalar overwrite
+   - map recursive merge
+   - sequence replacement
+   - explicit `null` clearing
+   - omitted key preservation
+5. `yaml.Node` policy:
+   - semantic merge for `hooks`/`settings`
+   - comment/anchor identity loss is acceptable
+   - custom-tag fail-hard outside `hooks`/`settings`

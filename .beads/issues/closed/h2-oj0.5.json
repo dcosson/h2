@@ -2,7 +2,7 @@
   "id": "h2-oj0.5",
   "title": "Configuration docs and examples for role inheritance",
   "description": "Update docs/configuration.md and docs/role-inheritance.md to reflect shipped behavior: multi-level static inherits, global-only inheritance parents (no pods/roles parents), render vs exposed variable contract, deep-merge semantics, and yaml.Node custom-tag fail-hard policy. Include command examples and troubleshooting notes that match implemented CLI behavior and validation errors.",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "parent": "h2-oj0",
@@ -30,5 +30,7 @@
     "project=role-inheritance"
   ],
   "created_at": "2026-02-25T09:53:37.523092-08:00",
-  "updated_at": "2026-02-25T09:53:37.523092-08:00"
+  "updated_at": "2026-02-25T10:26:04.106631-08:00",
+  "closed_at": "2026-02-25T10:26:04.106631-08:00",
+  "close_reason": "Closed"
 }
