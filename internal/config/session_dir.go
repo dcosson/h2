@@ -157,24 +157,23 @@ func buildH2Settings() map[string]any {
 }
 
 // buildH2Hooks creates the hooks section with h2 standard hooks.
+// All events use the unified "h2 handle-hook" command which forwards
+// events to the agent and handles PermissionRequest review.
 func buildH2Hooks() map[string][]hookMatcher {
-	collectHook := hookEntry{
+	hook := hookEntry{
 		Type:    "command",
-		Command: "h2 hook collect",
+		Command: "h2 handle-hook",
 		Timeout: 5,
 	}
 
-	permissionHook := hookEntry{
-		Type:    "command",
-		Command: "h2 permission-request",
-		Timeout: 60,
-	}
-
-	// Standard hook events that get the collect hook.
+	// Standard hook events.
 	standardEvents := []string{
 		"PreToolUse",
 		"PostToolUse",
+		"PostToolUseFailure",
+		"PreCompact",
 		"SessionStart",
+		"SessionEnd",
 		"Stop",
 		"UserPromptSubmit",
 	}
@@ -184,14 +183,19 @@ func buildH2Hooks() map[string][]hookMatcher {
 	for _, event := range standardEvents {
 		hooks[event] = []hookMatcher{{
 			Matcher: "",
-			Hooks:   []hookEntry{collectHook},
+			Hooks:   []hookEntry{hook},
 		}}
 	}
 
-	// PermissionRequest gets the permission handler + collect hook.
+	// PermissionRequest needs a longer timeout for the AI reviewer.
+	permissionHook := hookEntry{
+		Type:    "command",
+		Command: "h2 handle-hook",
+		Timeout: 60,
+	}
 	hooks["PermissionRequest"] = []hookMatcher{{
 		Matcher: "",
-		Hooks:   []hookEntry{permissionHook, collectHook},
+		Hooks:   []hookEntry{permissionHook},
 	}}
 
 	return hooks

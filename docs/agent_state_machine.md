@@ -65,8 +65,9 @@ Underlying hook signals:
 - `UserPromptSubmit`
 - `PreToolUse`
 - `PostToolUse`
+- `PostToolUseFailure`
 - `PermissionRequest`
-- `permission_decision` (not a claude code hook, we emit it in the h2 permission-request after a response is sent)
+- `permission_decision` (not a claude code hook, emitted by h2 handle-hook after a permission decision is made)
 - `PreCompact`
 - `SessionStart`
 - `Stop`
@@ -81,7 +82,8 @@ stateDiagram-v2
     Idle --> ActiveThinking: UserPromptSubmit\nemit user_prompt + state_change(active,thinking)
 
     ActiveThinking --> ActiveToolUse: PreToolUse\nemit tool_started + state_change(active,tool_use)
-    ActiveToolUse --> ActiveThinking: PostToolUse\nemit tool_completed + state_change(active,thinking)
+    ActiveToolUse --> ActiveThinking: PostToolUse\nemit tool_completed(success) + state_change(active,thinking)
+    ActiveToolUse --> ActiveThinking: PostToolUseFailure\nemit tool_completed(failure) + state_change(active,thinking)
 
     ActiveThinking --> ActiveWaitingPermission: PermissionRequest\nemit approval_requested + state_change(active,waiting_for_permission)
     ActiveWaitingPermission --> ActiveWaitingPermission: permission_decision(decision=ask_user)\nstate_change(active,waiting_for_permission)

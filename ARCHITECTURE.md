@@ -169,8 +169,7 @@ flowchart LR
 
     CC_OTEL -->|"POST /v1/logs"| OTEL_HTTP
     CC_OTEL -->|"POST /v1/metrics"| OTEL_METRICS
-    CC_HOOKS -->|"h2 hook collect → socket"| HC
-    CC_HOOKS -->|"h2 permission-request → socket"| HC
+    CC_HOOKS -->|"h2 handle-hook → socket"| HC
 
     OTEL_HTTP -->|"otelNotify chan"| SM
     OTEL_HTTP -->|"OtelMetrics / OtelConnected"| AL

@@ -151,6 +151,33 @@ func TestEventHandler_PermissionRequest(t *testing.T) {
 	}
 }
 
+func TestEventHandler_PostToolUseFailure(t *testing.T) {
+	events := make(chan monitor.AgentEvent, 64)
+	h := NewEventHandler(events, nil)
+
+	payload, _ := json.Marshal(map[string]string{"tool_name": "Bash", "session_id": "s1"})
+	h.ProcessHookEvent("PostToolUseFailure", payload)
+
+	got := drainEvents(events, 2)
+	if got[0].Type != monitor.EventToolCompleted {
+		t.Fatalf("event[0].Type = %v, want EventToolCompleted", got[0].Type)
+	}
+	tc := got[0].Data.(monitor.ToolCompletedData)
+	if tc.Success {
+		t.Fatal("expected Success=false for PostToolUseFailure")
+	}
+	if tc.ToolName != "Bash" {
+		t.Fatalf("ToolName = %q, want Bash", tc.ToolName)
+	}
+	if got[1].Type != monitor.EventStateChange {
+		t.Fatalf("event[1].Type = %v, want EventStateChange", got[1].Type)
+	}
+	sc := got[1].Data.(monitor.StateChangeData)
+	if sc.SubState != monitor.SubStateThinking {
+		t.Fatalf("SubState = %v, want Thinking", sc.SubState)
+	}
+}
+
 func TestEventHandler_SessionStart_Idle(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
 	h := NewEventHandler(events, nil)

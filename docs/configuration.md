@@ -138,7 +138,7 @@ permission_review_agent:
     ASK_USER: anything unusual or security-sensitive
 ```
 
-When enabled, h2 writes the instructions to `permission-reviewer.md` in the agent's session directory. The `h2 permission-request` hook reads this file and calls a fast model to evaluate each request.
+When enabled, h2 writes the instructions to `permission-reviewer.md` in the agent's session directory. The `h2 handle-hook` command reads this file and calls a fast model to evaluate each PermissionRequest.
 
 ### How settings are delivered to each agent
 

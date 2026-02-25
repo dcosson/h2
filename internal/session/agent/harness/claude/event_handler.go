@@ -116,6 +116,14 @@ func (h *EventHandler) ProcessHookEvent(eventName string, payload json.RawMessag
 		})
 		h.emitStateChange(now, monitor.StateActive, monitor.SubStateThinking)
 
+	case "PostToolUseFailure":
+		h.emit(monitor.AgentEvent{
+			Type:      monitor.EventToolCompleted,
+			Timestamp: now,
+			Data:      monitor.ToolCompletedData{ToolName: toolName, Success: false},
+		})
+		h.emitStateChange(now, monitor.StateActive, monitor.SubStateThinking)
+
 	case "PermissionRequest":
 		h.emit(monitor.AgentEvent{
 			Type:      monitor.EventApprovalRequested,
