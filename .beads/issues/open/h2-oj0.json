@@ -1,0 +1,37 @@
+{
+  "id": "h2-oj0",
+  "title": "Role inheritance implementation",
+  "description": "Implement role inheritance end-to-end from the design in docs/role-inheritance.md, including inheritance chain resolution, variable contract semantics, deep merge behavior, yaml.Node handling, CLI UX updates, and documentation.",
+  "status": "open",
+  "priority": 2,
+  "type": "epic",
+  "dependents": [
+    {
+      "id": "h2-oj0.1",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-oj0.2",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-oj0.3",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-oj0.4",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-oj0.5",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=role-inheritance"
+  ],
+  "created_at": "2026-02-25T09:53:22.295628-08:00",
+  "updated_at": "2026-02-25T09:53:22.295628-08:00"
+}

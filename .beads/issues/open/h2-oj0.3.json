@@ -1,0 +1,32 @@
+{
+  "id": "h2-oj0.3",
+  "title": "yaml.Node merge semantics and custom-tag preservation enforcement",
+  "description": "In the inheritance merge path, codify yaml.Node behavior for hooks/settings: semantic map merge, list replacement, explicit null clearing, omitted-key preservation, and acceptable loss of comments/anchor identity. Enforce fail-hard behavior when custom YAML tags cannot be preserved through merge round-trips while allowing standard YAML tags. Add focused tests in internal/config/role_test.go for custom-tag preserved success, custom-tag preservation failure (deterministic error), standard-tag behavior, anchor/alias normalization, and shape/type replacement edge cases.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "h2-oj0",
+  "dependencies": [
+    {
+      "id": "h2-oj0",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-oj0.2",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "h2-oj0.5",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=role-inheritance"
+  ],
+  "created_at": "2026-02-25T09:53:37.457833-08:00",
+  "updated_at": "2026-02-25T09:53:37.457833-08:00"
+}
