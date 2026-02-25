@@ -195,7 +195,8 @@ Default behavior contract for `yaml.Node` round-tripping in inheritance:
 - Omitted key in child keeps parent value.
 - YAML comments are not preserved (acceptable loss).
 - YAML anchors/aliases are flattened to resolved values after marshal/unmarshal; alias identity is not preserved.
-- Custom YAML tags are preserved only if they survive generic unmarshal/marshal. If not, value semantics win over tag fidelity.
+- Standard YAML tags are allowed (for example `!!str`, `!!int`) and follow normal yaml.v3 decoding behavior.
+- Custom YAML tags are allowed only if they can be preserved through inheritance merge round-trips; otherwise role loading fails with a clear error.
 
 ## Examples
 
@@ -377,7 +378,9 @@ Constraint: roles in `pods/roles/` cannot be used as inheritance parents. `inher
 - Omitted-key preservation: parent `hooks.pre` remains when child only sets `hooks.post`.
 - Comment loss expectation: comments in parent/child are ignored in equality assertions.
 - Anchor/alias normalization: parent uses `&anchor`/`*alias`; merged output compares semantic value, not anchor identity.
-- Tag fallback behavior: tagged values (for example `!!str 123`) either preserve tag through round-trip or normalize to equivalent scalar; test asserts accepted semantic value path.
+- Standard tag handling: values with standard tags (for example `!!str 123`) decode/merge as expected.
+- Custom tag preservation success: custom-tagged value remains custom-tagged after merge round-trip.
+- Custom tag preservation failure: if merge round-trip drops or rewrites a custom tag, loading fails with a deterministic validation error.
 - Heterogeneous sequence replacement: parent mixed-type list replaced exactly by child mixed-type list.
 - Nested shape change: parent mapping at key `x`, child sequence at `x` results in child sequence (type replacement).
 
@@ -393,7 +396,4 @@ Decisions in this draft:
 1. `inherits` supports multi-level chains, with max depth 10.
 2. `inherits` is static text only (not template-rendered).
 3. Pod-scoped roles (`pods/roles/*`) are not valid inheritance parents.
-4. `yaml.Node` merge behavior is semantic-first: preserve values and merge rules, not YAML presentation artifacts (comments/anchor identity).
-
-Open questions:
-1. **Tag handling strictness**: Should we eventually fail hard when a custom YAML tag cannot be preserved, instead of accepting semantic normalization?
+4. `yaml.Node` merge behavior is semantic-first for YAML presentation artifacts (comments/anchor identity), while custom YAML tag identity is strict: if custom tags cannot be preserved, loading fails.
