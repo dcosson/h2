@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1641,6 +1642,275 @@ instructions: |
 	if calls != 1 {
 		t.Errorf("expected 1 generate call (cached), got %d", calls)
 	}
+}
+
+// --- Role inheritance tests ---
+
+func TestLoadRoleRenderedFrom_InheritanceSingleLevelDeepMerge(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+
+	writeRoleFile(t, rolesDir, "coder.yaml.tmpl", `
+role_name: coder
+variables:
+  team:
+    description: "Team"
+  model:
+    description: "Model"
+    default: "sonnet"
+agent_model: "{{ .Var.model }}"
+additional_dirs:
+  - /parent/a
+settings:
+  shell: bash
+  retries: 1
+instructions: |
+  Parent {{ .AgentName }} on {{ .Var.team }} using {{ .Var.model }}.
+`)
+
+	childPath := writeRoleFile(t, rolesDir, "backend.yaml.tmpl", `
+role_name: backend
+inherits: coder
+variables:
+  team:
+    description: "Team override"
+    default: "platform"
+  service:
+    description: "Service"
+additional_dirs:
+  - /child/only
+settings:
+  retries: 5
+  nested:
+    mode: strict
+instructions: |
+  Child {{ .AgentName }} for {{ .Var.service }}.
+`)
+
+	role, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{
+		AgentName: "agent-x",
+		Var:       map[string]string{"service": "auth"},
+	})
+	if err != nil {
+		t.Fatalf("LoadRoleRenderedFrom: %v", err)
+	}
+	if role.RoleName != "backend" {
+		t.Errorf("RoleName = %q, want %q", role.RoleName, "backend")
+	}
+	if role.GetModel() != "sonnet" {
+		t.Errorf("AgentModel = %q, want %q", role.GetModel(), "sonnet")
+	}
+	if len(role.AdditionalDirs) != 1 || role.AdditionalDirs[0] != "/child/only" {
+		t.Errorf("AdditionalDirs = %#v, want child list replacement", role.AdditionalDirs)
+	}
+	if !strings.Contains(role.Instructions, "Child agent-x for auth.") {
+		t.Errorf("Instructions = %q, want child-rendered content", role.Instructions)
+	}
+
+	var settings map[string]interface{}
+	if err := role.Settings.Decode(&settings); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	if settings["shell"] != "bash" {
+		t.Errorf("settings.shell = %v, want %q", settings["shell"], "bash")
+	}
+	if settings["retries"] != 5 {
+		t.Errorf("settings.retries = %v, want 5", settings["retries"])
+	}
+	nested, ok := settings["nested"].(map[string]interface{})
+	if !ok || nested["mode"] != "strict" {
+		t.Errorf("settings.nested = %#v, want nested.mode=strict", settings["nested"])
+	}
+
+	if _, ok := role.Variables["model"]; ok {
+		t.Errorf("exposed vars should hide omitted optional parent var 'model': %#v", role.Variables)
+	}
+	if _, ok := role.Variables["service"]; !ok {
+		t.Errorf("expected child var 'service' in exposed vars: %#v", role.Variables)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceRequiredParentVarMustBeDefined(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+variables:
+  team:
+    description: "Team"
+instructions: hi
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+variables:
+  service:
+    description: "Service"
+instructions: hi
+`)
+
+	_, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{Var: map[string]string{"service": "api"}})
+	if err == nil {
+		t.Fatal("expected missing-required-parent-var error")
+	}
+	if !strings.Contains(err.Error(), "team") {
+		t.Errorf("error should mention missing parent required var 'team': %v", err)
+	}
+}
+
+func TestLoadRoleWithNameResolution_InheritanceRejectsUnknownAgainstExposedContract(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+variables:
+  model:
+    description: "Model"
+    default: "sonnet"
+instructions: |
+  Model {{ .Var.model }}
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+variables:
+  service:
+    description: "Service"
+instructions: |
+  Service {{ .Var.service }}
+`)
+
+	_, _, err := LoadRoleWithNameResolution(
+		childPath,
+		&tmpl.Context{Var: map[string]string{"service": "api", "model": "opus"}},
+		nil,
+		"agent-1",
+		func() string { return "unused" },
+	)
+	if err == nil {
+		t.Fatal("expected unknown-var error")
+	}
+	if !strings.Contains(err.Error(), "model") {
+		t.Errorf("error should mention unknown var 'model': %v", err)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceParentNotFound(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: missing-parent
+instructions: hi
+`)
+	_, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err == nil {
+		t.Fatal("expected parent-not-found error")
+	}
+	if !strings.Contains(err.Error(), "missing-parent") {
+		t.Errorf("error should mention missing parent name: %v", err)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceCycle(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	aPath := writeRoleFile(t, rolesDir, "a.yaml", `
+role_name: a
+inherits: b
+instructions: A
+`)
+	writeRoleFile(t, rolesDir, "b.yaml", `
+role_name: b
+inherits: a
+instructions: B
+`)
+
+	_, err := LoadRoleRenderedFrom(aPath, &tmpl.Context{})
+	if err == nil {
+		t.Fatal("expected cycle error")
+	}
+	if !strings.Contains(err.Error(), "circular") {
+		t.Errorf("error should mention circular inheritance: %v", err)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceDepthLimit(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "r01.yaml", `
+role_name: r01
+instructions: base
+`)
+	for i := 2; i <= 11; i++ {
+		name := fmt.Sprintf("r%02d", i)
+		parent := fmt.Sprintf("r%02d", i-1)
+		writeRoleFile(t, rolesDir, name+".yaml", fmt.Sprintf(`
+role_name: %s
+inherits: %s
+instructions: %s
+`, name, parent, name))
+	}
+
+	deepPath := filepath.Join(rolesDir, "r11.yaml")
+	_, err := LoadRoleRenderedFrom(deepPath, &tmpl.Context{})
+	if err == nil {
+		t.Fatal("expected depth-limit error")
+	}
+	if !strings.Contains(err.Error(), "depth") {
+		t.Errorf("error should mention depth limit: %v", err)
+	}
+}
+
+func TestLoadRoleWithNameResolution_InheritanceTwoPassAgentName(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+instructions: |
+  Parent sees {{ .AgentName }}
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+agent_name: '{{ randomName }}'
+`)
+
+	nameFuncs := tmpl.NameFuncs(func() string { return "bright-hare" }, nil)
+	role, name, err := LoadRoleWithNameResolution(
+		childPath,
+		&tmpl.Context{},
+		nameFuncs,
+		"",
+		func() string { return "fallback" },
+	)
+	if err != nil {
+		t.Fatalf("LoadRoleWithNameResolution: %v", err)
+	}
+	if name != "bright-hare" {
+		t.Errorf("name = %q, want %q", name, "bright-hare")
+	}
+	if !strings.Contains(role.Instructions, "bright-hare") {
+		t.Errorf("instructions should include resolved AgentName from pass2: %q", role.Instructions)
+	}
+}
+
+func setupInheritanceRolesEnv(t *testing.T) string {
+	t.Helper()
+	h2Dir := t.TempDir()
+	rolesDir := filepath.Join(h2Dir, "roles")
+	if err := os.MkdirAll(rolesDir, 0o755); err != nil {
+		t.Fatalf("mkdir roles dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(h2Dir, ".h2-dir.txt"), []byte("vtest\n"), 0o644); err != nil {
+		t.Fatalf("write h2 marker: %v", err)
+	}
+	t.Setenv("H2_DIR", h2Dir)
+	ResetResolveCache()
+	t.Cleanup(ResetResolveCache)
+	return rolesDir
+}
+
+func writeRoleFile(t *testing.T, rolesDir, name, content string) string {
+	t.Helper()
+	path := filepath.Join(rolesDir, name)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write role file %s: %v", name, err)
+	}
+	return path
 }
 
 func writeTempFile(t *testing.T, name, content string) string {

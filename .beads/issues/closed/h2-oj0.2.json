@@ -2,7 +2,7 @@
   "id": "h2-oj0.2",
   "title": "Core role inheritance loading and deep-merge pipeline",
   "description": "Implement inheritance chain resolution in internal/config/role.go for LoadRoleRenderedFrom and LoadRoleWithNameResolution, including cycle detection, depth limit, and global-role-only parent resolution. Build dual var definition views (renderDefs and exposedDefs), perform two-pass rendering across chain, and deep-merge ancestor-\u003edescendant YAML with documented scalar/map/list/null semantics. Add/extend role tests to cover single-level/multi-level inheritance, parent-not-found, depth overflow, unknown var handling against exposed contract, and AgentName two-pass behavior through inheritance.",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "parent": "h2-oj0",
@@ -36,5 +36,7 @@
     "project=role-inheritance"
   ],
   "created_at": "2026-02-25T09:53:37.429635-08:00",
-  "updated_at": "2026-02-25T09:53:37.429635-08:00"
+  "updated_at": "2026-02-25T10:17:52.72193-08:00",
+  "closed_at": "2026-02-25T10:17:52.72193-08:00",
+  "close_reason": "Closed"
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/template"
 	"time"
@@ -108,10 +109,10 @@ var ValidCodexSandboxModes = []string{
 
 // PermissionReviewAgent configures the AI permission reviewer.
 type PermissionReviewAgent struct {
-	Enabled              *bool  `yaml:"enabled,omitempty"` // defaults to true if instructions are set
-	Instructions         string `yaml:"instructions,omitempty"`
-	InstructionsIntro    string `yaml:"instructions_intro,omitempty"`
-	InstructionsBody     string `yaml:"instructions_body,omitempty"`
+	Enabled                 *bool  `yaml:"enabled,omitempty"` // defaults to true if instructions are set
+	Instructions            string `yaml:"instructions,omitempty"`
+	InstructionsIntro       string `yaml:"instructions_intro,omitempty"`
+	InstructionsBody        string `yaml:"instructions_body,omitempty"`
 	InstructionsAdditional1 string `yaml:"instructions_additional_1,omitempty"`
 	InstructionsAdditional2 string `yaml:"instructions_additional_2,omitempty"`
 	InstructionsAdditional3 string `yaml:"instructions_additional_3,omitempty"`
@@ -156,24 +157,24 @@ type Role struct {
 	CodexConfigPath            string `yaml:"codex_config_path,omitempty"`              // explicit path override
 	CodexConfigPathPrefix      string `yaml:"codex_config_path_prefix,omitempty"`       // default: <H2Dir>/codex-config
 
-	WorkingDir           string                  `yaml:"working_dir,omitempty"`             // agent CWD (default ".")
-	AdditionalDirs       []string                `yaml:"additional_dirs,omitempty"`         // extra dirs passed via --add-dir
-	Worktree             *WorktreeConfig         `yaml:"worktree,omitempty"`                // git worktree settings
-	SystemPrompt         string                  `yaml:"system_prompt,omitempty"`           // replaces Claude's entire default system prompt (--system-prompt)
-	Instructions         string                  `yaml:"instructions,omitempty"`            // appended to default system prompt (--append-system-prompt)
-	InstructionsIntro       string               `yaml:"instructions_intro,omitempty"`      // split instructions: intro
-	InstructionsBody        string               `yaml:"instructions_body,omitempty"`       // split instructions: body
-	InstructionsAdditional1 string               `yaml:"instructions_additional_1,omitempty"` // split instructions: additional 1
-	InstructionsAdditional2 string               `yaml:"instructions_additional_2,omitempty"` // split instructions: additional 2
-	InstructionsAdditional3 string               `yaml:"instructions_additional_3,omitempty"` // split instructions: additional 3
-	PermissionMode       string                  `yaml:"permission_mode,omitempty"`         // Claude Code --permission-mode flag
-	CodexSandboxMode     string                  `yaml:"codex_sandbox_mode,omitempty"`      // Codex --sandbox flag
-	CodexAskForApproval  string                  `yaml:"codex_ask_for_approval,omitempty"`  // Codex --ask-for-approval flag
-	PermissionReviewAgent *PermissionReviewAgent  `yaml:"permission_review_agent,omitempty"` // AI permission reviewer
-	Heartbeat            *HeartbeatConfig         `yaml:"heartbeat,omitempty"`
-	Hooks                yaml.Node                `yaml:"hooks,omitempty"`     // passed through as-is to settings.json
-	Settings             yaml.Node                `yaml:"settings,omitempty"`  // extra settings.json keys
-	Variables            map[string]tmpl.VarDef   `yaml:"variables,omitempty"` // template variable definitions
+	WorkingDir              string                 `yaml:"working_dir,omitempty"`               // agent CWD (default ".")
+	AdditionalDirs          []string               `yaml:"additional_dirs,omitempty"`           // extra dirs passed via --add-dir
+	Worktree                *WorktreeConfig        `yaml:"worktree,omitempty"`                  // git worktree settings
+	SystemPrompt            string                 `yaml:"system_prompt,omitempty"`             // replaces Claude's entire default system prompt (--system-prompt)
+	Instructions            string                 `yaml:"instructions,omitempty"`              // appended to default system prompt (--append-system-prompt)
+	InstructionsIntro       string                 `yaml:"instructions_intro,omitempty"`        // split instructions: intro
+	InstructionsBody        string                 `yaml:"instructions_body,omitempty"`         // split instructions: body
+	InstructionsAdditional1 string                 `yaml:"instructions_additional_1,omitempty"` // split instructions: additional 1
+	InstructionsAdditional2 string                 `yaml:"instructions_additional_2,omitempty"` // split instructions: additional 2
+	InstructionsAdditional3 string                 `yaml:"instructions_additional_3,omitempty"` // split instructions: additional 3
+	PermissionMode          string                 `yaml:"permission_mode,omitempty"`           // Claude Code --permission-mode flag
+	CodexSandboxMode        string                 `yaml:"codex_sandbox_mode,omitempty"`        // Codex --sandbox flag
+	CodexAskForApproval     string                 `yaml:"codex_ask_for_approval,omitempty"`    // Codex --ask-for-approval flag
+	PermissionReviewAgent   *PermissionReviewAgent `yaml:"permission_review_agent,omitempty"`   // AI permission reviewer
+	Heartbeat               *HeartbeatConfig       `yaml:"heartbeat,omitempty"`
+	Hooks                   yaml.Node              `yaml:"hooks,omitempty"`     // passed through as-is to settings.json
+	Settings                yaml.Node              `yaml:"settings,omitempty"`  // extra settings.json keys
+	Variables               map[string]tmpl.VarDef `yaml:"variables,omitempty"` // template variable definitions
 }
 
 // UnmarshalYAML decodes a role from YAML.
@@ -323,7 +324,6 @@ func (r *Role) GetAgentAccountProfile() string {
 	return "default"
 }
 
-
 // RolesDir returns the directory where role files are stored (~/.h2/roles/).
 func RolesDir() string {
 	return filepath.Join(ConfigDir(), "roles")
@@ -456,59 +456,27 @@ func LoadRoleRenderedFrom(path string, ctx *tmpl.Context) (*Role, error) {
 	if ctx == nil {
 		return LoadRoleFrom(path)
 	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read role file: %w", err)
-	}
-
-	// Extract variables section before rendering.
-	defs, remaining, err := tmpl.ParseVarDefs(string(data))
-	if err != nil {
-		return nil, fmt.Errorf("parse variables in role %q: %w", path, err)
-	}
-
-	// Clone ctx.Var so we don't mutate the caller's map.
-	vars := make(map[string]string, len(ctx.Var))
-	for k, v := range ctx.Var {
-		vars[k] = v
-	}
-	for name, def := range defs {
-		if _, ok := vars[name]; !ok && def.Default != nil {
-			vars[name] = *def.Default
-		}
-	}
-
-	// Validate that all required variables are present.
-	if err := tmpl.ValidateVars(defs, vars); err != nil {
-		return nil, fmt.Errorf("role %q: %w", filepath.Base(path), err)
-	}
-
-	// Render template with cloned vars.
-	renderCtx := *ctx
-	renderCtx.Var = vars
-	rendered, err := tmpl.Render(remaining, &renderCtx)
-	if err != nil {
-		return nil, fmt.Errorf("template error in role %q (%s): %w", filepath.Base(path), path, err)
-	}
-
-	var role Role
-	if err := yaml.Unmarshal([]byte(rendered), &role); err != nil {
-		return nil, fmt.Errorf("parse rendered role YAML %q: %w", path, err)
-	}
-
-	role.Variables = defs
-
-	if err := role.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid role %q: %w", path, err)
-	}
-
-	return &role, nil
+	return loadRoleRenderedFromWithFuncs(path, ctx, nil)
 }
 
 // agentNamePlaceholder is used during the first render pass to detect
 // whether the role template references {{ .AgentName }}.
 const agentNamePlaceholder = "<AGENT_NAME_PLACEHOLDER>"
+
+const maxRoleInheritanceDepth = 10
+
+type inheritanceLevel struct {
+	name      string
+	path      string
+	defs      map[string]tmpl.VarDef
+	remaining string
+}
+
+type inheritanceRenderPlan struct {
+	chain       []inheritanceLevel
+	renderDefs  map[string]tmpl.VarDef
+	exposedDefs map[string]tmpl.VarDef
+}
 
 // LoadRoleWithNameResolution loads a role using two-pass rendering to resolve
 // the agent_name field. This allows agent_name to use template functions like
@@ -530,96 +498,61 @@ func LoadRoleWithNameResolution(
 	cliName string,
 	generateFallback func() string,
 ) (*Role, string, error) {
+	if ctx == nil {
+		ctx = &tmpl.Context{}
+	}
+
+	plan, err := buildInheritanceRenderPlan(path)
+	if err != nil {
+		return nil, "", err
+	}
+
+	vars := mergeVarDefaults(ctx.Var, plan.renderDefs)
+	if err := tmpl.ValidateVars(plan.renderDefs, vars); err != nil {
+		return nil, "", fmt.Errorf("role %q: %w", filepath.Base(path), err)
+	}
+	if err := tmpl.ValidateNoUnknownVars(plan.exposedDefs, ctx.Var); err != nil {
+		return nil, "", fmt.Errorf("role %q: %w", filepath.Base(path), err)
+	}
+
+	renderCtx := *ctx
+	renderCtx.Var = vars
+
 	// Fast path: CLI name provided, no two-pass needed.
 	if cliName != "" {
-		// Validate unknown vars before rendering (typo protection).
-		if ctx != nil && len(ctx.Var) > 0 {
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return nil, "", fmt.Errorf("read role file: %w", err)
-			}
-			defs, _, err := tmpl.ParseVarDefs(string(data))
-			if err != nil {
-				return nil, "", fmt.Errorf("parse variables in role %q: %w", path, err)
-			}
-			if err := tmpl.ValidateNoUnknownVars(defs, ctx.Var); err != nil {
-				return nil, "", fmt.Errorf("role %q: %w", filepath.Base(path), err)
-			}
-		}
-		renderCtx := *ctx
 		renderCtx.AgentName = cliName
-		role, err := loadRoleRenderedFromWithFuncs(path, &renderCtx, nameFuncs)
+		role, err := renderRoleFromPlan(plan, &renderCtx, nameFuncs, filepath.Base(path))
 		if err != nil {
 			return nil, "", err
 		}
 		return role, cliName, nil
 	}
 
-	// Read the raw file and prepare template vars (shared across both passes).
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, "", fmt.Errorf("read role file: %w", err)
-	}
-
-	defs, remaining, err := tmpl.ParseVarDefs(string(data))
-	if err != nil {
-		return nil, "", fmt.Errorf("parse variables in role %q: %w", path, err)
-	}
-
-	vars := mergeVarDefaults(ctx.Var, defs)
-	if err := tmpl.ValidateVars(defs, vars); err != nil {
-		return nil, "", fmt.Errorf("role %q: %w", filepath.Base(path), err)
-	}
-	// Reject unknown variables (typo protection).
-	if err := tmpl.ValidateNoUnknownVars(defs, ctx.Var); err != nil {
-		return nil, "", fmt.Errorf("role %q: %w", filepath.Base(path), err)
-	}
-
-	// --- Pass 1: render with placeholder AgentName to extract agent_name ---
-	pass1Ctx := *ctx
+	// Pass 1 to resolve agent_name from merged inherited output.
+	pass1Ctx := renderCtx
 	pass1Ctx.AgentName = agentNamePlaceholder
-	pass1Ctx.Var = vars
-
-	pass1Rendered, err := tmpl.RenderWithExtraFuncs(remaining, &pass1Ctx, nameFuncs)
+	pass1Map, err := renderMergedRoleMap(plan.chain, &pass1Ctx, nameFuncs, filepath.Base(path), "pass 1")
 	if err != nil {
-		return nil, "", fmt.Errorf("template error in role %q (pass 1): %w", filepath.Base(path), err)
+		return nil, "", err
 	}
 
-	var pass1Role Role
-	if err := yaml.Unmarshal([]byte(pass1Rendered), &pass1Role); err != nil {
-		return nil, "", fmt.Errorf("parse role YAML %q (pass 1): %w", path, err)
-	}
-
-	// Resolve the agent name.
-	resolvedName := pass1Role.AgentName
-	if strings.Contains(resolvedName, agentNamePlaceholder) {
-		return nil, "", fmt.Errorf("role %q: agent_name must not reference {{ .AgentName }} (circular reference)", filepath.Base(path))
+	resolvedName, err := extractResolvedAgentName(pass1Map, filepath.Base(path))
+	if err != nil {
+		return nil, "", err
 	}
 	if resolvedName == "" {
 		resolvedName = generateFallback()
 	}
 
-	// --- Pass 2: re-render with the resolved AgentName ---
-	pass2Ctx := *ctx
+	// Pass 2 with resolved agent name.
+	pass2Ctx := renderCtx
 	pass2Ctx.AgentName = resolvedName
-	pass2Ctx.Var = vars
-
-	pass2Rendered, err := tmpl.RenderWithExtraFuncs(remaining, &pass2Ctx, nameFuncs)
+	role, err := renderRoleFromPlan(plan, &pass2Ctx, nameFuncs, filepath.Base(path))
 	if err != nil {
-		return nil, "", fmt.Errorf("template error in role %q (pass 2): %w", filepath.Base(path), err)
+		return nil, "", err
 	}
 
-	var role Role
-	if err := yaml.Unmarshal([]byte(pass2Rendered), &role); err != nil {
-		return nil, "", fmt.Errorf("parse role YAML %q (pass 2): %w", path, err)
-	}
-
-	role.Variables = defs
-	if err := role.Validate(); err != nil {
-		return nil, "", fmt.Errorf("invalid role %q: %w", path, err)
-	}
-
-	return &role, resolvedName, nil
+	return role, resolvedName, nil
 }
 
 // loadRoleRenderedFromWithFuncs is like LoadRoleRenderedFrom but uses extra template functions.
@@ -628,39 +561,216 @@ func loadRoleRenderedFromWithFuncs(path string, ctx *tmpl.Context, extraFuncs te
 		return LoadRoleFrom(path)
 	}
 
-	data, err := os.ReadFile(path)
+	plan, err := buildInheritanceRenderPlan(path)
 	if err != nil {
-		return nil, fmt.Errorf("read role file: %w", err)
+		return nil, err
 	}
 
-	defs, remaining, err := tmpl.ParseVarDefs(string(data))
-	if err != nil {
-		return nil, fmt.Errorf("parse variables in role %q: %w", path, err)
-	}
-
-	vars := mergeVarDefaults(ctx.Var, defs)
-	if err := tmpl.ValidateVars(defs, vars); err != nil {
+	vars := mergeVarDefaults(ctx.Var, plan.renderDefs)
+	if err := tmpl.ValidateVars(plan.renderDefs, vars); err != nil {
 		return nil, fmt.Errorf("role %q: %w", filepath.Base(path), err)
 	}
 
 	renderCtx := *ctx
 	renderCtx.Var = vars
-	rendered, err := tmpl.RenderWithExtraFuncs(remaining, &renderCtx, extraFuncs)
+	return renderRoleFromPlan(plan, &renderCtx, extraFuncs, filepath.Base(path))
+}
+
+func buildInheritanceRenderPlan(path string) (*inheritanceRenderPlan, error) {
+	chain, err := resolveInheritanceChain(path, map[string]bool{}, 1)
 	if err != nil {
-		return nil, fmt.Errorf("template error in role %q (%s): %w", filepath.Base(path), path, err)
+		return nil, err
+	}
+
+	renderDefs := map[string]tmpl.VarDef{}
+	for i, level := range chain {
+		if i > 0 {
+			if err := tmpl.ValidateChildCoversRequired(chain[i-1].defs, level.defs); err != nil {
+				return nil, fmt.Errorf("role %q inheritance from %q invalid: %w", level.name, chain[i-1].name, err)
+			}
+		}
+		renderDefs = tmpl.MergeVarDefs(renderDefs, level.defs)
+	}
+
+	exposedDefs := copyVarDefs(renderDefs)
+	if len(chain) > 1 {
+		childDefs := chain[len(chain)-1].defs
+		exposedDefs = copyVarDefs(childDefs)
+
+		parentDefs := map[string]tmpl.VarDef{}
+		for i := 0; i < len(chain)-1; i++ {
+			parentDefs = tmpl.MergeVarDefs(parentDefs, chain[i].defs)
+		}
+		for name, def := range parentDefs {
+			if !def.Required() {
+				continue
+			}
+			if childDef, ok := childDefs[name]; ok {
+				exposedDefs[name] = childDef
+			}
+		}
+	}
+
+	return &inheritanceRenderPlan{
+		chain:       chain,
+		renderDefs:  renderDefs,
+		exposedDefs: exposedDefs,
+	}, nil
+}
+
+func resolveInheritanceChain(path string, seen map[string]bool, depth int) ([]inheritanceLevel, error) {
+	if depth > maxRoleInheritanceDepth {
+		return nil, fmt.Errorf("role inheritance depth exceeds maximum of %d", maxRoleInheritanceDepth)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read role file: %w", err)
+	}
+
+	name := roleNameFromFile(filepath.Base(path))
+	if seen[name] {
+		return nil, fmt.Errorf("circular role inheritance detected at %q", name)
+	}
+	seen[name] = true
+
+	inherits, withoutInherits, err := tmpl.ParseInherits(string(data))
+	if err != nil {
+		return nil, fmt.Errorf("parse inherits in role %q: %w", path, err)
+	}
+
+	defs, remaining, err := tmpl.ParseVarDefs(withoutInherits)
+	if err != nil {
+		return nil, fmt.Errorf("parse variables in role %q: %w", path, err)
+	}
+
+	current := inheritanceLevel{
+		name:      name,
+		path:      path,
+		defs:      defs,
+		remaining: remaining,
+	}
+
+	if inherits == "" {
+		return []inheritanceLevel{current}, nil
+	}
+
+	parentPath, _ := resolveRolePath(RolesDir(), inherits)
+	if _, err := os.Stat(parentPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("role %q inherits unknown parent role %q", name, inherits)
+		}
+		return nil, fmt.Errorf("resolve parent role %q: %w", inherits, err)
+	}
+
+	parentChain, err := resolveInheritanceChain(parentPath, seen, depth+1)
+	if err != nil {
+		return nil, err
+	}
+	return append(parentChain, current), nil
+}
+
+func renderRoleFromPlan(plan *inheritanceRenderPlan, ctx *tmpl.Context, extraFuncs template.FuncMap, roleLabel string) (*Role, error) {
+	mergedMap, err := renderMergedRoleMap(plan.chain, ctx, extraFuncs, roleLabel, "")
+	if err != nil {
+		return nil, err
 	}
 
 	var role Role
-	if err := yaml.Unmarshal([]byte(rendered), &role); err != nil {
-		return nil, fmt.Errorf("parse rendered role YAML %q: %w", path, err)
+	roleYAML, err := yaml.Marshal(mergedMap)
+	if err != nil {
+		return nil, fmt.Errorf("marshal merged role YAML %q: %w", roleLabel, err)
+	}
+	if err := yaml.Unmarshal(roleYAML, &role); err != nil {
+		return nil, fmt.Errorf("parse merged role YAML %q: %w", roleLabel, err)
 	}
 
-	role.Variables = defs
+	role.Variables = copyVarDefs(plan.exposedDefs)
 	if err := role.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid role %q: %w", path, err)
+		return nil, fmt.Errorf("invalid role %q: %w", roleLabel, err)
 	}
 
 	return &role, nil
+}
+
+func renderMergedRoleMap(chain []inheritanceLevel, ctx *tmpl.Context, extraFuncs template.FuncMap, roleLabel, passLabel string) (map[string]interface{}, error) {
+	merged := map[string]interface{}{}
+	for _, level := range chain {
+		rendered, err := tmpl.RenderWithExtraFuncs(level.remaining, ctx, extraFuncs)
+		if err != nil {
+			if passLabel != "" {
+				return nil, fmt.Errorf("template error in role %q (%s, %s): %w", roleLabel, level.path, passLabel, err)
+			}
+			return nil, fmt.Errorf("template error in role %q (%s): %w", roleLabel, level.path, err)
+		}
+
+		var roleMap map[string]interface{}
+		if err := yaml.Unmarshal([]byte(rendered), &roleMap); err != nil {
+			if passLabel != "" {
+				return nil, fmt.Errorf("parse rendered role YAML %q (%s, %s): %w", roleLabel, level.path, passLabel, err)
+			}
+			return nil, fmt.Errorf("parse rendered role YAML %q (%s): %w", roleLabel, level.path, err)
+		}
+
+		delete(roleMap, "inherits")
+		delete(roleMap, "variables")
+		merged = deepMergeMaps(merged, roleMap)
+	}
+	return merged, nil
+}
+
+func extractResolvedAgentName(rendered map[string]interface{}, roleLabel string) (string, error) {
+	rawName, ok := rendered["agent_name"]
+	if !ok || rawName == nil {
+		return "", nil
+	}
+	name, ok := rawName.(string)
+	if !ok {
+		return "", fmt.Errorf("role %q: agent_name must render to a string", roleLabel)
+	}
+	if strings.Contains(name, agentNamePlaceholder) {
+		return "", fmt.Errorf("role %q: agent_name must not reference {{ .AgentName }} (circular reference)", roleLabel)
+	}
+	return name, nil
+}
+
+func deepMergeMaps(base, overlay map[string]interface{}) map[string]interface{} {
+	merged := make(map[string]interface{}, len(base)+len(overlay))
+	for k, v := range base {
+		merged[k] = v
+	}
+
+	for key, overlayValue := range overlay {
+		baseValue, exists := merged[key]
+		if exists {
+			baseMap, baseOK := baseValue.(map[string]interface{})
+			overlayMap, overlayOK := overlayValue.(map[string]interface{})
+			if baseOK && overlayOK {
+				merged[key] = deepMergeMaps(baseMap, overlayMap)
+				continue
+			}
+		}
+		merged[key] = overlayValue
+	}
+
+	return merged
+}
+
+func copyVarDefs(defs map[string]tmpl.VarDef) map[string]tmpl.VarDef {
+	if len(defs) == 0 {
+		return map[string]tmpl.VarDef{}
+	}
+	names := make([]string, 0, len(defs))
+	for name := range defs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	copied := make(map[string]tmpl.VarDef, len(defs))
+	for _, name := range names {
+		copied[name] = defs[name]
+	}
+	return copied
 }
 
 // mergeVarDefaults creates a new map with provided vars + defaults for missing ones.
