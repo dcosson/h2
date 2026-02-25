@@ -12,7 +12,7 @@ import (
 )
 
 func TestRoleTemplate_UsesTemplateSyntax(t *testing.T) {
-	for _, name := range []string{"default", "concierge", "custom"} {
+	for _, name := range []string{"default", "custom"} {
 		tmplText := config.RoleTemplate(name)
 
 		if !strings.Contains(tmplText, "{{ .RoleName }}") {
@@ -25,6 +25,11 @@ func TestRoleTemplate_UsesTemplateSyntax(t *testing.T) {
 		if strings.Contains(tmplText, "%s") || strings.Contains(tmplText, "%v") {
 			t.Errorf("roleTemplate(%q): should not contain %%s or %%v placeholders", name)
 		}
+	}
+
+	concierge := config.RoleTemplate("concierge")
+	if !strings.Contains(concierge, "inherits: default") {
+		t.Error(`roleTemplate("concierge"): should contain "inherits: default"`)
 	}
 }
 
@@ -39,7 +44,7 @@ func stubNameFuncs() template.FuncMap {
 
 func TestRoleTemplate_ValidGoTemplate(t *testing.T) {
 	// Generated role templates must be renderable with variables and name functions.
-	for _, name := range []string{"default", "concierge"} {
+	for _, name := range []string{"default"} {
 		tmplText := config.RoleTemplate(name)
 
 		// Parse out variables section and set defaults (mimics LoadRoleRendered flow).
@@ -74,7 +79,7 @@ func TestRoleTemplate_ValidGoTemplate(t *testing.T) {
 
 func TestRoleTemplate_RenderedIsValidRole(t *testing.T) {
 	// After rendering via LoadRoleWithNameResolution, the output should be a valid Role.
-	for _, name := range []string{"default", "concierge"} {
+	for _, name := range []string{"default"} {
 		tmplText := config.RoleTemplate(name)
 
 		// Write template to temp file and load via LoadRoleWithNameResolution.
@@ -178,11 +183,11 @@ func TestRoleInitCmd_ConciergeGeneratesTemplateFile(t *testing.T) {
 	}
 
 	content := string(data)
-	if !strings.Contains(content, "{{ .RoleName }}") {
-		t.Error("generated concierge role should contain {{ .RoleName }}")
+	if !strings.Contains(content, "inherits: default") {
+		t.Error(`generated concierge role should contain "inherits: default"`)
 	}
-	if !strings.Contains(content, "{{ .H2Dir }}") {
-		t.Error("generated concierge role should contain {{ .H2Dir }}")
+	if !strings.Contains(content, "instructions_body:") {
+		t.Error("generated concierge role should contain instructions_body override")
 	}
 }
 

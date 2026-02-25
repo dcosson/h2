@@ -32,11 +32,14 @@ func TestRoleTemplate_Concierge(t *testing.T) {
 	if tmpl == "" {
 		t.Fatal("concierge template is empty")
 	}
-	if !strings.Contains(tmpl, "role_name:") {
-		t.Error("concierge template missing role_name field")
+	if !strings.Contains(tmpl, "inherits: default") {
+		t.Error("concierge template should inherit from default")
 	}
 	if !strings.Contains(tmpl, "concierge") {
 		t.Error("concierge template should mention 'concierge'")
+	}
+	if !strings.Contains(tmpl, "instructions_body:") {
+		t.Error("concierge template should override instructions_body")
 	}
 }
 
