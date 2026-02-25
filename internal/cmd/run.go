@@ -109,15 +109,24 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 					// Pod roles use existing flow — pods handle their own name resolution.
 					agentName := name
 					if agentName == "" {
-						agentName = session.GenerateName()
+						if dryRun {
+							agentName = dryRunAgentNamePlaceholder
+						} else {
+							agentName = session.GenerateName()
+						}
 					}
 					ctx.AgentName = agentName
 					name = agentName
 					role, err = config.LoadPodRoleRendered(roleName, ctx)
 				} else {
 					rolePath := config.ResolveRolePath(roleName)
+					resolvedCLIName := name
+					if dryRun && resolvedCLIName == "" {
+						// Keep dry-run deterministic and avoid rendering random names.
+						resolvedCLIName = dryRunAgentNamePlaceholder
+					}
 					role, name, err = config.LoadRoleWithNameResolution(
-						rolePath, ctx, nameFuncs, name, session.GenerateName,
+						rolePath, ctx, nameFuncs, resolvedCLIName, session.GenerateName,
 					)
 				}
 				if err != nil {

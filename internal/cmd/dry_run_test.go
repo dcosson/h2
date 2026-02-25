@@ -88,7 +88,7 @@ func TestResolveAgentConfig_NoPodEnvWhenEmpty(t *testing.T) {
 	}
 }
 
-func TestResolveAgentConfig_GeneratesName(t *testing.T) {
+func TestResolveAgentConfig_UsesPlaceholderNameWhenEmpty(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	role := &config.Role{
@@ -101,8 +101,11 @@ func TestResolveAgentConfig_GeneratesName(t *testing.T) {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
 
-	if rc.Name == "" {
-		t.Error("Name should be auto-generated")
+	if rc.Name != dryRunAgentNamePlaceholder {
+		t.Errorf("Name = %q, want %q", rc.Name, dryRunAgentNamePlaceholder)
+	}
+	if rc.EnvVars["H2_ACTOR"] != dryRunAgentNamePlaceholder {
+		t.Errorf("H2_ACTOR = %q, want %q", rc.EnvVars["H2_ACTOR"], dryRunAgentNamePlaceholder)
 	}
 }
 
@@ -847,6 +850,36 @@ instructions: |
 		"Role: configurable",
 		"h2 project",           // template var resolved in instructions
 		"Environment: staging", // template var resolved in instructions
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Errorf("output should contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestRunDryRun_WithoutNameUsesPlaceholder(t *testing.T) {
+	h2Root := setupPodTestEnv(t)
+
+	roleContent := `role_name: nameful
+agent_name: "{{ randomName }}"
+instructions: |
+  You are {{ .AgentName }}.
+`
+	os.WriteFile(filepath.Join(h2Root, "roles", "nameful.yaml.tmpl"), []byte(roleContent), 0o644)
+
+	output := captureStdout(func() {
+		cmd := newRunCmd()
+		cmd.SetArgs([]string{"--dry-run", "--role", "nameful"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	checks := []string{
+		"Agent: <agent-name>",
+		"You are <agent-name>.",
+		"H2_ACTOR=<agent-name>",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {

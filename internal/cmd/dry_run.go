@@ -12,6 +12,8 @@ import (
 	"h2/internal/session/agent/harness"
 )
 
+const dryRunAgentNamePlaceholder = "<agent-name>"
+
 // ResolvedAgentConfig holds all resolved values for an agent launch,
 // computed without any side effects. Used by --dry-run display.
 type ResolvedAgentConfig struct {
@@ -35,7 +37,7 @@ type ResolvedAgentConfig struct {
 // performing any side effects (no dir creation, no worktree creation, no forking).
 func resolveAgentConfig(name string, role *config.Role, pod string, overrides []string, extraArgs []string) (*ResolvedAgentConfig, error) {
 	if name == "" {
-		name = session.GenerateName()
+		name = dryRunAgentNamePlaceholder
 	}
 
 	h, err := harness.Resolve(roleHarnessConfig(role), nil)
