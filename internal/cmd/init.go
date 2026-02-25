@@ -386,9 +386,13 @@ func generateConfig(abs, style string, force bool, out io.Writer) error {
 
 func generateHarnessPolicyFiles(abs, style string, force bool, out io.Writer) error {
 	claudeSettingsPath := filepath.Join(abs, "claude-config", "default", "settings.json")
+	codexConfigPath := filepath.Join(abs, "codex-config", "default", "config.toml")
 	codexRequirementsPath := filepath.Join(abs, "codex-config", "default", "requirements.toml")
 
 	if err := writeGeneratedFile(claudeSettingsPath, config.ClaudeSettingsTemplate(style), force, out, "claude-config/default/settings.json"); err != nil {
+		return err
+	}
+	if err := writeGeneratedFile(codexConfigPath, config.CodexConfigTemplate(style), force, out, "codex-config/default/config.toml"); err != nil {
 		return err
 	}
 	if err := writeGeneratedFile(codexRequirementsPath, config.CodexRequirementsTemplate(style), force, out, "codex-config/default/requirements.toml"); err != nil {
@@ -452,6 +456,9 @@ func writeInstructions(abs, style string) error {
 	}
 	if err := os.WriteFile(filepath.Join(codexDir, "requirements.toml"), []byte(config.CodexRequirementsTemplate(style)), 0o644); err != nil {
 		return fmt.Errorf("write codex requirements.toml: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(config.CodexConfigTemplate(style)), 0o644); err != nil {
+		return fmt.Errorf("write codex config.toml: %w", err)
 	}
 
 	return nil

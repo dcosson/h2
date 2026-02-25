@@ -94,6 +94,16 @@ func CodexRequirementsTemplate(style string) string {
 	return string(data)
 }
 
+// CodexConfigTemplate returns the style-specific Codex config.toml.
+// Unknown styles fall back to opinionated.
+func CodexConfigTemplate(style string) string {
+	data, err := Templates.ReadFile(fmt.Sprintf("templates/styles/%s/codex/config.toml", normalizeTemplateStyle(style)))
+	if err != nil {
+		panic(fmt.Sprintf("embedded codex config.toml missing for style %q: %v", style, err))
+	}
+	return string(data)
+}
+
 // WriteSkillsTemplate materializes the embedded style-specific skills template
 // into targetDir. For minimal style, this intentionally results in an empty
 // directory. If force is false and targetDir is non-empty, it leaves content

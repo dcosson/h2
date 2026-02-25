@@ -469,6 +469,9 @@ func TestInitCmd_CreatesClaudeSettingsAndCodexRequirements(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "claude-config", "default", "settings.json")); err != nil {
 		t.Fatalf("expected claude settings.json to exist: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(dir, "codex-config", "default", "config.toml")); err != nil {
+		t.Fatalf("expected codex config.toml to exist: %v", err)
+	}
 	if _, err := os.Stat(filepath.Join(dir, "codex-config", "default", "requirements.toml")); err != nil {
 		t.Fatalf("expected codex requirements.toml to exist: %v", err)
 	}
