@@ -504,7 +504,8 @@ instructions: |
 		"team",
 		"[from: child]",
 		"service",
-		"Inherited Variables (hidden from child contract):",
+		"Inherited Defaults (not settable via --var on this role):",
+		"Pinned from parent role templates",
 		"model",
 		"[from: base]",
 	}

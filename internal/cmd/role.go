@@ -191,7 +191,8 @@ func printHiddenInheritedVariables(origins map[string]string) {
 	}
 	sort.Strings(names)
 
-	fmt.Printf("\nInherited Variables (hidden from child contract):\n")
+	fmt.Printf("\nInherited Defaults (not settable via --var on this role):\n")
+	fmt.Printf("  (Pinned from parent role templates; child must redefine under variables: to expose.)\n")
 	for _, name := range names {
 		fmt.Printf("  %-16s [from: %s]\n", name, origins[name])
 	}
