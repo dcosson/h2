@@ -516,6 +516,49 @@ instructions: |
 	}
 }
 
+func TestRoleShowCmd_InheritedRoleWithRequiredChildVar(t *testing.T) {
+	h2Dir := setupRoleTestH2Dir(t)
+
+	os.WriteFile(filepath.Join(h2Dir, "roles", "base.yaml.tmpl"), []byte(`
+role_name: "{{ .RoleName }}"
+variables:
+  model:
+    description: "Model"
+    default: "sonnet"
+instructions_intro: Base intro
+instructions_body: |
+  Base {{ .Var.model }}
+`), 0o644)
+	os.WriteFile(filepath.Join(h2Dir, "roles", "child.yaml"), []byte(`
+inherits: base
+variables:
+  foo:
+    description: "Required child var"
+instructions_body: Child instructions
+`), 0o644)
+
+	output := captureStdout(func() {
+		cmd := newRoleShowCmd()
+		cmd.SetArgs([]string{"child"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("role show failed: %v", err)
+		}
+	})
+
+	checks := []string{
+		"Role:        child",
+		"Inherits:    base",
+		"Variables:",
+		"foo",
+		"(required)",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("output should contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestRoleCheckCmd_TemplateFile(t *testing.T) {
 	h2Dir := setupRoleTestH2Dir(t)
 

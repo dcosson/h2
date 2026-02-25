@@ -592,6 +592,24 @@ func loadRoleRenderedFromWithFuncs(path string, ctx *tmpl.Context, extraFuncs te
 	return renderRoleFromPlan(plan, &renderCtx, extraFuncs, filepath.Base(path))
 }
 
+// loadRoleRenderedForDisplay renders a role for display commands.
+// Unlike launch-time rendering, it intentionally does not enforce required-var
+// presence so role metadata can be inspected without caller-provided --var values.
+func loadRoleRenderedForDisplay(path string, ctx *tmpl.Context, extraFuncs template.FuncMap) (*Role, error) {
+	if ctx == nil {
+		return LoadRoleFrom(path)
+	}
+
+	plan, err := buildInheritanceRenderPlan(path)
+	if err != nil {
+		return nil, err
+	}
+
+	renderCtx := *ctx
+	renderCtx.Var = mergeVarDefaults(ctx.Var, plan.renderDefs)
+	return renderRoleFromPlan(plan, &renderCtx, extraFuncs, filepath.Base(path))
+}
+
 func buildInheritanceRenderPlan(path string) (*inheritanceRenderPlan, error) {
 	chain, err := resolveInheritanceChain(path, map[string]bool{}, 1)
 	if err != nil {
@@ -1097,13 +1115,15 @@ func loadRoleForDisplay(path, roleName string) (*Role, map[string]tmpl.VarDef, e
 		H2Dir:     ConfigDir(),
 		H2RootDir: rootDir,
 	}
-	role, err := loadRoleRenderedFromWithFuncs(path, ctx, listStubFuncs)
+	role, err := loadRoleRenderedForDisplay(path, ctx, listStubFuncs)
 	if err != nil {
 		// Fallback to plain load (handles roles with required vars).
-		role, err = LoadRoleFrom(path)
-		if err != nil {
-			return nil, nil, err
+		var fallbackErr error
+		role, fallbackErr = LoadRoleFrom(path)
+		if fallbackErr != nil {
+			return nil, nil, fmt.Errorf("%w (display render failed: %v)", fallbackErr, err)
 		}
+		err = nil
 	}
 
 	// Ensure Variables is populated from defs (may not be if fallback was used).
