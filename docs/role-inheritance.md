@@ -2,7 +2,7 @@
 
 ## Summary
 
-Roles can inherit from a parent role via an `inherits` field. The child role's configuration is layered on top of the parent's: variable definitions are merged, both templates are rendered with the merged variable set, and the resulting YAML configs are deep-merged with the child's values winning.
+Roles can inherit from a parent role via an `inherits` field. The child role's configuration is layered on top of the parent's: variable definitions are merged, both templates are rendered with a shared variable context, and the resulting YAML configs are deep-merged with the child's values winning.
 
 This enables creating a base role with common configuration (harness, permissions, shared instructions) and deriving specialized roles that override specific fields or narrow/widen the variable contract.
 
@@ -32,10 +32,14 @@ Variable definitions from parent and child are merged with the child overlaying 
 | required (no default) | omitted | **error** | Child must define all parent required vars |
 | optional (has default) | defines with different default | optional (child default) | Child overrides the default |
 | optional (has default) | defines without default | required | Child removes the default, making it required |
-| optional (has default) | omitted | baked-in | Parent's default is baked into the rendered parent template; variable is not exposed to the child's users |
+| optional (has default) | omitted | baked-in | Parent's default is baked into parent template rendering; not exposed in the child's CLI variable contract |
 | — | new child-only var | as defined | Child can introduce new variables |
 
 **Key rule**: The child **must** explicitly define every variable that is required (no default) in the parent. Optional parent variables that the child omits are silently resolved using the parent's default during parent template rendering.
+
+Two variable views are maintained:
+- **Render var defs**: used to render templates in the inheritance chain; includes parent optional vars (with defaults) even if omitted by child.
+- **Exposed var defs**: used for child-role CLI/API validation; excludes parent optional vars omitted by child so callers are not offered inherited implementation details.
 
 ### Rendering Pipeline
 
@@ -48,7 +52,7 @@ flowchart TD
     E --> F[Extract parent 'inherits' + 'variables']
     F --> G{Parent also inherits?}
     G -->|yes| H[Recurse: load grandparent...]
-    G -->|no| I[Merge variable defs: parent ← child overlay]
+    G -->|no| I[Build var defs: render defs + exposed defs]
     H --> I
     I --> J[Validate: child defines all parent required vars]
     J --> K[Merge user-provided vars with merged defs + defaults]
@@ -83,13 +87,17 @@ Circular inheritance is detected by tracking visited role names during resolutio
 
 **Depth limit**: Maximum inheritance depth of 10 to prevent runaway chains.
 
-**3. Merge variable definitions**
+**3. Build variable definitions**
 
-Walk the chain from ancestor to descendant, overlaying each level's variable defs:
+Walk the chain from ancestor to descendant and build two def maps:
+- `renderDefs`: ancestor-to-descendant overlay (used for template rendering)
+- `exposedDefs`: the child's public variable contract
+  - include all child-defined vars
+  - include parent required vars (child must redefine each)
+  - exclude parent optional vars omitted by child
 
 ```go
 // mergeVarDefs overlays child defs on top of parent defs.
-// Returns merged defs.
 func mergeVarDefs(parent, child map[string]VarDef) map[string]VarDef {
     merged := make(map[string]VarDef, len(parent)+len(child))
     for k, v := range parent {
@@ -99,6 +107,23 @@ func mergeVarDefs(parent, child map[string]VarDef) map[string]VarDef {
         merged[k] = v
     }
     return merged
+}
+
+// buildExposedVarDefs returns the child's public variable contract.
+// Parent optional vars omitted by child are intentionally hidden.
+func buildExposedVarDefs(parentDefs, childDefs map[string]VarDef) map[string]VarDef {
+    exposed := make(map[string]VarDef, len(childDefs))
+    for k, v := range childDefs {
+        exposed[k] = v
+    }
+    for k, v := range parentDefs {
+        if v.Required() {
+            if cv, ok := childDefs[k]; ok {
+                exposed[k] = cv
+            }
+        }
+    }
+    return exposed
 }
 ```
 
@@ -122,7 +147,9 @@ func validateChildCoversParentRequired(parentDefs, childDefs map[string]VarDef) 
 
 **5. Merge user vars with defaults and validate**
 
-Same as today's `mergeVarDefaults` + `ValidateVars` + `ValidateNoUnknownVars`, but operating on the merged variable defs.
+Use:
+- `renderDefs` for resolving defaults used during template execution.
+- `exposedDefs` for `ValidateVars` + `ValidateNoUnknownVars` so callers only pass variables the child role explicitly exposes.
 
 **6. Two-pass rendering**
 
@@ -143,7 +170,8 @@ The YAML deep merge follows standard rules:
 | Scalar (string, int, bool) | Child overwrites parent |
 | Map/object | Recursively merge |
 | List/array | Child replaces parent entirely |
-| null/omitted in child | Parent value preserved |
+| Key omitted in child | Parent value preserved |
+| Key set to `null` in child | Child overwrites parent with `null` |
 
 Lists replace rather than append because:
 - `additional_dirs: [./backend]` in the child means "these are the dirs I want", not "add to parent's dirs"
@@ -298,7 +326,7 @@ The existing `LoadRoleRenderedFrom` (used for simpler loading without name resol
 
 ### Interaction with pods
 
-Pod templates reference roles by name. If a pod agent references a child role that inherits, the inheritance is resolved transparently — the pod doesn't need to know about the inheritance chain. Variable definitions exposed to `--var` are the **merged** definitions (parent + child overlay).
+Pod templates reference roles by name. If a pod agent references a child role that inherits, the inheritance is resolved transparently — the pod doesn't need to know about the inheritance chain. Variable definitions exposed to `--var` follow the child's public contract (`exposedDefs`), not the full inherited render set.
 
 ### `h2 role show` and `h2 role list`
 
@@ -320,7 +348,8 @@ Pod templates reference roles by name. If a pod agent references a child role th
 - Variable merge: child introduces new variable
 - Deep merge: nested maps merge recursively
 - Deep merge: lists replace (not append)
-- Deep merge: child null/omitted preserves parent value
+- Deep merge: omitted keys preserve parent value
+- Deep merge: explicit `null` overwrites parent value
 - Circular inheritance detection
 - Depth limit exceeded
 - Parent not found error
@@ -333,12 +362,12 @@ Pod templates reference roles by name. If a pod agent references a child role th
 - `h2 role check child` validates full chain
 - `h2 run --role child --var missing_var=x` errors on unknown var (merged defs)
 
-## Open Questions
+## Decisions and Open Questions
 
-1. **Should `inherits` support chains longer than 2 levels?** The design supports it with depth limit of 10, but it adds complexity. Could start with single-level only and extend later.
+Decisions in this draft:
+1. `inherits` supports multi-level chains, with max depth 10.
+2. `inherits` is static text only (not template-rendered).
 
-2. **Should the child be able to inherit from a pod-scoped role?** Current design resolves via `resolveRolePath` which only checks the global roles dir. Pod roles live in `pods/roles/`. Probably fine to start with global-only and extend if needed.
-
-3. **Should `inherits` be template-aware?** E.g., `inherits: "{{ .Var.base_role }}"`. This adds complexity and the use case is unclear. Recommend starting with static strings only.
-
-4. **What about `yaml.Node` deep merge edge cases?** The `hooks` and `settings` fields are `yaml.Node`. The map-based deep merge handles nested maps naturally, but there could be edge cases with YAML anchors, tags, or comments. Need to verify with tests.
+Open questions:
+1. **Should the child be able to inherit from a pod-scoped role?** Current design resolves via `resolveRolePath` which only checks the global roles dir. Pod roles live in `pods/roles/`. Probably fine to start with global-only and extend if needed.
+2. **What about `yaml.Node` deep merge edge cases?** The map-based merge handles nested maps naturally, but YAML anchors, tags, and comments may not survive round-trips. Need explicit tests.
