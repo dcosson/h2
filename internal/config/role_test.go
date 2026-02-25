@@ -1758,6 +1758,101 @@ instructions: hi
 	}
 }
 
+func TestLoadRoleRenderedFrom_InheritanceParentInstructionsChildSplitErrors(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+instructions: |
+  Parent instructions
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+instructions_body: |
+  Child body
+`)
+
+	_, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err == nil {
+		t.Fatal("expected error when parent sets instructions and child sets split instructions")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("expected mutually exclusive error, got: %v", err)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceParentSplitChildInstructionsErrors(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+instructions_intro: Parent intro
+instructions_body: Parent body
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+instructions: |
+  Child instructions
+`)
+
+	_, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err == nil {
+		t.Fatal("expected error when parent sets split instructions and child sets instructions")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("expected mutually exclusive error, got: %v", err)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceChildCanNullParentInstructions(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+instructions: |
+  Parent instructions
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+instructions: null
+instructions_body: |
+  Child body
+`)
+
+	role, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err != nil {
+		t.Fatalf("LoadRoleRenderedFrom: %v", err)
+	}
+	if got := role.GetInstructions(); !strings.Contains(got, "Child body") {
+		t.Fatalf("expected child split instructions to remain after nulling parent instructions, got: %q", got)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceChildCanNullParentSplit(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+instructions_intro: Parent intro
+instructions_body: Parent body
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+instructions_intro: null
+instructions_body: null
+instructions: |
+  Child instructions
+`)
+
+	role, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err != nil {
+		t.Fatalf("LoadRoleRenderedFrom: %v", err)
+	}
+	if got := role.GetInstructions(); !strings.Contains(got, "Child instructions") {
+		t.Fatalf("expected child instructions to remain after nulling parent split fields, got: %q", got)
+	}
+}
+
 func TestLoadRoleWithNameResolution_InheritanceRejectsUnknownAgainstExposedContract(t *testing.T) {
 	rolesDir := setupInheritanceRolesEnv(t)
 	writeRoleFile(t, rolesDir, "parent.yaml", `
