@@ -1,0 +1,23 @@
+[rules]
+prefix_rules = [
+  "h2",
+  "bd",
+  "git",
+  "rg",
+  "ls",
+  "cat",
+  "sed",
+  "awk",
+  "find",
+  "jq",
+  "head",
+  "tail",
+  "wc",
+  "nl",
+  "go",
+  "pytest",
+  "npm",
+  "pnpm",
+  "yarn",
+  "make"
+]

@@ -327,6 +327,9 @@ func generateInstructions(abs, style string, force bool, out io.Writer) error {
 	if err := config.WriteSkillsTemplate(style, sharedSkillsDir, force); err != nil {
 		return fmt.Errorf("write shared skills: %w", err)
 	}
+	if err := generateHarnessPolicyFiles(abs, style, force, out); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -381,6 +384,33 @@ func generateConfig(abs, style string, force bool, out io.Writer) error {
 	return nil
 }
 
+func generateHarnessPolicyFiles(abs, style string, force bool, out io.Writer) error {
+	claudeSettingsPath := filepath.Join(abs, "claude-config", "default", "settings.json")
+	codexRequirementsPath := filepath.Join(abs, "codex-config", "default", "requirements.toml")
+
+	if err := writeGeneratedFile(claudeSettingsPath, config.ClaudeSettingsTemplate(style), force, out, "claude-config/default/settings.json"); err != nil {
+		return err
+	}
+	if err := writeGeneratedFile(codexRequirementsPath, config.CodexRequirementsTemplate(style), force, out, "codex-config/default/requirements.toml"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func writeGeneratedFile(path, content string, force bool, out io.Writer, label string) error {
+	if !force {
+		if _, err := os.Stat(path); err == nil {
+			fmt.Fprintf(out, "  Skipped %s (already exists, use --force to overwrite)\n", label)
+			return nil
+		}
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", label, err)
+	}
+	fmt.Fprintf(out, "  Wrote %s\n", label)
+	return nil
+}
+
 // writeInstructions writes shared CLAUDE_AND_AGENTS.md and creates profile symlinks.
 func writeInstructions(abs, style string) error {
 	sharedDir := filepath.Join(abs, "account-profiles-shared", "default")
@@ -416,6 +446,12 @@ func writeInstructions(abs, style string) error {
 	}
 	if err := os.Symlink(sharedSkillsTarget, codexSkillsPath); err != nil {
 		return fmt.Errorf("symlink codex skills dir: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(config.ClaudeSettingsTemplate(style)), 0o644); err != nil {
+		return fmt.Errorf("write claude settings.json: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(codexDir, "requirements.toml"), []byte(config.CodexRequirementsTemplate(style)), 0o644); err != nil {
+		return fmt.Errorf("write codex requirements.toml: %w", err)
 	}
 
 	return nil

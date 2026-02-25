@@ -2,13 +2,69 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
 	"h2/internal/config"
 )
+
+func extractClaudeAllowedCommands(t *testing.T, settingsPath string) []string {
+	t.Helper()
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings.json: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("parse settings.json: %v", err)
+	}
+	perms, ok := parsed["permissions"].(map[string]any)
+	if !ok {
+		t.Fatal("settings.json missing permissions object")
+	}
+	allow, ok := perms["allow"].([]any)
+	if !ok {
+		t.Fatal("settings.json missing permissions.allow array")
+	}
+	re := regexp.MustCompile(`^Bash\(([^ )]+) \*\)$`)
+	var cmds []string
+	for _, item := range allow {
+		s, ok := item.(string)
+		if !ok {
+			t.Fatalf("permissions.allow contains non-string value: %#v", item)
+		}
+		m := re.FindStringSubmatch(s)
+		if len(m) != 2 {
+			t.Fatalf("unexpected command allow format %q", s)
+		}
+		cmds = append(cmds, m[1])
+	}
+	sort.Strings(cmds)
+	return cmds
+}
+
+func extractCodexAllowedCommands(t *testing.T, requirementsPath string) []string {
+	t.Helper()
+	data, err := os.ReadFile(requirementsPath)
+	if err != nil {
+		t.Fatalf("read requirements.toml: %v", err)
+	}
+	re := regexp.MustCompile(`"([^"]+)"`)
+	matches := re.FindAllStringSubmatch(string(data), -1)
+	var cmds []string
+	for _, m := range matches {
+		if len(m) == 2 {
+			cmds = append(cmds, m[1])
+		}
+	}
+	sort.Strings(cmds)
+	return cmds
+}
 
 // expectedDirs returns the subdirectories that h2 init should create.
 func expectedDirs() []string {
@@ -397,6 +453,24 @@ func TestInitCmd_CreatesAGENTSMDSymlink(t *testing.T) {
 	}
 	if len(data) == 0 {
 		t.Error("AGENTS.md (via symlink) should not be empty")
+	}
+}
+
+func TestInitCmd_CreatesClaudeSettingsAndCodexRequirements(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := filepath.Join(fakeHome, "myh2")
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init command failed: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "claude-config", "default", "settings.json")); err != nil {
+		t.Fatalf("expected claude settings.json to exist: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "codex-config", "default", "requirements.toml")); err != nil {
+		t.Fatalf("expected codex requirements.toml to exist: %v", err)
 	}
 }
 
@@ -871,6 +945,40 @@ func TestInitCmd_GenerateSkills(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(sharedSkills, "shaping", "SKILL.md")); err != nil {
 		t.Fatalf("expected shaping skill after --generate skills: %v", err)
+	}
+}
+
+func TestInitCmd_Minimal_CommandPolicyMatchesBetweenClaudeAndCodex(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := filepath.Join(fakeHome, "myh2-min-policy")
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--style", "minimal"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init --style minimal failed: %v", err)
+	}
+
+	claude := extractClaudeAllowedCommands(t, filepath.Join(dir, "claude-config", "default", "settings.json"))
+	codex := extractCodexAllowedCommands(t, filepath.Join(dir, "codex-config", "default", "requirements.toml"))
+	if strings.Join(claude, ",") != strings.Join(codex, ",") {
+		t.Fatalf("minimal command policy mismatch: claude=%v codex=%v", claude, codex)
+	}
+}
+
+func TestInitCmd_Opinionated_CommandPolicyMatchesBetweenClaudeAndCodex(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := filepath.Join(fakeHome, "myh2-op-policy")
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--style", "opinionated"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init --style opinionated failed: %v", err)
+	}
+
+	claude := extractClaudeAllowedCommands(t, filepath.Join(dir, "claude-config", "default", "settings.json"))
+	codex := extractCodexAllowedCommands(t, filepath.Join(dir, "codex-config", "default", "requirements.toml"))
+	if strings.Join(claude, ",") != strings.Join(codex, ",") {
+		t.Fatalf("opinionated command policy mismatch: claude=%v codex=%v", claude, codex)
 	}
 }
 

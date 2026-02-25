@@ -74,6 +74,26 @@ func ConfigTemplate(style string) string {
 	return string(data)
 }
 
+// ClaudeSettingsTemplate returns the style-specific Claude settings.json.
+// Unknown styles fall back to opinionated.
+func ClaudeSettingsTemplate(style string) string {
+	data, err := Templates.ReadFile(fmt.Sprintf("templates/styles/%s/claude/settings.json", normalizeTemplateStyle(style)))
+	if err != nil {
+		panic(fmt.Sprintf("embedded claude settings.json missing for style %q: %v", style, err))
+	}
+	return string(data)
+}
+
+// CodexRequirementsTemplate returns the style-specific Codex requirements.toml.
+// Unknown styles fall back to opinionated.
+func CodexRequirementsTemplate(style string) string {
+	data, err := Templates.ReadFile(fmt.Sprintf("templates/styles/%s/codex/requirements.toml", normalizeTemplateStyle(style)))
+	if err != nil {
+		panic(fmt.Sprintf("embedded codex requirements.toml missing for style %q: %v", style, err))
+	}
+	return string(data)
+}
+
 // WriteSkillsTemplate materializes the embedded style-specific skills template
 // into targetDir. For minimal style, this intentionally results in an empty
 // directory. If force is false and targetDir is non-empty, it leaves content
