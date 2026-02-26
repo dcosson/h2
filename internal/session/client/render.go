@@ -21,8 +21,11 @@ import (
 
 // RenderScreen renders the virtual terminal buffer to the output.
 // Uses DECSC/DECRC to save and restore cursor position so the cursor
-// stays on the input bar (positioned by RenderInputBar) without needing
-// cursor hide/show, which would reset the terminal's blink timer.
+// stays on the input bar (positioned by RenderInputBar). Re-asserts
+// cursor visibility afterward because child output may contain
+// \033[?25l which gets forwarded to the outer terminal. This only
+// fires during active output (PipeOutput), so it doesn't affect
+// cursor blink during idle.
 func (c *Client) RenderScreen() {
 	var buf bytes.Buffer
 	buf.WriteString("\0337") // DECSC: save cursor position
@@ -33,6 +36,12 @@ func (c *Client) RenderScreen() {
 	}
 	c.renderSelectHint(&buf)
 	buf.WriteString("\0338") // DECRC: restore cursor position
+	// Re-assert cursor visibility — child output may toggle it via
+	// forwarded escape sequences. During active output the blink timer
+	// reset is invisible; during idle PipeOutput doesn't fire.
+	if c.Mode != ModePassthrough && c.Mode != ModePassthroughScroll {
+		buf.WriteString("\033[?25h")
+	}
 	c.OutputMu.Lock()
 	c.Output.Write(buf.Bytes())
 	c.OutputMu.Unlock()
@@ -202,10 +211,11 @@ func (c *Client) RenderLine(buf *bytes.Buffer, row int) {
 }
 
 // RenderStatusBar draws the separator line with mode, status, and help text.
-// This is rendered independently from the input bar so that frequent status
-// updates (e.g. from TickStatus) don't reset the terminal's cursor blink timer.
+// Uses DECSC/DECRC to preserve cursor position so the 1-second TickStatus
+// doesn't move the cursor away from the input bar.
 func (c *Client) RenderStatusBar() {
 	var buf bytes.Buffer
+	buf.WriteString("\0337") // DECSC: save cursor position
 
 	sepRow := c.VT.Rows - 1
 	if c.DebugKeys {
@@ -294,6 +304,7 @@ func (c *Client) RenderStatusBar() {
 	}
 	buf.WriteString(right)
 	buf.WriteString("\033[0m")
+	buf.WriteString("\0338") // DECRC: restore cursor position
 
 	c.OutputMu.Lock()
 	c.Output.Write(buf.Bytes())
