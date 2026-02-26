@@ -129,7 +129,6 @@ func (vt *VT) PipeOutput(onData func()) {
 	for {
 		n, err := vt.Ptm.Read(buf)
 		if n > 0 {
-			vt.RespondOSCColors(buf[:n])
 			vt.RespondTerminalQueries(buf[:n])
 
 			vt.Mu.Lock()
@@ -230,36 +229,35 @@ func (vt *VT) ResetScanState() {
 	vt.AltScrollEnabled = false
 }
 
-// RespondOSCColors responds to OSC 10/11 color queries from the child.
-func (vt *VT) RespondOSCColors(data []byte) {
-	fg := vt.OscFg
-	bg := vt.OscBg
-	if fg == "" || bg == "" {
-		fallbackFg, fallbackBg := FallbackOSCPalette(os.Getenv("COLORFGBG"))
-		if fg == "" {
-			fg = fallbackFg
-		}
-		if bg == "" {
-			bg = fallbackBg
-		}
-	}
+// RespondTerminalQueries responds to terminal capability queries from the
+// child process. Scans raw PTY output and writes responses directly to the
+// PTY before midterm parses the data.
+//
+// Handled queries:
+//   - OSC 10 (foreground color): responds with cached/fallback X11 rgb value
+//   - OSC 11 (background color): responds with cached/fallback X11 rgb value
+//   - DA2 (CSI > c): responds as xterm v388 (CSI > 65 ; 388 ; 1 c)
+//   - XTVERSION (CSI > 0 q): responds as xterm(388) (DCS > | xterm(388) ST)
+//
+// DA2 and XTVERSION are silently dropped by midterm, so without these
+// responses the child times out and falls back to basic rendering.
+func (vt *VT) RespondTerminalQueries(data []byte) {
+	// OSC 10: foreground color query.
 	if bytes.Contains(data, []byte("\033]10;?")) {
+		fg := vt.OscFg
+		if fg == "" {
+			fg, _ = FallbackOSCPalette(os.Getenv("COLORFGBG"))
+		}
 		fmt.Fprintf(vt.Ptm, "\033]10;%s\033\\", fg)
 	}
+	// OSC 11: background color query.
 	if bytes.Contains(data, []byte("\033]11;?")) {
+		bg := vt.OscBg
+		if bg == "" {
+			_, bg = FallbackOSCPalette(os.Getenv("COLORFGBG"))
+		}
 		fmt.Fprintf(vt.Ptm, "\033]11;%s\033\\", bg)
 	}
-}
-
-// RespondTerminalQueries responds to terminal capability queries from the
-// child process. Scans raw PTY output for DA2 (CSI > c) and XTVERSION
-// (CSI > 0 q) and writes responses directly to the PTY. These queries are
-// silently dropped by midterm, so h2 handles them here with modern
-// xterm-compatible responses.
-//
-// DA2 response: CSI > 65 ; 388 ; 1 c (VT500 type, xterm version 388)
-// XTVERSION response: DCS > | xterm(388) ST
-func (vt *VT) RespondTerminalQueries(data []byte) {
 	// DA2: ESC [ > c  or  ESC [ > 0 c
 	if bytes.Contains(data, []byte("\033[>c")) || bytes.Contains(data, []byte("\033[>0c")) {
 		fmt.Fprintf(vt.Ptm, "\033[>65;388;1c")
