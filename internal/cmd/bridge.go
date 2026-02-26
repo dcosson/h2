@@ -2,12 +2,16 @@ package cmd
 
 import (
 	"fmt"
+	"net"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"h2/internal/bridgeservice"
 	"h2/internal/config"
+	"h2/internal/session/message"
+	"h2/internal/socketdir"
 	"h2/internal/tmpl"
 )
 
@@ -68,6 +72,13 @@ to route to an existing agent without spawning a new session.`,
 			}
 
 			// Fork the bridge service as a background daemon.
+			stopped, err := stopExistingBridgeIfRunning(user)
+			if err != nil {
+				return err
+			}
+			if stopped {
+				fmt.Fprintf(os.Stderr, "Stopped existing bridge service for user %q.\n", user)
+			}
 			fmt.Fprintf(os.Stderr, "Starting bridge service for user %q...\n", user)
 			if err := bridgeservice.ForkBridge(user, concierge); err != nil {
 				return err
@@ -100,6 +111,36 @@ to route to an existing agent without spawning a new session.`,
 	cmd.Flags().StringVar(&roleName, "role", "concierge", "Role to use for the concierge session")
 
 	return cmd
+}
+
+// stopExistingBridgeIfRunning stops an already-running bridge daemon for the user.
+// This allows `h2 bridge --set-concierge` to reliably apply new routing config.
+func stopExistingBridgeIfRunning(user string) (bool, error) {
+	sockPath := socketdir.Path(socketdir.TypeBridge, user)
+	conn, err := net.DialTimeout("unix", sockPath, 500*time.Millisecond)
+	if err != nil {
+		return false, nil
+	}
+	defer conn.Close()
+
+	if err := message.SendRequest(conn, &message.Request{Type: "stop"}); err != nil {
+		return false, fmt.Errorf("stop existing bridge for user %q: send stop request: %w", user, err)
+	}
+	resp, err := message.ReadResponse(conn)
+	if err != nil {
+		return false, fmt.Errorf("stop existing bridge for user %q: read response: %w", user, err)
+	}
+	if !resp.OK {
+		return false, fmt.Errorf("stop existing bridge for user %q: %s", user, resp.Error)
+	}
+
+	for i := 0; i < 50; i++ {
+		if _, err := os.Stat(sockPath); os.IsNotExist(err) {
+			return true, nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return false, fmt.Errorf("stop existing bridge for user %q: bridge socket still present after stop", user)
 }
 
 // resolveUser determines which user config to use.
