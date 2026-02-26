@@ -750,3 +750,141 @@ func TestSetupAgent_LogDirUsesH2Dir(t *testing.T) {
 		t.Fatalf("activity log not created at expected path %s", logPath)
 	}
 }
+
+func TestResolveFullHarness_RoleWithRandomName(t *testing.T) {
+	// Create a custom h2 dir with a role that uses {{ randomName }}.
+	h2Dir := filepath.Join(t.TempDir(), "h2")
+	if err := os.MkdirAll(h2Dir, 0o755); err != nil {
+		t.Fatalf("create h2 dir: %v", err)
+	}
+	if err := config.WriteMarker(h2Dir); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	t.Setenv("H2_DIR", h2Dir)
+	config.ResetResolveCache()
+	t.Cleanup(config.ResetResolveCache)
+
+	// Create a role template that uses {{ randomName }} (like the default role).
+	rolesDir := filepath.Join(h2Dir, "roles")
+	if err := os.MkdirAll(rolesDir, 0o755); err != nil {
+		t.Fatalf("create roles dir: %v", err)
+	}
+	roleTmpl := `role_name: "{{ .RoleName }}"
+agent_name: "{{ randomName }}"
+agent_harness: claude_code
+`
+	if err := os.WriteFile(filepath.Join(rolesDir, "testrole.yaml.tmpl"), []byte(roleTmpl), 0o644); err != nil {
+		t.Fatalf("write role template: %v", err)
+	}
+
+	// resolveFullHarness should successfully load the role despite {{ randomName }}.
+	h, err := resolveFullHarness("claude", "testrole", nil)
+	if err != nil {
+		t.Fatalf("resolveFullHarness: %v", err)
+	}
+
+	// The harness should use the default account profile ("default"), not the role name.
+	envVars := h.BuildCommandEnvVars(h2Dir)
+	want := filepath.Join(h2Dir, "claude-config", "default")
+	if got := envVars["CLAUDE_CONFIG_DIR"]; got != want {
+		t.Errorf("CLAUDE_CONFIG_DIR = %q, want %q", got, want)
+	}
+}
+
+func TestResolveFullHarness_MissingRoleReturnsError(t *testing.T) {
+	// Create a custom h2 dir without any role files.
+	h2Dir := filepath.Join(t.TempDir(), "h2")
+	if err := os.MkdirAll(h2Dir, 0o755); err != nil {
+		t.Fatalf("create h2 dir: %v", err)
+	}
+	if err := config.WriteMarker(h2Dir); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	t.Setenv("H2_DIR", h2Dir)
+	config.ResetResolveCache()
+	t.Cleanup(config.ResetResolveCache)
+
+	// A specified role that doesn't exist should return an error, not silently fall back.
+	_, err := resolveFullHarness("claude", "nonexistent-role", nil)
+	if err == nil {
+		t.Fatal("expected error for nonexistent role, got nil")
+	}
+}
+
+func TestResolveFullHarness_NoRoleUsesDefaultProfile(t *testing.T) {
+	// When no role is specified, the command-only fallback should use "default" profile.
+	h2Dir := filepath.Join(t.TempDir(), "h2")
+	if err := os.MkdirAll(h2Dir, 0o755); err != nil {
+		t.Fatalf("create h2 dir: %v", err)
+	}
+	if err := config.WriteMarker(h2Dir); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	t.Setenv("H2_DIR", h2Dir)
+	config.ResetResolveCache()
+	t.Cleanup(config.ResetResolveCache)
+
+	h, err := resolveFullHarness("claude", "", nil)
+	if err != nil {
+		t.Fatalf("resolveFullHarness: %v", err)
+	}
+
+	envVars := h.BuildCommandEnvVars(h2Dir)
+	want := filepath.Join(h2Dir, "claude-config", "default")
+	if got := envVars["CLAUDE_CONFIG_DIR"]; got != want {
+		t.Errorf("CLAUDE_CONFIG_DIR = %q, want %q", got, want)
+	}
+}
+
+func TestResolveFullHarness_InheritedRoleUsesDefaultProfile(t *testing.T) {
+	// Create a custom h2 dir with parent and child roles.
+	h2Dir := filepath.Join(t.TempDir(), "h2")
+	if err := os.MkdirAll(h2Dir, 0o755); err != nil {
+		t.Fatalf("create h2 dir: %v", err)
+	}
+	if err := config.WriteMarker(h2Dir); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	t.Setenv("H2_DIR", h2Dir)
+	config.ResetResolveCache()
+	t.Cleanup(config.ResetResolveCache)
+
+	rolesDir := filepath.Join(h2Dir, "roles")
+	if err := os.MkdirAll(rolesDir, 0o755); err != nil {
+		t.Fatalf("create roles dir: %v", err)
+	}
+
+	// Parent role uses {{ randomName }}.
+	parentTmpl := `role_name: "{{ .RoleName }}"
+agent_name: "{{ randomName }}"
+agent_harness: claude_code
+instructions_body: "default instructions"
+`
+	if err := os.WriteFile(filepath.Join(rolesDir, "default.yaml.tmpl"), []byte(parentTmpl), 0o644); err != nil {
+		t.Fatalf("write parent role: %v", err)
+	}
+
+	// Child role inherits from default.
+	childTmpl := `inherits: default
+instructions_body: "concierge instructions"
+`
+	if err := os.WriteFile(filepath.Join(rolesDir, "concierge.yaml.tmpl"), []byte(childTmpl), 0o644); err != nil {
+		t.Fatalf("write child role: %v", err)
+	}
+
+	// resolveFullHarness with "concierge" should use default profile.
+	h, err := resolveFullHarness("claude", "concierge", nil)
+	if err != nil {
+		t.Fatalf("resolveFullHarness: %v", err)
+	}
+
+	envVars := h.BuildCommandEnvVars(h2Dir)
+	want := filepath.Join(h2Dir, "claude-config", "default")
+	if got := envVars["CLAUDE_CONFIG_DIR"]; got != want {
+		t.Errorf("CLAUDE_CONFIG_DIR = %q, want %q", got, want)
+	}
+}

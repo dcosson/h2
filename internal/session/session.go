@@ -228,39 +228,39 @@ func resolveFullHarness(command, roleName string, log *activitylog.Logger) (harn
 			H2Dir:     config.ConfigDir(),
 			H2RootDir: rootDir,
 		}
-		if role, err := config.LoadRoleRendered(roleName, ctx); err == nil {
-			ht := harness.CanonicalName(role.GetHarnessType())
-			command := role.GetAgentType()
-			if command == "" {
-				command = harness.DefaultCommand(ht)
-			}
-			cfg := harness.HarnessConfig{
-				HarnessType: ht,
-				Command:     command,
-				Model:       role.GetModel(),
-			}
-			switch ht {
-			case "claude_code", "claude":
-				cfg.ConfigDir = role.GetClaudeConfigDir()
-			case "codex":
-				cfg.ConfigDir = role.GetCodexConfigDir()
-			}
-			return harness.Resolve(cfg, log)
+		// Use stub name functions since the daemon doesn't need real
+		// randomName/autoIncrement — it already has its agent name.
+		role, err := config.LoadRoleRenderedWithFuncs(roleName, ctx, config.NameStubFuncs)
+		if err != nil {
+			return nil, fmt.Errorf("load role %q: %w", roleName, err)
 		}
-		// Fall through to command-based resolution if role load fails.
+		ht := harness.CanonicalName(role.GetHarnessType())
+		command := role.GetAgentType()
+		if command == "" {
+			command = harness.DefaultCommand(ht)
+		}
+		cfg := harness.HarnessConfig{
+			HarnessType: ht,
+			Command:     command,
+			Model:       role.GetModel(),
+		}
+		switch ht {
+		case "claude_code", "claude":
+			cfg.ConfigDir = role.GetClaudeConfigDir()
+		case "codex":
+			cfg.ConfigDir = role.GetCodexConfigDir()
+		}
+		return harness.Resolve(cfg, log)
 	}
 
-	// Fallback: resolve from command name alone (no role available).
+	// No role specified — resolve from command name alone.
+	// Always use "default" account profile — role name != account profile.
 	harnessType := "generic"
 	var configDir string
 	switch filepath.Base(command) {
 	case "claude":
 		harnessType = "claude_code"
-		rn := roleName
-		if rn == "" {
-			rn = "default"
-		}
-		configDir = filepath.Join(config.ConfigDir(), "claude-config", rn)
+		configDir = config.DefaultClaudeConfigDir()
 	case "codex":
 		harnessType = "codex"
 	}

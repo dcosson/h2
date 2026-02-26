@@ -86,7 +86,7 @@ to route to an existing agent without spawning a new session.`,
 				H2Dir:     config.ConfigDir(),
 				H2RootDir: rootDir,
 			}
-			role, err := config.LoadRoleRendered(roleName, ctx)
+			role, err := config.LoadRoleRenderedWithFuncs(roleName, ctx, config.NameStubFuncs)
 			if err != nil {
 				return fmt.Errorf("concierge role not found; create one with: h2 role init concierge")
 			}

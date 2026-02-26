@@ -459,6 +459,17 @@ func LoadRoleRenderedFrom(path string, ctx *tmpl.Context) (*Role, error) {
 	return loadRoleRenderedFromWithFuncs(path, ctx, nil)
 }
 
+// LoadRoleRenderedWithFuncs loads a role by name with extra template functions.
+// Use this when rendering roles outside of the agent launch path (e.g. in the
+// daemon re-resolve) where functions like randomName are not available.
+func LoadRoleRenderedWithFuncs(name string, ctx *tmpl.Context, extraFuncs template.FuncMap) (*Role, error) {
+	path, _ := resolveRolePath(RolesDir(), name)
+	if ctx == nil {
+		return LoadRoleFrom(path)
+	}
+	return loadRoleRenderedFromWithFuncs(path, ctx, extraFuncs)
+}
+
 // agentNamePlaceholder is used during the first render pass to detect
 // whether the role template references {{ .AgentName }}.
 const agentNamePlaceholder = "<AGENT_NAME_PLACEHOLDER>"
@@ -1028,13 +1039,17 @@ func roleNameFromFile(name string) string {
 	return name
 }
 
-// listStubFuncs provides stub template functions for listing roles.
-// These are needed because templates may reference functions like randomName
-// or autoIncrement that are only fully functional during agent launch.
-var listStubFuncs = template.FuncMap{
+// NameStubFuncs provides stub template functions for contexts where
+// randomName and autoIncrement are not meaningful (e.g. listing roles,
+// daemon re-resolve). Templates may reference these functions but only
+// the agent launch path provides real implementations.
+var NameStubFuncs = template.FuncMap{
 	"randomName":    func() string { return "<name>" },
 	"autoIncrement": func(prefix string) int { return 0 },
 }
+
+// listStubFuncs is an alias kept for internal use.
+var listStubFuncs = NameStubFuncs
 
 // listRolesFromDir scans a directory for role files (.yaml and .yaml.tmpl) and loads them.
 func listRolesFromDir(dir string) ([]*Role, error) {
