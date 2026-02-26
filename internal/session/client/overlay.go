@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -38,7 +39,8 @@ func (c *Client) IsScrollMode() bool {
 // Client owns all UI state and holds a pointer to the underlying VT.
 type Client struct {
 	VT                  *virtualterminal.VT
-	Output              io.Writer // per-client output (each client writes to its own connection)
+	Output              io.Writer  // per-client output (each client writes to its own connection)
+	OutputMu            sync.Mutex // serializes terminal writes from different render paths
 	Input               []byte
 	CursorPos           int // byte offset within Input
 	History             []string
@@ -111,7 +113,7 @@ func (c *Client) ReadInput() {
 		c.VT.Mu.Lock()
 		if c.DebugKeys && n > 0 {
 			c.AppendDebugBytes(buf[:n])
-			c.RenderBar()
+			c.RenderInputBar()
 		}
 		for i := 0; i < n; {
 			switch c.Mode {
@@ -137,7 +139,7 @@ func (c *Client) TickStatus(stop <-chan struct{}) {
 		select {
 		case <-ticker.C:
 			c.VT.Mu.Lock()
-			c.RenderBar()
+			c.RenderStatusBar()
 			c.VT.Mu.Unlock()
 		case <-stop:
 			return
