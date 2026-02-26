@@ -43,6 +43,8 @@ type Session struct {
 	Instructions         string   // Role instructions, passed via --append-system-prompt
 	SystemPrompt         string   // Replaces default system prompt, passed via --system-prompt
 	Model                string   // Model selection, passed via --model
+	HarnessType          string   // Resolved harness type (when provided by launcher)
+	HarnessConfigDir     string   // Resolved harness config dir (when provided by launcher)
 	ClaudePermissionMode string   // Claude Code --permission-mode
 	CodexSandboxMode     string   // Codex --sandbox
 	CodexAskForApproval  string   // Codex --ask-for-approval
@@ -181,13 +183,27 @@ func (s *Session) setupAgent() error {
 	actLog := activitylog.New(true, logPath, s.Name, s.SessionID)
 	s.activityLog = actLog
 
-	// Re-resolve harness with proper config (logger, configDir).
-	// The minimal harness from session.New() lacks these.
-	h, err := resolveFullHarness(s.Command, s.RoleName, actLog)
-	if err != nil {
-		return fmt.Errorf("resolve harness: %w", err)
+	// Resolve harness with proper config (logger, configDir).
+	// Prefer launcher-provided harness config to avoid re-rendering roles in daemon mode.
+	if s.HarnessType != "" {
+		h, err := harness.Resolve(harness.HarnessConfig{
+			HarnessType: s.HarnessType,
+			Command:     s.Command,
+			Model:       s.Model,
+			ConfigDir:   s.HarnessConfigDir,
+		}, actLog)
+		if err != nil {
+			return fmt.Errorf("resolve harness: %w", err)
+		}
+		s.harness = h
+	} else {
+		// Backward compatibility for older launchers that don't pass harness fields.
+		h, err := resolveFullHarness(s.Command, s.RoleName, actLog)
+		if err != nil {
+			return fmt.Errorf("resolve harness: %w", err)
+		}
+		s.harness = h
 	}
-	s.harness = h
 
 	// Prepare harness and get launch config (env vars, prepend args).
 	launchCfg, err := s.harness.PrepareForLaunch(s.Name, s.SessionID, false)
@@ -415,6 +431,10 @@ func (s *Session) ForEachClient(fn func(cl *client.Client)) {
 
 // pipeOutputCallback returns the callback for VT.PipeOutput that renders
 // all connected clients. Called with VT.Mu held.
+// Only renders the screen content — status bar and input bar are rendered
+// by their own triggers (TickStatus and ReadInput respectively). This avoids
+// resetting the cursor blink timer on every PTY output chunk and reduces
+// mutex hold time.
 func (s *Session) pipeOutputCallback() func() {
 	return func() {
 		// HandleOutput for the session (only need to call once).
@@ -422,7 +442,6 @@ func (s *Session) pipeOutputCallback() func() {
 		s.ForEachClient(func(cl *client.Client) {
 			if !cl.IsScrollMode() {
 				cl.RenderScreen()
-				cl.RenderBar()
 			}
 		})
 	}
@@ -476,11 +495,11 @@ func (s *Session) RunDaemon() error {
 	s.Client = s.NewClient()
 	s.AddClient(s.Client)
 
-	// Set up delivery callback.
+	// Set up delivery callback (queue count update → status bar only).
 	s.OnDeliver = func() {
 		s.VT.Mu.Lock()
 		s.ForEachClient(func(cl *client.Client) {
-			cl.RenderBar()
+			cl.RenderStatusBar()
 		})
 		s.VT.Mu.Unlock()
 	}
@@ -578,11 +597,11 @@ func (s *Session) RunInteractive() error {
 	s.Client.Output = os.Stdout
 	s.VT.InputSrc = os.Stdin
 
-	// Set up delivery callback.
+	// Set up delivery callback (queue count update → status bar only).
 	s.OnDeliver = func() {
 		s.VT.Mu.Lock()
 		s.ForEachClient(func(cl *client.Client) {
-			cl.RenderBar()
+			cl.RenderStatusBar()
 		})
 		s.VT.Mu.Unlock()
 	}
@@ -703,7 +722,7 @@ func (s *Session) TickStatus(stop <-chan struct{}) {
 		case <-ticker.C:
 			s.VT.Mu.Lock()
 			s.ForEachClient(func(cl *client.Client) {
-				cl.RenderBar()
+				cl.RenderStatusBar()
 			})
 			s.VT.Mu.Unlock()
 		case <-stop:

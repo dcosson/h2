@@ -20,16 +20,22 @@ import (
 )
 
 // RenderScreen renders the virtual terminal buffer to the output.
+// Uses DECSC/DECRC to save and restore cursor position so the cursor
+// stays on the input bar (positioned by RenderInputBar) without needing
+// cursor hide/show, which would reset the terminal's blink timer.
 func (c *Client) RenderScreen() {
 	var buf bytes.Buffer
-	buf.WriteString("\033[?25l")
+	buf.WriteString("\0337") // DECSC: save cursor position
 	if c.IsScrollMode() {
 		c.renderScrollView(&buf)
 	} else {
 		c.renderLiveView(&buf)
 	}
 	c.renderSelectHint(&buf)
+	buf.WriteString("\0338") // DECRC: restore cursor position
+	c.OutputMu.Lock()
 	c.Output.Write(buf.Bytes())
+	c.OutputMu.Unlock()
 }
 
 // renderSelectHint draws the "hold shift to select" hint when active.
@@ -195,17 +201,15 @@ func (c *Client) RenderLine(buf *bytes.Buffer, row int) {
 	c.RenderLineFrom(buf, c.VT.Vt, row)
 }
 
-// RenderBar draws the separator line and input bar.
-func (c *Client) RenderBar() {
+// RenderStatusBar draws the separator line with mode, status, and help text.
+// This is rendered independently from the input bar so that frequent status
+// updates (e.g. from TickStatus) don't reset the terminal's cursor blink timer.
+func (c *Client) RenderStatusBar() {
 	var buf bytes.Buffer
 
 	sepRow := c.VT.Rows - 1
-	inputRow := c.VT.Rows
-	debugRow := 0
 	if c.DebugKeys {
 		sepRow = c.VT.Rows - 2
-		inputRow = c.VT.Rows - 1
-		debugRow = c.VT.Rows
 	}
 
 	// --- Separator line ---
@@ -291,6 +295,24 @@ func (c *Client) RenderBar() {
 	buf.WriteString(right)
 	buf.WriteString("\033[0m")
 
+	c.OutputMu.Lock()
+	c.Output.Write(buf.Bytes())
+	c.OutputMu.Unlock()
+}
+
+// RenderInputBar draws the input prompt, text, cursor, and debug line.
+// Cursor visibility (show/hide) is managed here so that it only changes
+// on user-initiated renders, preserving the terminal's cursor blink timer.
+func (c *Client) RenderInputBar() {
+	var buf bytes.Buffer
+
+	inputRow := c.VT.Rows
+	debugRow := 0
+	if c.DebugKeys {
+		inputRow = c.VT.Rows - 1
+		debugRow = c.VT.Rows
+	}
+
 	// --- Input line ---
 	prompt := c.InputPriority.String() + " > "
 	maxInput := c.VT.Cols - len(prompt)
@@ -343,6 +365,8 @@ func (c *Client) RenderBar() {
 		if pad := c.VT.Cols - len(debugLabel); pad > 0 {
 			buf.WriteString(strings.Repeat(" ", pad))
 		}
+		// Reposition cursor back to input line after debug row.
+		fmt.Fprintf(&buf, "\033[%d;%dH", inputRow, cursorCol)
 	}
 
 	if c.Mode == ModePassthrough || c.Mode == ModePassthroughScroll {
@@ -350,7 +374,18 @@ func (c *Client) RenderBar() {
 	} else {
 		buf.WriteString("\033[?25h")
 	}
+
+	c.OutputMu.Lock()
 	c.Output.Write(buf.Bytes())
+	c.OutputMu.Unlock()
+}
+
+// RenderBar draws both the status bar and input bar.
+// Use this for full bar repaints (mode changes, resize, child exit).
+// For targeted updates, prefer RenderStatusBar or RenderInputBar.
+func (c *Client) RenderBar() {
+	c.RenderStatusBar()
+	c.RenderInputBar()
 }
 
 // ModeLabel returns the display name for the current mode.

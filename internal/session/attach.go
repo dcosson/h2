@@ -148,7 +148,7 @@ func (d *Daemon) readClientInput(conn net.Conn, cl *client.Client) {
 			vt.Mu.Lock()
 			if cl.DebugKeys && len(payload) > 0 {
 				cl.AppendDebugBytes(payload)
-				cl.RenderBar()
+				cl.RenderInputBar()
 			}
 			for i := 0; i < len(payload); {
 				switch cl.Mode {

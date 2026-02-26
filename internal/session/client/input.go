@@ -201,7 +201,7 @@ func (c *Client) HandleMenuBytes(buf []byte, start, n int) int {
 		case 'p', 'P': // passthrough mode
 			if c.TryPassthrough != nil && !c.TryPassthrough() {
 				// Locked by another client — stay in menu.
-				c.RenderBar()
+				c.RenderStatusBar()
 				continue
 			}
 			c.setMode(ModePassthrough)
@@ -262,7 +262,7 @@ func (c *Client) HandleDefaultBytes(buf []byte, start, n int) int {
 
 		case 0x09:
 			c.CyclePriority()
-			c.RenderBar()
+			c.RenderInputBar()
 
 		case 0x0D, 0x0A:
 			if len(c.Input) > 0 {
@@ -292,18 +292,18 @@ func (c *Client) HandleDefaultBytes(buf []byte, start, n int) int {
 			}
 			c.HistIdx = -1
 			c.Saved = nil
-			c.RenderBar()
+			c.RenderInputBar()
 
 		case 0x7F, 0x08:
 			if c.CursorPos > 0 {
 				c.DeleteBackward()
-				c.RenderBar()
+				c.RenderInputBar()
 			}
 
 		case 0x01: // ctrl+a — move to start (pass through if input empty)
 			if len(c.Input) > 0 {
 				c.CursorToStart()
-				c.RenderBar()
+				c.RenderInputBar()
 			} else {
 				if !c.writePTYOrHang([]byte{b}) {
 					return n
@@ -313,7 +313,7 @@ func (c *Client) HandleDefaultBytes(buf []byte, start, n int) int {
 		case 0x05: // ctrl+e — move to end (pass through if input empty)
 			if len(c.Input) > 0 {
 				c.CursorToEnd()
-				c.RenderBar()
+				c.RenderInputBar()
 			} else {
 				if !c.writePTYOrHang([]byte{b}) {
 					return n
@@ -323,7 +323,7 @@ func (c *Client) HandleDefaultBytes(buf []byte, start, n int) int {
 		case 0x0B: // ctrl+k — kill to end of line (pass through if input empty)
 			if len(c.Input) > 0 {
 				c.KillToEnd()
-				c.RenderBar()
+				c.RenderInputBar()
 			} else {
 				if !c.writePTYOrHang([]byte{b}) {
 					return n
@@ -333,7 +333,7 @@ func (c *Client) HandleDefaultBytes(buf []byte, start, n int) int {
 		case 0x15: // ctrl+u — kill to start of line (pass through if input empty)
 			if len(c.Input) > 0 {
 				c.KillToStart()
-				c.RenderBar()
+				c.RenderInputBar()
 			} else {
 				if !c.writePTYOrHang([]byte{b}) {
 					return n
@@ -347,7 +347,7 @@ func (c *Client) HandleDefaultBytes(buf []byte, start, n int) int {
 				}
 			} else {
 				c.InsertByte(b)
-				c.RenderBar()
+				c.RenderInputBar()
 			}
 		}
 	}
@@ -403,14 +403,14 @@ func (c *Client) HandleEscape(remaining []byte) (consumed int, handled bool) {
 	case 'f': // meta+f — forward word
 		if c.Mode == ModeNormal && len(c.Input) > 0 {
 			c.CursorForwardWord()
-			c.RenderBar()
+			c.RenderInputBar()
 			return 1, true
 		}
 		return 0, false
 	case 'b': // meta+b — backward word
 		if c.Mode == ModeNormal && len(c.Input) > 0 {
 			c.CursorBackwardWord()
-			c.RenderBar()
+			c.RenderInputBar()
 			return 1, true
 		}
 		return 0, false
@@ -463,7 +463,7 @@ func (c *Client) HandleCSI(remaining []byte) (consumed int, handled bool) {
 			} else {
 				c.HistoryDown()
 			}
-			c.RenderBar()
+			c.RenderInputBar()
 		}
 	case 'C', 'D':
 		if c.Mode == ModePassthrough {
@@ -477,7 +477,7 @@ func (c *Client) HandleCSI(remaining []byte) (consumed int, handled bool) {
 				} else {
 					c.CursorRight()
 				}
-				c.RenderBar()
+				c.RenderInputBar()
 			} else {
 				c.writePTYOrHang(append([]byte{0x1B, '['}, remaining[:i+1]...))
 			}
