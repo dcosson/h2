@@ -207,7 +207,7 @@ Default behavior contract for `yaml.Node` round-tripping in inheritance:
 # roles/coder.yaml.tmpl
 role_name: coder
 agent_harness: claude_code
-permission_mode: acceptEdits
+claude_permission_mode: acceptEdits
 
 variables:
   agent_model:
@@ -255,7 +255,7 @@ instructions: |
 ```yaml
 role_name: backend-coder
 agent_harness: claude_code         # from parent
-permission_mode: acceptEdits       # from parent
+claude_permission_mode: acceptEdits       # from parent
 instructions: |                    # from child (overwrites parent)
   You specialize in the auth-api backend service.
   Focus on Go code, database queries, and API design.

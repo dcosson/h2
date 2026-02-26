@@ -32,21 +32,21 @@ type DaemonHeartbeat struct {
 
 // RunDaemonOpts holds all options for running a daemon.
 type RunDaemonOpts struct {
-	Name                string
-	SessionID           string
-	Command             string
-	Args                []string
-	RoleName            string
-	SessionDir          string
-	Instructions        string   // role instructions → --append-system-prompt
-	SystemPrompt        string   // replaces default system prompt → --system-prompt
-	Model               string   // model selection → --model
-	PermissionMode      string   // Claude Code --permission-mode
-	CodexSandboxMode    string   // Codex --sandbox
-	CodexAskForApproval string   // Codex --ask-for-approval
-	AdditionalDirs      []string // extra dirs passed via --add-dir
-	Heartbeat           DaemonHeartbeat
-	Overrides           map[string]string // --override key=value pairs for metadata
+	Name                 string
+	SessionID            string
+	Command              string
+	Args                 []string
+	RoleName             string
+	SessionDir           string
+	Instructions         string   // role instructions → --append-system-prompt
+	SystemPrompt         string   // replaces default system prompt → --system-prompt
+	Model                string   // model selection → --model
+	ClaudePermissionMode string   // Claude Code --permission-mode
+	CodexSandboxMode     string   // Codex --sandbox
+	CodexAskForApproval  string   // Codex --ask-for-approval
+	AdditionalDirs       []string // extra dirs passed via --add-dir
+	Heartbeat            DaemonHeartbeat
+	Overrides            map[string]string // --override key=value pairs for metadata
 }
 
 // RunDaemon creates a Session and Daemon, sets up the socket, and runs
@@ -59,7 +59,7 @@ func RunDaemon(opts RunDaemonOpts) error {
 	s.Instructions = opts.Instructions
 	s.SystemPrompt = opts.SystemPrompt
 	s.Model = opts.Model
-	s.PermissionMode = opts.PermissionMode
+	s.ClaudePermissionMode = opts.ClaudePermissionMode
 	s.CodexSandboxMode = opts.CodexSandboxMode
 	s.CodexAskForApproval = opts.CodexAskForApproval
 	s.AdditionalDirs = opts.AdditionalDirs
@@ -188,28 +188,28 @@ func gitStats() *gitDiffStats {
 
 // ForkDaemonOpts holds all options for forking a daemon process.
 type ForkDaemonOpts struct {
-	Name                string
-	SessionID           string
-	Command             string
-	Args                []string
-	RoleName            string
-	SessionDir          string
-	Instructions        string // role instructions → --append-system-prompt
-	SystemPrompt        string // replaces default system prompt → --system-prompt
-	Model               string // model selection → --model
-	PermissionMode      string // Claude Code --permission-mode
-	CodexSandboxMode    string // Codex --sandbox
-	CodexAskForApproval string // Codex --ask-for-approval
-	Heartbeat           DaemonHeartbeat
-	CWD                 string   // working directory for the child process
-	AdditionalDirs      []string // extra dirs passed via --add-dir
-	Pod                 string   // pod name (set as H2_POD env var)
-	Overrides           []string // --override key=value pairs (recorded in session metadata)
-	OscFg               string   // startup terminal foreground color (X11 rgb)
-	OscBg               string   // startup terminal background color (X11 rgb)
-	ColorFGBG           string   // startup COLORFGBG hint
-	Term                string   // TERM value from launching terminal
-	ColorTerm           string   // COLORTERM value from launching terminal
+	Name                 string
+	SessionID            string
+	Command              string
+	Args                 []string
+	RoleName             string
+	SessionDir           string
+	Instructions         string // role instructions → --append-system-prompt
+	SystemPrompt         string // replaces default system prompt → --system-prompt
+	Model                string // model selection → --model
+	ClaudePermissionMode string // Claude Code --permission-mode
+	CodexSandboxMode     string // Codex --sandbox
+	CodexAskForApproval  string // Codex --ask-for-approval
+	Heartbeat            DaemonHeartbeat
+	CWD                  string   // working directory for the child process
+	AdditionalDirs       []string // extra dirs passed via --add-dir
+	Pod                  string   // pod name (set as H2_POD env var)
+	Overrides            []string // --override key=value pairs (recorded in session metadata)
+	OscFg                string   // startup terminal foreground color (X11 rgb)
+	OscBg                string   // startup terminal background color (X11 rgb)
+	ColorFGBG            string   // startup COLORFGBG hint
+	Term                 string   // TERM value from launching terminal
+	ColorTerm            string   // COLORTERM value from launching terminal
 }
 
 // ForkDaemon starts a daemon in a background process by re-execing with
@@ -243,8 +243,8 @@ func ForkDaemon(opts ForkDaemonOpts) error {
 	if opts.Model != "" {
 		daemonArgs = append(daemonArgs, "--model", opts.Model)
 	}
-	if opts.PermissionMode != "" {
-		daemonArgs = append(daemonArgs, "--permission-mode", opts.PermissionMode)
+	if opts.ClaudePermissionMode != "" {
+		daemonArgs = append(daemonArgs, "--permission-mode", opts.ClaudePermissionMode)
 	}
 	if opts.CodexSandboxMode != "" {
 		daemonArgs = append(daemonArgs, "--codex-sandbox-mode", opts.CodexSandboxMode)

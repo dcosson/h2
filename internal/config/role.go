@@ -120,8 +120,8 @@ func WorktreesDir() string {
 	return filepath.Join(ConfigDir(), "worktrees")
 }
 
-// ValidPermissionModes lists all valid values for the permission_mode field.
-var ValidPermissionModes = []string{
+// ValidClaudePermissionModes lists all valid values for the claude_permission_mode field.
+var ValidClaudePermissionModes = []string{
 	"default", "delegate", "acceptEdits", "plan", "dontAsk", "bypassPermissions",
 }
 
@@ -204,7 +204,7 @@ type Role struct {
 	InstructionsAdditional1 string                 `yaml:"instructions_additional_1,omitempty"` // split instructions: additional 1
 	InstructionsAdditional2 string                 `yaml:"instructions_additional_2,omitempty"` // split instructions: additional 2
 	InstructionsAdditional3 string                 `yaml:"instructions_additional_3,omitempty"` // split instructions: additional 3
-	PermissionMode          string                 `yaml:"permission_mode,omitempty"`           // Claude Code --permission-mode flag
+	ClaudePermissionMode    string                 `yaml:"claude_permission_mode,omitempty"`    // Claude Code --permission-mode flag
 	CodexSandboxMode        string                 `yaml:"codex_sandbox_mode,omitempty"`        // Codex --sandbox flag
 	CodexAskForApproval     string                 `yaml:"codex_ask_for_approval,omitempty"`    // Codex --ask-for-approval flag
 	PermissionReviewAgent   *PermissionReviewAgent `yaml:"permission_review_agent,omitempty"`   // AI permission reviewer
@@ -1306,17 +1306,17 @@ func (r *Role) Validate() error {
 	if r.RoleName == "" {
 		return fmt.Errorf("role_name is required")
 	}
-	if r.PermissionMode != "" {
+	if r.ClaudePermissionMode != "" {
 		valid := false
-		for _, mode := range ValidPermissionModes {
-			if r.PermissionMode == mode {
+		for _, mode := range ValidClaudePermissionModes {
+			if r.ClaudePermissionMode == mode {
 				valid = true
 				break
 			}
 		}
 		if !valid {
-			return fmt.Errorf("invalid permission_mode %q; valid values: %s",
-				r.PermissionMode, strings.Join(ValidPermissionModes, ", "))
+			return fmt.Errorf("invalid claude_permission_mode %q; valid values: %s",
+				r.ClaudePermissionMode, strings.Join(ValidClaudePermissionModes, ", "))
 		}
 	}
 	if r.CodexSandboxMode != "" {

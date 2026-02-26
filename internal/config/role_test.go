@@ -1180,7 +1180,7 @@ func TestE2E_PodAwareRole_StandaloneZeroValues(t *testing.T) {
 	}
 }
 
-// --- Validate tests for system_prompt and permission_mode ---
+// --- Validate tests for system_prompt and claude_permission_mode ---
 
 func TestValidate_InstructionsOnly(t *testing.T) {
 	role := &Role{RoleName: "test", Instructions: "Do stuff"}
@@ -1245,23 +1245,23 @@ func TestValidate_NeitherInstructionsNorSplit(t *testing.T) {
 	}
 }
 
-func TestValidate_PermissionMode_Valid(t *testing.T) {
-	for _, mode := range ValidPermissionModes {
-		role := &Role{RoleName: "test", PermissionMode: mode}
+func TestValidate_ClaudePermissionMode_Valid(t *testing.T) {
+	for _, mode := range ValidClaudePermissionModes {
+		role := &Role{RoleName: "test", ClaudePermissionMode: mode}
 		if err := role.Validate(); err != nil {
-			t.Errorf("expected no error for permission_mode %q, got: %v", mode, err)
+			t.Errorf("expected no error for claude_permission_mode %q, got: %v", mode, err)
 		}
 	}
 }
 
-func TestValidate_PermissionMode_Invalid(t *testing.T) {
-	role := &Role{RoleName: "test", PermissionMode: "yolo"}
+func TestValidate_ClaudePermissionMode_Invalid(t *testing.T) {
+	role := &Role{RoleName: "test", ClaudePermissionMode: "yolo"}
 	err := role.Validate()
 	if err == nil {
-		t.Fatal("expected error for invalid permission_mode")
+		t.Fatal("expected error for invalid claude_permission_mode")
 	}
-	if !strings.Contains(err.Error(), "invalid permission_mode") {
-		t.Errorf("expected 'invalid permission_mode' in error, got: %v", err)
+	if !strings.Contains(err.Error(), "invalid claude_permission_mode") {
+		t.Errorf("expected 'invalid claude_permission_mode' in error, got: %v", err)
 	}
 	if !strings.Contains(err.Error(), "yolo") {
 		t.Errorf("error should contain the invalid value 'yolo', got: %v", err)
@@ -1272,10 +1272,10 @@ func TestValidate_PermissionMode_Invalid(t *testing.T) {
 	}
 }
 
-func TestValidate_PermissionMode_Empty(t *testing.T) {
-	role := &Role{RoleName: "test", PermissionMode: ""}
+func TestValidate_ClaudePermissionMode_Empty(t *testing.T) {
+	role := &Role{RoleName: "test", ClaudePermissionMode: ""}
 	if err := role.Validate(); err != nil {
-		t.Fatalf("empty permission_mode should be valid, got: %v", err)
+		t.Fatalf("empty claude_permission_mode should be valid, got: %v", err)
 	}
 }
 
@@ -1298,36 +1298,36 @@ system_prompt: |
 	}
 }
 
-func TestLoadRoleFrom_PermissionModeField(t *testing.T) {
+func TestLoadRoleFrom_ClaudePermissionModeField(t *testing.T) {
 	yaml := `
 role_name: permissive
 instructions: |
   Do stuff.
-permission_mode: bypassPermissions
+claude_permission_mode: bypassPermissions
 `
 	path := writeTempFile(t, "permissive.yaml", yaml)
 	role, err := LoadRoleFrom(path)
 	if err != nil {
 		t.Fatalf("LoadRoleFrom: %v", err)
 	}
-	if role.PermissionMode != "bypassPermissions" {
-		t.Errorf("PermissionMode = %q, want %q", role.PermissionMode, "bypassPermissions")
+	if role.ClaudePermissionMode != "bypassPermissions" {
+		t.Errorf("ClaudePermissionMode = %q, want %q", role.ClaudePermissionMode, "bypassPermissions")
 	}
 }
 
-func TestLoadRoleFrom_InvalidPermissionMode(t *testing.T) {
+func TestLoadRoleFrom_InvalidClaudePermissionMode(t *testing.T) {
 	yaml := `
 role_name: bad
 instructions: |
   Do stuff.
-permission_mode: invalid_mode
+claude_permission_mode: invalid_mode
 `
 	path := writeTempFile(t, "bad.yaml", yaml)
 	_, err := LoadRoleFrom(path)
 	if err == nil {
-		t.Fatal("expected error for invalid permission_mode")
+		t.Fatal("expected error for invalid claude_permission_mode")
 	}
-	if !strings.Contains(err.Error(), "invalid permission_mode") {
+	if !strings.Contains(err.Error(), "invalid claude_permission_mode") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }

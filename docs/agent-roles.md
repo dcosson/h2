@@ -51,7 +51,7 @@ model: opus
 
 # Permission mode — passed to Claude Code via --permission-mode
 # Valid values: default, delegate, acceptEdits, plan, dontAsk, bypassPermissions
-# permission_mode: plan
+# claude_permission_mode: plan
 
 # System prompt — replaces Claude Code's entire default system prompt (--system-prompt).
 # Use this when you need full control over the prompt. Mutually exclusive in

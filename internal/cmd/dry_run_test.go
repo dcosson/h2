@@ -446,10 +446,10 @@ func TestResolveAgentConfig_ChildArgsIncludeNewFields(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	role := &config.Role{
-		RoleName:       "test-role",
-		Instructions:   "Do work",
-		AgentModel:     "opus",
-		PermissionMode: "plan",
+		RoleName:             "test-role",
+		Instructions:         "Do work",
+		AgentModel:           "opus",
+		ClaudePermissionMode: "plan",
 	}
 
 	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
@@ -508,13 +508,13 @@ func TestPrintDryRun_SystemPromptTruncated(t *testing.T) {
 	}
 }
 
-func TestPrintDryRun_PermissionMode(t *testing.T) {
+func TestPrintDryRun_ClaudePermissionMode(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	role := &config.Role{
-		RoleName:       "test-role",
-		Instructions:   "Test",
-		PermissionMode: "plan",
+		RoleName:             "test-role",
+		Instructions:         "Test",
+		ClaudePermissionMode: "plan",
 	}
 
 	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
@@ -1028,8 +1028,8 @@ func TestRunDryRun_RequiresRole(t *testing.T) {
 func TestRunDryRun_InvalidDefaultRoleShowsValidationError(t *testing.T) {
 	h2Root := setupPodTestEnv(t)
 
-	// Create an invalid default role (invalid permission_mode).
-	roleContent := "role_name: default\npermission_mode: invalid_mode\n"
+	// Create an invalid default role (invalid claude_permission_mode).
+	roleContent := "role_name: default\nclaude_permission_mode: invalid_mode\n"
 	os.WriteFile(filepath.Join(h2Root, "roles", "default.yaml"), []byte(roleContent), 0o644)
 
 	cmd := newRunCmd()

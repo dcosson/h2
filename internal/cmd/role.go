@@ -113,8 +113,8 @@ func newRoleShowCmd() *cobra.Command {
 			if role.Description != "" {
 				fmt.Printf("Description: %s\n", role.Description)
 			}
-			if role.PermissionMode != "" {
-				fmt.Printf("Permission Mode: %s\n", role.PermissionMode)
+			if role.ClaudePermissionMode != "" {
+				fmt.Printf("Permission Mode: %s\n", role.ClaudePermissionMode)
 			}
 			if role.CodexSandboxMode != "" {
 				fmt.Printf("Codex Sandbox: %s\n", role.CodexSandboxMode)

@@ -103,14 +103,14 @@ type CommandArgsConfig struct {
 	ExtraArgs []string
 
 	// Role config fields mapped to CLI flags by each harness.
-	SessionID           string
-	Instructions        string
-	SystemPrompt        string
-	Model               string
-	PermissionMode      string   // Claude Code --permission-mode
-	CodexSandboxMode    string   // Codex --sandbox
-	CodexAskForApproval string   // Codex --ask-for-approval
-	AdditionalDirs      []string // --add-dir (both Claude Code and Codex)
+	SessionID            string
+	Instructions         string
+	SystemPrompt         string
+	Model                string
+	ClaudePermissionMode string   // Claude Code --permission-mode
+	CodexSandboxMode     string   // Codex --sandbox
+	CodexAskForApproval  string   // Codex --ask-for-approval
+	AdditionalDirs       []string // --add-dir (both Claude Code and Codex)
 }
 
 // CombineArgs assembles the complete child process argument list from

@@ -33,31 +33,31 @@ import (
 // Session manages the message queue, delivery loop, observable state,
 // child process lifecycle, and client connections for an h2 session.
 type Session struct {
-	Name                string
-	Command             string
-	Args                []string
-	SessionID           string   // Claude Code session ID (UUID), set for claude commands
-	RoleName            string   // Role name, if launched with --role
-	SessionDir          string   // Session directory path (~/.h2/sessions/<name>/)
-	WorkingDir          string   // Working directory for the child process/session
-	Instructions        string   // Role instructions, passed via --append-system-prompt
-	SystemPrompt        string   // Replaces default system prompt, passed via --system-prompt
-	Model               string   // Model selection, passed via --model
-	PermissionMode      string   // Claude Code --permission-mode
-	CodexSandboxMode    string   // Codex --sandbox
-	CodexAskForApproval string   // Codex --ask-for-approval
-	AdditionalDirs      []string // extra dirs passed via --add-dir
-	Queue               *message.MessageQueue
-	AgentName           string
-	harness             harness.Harness
-	monitor             *monitor.AgentMonitor
-	agentCancel         context.CancelFunc
-	activityLog         *activitylog.Logger
-	VT                  *virtualterminal.VT
-	Client              *client.Client // primary/interactive client (nil in daemon-only)
-	Clients             []*client.Client
-	clientsMu           sync.Mutex
-	PassthroughOwner    *client.Client // which client owns passthrough mode (nil = none)
+	Name                 string
+	Command              string
+	Args                 []string
+	SessionID            string   // Claude Code session ID (UUID), set for claude commands
+	RoleName             string   // Role name, if launched with --role
+	SessionDir           string   // Session directory path (~/.h2/sessions/<name>/)
+	WorkingDir           string   // Working directory for the child process/session
+	Instructions         string   // Role instructions, passed via --append-system-prompt
+	SystemPrompt         string   // Replaces default system prompt, passed via --system-prompt
+	Model                string   // Model selection, passed via --model
+	ClaudePermissionMode string   // Claude Code --permission-mode
+	CodexSandboxMode     string   // Codex --sandbox
+	CodexAskForApproval  string   // Codex --ask-for-approval
+	AdditionalDirs       []string // extra dirs passed via --add-dir
+	Queue                *message.MessageQueue
+	AgentName            string
+	harness              harness.Harness
+	monitor              *monitor.AgentMonitor
+	agentCancel          context.CancelFunc
+	activityLog          *activitylog.Logger
+	VT                   *virtualterminal.VT
+	Client               *client.Client // primary/interactive client (nil in daemon-only)
+	Clients              []*client.Client
+	clientsMu            sync.Mutex
+	PassthroughOwner     *client.Client // which client owns passthrough mode (nil = none)
 
 	// prependArgs holds CLI args from the adapter's launch config
 	// (e.g. --session-id for Claude Code). Set by setupAgent().
@@ -276,16 +276,16 @@ func resolveFullHarness(command, roleName string, log *activitylog.Logger) (harn
 // role flags via BuildCommandArgs.
 func (s *Session) childArgs() []string {
 	return s.harness.BuildCommandArgs(harness.CommandArgsConfig{
-		PrependArgs:         s.prependArgs,
-		ExtraArgs:           s.Args,
-		SessionID:           s.SessionID,
-		Instructions:        s.Instructions,
-		SystemPrompt:        s.SystemPrompt,
-		Model:               s.Model,
-		PermissionMode:      s.PermissionMode,
-		CodexSandboxMode:    s.CodexSandboxMode,
-		CodexAskForApproval: s.CodexAskForApproval,
-		AdditionalDirs:      s.AdditionalDirs,
+		PrependArgs:          s.prependArgs,
+		ExtraArgs:            s.Args,
+		SessionID:            s.SessionID,
+		Instructions:         s.Instructions,
+		SystemPrompt:         s.SystemPrompt,
+		Model:                s.Model,
+		ClaudePermissionMode: s.ClaudePermissionMode,
+		CodexSandboxMode:     s.CodexSandboxMode,
+		CodexAskForApproval:  s.CodexAskForApproval,
+		AdditionalDirs:       s.AdditionalDirs,
 	})
 }
 

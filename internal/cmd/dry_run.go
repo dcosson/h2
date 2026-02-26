@@ -119,16 +119,16 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 	// Build the complete child args via BuildCommandArgs.
 	roleCfg := roleHarnessConfig(role)
 	childArgs := h.BuildCommandArgs(harness.CommandArgsConfig{
-		PrependArgs:         prependArgs,
-		ExtraArgs:           extraArgs,
-		SessionID:           "<generated-uuid>",
-		Instructions:        role.GetInstructions(),
-		SystemPrompt:        role.SystemPrompt,
-		Model:               roleCfg.Model,
-		PermissionMode:      role.PermissionMode,
-		CodexSandboxMode:    role.CodexSandboxMode,
-		CodexAskForApproval: role.CodexAskForApproval,
-		AdditionalDirs:      additionalDirs,
+		PrependArgs:          prependArgs,
+		ExtraArgs:            extraArgs,
+		SessionID:            "<generated-uuid>",
+		Instructions:         role.GetInstructions(),
+		SystemPrompt:         role.SystemPrompt,
+		Model:                roleCfg.Model,
+		ClaudePermissionMode: role.ClaudePermissionMode,
+		CodexSandboxMode:     role.CodexSandboxMode,
+		CodexAskForApproval:  role.CodexAskForApproval,
+		AdditionalDirs:       additionalDirs,
 	})
 
 	return &ResolvedAgentConfig{
@@ -159,8 +159,8 @@ func printDryRun(rc *ResolvedAgentConfig) {
 	if rc.Model != "" {
 		fmt.Printf("Model: %s\n", rc.Model)
 	}
-	if role.PermissionMode != "" {
-		fmt.Printf("Permission Mode: %s\n", role.PermissionMode)
+	if role.ClaudePermissionMode != "" {
+		fmt.Printf("Permission Mode: %s\n", role.ClaudePermissionMode)
 	}
 
 	// System prompt (truncated with line count).

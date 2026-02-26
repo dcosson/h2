@@ -57,7 +57,7 @@ The unified `approval_policy` field (which mapped to each harness's native
 permission flags) has been removed in favor of using harness-native fields
 directly:
 
-- **Claude Code**: Set `permission_mode` (maps to `--permission-mode`)
+- **Claude Code**: Set `claude_permission_mode` (maps to `--permission-mode`)
 - **Codex**: Set `codex_ask_for_approval` (maps to `--ask-for-approval`) and
   `codex_sandbox_mode` (maps to `--sandbox`)
 
@@ -73,7 +73,7 @@ Update your role YAML files from v0.1.0 to v0.2.0 format:
 name: my-role
 agent_type: claude
 model: sonnet
-permission_mode: plan
+claude_permission_mode: plan
 permissions:
   agent:
     enabled: true
@@ -85,7 +85,7 @@ instructions: |
 role_name: my-role
 agent_harness: claude_code
 agent_model: sonnet
-permission_mode: plan
+claude_permission_mode: plan
 permission_review_agent:
   enabled: true
   instructions: "Review all file writes"

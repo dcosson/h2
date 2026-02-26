@@ -50,11 +50,11 @@ func TestDisplayCommand(t *testing.T) {
 func TestBuildCommandArgs_AllFields(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
 	args := h.BuildCommandArgs(harness.CommandArgsConfig{
-		SessionID:      "test-uuid-123",
-		SystemPrompt:   "Custom prompt",
-		Instructions:   "Extra instructions",
-		Model:          "claude-opus-4-6",
-		PermissionMode: "plan",
+		SessionID:            "test-uuid-123",
+		SystemPrompt:         "Custom prompt",
+		Instructions:         "Extra instructions",
+		Model:                "claude-opus-4-6",
+		ClaudePermissionMode: "plan",
 	})
 	expected := []string{
 		"--session-id", "test-uuid-123",
@@ -73,9 +73,9 @@ func TestBuildCommandArgs_AllFields(t *testing.T) {
 	}
 }
 
-func TestBuildCommandArgs_PermissionMode(t *testing.T) {
+func TestBuildCommandArgs_ClaudePermissionMode(t *testing.T) {
 	h := New(harness.HarnessConfig{}, nil)
-	args := h.BuildCommandArgs(harness.CommandArgsConfig{PermissionMode: "dontAsk"})
+	args := h.BuildCommandArgs(harness.CommandArgsConfig{ClaudePermissionMode: "dontAsk"})
 	expected := []string{"--permission-mode", "dontAsk"}
 	if len(args) != len(expected) {
 		t.Fatalf("expected %v, got %v", expected, args)

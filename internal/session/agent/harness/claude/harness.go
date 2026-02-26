@@ -83,8 +83,8 @@ func (h *ClaudeCodeHarness) BuildCommandArgs(cfg harness.CommandArgsConfig) []st
 	if cfg.Model != "" {
 		roleArgs = append(roleArgs, "--model", cfg.Model)
 	}
-	if cfg.PermissionMode != "" {
-		roleArgs = append(roleArgs, "--permission-mode", cfg.PermissionMode)
+	if cfg.ClaudePermissionMode != "" {
+		roleArgs = append(roleArgs, "--permission-mode", cfg.ClaudePermissionMode)
 	}
 	for _, dir := range cfg.AdditionalDirs {
 		roleArgs = append(roleArgs, "--add-dir", dir)

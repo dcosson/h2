@@ -71,11 +71,11 @@ func TestGenerateOrchestratorRole_Model(t *testing.T) {
 	}
 }
 
-func TestGenerateOrchestratorRole_PermissionMode(t *testing.T) {
+func TestGenerateOrchestratorRole_ClaudePermissionMode(t *testing.T) {
 	role := GenerateOrchestratorRole("opus", "", "plan", "test")
 
-	if !strings.Contains(role, "permission_mode: bypassPermissions") {
-		t.Error("role should set permission_mode to bypassPermissions")
+	if !strings.Contains(role, "claude_permission_mode: bypassPermissions") {
+		t.Error("role should set claude_permission_mode to bypassPermissions")
 	}
 }
 
@@ -97,7 +97,7 @@ func TestGenerateOrchestratorInstructions_PlainText(t *testing.T) {
 	if strings.Contains(instructions, "name: qa-orchestrator") {
 		t.Error("instructions should not contain YAML role header")
 	}
-	if strings.Contains(instructions, "permission_mode:") {
+	if strings.Contains(instructions, "claude_permission_mode:") {
 		t.Error("instructions should not contain YAML fields")
 	}
 

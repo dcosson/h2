@@ -76,13 +76,13 @@ func TestForkDaemonOpts_InstructionsField(t *testing.T) {
 
 func TestRunDaemonOpts_AllNewFieldsStoredOnSession(t *testing.T) {
 	opts := RunDaemonOpts{
-		Name:           "test-agent",
-		SessionID:      "test-uuid",
-		Command:        "claude",
-		Instructions:   "Instructions here",
-		SystemPrompt:   "Custom system prompt",
-		Model:          "claude-opus-4-6",
-		PermissionMode: "plan",
+		Name:                 "test-agent",
+		SessionID:            "test-uuid",
+		Command:              "claude",
+		Instructions:         "Instructions here",
+		SystemPrompt:         "Custom system prompt",
+		Model:                "claude-opus-4-6",
+		ClaudePermissionMode: "plan",
 	}
 
 	s := New(opts.Name, opts.Command, opts.Args)
@@ -90,7 +90,7 @@ func TestRunDaemonOpts_AllNewFieldsStoredOnSession(t *testing.T) {
 	s.Instructions = opts.Instructions
 	s.SystemPrompt = opts.SystemPrompt
 	s.Model = opts.Model
-	s.PermissionMode = opts.PermissionMode
+	s.ClaudePermissionMode = opts.ClaudePermissionMode
 
 	if s.SystemPrompt != "Custom system prompt" {
 		t.Fatalf("SystemPrompt not stored: got %q", s.SystemPrompt)
@@ -98,8 +98,8 @@ func TestRunDaemonOpts_AllNewFieldsStoredOnSession(t *testing.T) {
 	if s.Model != "claude-opus-4-6" {
 		t.Fatalf("Model not stored: got %q", s.Model)
 	}
-	if s.PermissionMode != "plan" {
-		t.Fatalf("PermissionMode not stored: got %q", s.PermissionMode)
+	if s.ClaudePermissionMode != "plan" {
+		t.Fatalf("ClaudePermissionMode not stored: got %q", s.ClaudePermissionMode)
 	}
 
 	// Verify all fields appear in childArgs.
@@ -128,12 +128,12 @@ func TestRunDaemonOpts_AllNewFieldsStoredOnSession(t *testing.T) {
 
 func TestForkDaemonOpts_AllNewFields(t *testing.T) {
 	opts := ForkDaemonOpts{
-		Name:           "test-agent",
-		SessionID:      "test-uuid",
-		Command:        "claude",
-		SystemPrompt:   "Custom prompt",
-		Model:          "claude-sonnet-4-5-20250929",
-		PermissionMode: "bypassPermissions",
+		Name:                 "test-agent",
+		SessionID:            "test-uuid",
+		Command:              "claude",
+		SystemPrompt:         "Custom prompt",
+		Model:                "claude-sonnet-4-5-20250929",
+		ClaudePermissionMode: "bypassPermissions",
 	}
 
 	if opts.SystemPrompt != "Custom prompt" {
@@ -142,8 +142,8 @@ func TestForkDaemonOpts_AllNewFields(t *testing.T) {
 	if opts.Model != "claude-sonnet-4-5-20250929" {
 		t.Fatalf("Model not preserved: got %q", opts.Model)
 	}
-	if opts.PermissionMode != "bypassPermissions" {
-		t.Fatalf("PermissionMode not preserved: got %q", opts.PermissionMode)
+	if opts.ClaudePermissionMode != "bypassPermissions" {
+		t.Fatalf("ClaudePermissionMode not preserved: got %q", opts.ClaudePermissionMode)
 	}
 }
 

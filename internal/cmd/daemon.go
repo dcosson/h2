@@ -63,21 +63,21 @@ func newDaemonCmd() *cobra.Command {
 			}
 
 			err := session.RunDaemon(session.RunDaemonOpts{
-				Name:                name,
-				SessionID:           sessionID,
-				Command:             args[0],
-				Args:                args[1:],
-				RoleName:            roleName,
-				SessionDir:          sessionDir,
-				Instructions:        instructions,
-				SystemPrompt:        systemPrompt,
-				Model:               model,
-				PermissionMode:      permissionMode,
-				CodexSandboxMode:    codexSandboxMode,
-				CodexAskForApproval: codexAskForApproval,
-				AdditionalDirs:      additionalDirs,
-				Heartbeat:           heartbeat,
-				Overrides:           overrideMap,
+				Name:                 name,
+				SessionID:            sessionID,
+				Command:              args[0],
+				Args:                 args[1:],
+				RoleName:             roleName,
+				SessionDir:           sessionDir,
+				Instructions:         instructions,
+				SystemPrompt:         systemPrompt,
+				Model:                model,
+				ClaudePermissionMode: permissionMode,
+				CodexSandboxMode:     codexSandboxMode,
+				CodexAskForApproval:  codexAskForApproval,
+				AdditionalDirs:       additionalDirs,
+				Heartbeat:            heartbeat,
+				Overrides:            overrideMap,
 			})
 			if err != nil {
 				if _, ok := err.(*exec.ExitError); ok {

@@ -44,7 +44,7 @@ agent_model: "{{ if eq .Var.agent_model "<harness-default>" -}}opus{{- else -}}{
 
 # Permission mode for Claude Code
 # Valid: default, delegate, acceptEdits, plan, dontAsk, bypassPermissions
-permission_mode: default
+claude_permission_mode: default
 {{- else -}}
 # Permission mode for Generic Agent
 # agent_harness_command: some-other-binary

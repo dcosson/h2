@@ -676,10 +676,10 @@ func TestChildArgs_Model(t *testing.T) {
 	}
 }
 
-func TestChildArgs_PermissionMode(t *testing.T) {
+func TestChildArgs_ClaudePermissionMode(t *testing.T) {
 	s := New("test", "claude", nil)
 	s.SessionID = "test-uuid"
-	s.PermissionMode = "bypassPermissions"
+	s.ClaudePermissionMode = "bypassPermissions"
 
 	args := s.childArgs()
 
@@ -697,7 +697,7 @@ func TestChildArgs_AllFieldsCombined(t *testing.T) {
 	s.SystemPrompt = "Custom prompt"
 	s.Instructions = "Extra instructions"
 	s.Model = "claude-opus-4-6"
-	s.PermissionMode = "plan"
+	s.ClaudePermissionMode = "plan"
 
 	args := s.childArgs()
 
