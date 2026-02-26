@@ -55,6 +55,9 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 	if name == "" {
 		name = session.GenerateName()
 	}
+	if err := ensureAgentSocketAvailable(name); err != nil {
+		return err
+	}
 
 	sessionDir, err := config.SetupSessionDir(name, role)
 	if err != nil {

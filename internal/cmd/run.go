@@ -165,6 +165,9 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 			if name == "" {
 				name = session.GenerateName()
 			}
+			if err := ensureAgentSocketAvailable(name); err != nil {
+				return err
+			}
 
 			sessionID := uuid.New().String()
 			colorHints := detectTerminalColorHints()
