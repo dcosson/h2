@@ -13,7 +13,7 @@ func NewRootCmd() *cobra.Command {
 		Short: "Terminal wrapper with inter-agent messaging",
 		Long:  "h2 wraps a TUI application with a persistent input bar and supports inter-agent messaging via Unix domain sockets.",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			refreshTerminalColorHintsCache()
+			refreshTerminalHintsCache()
 
 			switch cmd.Name() {
 			case "init", "version", "help", "completion":

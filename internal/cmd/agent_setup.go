@@ -140,7 +140,7 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 	}
 
 	sessionID := uuid.New().String()
-	colorHints := detectTerminalColorHints()
+	colorHints := detectTerminalHints()
 
 	// Fork the daemon.
 	roleCfg := roleHarnessConfig(role)

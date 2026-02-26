@@ -12,7 +12,7 @@ import (
 	"h2/internal/session/virtualterminal"
 )
 
-type terminalColorHints struct {
+type terminalHints struct {
 	OscFg     string `json:"osc_fg,omitempty"`
 	OscBg     string `json:"osc_bg,omitempty"`
 	ColorFGBG string `json:"colorfgbg,omitempty"`
@@ -20,11 +20,11 @@ type terminalColorHints struct {
 	ColorTerm string `json:"colorterm,omitempty"`
 }
 
-// detectTerminalColorHints captures current terminal colors for OSC 10/11
+// detectTerminalHints captures current terminal colors for OSC 10/11
 // responses, a COLORFGBG hint for fallback palette selection, and TERM/COLORTERM
 // for terminal capability detection.
-func detectTerminalColorHints() terminalColorHints {
-	var hints terminalColorHints
+func detectTerminalHints() terminalHints {
+	var hints terminalHints
 
 	// Explicit overrides win (applied at the end).
 	overrideFg := os.Getenv("H2_OSC_FG")
@@ -53,8 +53,8 @@ func detectTerminalColorHints() terminalColorHints {
 		hints.Term = os.Getenv("TERM")
 		hints.ColorTerm = os.Getenv("COLORTERM")
 
-		_ = persistTerminalColorHints(hints)
-	} else if cached, ok := loadTerminalColorHints(); ok {
+		_ = persistTerminalHints(hints)
+	} else if cached, ok := loadTerminalHints(); ok {
 		hints = cached
 	}
 
@@ -75,24 +75,24 @@ func detectTerminalColorHints() terminalColorHints {
 	return hints
 }
 
-// refreshTerminalColorHintsCache updates terminal color hints on disk when this
+// refreshTerminalHintsCache updates terminal hints on disk when this
 // process has a TTY. Non-TTY invocations are a no-op.
-func refreshTerminalColorHintsCache() {
+func refreshTerminalHintsCache() {
 	if term.IsTerminal(int(os.Stdout.Fd())) {
-		detectTerminalColorHints()
+		detectTerminalHints()
 	}
 }
 
-func terminalColorHintsPath() (string, error) {
+func terminalHintsPath() (string, error) {
 	root, err := config.RootDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, "terminal-colors.json"), nil
+	return filepath.Join(root, "terminal.json"), nil
 }
 
-func persistTerminalColorHints(h terminalColorHints) error {
-	path, err := terminalColorHintsPath()
+func persistTerminalHints(h terminalHints) error {
+	path, err := terminalHintsPath()
 	if err != nil {
 		return err
 	}
@@ -106,18 +106,26 @@ func persistTerminalColorHints(h terminalColorHints) error {
 	return os.WriteFile(path, append(data, '\n'), 0o644)
 }
 
-func loadTerminalColorHints() (terminalColorHints, bool) {
-	path, err := terminalColorHintsPath()
+func loadTerminalHints() (terminalHints, bool) {
+	path, err := terminalHintsPath()
 	if err != nil {
-		return terminalColorHints{}, false
+		return terminalHints{}, false
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return terminalColorHints{}, false
+		// Fall back to legacy file name.
+		root, rootErr := config.RootDir()
+		if rootErr != nil {
+			return terminalHints{}, false
+		}
+		data, err = os.ReadFile(filepath.Join(root, "terminal-colors.json"))
+		if err != nil {
+			return terminalHints{}, false
+		}
 	}
-	var h terminalColorHints
+	var h terminalHints
 	if err := json.Unmarshal(data, &h); err != nil {
-		return terminalColorHints{}, false
+		return terminalHints{}, false
 	}
 	return h, true
 }

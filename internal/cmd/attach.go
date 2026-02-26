@@ -44,7 +44,7 @@ func doAttach(name string) error {
 	if err != nil {
 		return fmt.Errorf("get terminal size: %w", err)
 	}
-	colorHints := detectTerminalColorHints()
+	colorHints := detectTerminalHints()
 
 	// Send attach handshake.
 	if err := message.SendRequest(conn, &message.Request{

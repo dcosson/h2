@@ -30,6 +30,7 @@ var expectedRootDirFiles = map[string]bool{
 	".h2-dir.txt":          true,
 	"routes.jsonl":         true,
 	"terminal-colors.json": true,
+	"terminal.json":        true,
 	"config.yaml":          true,
 }
 
