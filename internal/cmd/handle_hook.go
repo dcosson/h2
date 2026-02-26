@@ -19,6 +19,7 @@ import (
 
 func newHandleHookCmd() *cobra.Command {
 	var agentName string
+	var forcedPermissionResult string
 
 	cmd := &cobra.Command{
 		Use:   "handle-hook",
@@ -54,13 +55,16 @@ in settings.json. Exits 0 with JSON on stdout.`,
 			if envelope.HookEventName == "" {
 				return fmt.Errorf("hook_event_name not found in payload")
 			}
+			if forcedPermissionResult != "" && !isValidForcedPermissionResult(forcedPermissionResult) {
+				return fmt.Errorf("--force-permission-request-result must be one of: deny, allow, ask_user")
+			}
 
 			// Step 1: Always forward the hook event to the agent.
 			sendHookEvent(agentName, envelope.HookEventName, data)
 
 			// Step 2: For PermissionRequest, optionally run the permission reviewer.
 			if envelope.HookEventName == "PermissionRequest" {
-				return handlePermissionRequest(cmd, agentName, data)
+				return handlePermissionRequest(cmd, agentName, data, forcedPermissionResult)
 			}
 
 			// All other events: return empty JSON.
@@ -70,6 +74,7 @@ in settings.json. Exits 0 with JSON on stdout.`,
 	}
 
 	cmd.Flags().StringVar(&agentName, "agent", "", "Agent name (defaults to $H2_ACTOR)")
+	cmd.Flags().StringVar(&forcedPermissionResult, "force-permission-request-result", "", "Force PermissionRequest result: deny, allow, or ask_user (only applies to PermissionRequest hooks)")
 
 	return cmd
 }
@@ -128,12 +133,16 @@ func sendPermissionDecision(agentName, sessionID, toolName, decision, reason str
 // The PermissionRequest event has already been forwarded to the agent
 // (setting WaitingForPermission state). This function optionally runs
 // the AI reviewer and returns a decision to Claude Code.
-func handlePermissionRequest(cmd *cobra.Command, agentName string, data []byte) error {
+func handlePermissionRequest(cmd *cobra.Command, agentName string, data []byte, forcedResult string) error {
 	var request permissionInput
 	if err := json.Unmarshal(data, &request); err != nil {
 		// Can't parse — fall through to Claude Code's built-in dialog.
 		fmt.Fprintln(cmd.OutOrStdout(), "{}")
 		return nil
+	}
+
+	if forcedResult != "" {
+		return writeForcedPermissionResult(cmd, agentName, request, forcedResult)
 	}
 
 	// Skip review for non-risky tools.
@@ -198,6 +207,56 @@ func handlePermissionRequest(cmd *cobra.Command, agentName string, data []byte) 
 	}
 
 	return nil
+}
+
+func isValidForcedPermissionResult(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "allow", "deny", "ask_user":
+		return true
+	default:
+		return false
+	}
+}
+
+func writeForcedPermissionResult(cmd *cobra.Command, agentName string, request permissionInput, forcedResult string) error {
+	reason := "forced by --force-permission-request-result"
+
+	switch strings.ToLower(strings.TrimSpace(forcedResult)) {
+	case "allow":
+		sendPermissionDecision(agentName, request.SessionID, request.ToolName, "allow", reason)
+		resp := hookResponse{
+			HookSpecificOutput: hookDecision{
+				HookEventName: "PermissionRequest",
+				Decision: decisionPayload{
+					Behavior: "allow",
+				},
+			},
+		}
+		out, _ := json.Marshal(resp)
+		fmt.Fprintln(cmd.OutOrStdout(), string(out))
+		return nil
+	case "deny":
+		sendPermissionDecision(agentName, request.SessionID, request.ToolName, "deny", reason)
+		resp := hookResponse{
+			HookSpecificOutput: hookDecision{
+				HookEventName: "PermissionRequest",
+				Decision: decisionPayload{
+					Behavior: "deny",
+					Message:  reason,
+				},
+			},
+		}
+		out, _ := json.Marshal(resp)
+		fmt.Fprintln(cmd.OutOrStdout(), string(out))
+		return nil
+	case "ask_user":
+		sendPermissionDecision(agentName, request.SessionID, request.ToolName, "ask_user", reason)
+		fmt.Fprintln(cmd.OutOrStdout(), "{}")
+		return nil
+	default:
+		// Guardrail: caller validates this already.
+		return fmt.Errorf("--force-permission-request-result must be one of: deny, allow, ask_user")
+	}
 }
 
 // permissionInput is the JSON payload from a PermissionRequest hook.

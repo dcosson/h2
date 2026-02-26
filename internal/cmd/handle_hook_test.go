@@ -309,6 +309,131 @@ func TestHandleHook_PermissionRequest_ForwardsEventBeforeDecision(t *testing.T) 
 	}
 }
 
+func TestHandleHook_PermissionRequest_ForceAllow(t *testing.T) {
+	tmpDir := shortHookTempDir(t)
+	agent := setupMockAgent(t, tmpDir, "test-agent")
+
+	payload := `{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"ls"},"session_id":"s1"}`
+
+	cmd := newHandleHookCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetIn(strings.NewReader(payload))
+	cmd.SetArgs([]string{"--force-permission-request-result", "allow"})
+
+	t.Setenv("H2_ACTOR", "test-agent")
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if !strings.Contains(out.String(), `"behavior":"allow"`) {
+		t.Fatalf("output = %q, want allow behavior", out.String())
+	}
+
+	reqs := agent.Received()
+	if len(reqs) < 2 {
+		t.Fatalf("expected at least 2 requests (hook_event + permission_decision), got %d", len(reqs))
+	}
+	if reqs[1].EventName != "permission_decision" {
+		t.Fatalf("second event = %q, want permission_decision", reqs[1].EventName)
+	}
+	var decision map[string]string
+	if err := json.Unmarshal(reqs[1].Payload, &decision); err != nil {
+		t.Fatalf("unmarshal decision payload: %v", err)
+	}
+	if decision["decision"] != "allow" {
+		t.Fatalf("decision = %q, want allow", decision["decision"])
+	}
+	if decision["reason"] != "forced by --force-permission-request-result" {
+		t.Fatalf("reason = %q, want forced reason", decision["reason"])
+	}
+}
+
+func TestHandleHook_PermissionRequest_ForceDeny(t *testing.T) {
+	tmpDir := shortHookTempDir(t)
+	agent := setupMockAgent(t, tmpDir, "test-agent")
+
+	payload := `{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"ls"},"session_id":"s1"}`
+
+	cmd := newHandleHookCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetIn(strings.NewReader(payload))
+	cmd.SetArgs([]string{"--force-permission-request-result", "deny"})
+
+	t.Setenv("H2_ACTOR", "test-agent")
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if !strings.Contains(out.String(), `"behavior":"deny"`) {
+		t.Fatalf("output = %q, want deny behavior", out.String())
+	}
+
+	reqs := agent.Received()
+	if len(reqs) < 2 {
+		t.Fatalf("expected at least 2 requests (hook_event + permission_decision), got %d", len(reqs))
+	}
+	var decision map[string]string
+	if err := json.Unmarshal(reqs[1].Payload, &decision); err != nil {
+		t.Fatalf("unmarshal decision payload: %v", err)
+	}
+	if decision["decision"] != "deny" {
+		t.Fatalf("decision = %q, want deny", decision["decision"])
+	}
+}
+
+func TestHandleHook_PermissionRequest_ForceAskUser(t *testing.T) {
+	tmpDir := shortHookTempDir(t)
+	agent := setupMockAgent(t, tmpDir, "test-agent")
+
+	payload := `{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"ls"},"session_id":"s1"}`
+
+	cmd := newHandleHookCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetIn(strings.NewReader(payload))
+	cmd.SetArgs([]string{"--force-permission-request-result", "ask_user"})
+
+	t.Setenv("H2_ACTOR", "test-agent")
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if strings.TrimSpace(out.String()) != "{}" {
+		t.Fatalf("output = %q, want {}", out.String())
+	}
+
+	reqs := agent.Received()
+	if len(reqs) < 2 {
+		t.Fatalf("expected at least 2 requests (hook_event + permission_decision), got %d", len(reqs))
+	}
+	var decision map[string]string
+	if err := json.Unmarshal(reqs[1].Payload, &decision); err != nil {
+		t.Fatalf("unmarshal decision payload: %v", err)
+	}
+	if decision["decision"] != "ask_user" {
+		t.Fatalf("decision = %q, want ask_user", decision["decision"])
+	}
+}
+
+func TestHandleHook_ForcePermissionRequestResult_Invalid(t *testing.T) {
+	cmd := newHandleHookCmd()
+	cmd.SetArgs([]string{"--agent", "test-agent", "--force-permission-request-result", "maybe"})
+	cmd.SetIn(bytes.NewBufferString(`{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{},"session_id":"s1"}`))
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid --force-permission-request-result")
+	}
+	if err.Error() != "--force-permission-request-result must be one of: deny, allow, ask_user" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 // --- parseReviewerResponse tests ---
 
 func TestParseReviewerResponse_Allow(t *testing.T) {
