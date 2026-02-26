@@ -22,6 +22,7 @@ func newHandleHookCmd() *cobra.Command {
 	var agentName string
 	var forcedPermissionResult string
 	var delaySeconds float64
+	var delayPermissionRequestSeconds float64
 
 	cmd := &cobra.Command{
 		Use:   "handle-hook",
@@ -63,6 +64,9 @@ in settings.json. Exits 0 with JSON on stdout.`,
 			if delaySeconds < 0 {
 				return fmt.Errorf("--delay-seconds must be >= 0")
 			}
+			if delayPermissionRequestSeconds < 0 {
+				return fmt.Errorf("--delay-permission-request-seconds must be >= 0")
+			}
 			if delaySeconds > 0 {
 				time.Sleep(time.Duration(delaySeconds * float64(time.Second)))
 			}
@@ -72,6 +76,9 @@ in settings.json. Exits 0 with JSON on stdout.`,
 
 			// Step 2: For PermissionRequest, optionally run the permission reviewer.
 			if envelope.HookEventName == "PermissionRequest" {
+				if delayPermissionRequestSeconds > 0 {
+					time.Sleep(time.Duration(delayPermissionRequestSeconds * float64(time.Second)))
+				}
 				return handlePermissionRequest(cmd, agentName, data, forcedPermissionResult)
 			}
 
@@ -84,6 +91,7 @@ in settings.json. Exits 0 with JSON on stdout.`,
 	cmd.Flags().StringVar(&agentName, "agent", "", "Agent name (defaults to $H2_ACTOR)")
 	cmd.Flags().StringVar(&forcedPermissionResult, "force-permission-request-result", "", "Force PermissionRequest result: deny, allow, or ask_user (only applies to PermissionRequest hooks)")
 	cmd.Flags().Float64Var(&delaySeconds, "delay-seconds", 0, "Testing helper: delay before forwarding hook and starting any PermissionRequest handling")
+	cmd.Flags().Float64Var(&delayPermissionRequestSeconds, "delay-permission-request-seconds", 0, "Testing helper: for PermissionRequest only, delay before decision handling (after forwarding the hook event)")
 
 	return cmd
 }
