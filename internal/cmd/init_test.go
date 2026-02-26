@@ -1231,6 +1231,29 @@ func TestInitCmd_GenerateHarnessConfig_RequiresForceWhenExisting(t *testing.T) {
 	}
 }
 
+func TestInitCmd_GenerateHarnessConfig_ReportsAllPlannedTargetsOnFailure(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--generate", "harness-config"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected --generate harness-config to fail without --force")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"Planned targets:",
+		"claude-config/default/settings.json",
+		"codex-config/default/config.toml",
+		"codex-config/default/requirements.toml",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("expected error to contain %q, got: %v", want, err)
+		}
+	}
+}
+
 func TestInitCmd_Minimal_CommandPolicyMatchesBetweenClaudeAndCodex(t *testing.T) {
 	fakeHome := setupFakeHome(t)
 	dir := filepath.Join(fakeHome, "myh2-min-policy")

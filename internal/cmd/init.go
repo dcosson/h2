@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -252,15 +253,32 @@ func generateRoles(abs, style string, force bool, out io.Writer) error {
 
 	roleNames := config.RoleTemplateNamesWithStyle(style)
 	if !force {
+		var items []generatePreflightItem
 		for _, roleName := range roleNames {
+			content := config.RoleTemplateWithStyle(roleName, style)
+			ext := config.RoleFileExtension(content)
+			target := filepath.Join("roles", roleName+ext)
+			items = append(items, checkFilePreflight(filepath.Join(abs, target), target)...)
 			for _, e := range []string{".yaml", ".yaml.tmpl"} {
 				p := filepath.Join(abs, "roles", roleName+e)
+				label := filepath.Join("roles", roleName+e)
 				if _, err := os.Stat(p); err == nil {
-					return fmt.Errorf("roles/%s already exists; use --force to overwrite", filepath.Base(p))
+					items = append(items, generatePreflightItem{
+						Label:    label,
+						Status:   "exists",
+						Conflict: true,
+					})
 				} else if err != nil && !os.IsNotExist(err) {
-					return fmt.Errorf("check roles/%s: %w", filepath.Base(p), err)
+					items = append(items, generatePreflightItem{
+						Label:    label,
+						Status:   fmt.Sprintf("error: %v", err),
+						Conflict: true,
+					})
 				}
 			}
+		}
+		if err := summarizePreflight("roles", items); err != nil {
+			return err
 		}
 	}
 
@@ -306,18 +324,14 @@ func generateInstructions(abs, style string, force bool, out io.Writer) error {
 	}
 
 	sharedMDTarget := filepath.Join("..", "..", "account-profiles-shared", "default", "CLAUDE_AND_AGENTS.md")
-	if err := validateSymlinkDestination(claudeMDPath, sharedMDTarget, force, "claude-config/default/CLAUDE.md"); err != nil {
-		return err
-	}
-	if err := validateSymlinkDestination(agentsMDPath, sharedMDTarget, force, "codex-config/default/AGENTS.md"); err != nil {
-		return err
-	}
-
 	if !force {
-		if _, err := os.Stat(sharedMDPath); err == nil {
-			return fmt.Errorf("account-profiles-shared/default/CLAUDE_AND_AGENTS.md already exists; use --force to overwrite")
-		} else if !os.IsNotExist(err) {
-			return fmt.Errorf("check account-profiles-shared/default/CLAUDE_AND_AGENTS.md: %w", err)
+		items := []generatePreflightItem{
+			checkFilePreflight(sharedMDPath, "account-profiles-shared/default/CLAUDE_AND_AGENTS.md")[0],
+		}
+		items = append(items, checkSymlinkPreflight(claudeMDPath, sharedMDTarget, "claude-config/default/CLAUDE.md"))
+		items = append(items, checkSymlinkPreflight(agentsMDPath, sharedMDTarget, "codex-config/default/AGENTS.md"))
+		if err := summarizePreflight("instructions", items); err != nil {
+			return err
 		}
 	}
 
@@ -350,19 +364,14 @@ func generateSkills(abs, style string, force bool, out io.Writer) error {
 		return fmt.Errorf("create codex-config dir: %w", err)
 	}
 
-	// Preflight link destinations before touching shared skills content so
-	// generateSkills is fail-fast/atomic from the caller's perspective.
-	if err := validateSymlinkDestination(claudeSkillsPath, sharedSkillsTarget, force, "claude-config/default/skills"); err != nil {
-		return err
-	}
-	if err := validateSymlinkDestination(codexSkillsPath, sharedSkillsTarget, force, "codex-config/default/skills"); err != nil {
-		return err
-	}
 	if !force {
-		if entries, err := os.ReadDir(sharedSkillsDir); err == nil && len(entries) > 0 {
-			return fmt.Errorf("account-profiles-shared/default/skills already exists; use --force to overwrite")
-		} else if err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("check account-profiles-shared/default/skills: %w", err)
+		items := []generatePreflightItem{
+			checkDirPreflight(sharedSkillsDir, "account-profiles-shared/default/skills"),
+		}
+		items = append(items, checkSymlinkPreflight(claudeSkillsPath, sharedSkillsTarget, "claude-config/default/skills"))
+		items = append(items, checkSymlinkPreflight(codexSkillsPath, sharedSkillsTarget, "codex-config/default/skills"))
+		if err := summarizePreflight("skills", items); err != nil {
+			return err
 		}
 	}
 
@@ -376,30 +385,6 @@ func generateSkills(abs, style string, force bool, out io.Writer) error {
 		return err
 	}
 	fmt.Fprintf(out, "  Wrote account-profiles-shared/default/skills/\n")
-	return nil
-}
-
-func validateSymlinkDestination(path, target string, force bool, label string) error {
-	if existing, err := os.Readlink(path); err == nil {
-		if existing == target {
-			return nil
-		}
-		if !force {
-			return fmt.Errorf("%s points to %q (expected %q); use --force to overwrite", label, existing, target)
-		}
-		return nil
-	}
-
-	info, err := os.Lstat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("check %s: %w", label, err)
-	}
-	if info != nil && !force {
-		return fmt.Errorf("%s already exists; use --force to overwrite", label)
-	}
 	return nil
 }
 
@@ -433,10 +418,10 @@ func ensureSymlink(path, target string, force bool, out io.Writer, label string)
 func generateConfig(abs, style string, force bool, out io.Writer) error {
 	configPath := filepath.Join(abs, "config.yaml")
 	if !force {
-		if _, err := os.Stat(configPath); err == nil {
-			return fmt.Errorf("config.yaml already exists; use --force to overwrite")
-		} else if !os.IsNotExist(err) {
-			return fmt.Errorf("check config.yaml: %w", err)
+		if err := summarizePreflight("config", []generatePreflightItem{
+			checkFilePreflight(configPath, "config.yaml")[0],
+		}); err != nil {
+			return err
 		}
 	}
 	if err := os.WriteFile(configPath, []byte(config.ConfigTemplate(style)), 0o644); err != nil {
@@ -451,13 +436,11 @@ func generateHarnessPolicyFiles(abs, style string, force bool, out io.Writer) er
 	codexConfigPath := filepath.Join(abs, "codex-config", "default", "config.toml")
 	codexRequirementsPath := filepath.Join(abs, "codex-config", "default", "requirements.toml")
 	if !force {
-		if err := preflightGeneratedFile(claudeSettingsPath, "claude-config/default/settings.json"); err != nil {
-			return err
-		}
-		if err := preflightGeneratedFile(codexConfigPath, "codex-config/default/config.toml"); err != nil {
-			return err
-		}
-		if err := preflightGeneratedFile(codexRequirementsPath, "codex-config/default/requirements.toml"); err != nil {
+		if err := summarizePreflight("harness-config", []generatePreflightItem{
+			checkFilePreflight(claudeSettingsPath, "claude-config/default/settings.json")[0],
+			checkFilePreflight(codexConfigPath, "codex-config/default/config.toml")[0],
+			checkFilePreflight(codexRequirementsPath, "codex-config/default/requirements.toml")[0],
+		}); err != nil {
 			return err
 		}
 	}
@@ -475,11 +458,6 @@ func generateHarnessPolicyFiles(abs, style string, force bool, out io.Writer) er
 }
 
 func writeGeneratedFile(path, content string, force bool, out io.Writer, label string) error {
-	if !force {
-		if err := preflightGeneratedFile(path, label); err != nil {
-			return err
-		}
-	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", label, err)
 	}
@@ -487,13 +465,85 @@ func writeGeneratedFile(path, content string, force bool, out io.Writer, label s
 	return nil
 }
 
-func preflightGeneratedFile(path, label string) error {
-	if _, err := os.Stat(path); err == nil {
-		return fmt.Errorf("%s already exists; use --force to overwrite", label)
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("check %s: %w", label, err)
+type generatePreflightItem struct {
+	Label    string
+	Status   string
+	Conflict bool
+}
+
+func summarizePreflight(target string, items []generatePreflightItem) error {
+	conflicts := 0
+	sort.Slice(items, func(i, j int) bool { return items[i].Label < items[j].Label })
+	for _, item := range items {
+		if item.Conflict {
+			conflicts++
+		}
 	}
-	return nil
+	if conflicts == 0 {
+		return nil
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "--generate %s preflight failed (%d conflict(s)); use --force to overwrite\n", target, conflicts)
+	fmt.Fprintf(&b, "Planned targets:\n")
+	for _, item := range items {
+		fmt.Fprintf(&b, "  %s: %s\n", item.Label, item.Status)
+	}
+	return fmt.Errorf("%s", strings.TrimRight(b.String(), "\n"))
+}
+
+func checkFilePreflight(path, label string) []generatePreflightItem {
+	if _, err := os.Stat(path); err == nil {
+		return []generatePreflightItem{{Label: label, Status: "exists", Conflict: true}}
+	} else if os.IsNotExist(err) {
+		return []generatePreflightItem{{Label: label, Status: "missing"}}
+	} else {
+		return []generatePreflightItem{{Label: label, Status: fmt.Sprintf("error: %v", err), Conflict: true}}
+	}
+}
+
+func checkDirPreflight(path, label string) generatePreflightItem {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return generatePreflightItem{Label: label, Status: "missing"}
+		}
+		return generatePreflightItem{Label: label, Status: fmt.Sprintf("error: %v", err), Conflict: true}
+	}
+	if len(entries) == 0 {
+		return generatePreflightItem{Label: label, Status: "exists (empty dir)"}
+	}
+	return generatePreflightItem{Label: label, Status: "exists (non-empty dir)", Conflict: true}
+}
+
+func checkSymlinkPreflight(path, target, label string) generatePreflightItem {
+	if existing, err := os.Readlink(path); err == nil {
+		if existing == target {
+			return generatePreflightItem{Label: label, Status: "ok (correct symlink)"}
+		}
+		return generatePreflightItem{
+			Label:    label,
+			Status:   fmt.Sprintf("exists (symlink -> %q, expected %q)", existing, target),
+			Conflict: true,
+		}
+	}
+
+	info, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return generatePreflightItem{Label: label, Status: "missing"}
+		}
+		return generatePreflightItem{
+			Label:    label,
+			Status:   fmt.Sprintf("error: %v", err),
+			Conflict: true,
+		}
+	}
+
+	if info.IsDir() {
+		return generatePreflightItem{Label: label, Status: "exists (directory)", Conflict: true}
+	}
+	return generatePreflightItem{Label: label, Status: "exists (file)", Conflict: true}
 }
 
 // writeInstructions writes shared CLAUDE_AND_AGENTS.md and creates profile symlinks.
