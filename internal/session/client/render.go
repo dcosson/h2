@@ -389,7 +389,7 @@ func (c *Client) HelpLabel() string {
 	case ModePassthrough:
 		return c.keybindingHelp().PassthroughMode
 	case ModeMenu:
-		return "esc exit"
+		return `Ctrl+\ back | Up/Down history`
 	case ModeScroll, ModePassthroughScroll:
 		return "Scroll/Up/Down navigate | Esc exit scroll"
 	default:

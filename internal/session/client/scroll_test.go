@@ -1015,8 +1015,8 @@ func TestMenu_HelpLabel(t *testing.T) {
 	o := newTestClient(10, 80)
 	o.Mode = ModeMenu
 	got := o.HelpLabel()
-	if got != "esc exit" {
-		t.Fatalf("expected 'esc exit', got %q", got)
+	if got != `Ctrl+\ back | Up/Down history` {
+		t.Fatalf("unexpected menu help label: %q", got)
 	}
 }
 
