@@ -197,7 +197,6 @@ type Role struct {
 	WorktreePath            string                 `yaml:"worktree_path,omitempty"`             // explicit worktree path override
 	WorktreeBranchFrom      string                 `yaml:"worktree_branch_from,omitempty"`      // defaults to "main"
 	WorktreeBranch          string                 `yaml:"worktree_branch,omitempty"`           // defaults to worktree_name; supports "<detached_head>"
-	Worktree                *WorktreeConfig        `yaml:"worktree,omitempty"`                  // deprecated legacy object (compat)
 	SystemPrompt            string                 `yaml:"system_prompt,omitempty"`             // replaces Claude's entire default system prompt (--system-prompt)
 	Instructions            string                 `yaml:"instructions,omitempty"`              // appended to default system prompt (--append-system-prompt)
 	InstructionsIntro       string                 `yaml:"instructions_intro,omitempty"`        // split instructions: intro
@@ -257,32 +256,6 @@ func (r *Role) hasWorktreeFields() bool {
 // BuildWorktreeConfig returns normalized worktree configuration derived from
 // flattened role fields. The source repository is resolved from working_dir.
 func (r *Role) BuildWorktreeConfig(invocationCWD, agentName string) (*WorktreeConfig, error) {
-	// Legacy object compatibility path.
-	if r.Worktree != nil {
-		cfg := *r.Worktree
-		if cfg.ProjectDir == "" {
-			projectDir, err := r.ResolveWorkingDir(invocationCWD)
-			if err != nil {
-				return nil, err
-			}
-			cfg.ProjectDir = projectDir
-		}
-		if cfg.Name == "" {
-			if agentName != "" {
-				cfg.Name = agentName
-			} else if r.AgentName != "" {
-				cfg.Name = r.AgentName
-			}
-		}
-		if cfg.Branch == "" && cfg.Name != "" {
-			cfg.Branch = cfg.Name
-		}
-		if err := cfg.Validate(); err != nil {
-			return nil, err
-		}
-		return &cfg, nil
-	}
-
 	if !r.WorktreeEnabled {
 		return nil, nil
 	}
@@ -1391,7 +1364,7 @@ func (r *Role) Validate() error {
 	if !r.WorktreeEnabled && r.hasWorktreeFields() {
 		return fmt.Errorf("worktree_* fields require worktree_enabled=true")
 	}
-	if r.WorktreeEnabled || r.Worktree != nil {
+	if r.WorktreeEnabled {
 		if _, err := r.BuildWorktreeConfig(".", r.AgentName); err != nil {
 			return err
 		}

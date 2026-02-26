@@ -132,12 +132,11 @@ func TestResolveAgentConfig_Worktree(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	role := &config.Role{
-		RoleName:     "test-role",
-		Instructions: "Test instructions",
-		Worktree: &config.WorktreeConfig{
-			ProjectDir: "/tmp/repo",
-			Name:       "test-wt",
-		},
+		RoleName:        "test-role",
+		Instructions:    "Test instructions",
+		WorktreeEnabled: true,
+		WorkingDir:      "/tmp/repo",
+		WorktreeName:    "test-wt",
 	}
 
 	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
@@ -373,12 +372,11 @@ func TestPrintDryRun_WorktreeLabel(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	role := &config.Role{
-		RoleName:     "test-role",
-		Instructions: "Test",
-		Worktree: &config.WorktreeConfig{
-			ProjectDir: "/tmp/repo",
-			Name:       "test-wt",
-		},
+		RoleName:        "test-role",
+		Instructions:    "Test",
+		WorktreeEnabled: true,
+		WorkingDir:      "/tmp/repo",
+		WorktreeName:    "test-wt",
 	}
 
 	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)

@@ -570,19 +570,21 @@ func TestValidate_WorktreeUsesWorkingDirAsSourceRepo(t *testing.T) {
 
 func TestValidate_WorktreeMissingProjectDir(t *testing.T) {
 	role := &Role{
-		RoleName: "test",
-		Worktree: &WorktreeConfig{Name: "test-wt"},
+		RoleName:        "test",
+		WorktreeEnabled: true,
+		WorktreeName:    "test-wt",
 	}
 	err := role.Validate()
 	if err != nil {
-		t.Fatalf("legacy worktree without project_dir should use working_dir: %v", err)
+		t.Fatalf("worktree should use default working_dir when not explicitly set: %v", err)
 	}
 }
 
 func TestValidate_WorktreeMissingName(t *testing.T) {
 	role := &Role{
-		RoleName: "test",
-		Worktree: &WorktreeConfig{ProjectDir: "/tmp/repo"},
+		RoleName:        "test",
+		WorktreeEnabled: true,
+		WorkingDir:      "/tmp/repo",
 	}
 	err := role.Validate()
 	if err == nil {
