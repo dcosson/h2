@@ -20,28 +20,24 @@ import (
 )
 
 // RenderScreen renders the virtual terminal buffer to the output.
-// Uses DECSC/DECRC to save and restore cursor position so the cursor
-// stays on the input bar (positioned by RenderInputBar). Re-asserts
-// cursor visibility afterward because child output may contain
-// \033[?25l which gets forwarded to the outer terminal. This only
-// fires during active output (PipeOutput), so it doesn't affect
-// cursor blink during idle.
+// Wrapped in synchronized output mode (DEC private mode 2026) so the
+// terminal buffers all intermediate cursor movements and applies the
+// final state atomically. This prevents screen tearing and avoids
+// resetting the cursor blink timer on every PipeOutput chunk.
+// DECSC/DECRC save and restore cursor position so the cursor stays on
+// the input bar (positioned by RenderInputBar).
 func (c *Client) RenderScreen() {
 	var buf bytes.Buffer
-	buf.WriteString("\0337") // DECSC: save cursor position
+	buf.WriteString("\033[?2026h") // begin synchronized update
+	buf.WriteString("\0337")       // DECSC: save cursor position
 	if c.IsScrollMode() {
 		c.renderScrollView(&buf)
 	} else {
 		c.renderLiveView(&buf)
 	}
 	c.renderSelectHint(&buf)
-	buf.WriteString("\0338") // DECRC: restore cursor position
-	// Re-assert cursor visibility — child output may toggle it via
-	// forwarded escape sequences. During active output the blink timer
-	// reset is invisible; during idle PipeOutput doesn't fire.
-	if c.Mode != ModePassthrough && c.Mode != ModePassthroughScroll {
-		buf.WriteString("\033[?25h")
-	}
+	buf.WriteString("\0338")       // DECRC: restore cursor position
+	buf.WriteString("\033[?2026l") // end synchronized update
 	c.OutputMu.Lock()
 	c.Output.Write(buf.Bytes())
 	c.OutputMu.Unlock()
@@ -215,7 +211,8 @@ func (c *Client) RenderLine(buf *bytes.Buffer, row int) {
 // doesn't move the cursor away from the input bar.
 func (c *Client) RenderStatusBar() {
 	var buf bytes.Buffer
-	buf.WriteString("\0337") // DECSC: save cursor position
+	buf.WriteString("\033[?2026h") // begin synchronized update
+	buf.WriteString("\0337")       // DECSC: save cursor position
 
 	sepRow := c.VT.Rows - 1
 	if c.DebugKeys {
@@ -304,7 +301,8 @@ func (c *Client) RenderStatusBar() {
 	}
 	buf.WriteString(right)
 	buf.WriteString("\033[0m")
-	buf.WriteString("\0338") // DECRC: restore cursor position
+	buf.WriteString("\0338")       // DECRC: restore cursor position
+	buf.WriteString("\033[?2026l") // end synchronized update
 
 	c.OutputMu.Lock()
 	c.Output.Write(buf.Bytes())
