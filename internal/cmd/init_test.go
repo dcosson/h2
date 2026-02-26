@@ -595,7 +595,7 @@ func TestInitCmd_AllowsRootDirFiles(t *testing.T) {
 
 	// Pre-create expected root-dir files.
 	os.WriteFile(filepath.Join(dir, "routes.jsonl"), []byte(""), 0o644)
-	os.WriteFile(filepath.Join(dir, "terminal-colors.json"), []byte("{}"), 0o644)
+	os.WriteFile(filepath.Join(dir, "terminal.json"), []byte("{}"), 0o644)
 
 	cmd := newInitCmd()
 	var buf bytes.Buffer

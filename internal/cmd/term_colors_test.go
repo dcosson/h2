@@ -7,11 +7,11 @@ import (
 	"testing"
 )
 
-func TestTerminalColorHints_RoundTrip(t *testing.T) {
+func TestTerminalHints_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "terminal-colors.json")
+	path := filepath.Join(dir, "terminal.json")
 
-	original := terminalColorHints{
+	original := terminalHints{
 		OscFg:     "rgb:ffff/ffff/ffff",
 		OscBg:     "rgb:2828/2c2c/3434",
 		ColorFGBG: "15;0",
@@ -33,7 +33,7 @@ func TestTerminalColorHints_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var loaded terminalColorHints
+	var loaded terminalHints
 	if err := json.Unmarshal(raw, &loaded); err != nil {
 		t.Fatal(err)
 	}
@@ -55,10 +55,10 @@ func TestTerminalColorHints_RoundTrip(t *testing.T) {
 	}
 }
 
-func TestTerminalColorHints_BackwardCompat(t *testing.T) {
+func TestTerminalHints_BackwardCompat(t *testing.T) {
 	// Old cache files without term/colorterm should load fine (empty strings).
 	raw := `{"osc_fg":"rgb:ffff/ffff/ffff","osc_bg":"rgb:0000/0000/0000","colorfgbg":"15;0"}`
-	var hints terminalColorHints
+	var hints terminalHints
 	if err := json.Unmarshal([]byte(raw), &hints); err != nil {
 		t.Fatal(err)
 	}
@@ -73,9 +73,9 @@ func TestTerminalColorHints_BackwardCompat(t *testing.T) {
 	}
 }
 
-func TestTerminalColorHints_OmitEmpty(t *testing.T) {
+func TestTerminalHints_OmitEmpty(t *testing.T) {
 	// Fields with empty values should be omitted from JSON.
-	hints := terminalColorHints{
+	hints := terminalHints{
 		OscBg:     "rgb:0000/0000/0000",
 		ColorFGBG: "15;0",
 	}

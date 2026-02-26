@@ -130,6 +130,7 @@ func (vt *VT) PipeOutput(onData func()) {
 		n, err := vt.Ptm.Read(buf)
 		if n > 0 {
 			vt.RespondOSCColors(buf[:n])
+			vt.RespondTerminalQueries(buf[:n])
 
 			vt.Mu.Lock()
 			vt.LastOut = time.Now()
@@ -247,6 +248,25 @@ func (vt *VT) RespondOSCColors(data []byte) {
 	}
 	if bytes.Contains(data, []byte("\033]11;?")) {
 		fmt.Fprintf(vt.Ptm, "\033]11;%s\033\\", bg)
+	}
+}
+
+// RespondTerminalQueries responds to terminal capability queries from the
+// child process. Scans raw PTY output for DA2 (CSI > c) and XTVERSION
+// (CSI > 0 q) and writes responses directly to the PTY. These queries are
+// silently dropped by midterm, so h2 handles them here with modern
+// xterm-compatible responses.
+//
+// DA2 response: CSI > 65 ; 388 ; 1 c (VT500 type, xterm version 388)
+// XTVERSION response: DCS > | xterm(388) ST
+func (vt *VT) RespondTerminalQueries(data []byte) {
+	// DA2: ESC [ > c  or  ESC [ > 0 c
+	if bytes.Contains(data, []byte("\033[>c")) || bytes.Contains(data, []byte("\033[>0c")) {
+		fmt.Fprintf(vt.Ptm, "\033[>65;388;1c")
+	}
+	// XTVERSION: ESC [ > 0 q  (some apps send ESC [ > q without 0)
+	if bytes.Contains(data, []byte("\033[>0q")) || bytes.Contains(data, []byte("\033[>q")) {
+		fmt.Fprintf(vt.Ptm, "\033P>|xterm(388)\033\\")
 	}
 }
 

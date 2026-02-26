@@ -171,7 +171,7 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 			hcfg := commandHarnessConfig(cmdCommand)
 
 			sessionID := uuid.New().String()
-			colorHints := detectTerminalColorHints()
+			colorHints := detectTerminalHints()
 
 			// Fork a daemon process.
 			if err := forkDaemonFunc(session.ForkDaemonOpts{

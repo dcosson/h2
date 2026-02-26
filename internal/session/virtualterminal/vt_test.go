@@ -269,6 +269,98 @@ func TestScanPTYOutput_PrivateModeWithSemicolon(t *testing.T) {
 	}
 }
 
+// --- RespondTerminalQueries ---
+
+func TestRespondTerminalQueries_DA2(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+
+	vt := &VT{Ptm: w}
+	vt.RespondTerminalQueries([]byte("\033[>c"))
+
+	buf := make([]byte, 256)
+	n, err := r.Read(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(buf[:n])
+	want := "\033[>65;388;1c"
+	if got != want {
+		t.Errorf("DA2 response: got %q, want %q", got, want)
+	}
+}
+
+func TestRespondTerminalQueries_DA2WithParam(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+
+	vt := &VT{Ptm: w}
+	vt.RespondTerminalQueries([]byte("\033[>0c"))
+
+	buf := make([]byte, 256)
+	n, err := r.Read(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(buf[:n])
+	want := "\033[>65;388;1c"
+	if got != want {
+		t.Errorf("DA2 response: got %q, want %q", got, want)
+	}
+}
+
+func TestRespondTerminalQueries_XTVERSION(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+
+	vt := &VT{Ptm: w}
+	vt.RespondTerminalQueries([]byte("\033[>0q"))
+
+	buf := make([]byte, 256)
+	n, err := r.Read(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(buf[:n])
+	want := "\033P>|xterm(388)\033\\"
+	if got != want {
+		t.Errorf("XTVERSION response: got %q, want %q", got, want)
+	}
+}
+
+func TestRespondTerminalQueries_NoMatch(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	vt := &VT{Ptm: w}
+	// Normal output should not trigger any response.
+	vt.RespondTerminalQueries([]byte("hello world\033[31m"))
+
+	// Set read deadline to verify nothing was written.
+	r.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+	buf := make([]byte, 256)
+	_, err = r.Read(buf)
+	r.Close()
+	if err == nil {
+		t.Error("expected no response for normal output")
+	}
+}
+
 func TestResetScanState(t *testing.T) {
 	vt := &VT{}
 	vt.ScrollRegionUsed = true
