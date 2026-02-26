@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -20,6 +21,7 @@ import (
 func newHandleHookCmd() *cobra.Command {
 	var agentName string
 	var forcedPermissionResult string
+	var delaySeconds float64
 
 	cmd := &cobra.Command{
 		Use:   "handle-hook",
@@ -58,6 +60,12 @@ in settings.json. Exits 0 with JSON on stdout.`,
 			if forcedPermissionResult != "" && !isValidForcedPermissionResult(forcedPermissionResult) {
 				return fmt.Errorf("--force-permission-request-result must be one of: deny, allow, ask_user")
 			}
+			if delaySeconds < 0 {
+				return fmt.Errorf("--delay-seconds must be >= 0")
+			}
+			if delaySeconds > 0 {
+				time.Sleep(time.Duration(delaySeconds * float64(time.Second)))
+			}
 
 			// Step 1: Always forward the hook event to the agent.
 			sendHookEvent(agentName, envelope.HookEventName, data)
@@ -75,6 +83,7 @@ in settings.json. Exits 0 with JSON on stdout.`,
 
 	cmd.Flags().StringVar(&agentName, "agent", "", "Agent name (defaults to $H2_ACTOR)")
 	cmd.Flags().StringVar(&forcedPermissionResult, "force-permission-request-result", "", "Force PermissionRequest result: deny, allow, or ask_user (only applies to PermissionRequest hooks)")
+	cmd.Flags().Float64Var(&delaySeconds, "delay-seconds", 0, "Testing helper: delay before forwarding hook and starting any PermissionRequest handling")
 
 	return cmd
 }

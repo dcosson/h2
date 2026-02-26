@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"h2/internal/config"
 	"h2/internal/session/message"
@@ -219,6 +220,44 @@ func TestHandleHook_ErrorInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestHandleHook_ErrorNegativeDelaySeconds(t *testing.T) {
+	cmd := newHandleHookCmd()
+	cmd.SetArgs([]string{"--agent", "test", "--delay-seconds", "-1"})
+	cmd.SetIn(bytes.NewBufferString(`{"hook_event_name":"PreToolUse"}`))
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for negative delay")
+	}
+	if err.Error() != "--delay-seconds must be >= 0" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestHandleHook_DelaySeconds_AppliesToAnyHook(t *testing.T) {
+	tmpDir := shortHookTempDir(t)
+	agent := setupMockAgent(t, tmpDir, "myagent")
+
+	cmd := newHandleHookCmd()
+	cmd.SetArgs([]string{"--agent", "myagent", "--delay-seconds", "0.05"})
+	cmd.SetIn(bytes.NewBufferString(`{"hook_event_name":"SessionStart"}`))
+	cmd.SetOut(&bytes.Buffer{})
+
+	start := time.Now()
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if elapsed := time.Since(start); elapsed < 45*time.Millisecond {
+		t.Fatalf("elapsed = %v, want >= 45ms", elapsed)
+	}
+
+	reqs := agent.Received()
+	if len(reqs) != 1 || reqs[0].EventName != "SessionStart" {
+		t.Fatalf("unexpected requests: %+v", reqs)
+	}
+}
+
 // --- PermissionRequest tests ---
 
 func TestHandleHook_PermissionRequest_SkipNonRiskyTool(t *testing.T) {
@@ -306,6 +345,37 @@ func TestHandleHook_PermissionRequest_ForwardsEventBeforeDecision(t *testing.T) 
 	// Second request should be the permission_decision.
 	if reqs[1].EventName != "permission_decision" {
 		t.Errorf("second event = %q, want permission_decision", reqs[1].EventName)
+	}
+}
+
+func TestHandleHook_PermissionRequest_DelaySecondsBeforeAction(t *testing.T) {
+	tmpDir := shortHookTempDir(t)
+	agent := setupMockAgent(t, tmpDir, "test-agent")
+
+	cmd := newHandleHookCmd()
+	cmd.SetArgs([]string{"--delay-seconds", "0.05", "--force-permission-request-result", "ask_user"})
+	cmd.SetIn(strings.NewReader(`{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"ls"},"session_id":"s1"}`))
+	cmd.SetOut(&bytes.Buffer{})
+	t.Setenv("H2_ACTOR", "test-agent")
+
+	start := time.Now()
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if elapsed := time.Since(start); elapsed < 45*time.Millisecond {
+		t.Fatalf("elapsed = %v, want >= 45ms", elapsed)
+	}
+
+	reqs := agent.Received()
+	if len(reqs) < 2 {
+		t.Fatalf("expected at least 2 requests, got %d", len(reqs))
+	}
+	if reqs[0].EventName != "PermissionRequest" {
+		t.Fatalf("first event = %q, want PermissionRequest", reqs[0].EventName)
+	}
+	if reqs[1].EventName != "permission_decision" {
+		t.Fatalf("second event = %q, want permission_decision", reqs[1].EventName)
 	}
 }
 
