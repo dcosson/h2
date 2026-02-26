@@ -134,10 +134,14 @@ func (h *EventHandler) ProcessHookEvent(eventName string, payload json.RawMessag
 
 	case "permission_decision":
 		decision := extractDecision(payload)
-		if decision == "ask_user" {
+		switch decision {
+		case "ask_user":
 			h.emitStateChange(now, monitor.StateActive, monitor.SubStateWaitingForPermission)
-		} else {
+		case "allow":
 			h.emitStateChange(now, monitor.StateActive, monitor.SubStateToolUse)
+		default:
+			// deny (and any unknown value) means we are no longer executing the tool.
+			h.emitStateChange(now, monitor.StateActive, monitor.SubStateThinking)
 		}
 
 	case "PreCompact":
