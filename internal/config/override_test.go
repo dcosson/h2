@@ -37,50 +37,43 @@ func TestApplyOverrides_MultipleStrings(t *testing.T) {
 	}
 }
 
-func TestApplyOverrides_NestedBool(t *testing.T) {
+func TestApplyOverrides_WorktreeEnabledBool(t *testing.T) {
 	role := &Role{
 		RoleName:     "test",
 		Instructions: "test",
-		Worktree:     &WorktreeConfig{ProjectDir: "/tmp/repo", Name: "test-wt"},
 	}
-	err := ApplyOverrides(role, []string{"worktree.use_detached_head=true"})
+	err := ApplyOverrides(role, []string{"worktree_enabled=true"})
 	if err != nil {
 		t.Fatalf("ApplyOverrides: %v", err)
 	}
-	if !role.Worktree.UseDetachedHead {
-		t.Error("Worktree.UseDetachedHead should be true")
+	if !role.WorktreeEnabled {
+		t.Error("WorktreeEnabled should be true")
 	}
 }
 
-func TestApplyOverrides_NestedBoolFalse(t *testing.T) {
+func TestApplyOverrides_WorktreeEnabledBoolFalse(t *testing.T) {
 	role := &Role{
-		RoleName:     "test",
-		Instructions: "test",
-		Worktree:     &WorktreeConfig{ProjectDir: "/tmp/repo", Name: "test-wt", UseDetachedHead: true},
+		RoleName:        "test",
+		Instructions:    "test",
+		WorktreeEnabled: true,
 	}
-	err := ApplyOverrides(role, []string{"worktree.use_detached_head=false"})
+	err := ApplyOverrides(role, []string{"worktree_enabled=false"})
 	if err != nil {
 		t.Fatalf("ApplyOverrides: %v", err)
 	}
-	if role.Worktree.UseDetachedHead {
-		t.Error("Worktree.UseDetachedHead should be false")
+	if role.WorktreeEnabled {
+		t.Error("WorktreeEnabled should be false")
 	}
 }
 
-func TestApplyOverrides_AutoInitNilWorktree(t *testing.T) {
+func TestApplyOverrides_WorktreeName(t *testing.T) {
 	role := &Role{RoleName: "test", Instructions: "test"}
-	if role.Worktree != nil {
-		t.Fatal("precondition: Worktree should be nil")
-	}
-	err := ApplyOverrides(role, []string{"worktree.project_dir=/tmp/repo"})
+	err := ApplyOverrides(role, []string{"worktree_name=test-wt"})
 	if err != nil {
 		t.Fatalf("ApplyOverrides: %v", err)
 	}
-	if role.Worktree == nil {
-		t.Fatal("Worktree should have been auto-initialized")
-	}
-	if role.Worktree.ProjectDir != "/tmp/repo" {
-		t.Errorf("Worktree.ProjectDir = %q, want %q", role.Worktree.ProjectDir, "/tmp/repo")
+	if role.WorktreeName != "test-wt" {
+		t.Errorf("WorktreeName = %q, want %q", role.WorktreeName, "test-wt")
 	}
 }
 
@@ -121,12 +114,8 @@ func TestApplyOverrides_InvalidNestedKey(t *testing.T) {
 }
 
 func TestApplyOverrides_TypeMismatch_BoolField(t *testing.T) {
-	role := &Role{
-		RoleName:     "test",
-		Instructions: "test",
-		Worktree:     &WorktreeConfig{ProjectDir: "/tmp/repo", Name: "test-wt"},
-	}
-	err := ApplyOverrides(role, []string{"worktree.use_detached_head=notabool"})
+	role := &Role{RoleName: "test", Instructions: "test"}
+	err := ApplyOverrides(role, []string{"worktree_enabled=notabool"})
 	if err == nil {
 		t.Fatal("expected error for bool type mismatch")
 	}
@@ -203,15 +192,12 @@ func TestApplyOverrides_ValueWithEquals(t *testing.T) {
 
 func TestApplyOverrides_NestedStringField(t *testing.T) {
 	role := &Role{RoleName: "test", Instructions: "test"}
-	err := ApplyOverrides(role, []string{"worktree.branch_from=develop"})
+	err := ApplyOverrides(role, []string{"worktree_branch_from=develop"})
 	if err != nil {
 		t.Fatalf("ApplyOverrides: %v", err)
 	}
-	if role.Worktree == nil {
-		t.Fatal("Worktree should have been auto-initialized")
-	}
-	if role.Worktree.BranchFrom != "develop" {
-		t.Errorf("Worktree.BranchFrom = %q, want %q", role.Worktree.BranchFrom, "develop")
+	if role.WorktreeBranchFrom != "develop" {
+		t.Errorf("WorktreeBranchFrom = %q, want %q", role.WorktreeBranchFrom, "develop")
 	}
 }
 
@@ -261,8 +247,8 @@ func TestOverridesRecordedInMetadata(t *testing.T) {
 	dir := t.TempDir()
 
 	overrides := map[string]string{
-		"working_dir":          "/workspace",
-		"worktree.project_dir": "/tmp/repo",
+		"working_dir":      "/workspace",
+		"worktree_enabled": "true",
 	}
 	meta := SessionMetadata{
 		AgentName: "test-agent",
@@ -287,8 +273,8 @@ func TestOverridesRecordedInMetadata(t *testing.T) {
 	if got.Overrides["working_dir"] != "/workspace" {
 		t.Errorf("Overrides[working_dir] = %q, want %q", got.Overrides["working_dir"], "/workspace")
 	}
-	if got.Overrides["worktree.project_dir"] != "/tmp/repo" {
-		t.Errorf("Overrides[worktree.project_dir] = %q, want %q", got.Overrides["worktree.project_dir"], "/tmp/repo")
+	if got.Overrides["worktree_enabled"] != "true" {
+		t.Errorf("Overrides[worktree_enabled] = %q, want %q", got.Overrides["worktree_enabled"], "true")
 	}
 }
 

@@ -16,7 +16,7 @@ var nonOverridableFields = map[string]bool{
 }
 
 // ApplyOverrides applies --override key=value pairs to a loaded Role.
-// Keys use dot notation for nested fields (e.g. "worktree.enabled", "working_dir").
+// Keys use dot notation for nested fields (e.g. "heartbeat.message", "working_dir").
 // Returns an error for unknown keys, type mismatches, or non-overridable fields.
 func ApplyOverrides(role *Role, overrides []string) error {
 	for _, ov := range overrides {

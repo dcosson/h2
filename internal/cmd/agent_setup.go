@@ -83,21 +83,26 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 		}
 	}
 
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get working directory: %w", err)
+	}
+
 	// Resolve the working directory for the agent.
 	var agentCWD string
-	if role.Worktree != nil {
+	worktreeCfg, err := role.BuildWorktreeConfig(cwd, name)
+	if err != nil {
+		return fmt.Errorf("build worktree config: %w", err)
+	}
+	if worktreeCfg != nil {
 		// Worktree mode: create/reuse worktree, CWD = worktree path.
-		worktreePath, err := git.CreateWorktree(role.Worktree)
+		worktreePath, err := git.CreateWorktree(worktreeCfg)
 		if err != nil {
 			return fmt.Errorf("create worktree: %w", err)
 		}
 		agentCWD = worktreePath
 	} else {
 		// Normal mode: resolve working_dir.
-		cwd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("get working directory: %w", err)
-		}
 		agentCWD, err = role.ResolveWorkingDir(cwd)
 		if err != nil {
 			return fmt.Errorf("resolve working_dir: %w", err)
@@ -105,7 +110,6 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 	}
 
 	// Resolve additional dirs.
-	cwd, _ := os.Getwd()
 	additionalDirs, err := role.ResolveAdditionalDirs(cwd)
 	if err != nil {
 		return fmt.Errorf("resolve additional_dirs: %w", err)

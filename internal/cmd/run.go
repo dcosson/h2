@@ -203,7 +203,7 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 	cmd.Flags().StringVar(&agentType, "agent-type", "", "Agent type to run without a role (e.g. claude)")
 	cmd.Flags().StringVar(&command, "command", "", "Explicit command to run without a role")
 	cmd.Flags().StringVar(&pod, "pod", "", "Pod name for the agent (sets H2_POD env var)")
-	cmd.Flags().StringArrayVar(&overrides, "override", nil, "Override role field (key=value, e.g. worktree.enabled=true)")
+	cmd.Flags().StringArrayVar(&overrides, "override", nil, "Override role field (key=value, e.g. worktree_enabled=true)")
 	cmd.Flags().StringArrayVar(&varFlags, "var", nil, "Set template variable (key=value, repeatable)")
 
 	return cmd

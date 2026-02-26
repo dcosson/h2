@@ -554,38 +554,17 @@ working_dir: /workspace/project
 	}
 }
 
-func TestValidate_WorktreeAndWorkingDirMutualExclusivity(t *testing.T) {
-	// worktree + non-trivial working_dir should fail.
+func TestValidate_WorktreeUsesWorkingDirAsSourceRepo(t *testing.T) {
 	role := &Role{
-		RoleName:   "test",
-		WorkingDir: "projects/myapp",
-		Worktree:   &WorktreeConfig{ProjectDir: "/tmp/repo", Name: "test-wt"},
+		RoleName:        "test",
+		WorkingDir:      "projects/myapp",
+		WorktreeEnabled: true,
+		WorktreeName:    "test-wt",
+		WorktreeBranch:  "test-wt",
+		WorktreePath:    "/tmp/test-wt",
 	}
-	err := role.Validate()
-	if err == nil {
-		t.Fatal("expected error for worktree + working_dir")
-	}
-	if !strings.Contains(err.Error(), "mutually exclusive") {
-		t.Errorf("error = %q, want it to contain 'mutually exclusive'", err.Error())
-	}
-
-	// worktree + working_dir="." should be OK.
-	role2 := &Role{
-		RoleName:   "test",
-		WorkingDir: ".",
-		Worktree:   &WorktreeConfig{ProjectDir: "/tmp/repo", Name: "test-wt"},
-	}
-	if err := role2.Validate(); err != nil {
-		t.Errorf("worktree + working_dir='.' should be allowed: %v", err)
-	}
-
-	// worktree + empty working_dir should be OK.
-	role3 := &Role{
-		RoleName: "test",
-		Worktree: &WorktreeConfig{ProjectDir: "/tmp/repo", Name: "test-wt"},
-	}
-	if err := role3.Validate(); err != nil {
-		t.Errorf("worktree + empty working_dir should be allowed: %v", err)
+	if err := role.Validate(); err != nil {
+		t.Fatalf("worktree + working_dir should be allowed: %v", err)
 	}
 }
 
@@ -595,11 +574,8 @@ func TestValidate_WorktreeMissingProjectDir(t *testing.T) {
 		Worktree: &WorktreeConfig{Name: "test-wt"},
 	}
 	err := role.Validate()
-	if err == nil {
-		t.Fatal("expected error for missing project_dir")
-	}
-	if !strings.Contains(err.Error(), "project_dir") {
-		t.Errorf("error = %q, want it to contain 'project_dir'", err.Error())
+	if err != nil {
+		t.Fatalf("legacy worktree without project_dir should use working_dir: %v", err)
 	}
 }
 
@@ -614,6 +590,68 @@ func TestValidate_WorktreeMissingName(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "name") {
 		t.Errorf("error = %q, want it to contain 'name'", err.Error())
+	}
+}
+
+func TestValidate_WorktreeFieldsRequireEnabled(t *testing.T) {
+	role := &Role{
+		RoleName:       "test",
+		WorktreeName:   "wt-1",
+		WorktreeBranch: "wt-1",
+	}
+	err := role.Validate()
+	if err == nil {
+		t.Fatal("expected error when worktree_* fields are set without worktree_enabled")
+	}
+	if !strings.Contains(err.Error(), "worktree_enabled=true") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBuildWorktreeConfig_DefaultsFromAgentName(t *testing.T) {
+	role := &Role{
+		RoleName:        "test",
+		WorktreeEnabled: true,
+		WorkingDir:      ".",
+	}
+	cfg, err := role.BuildWorktreeConfig("/tmp/repo", "coder-7")
+	if err != nil {
+		t.Fatalf("BuildWorktreeConfig: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected worktree config")
+	}
+	if cfg.Name != "coder-7" {
+		t.Fatalf("Name = %q, want %q", cfg.Name, "coder-7")
+	}
+	if cfg.GetBranch() != "coder-7" {
+		t.Fatalf("GetBranch() = %q, want %q", cfg.GetBranch(), "coder-7")
+	}
+	if cfg.GetPath() != filepath.Join(WorktreesDir(), "coder-7") {
+		t.Fatalf("GetPath() = %q, want default worktree path", cfg.GetPath())
+	}
+}
+
+func TestBuildWorktreeConfig_DetachedHeadSentinel(t *testing.T) {
+	role := &Role{
+		RoleName:        "test",
+		WorktreeEnabled: true,
+		WorkingDir:      ".",
+		WorktreeName:    "wt-1",
+		WorktreeBranch:  "<detached_head>",
+	}
+	cfg, err := role.BuildWorktreeConfig("/tmp/repo", "coder-1")
+	if err != nil {
+		t.Fatalf("BuildWorktreeConfig: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected worktree config")
+	}
+	if !cfg.IsDetachedHead() {
+		t.Fatal("expected detached head mode")
+	}
+	if cfg.GetBranch() != "" {
+		t.Fatalf("GetBranch() = %q, want empty in detached head mode", cfg.GetBranch())
 	}
 }
 
@@ -680,10 +718,10 @@ func TestLoadRoleRenderedFrom_WorktreeRendering(t *testing.T) {
 role_name: coder
 instructions: |
   Work on ticket.
-worktree:
-  project_dir: /tmp/repo
-  name: "{{ .AgentName }}-wt"
-  branch_name: "feature/{{ .Var.ticket }}"
+worktree_enabled: true
+working_dir: /tmp/repo
+worktree_name: "{{ .AgentName }}-wt"
+worktree_branch: "feature/{{ .Var.ticket }}"
 `
 	path := writeTempFile(t, "worktree.yaml", yamlContent)
 	ctx := &tmpl.Context{
@@ -696,14 +734,14 @@ worktree:
 		t.Fatalf("LoadRoleRenderedFrom: %v", err)
 	}
 
-	if role.Worktree == nil {
-		t.Fatal("Worktree should not be nil")
+	if !role.WorktreeEnabled {
+		t.Fatal("WorktreeEnabled should be true")
 	}
-	if role.Worktree.Name != "coder-1-wt" {
-		t.Errorf("Worktree.Name = %q, want %q", role.Worktree.Name, "coder-1-wt")
+	if role.WorktreeName != "coder-1-wt" {
+		t.Errorf("WorktreeName = %q, want %q", role.WorktreeName, "coder-1-wt")
 	}
-	if role.Worktree.BranchName != "feature/123" {
-		t.Errorf("Worktree.BranchName = %q, want %q", role.Worktree.BranchName, "feature/123")
+	if role.WorktreeBranch != "feature/123" {
+		t.Errorf("WorktreeBranch = %q, want %q", role.WorktreeBranch, "feature/123")
 	}
 }
 

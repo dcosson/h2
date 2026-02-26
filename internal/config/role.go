@@ -27,15 +27,17 @@ func (k *HeartbeatConfig) ParseIdleTimeout() (time.Duration, error) {
 	return time.ParseDuration(k.IdleTimeout)
 }
 
-// WorktreeConfig defines git worktree settings for an agent.
-// Presence of this block implies worktree is enabled (no separate "enabled" flag).
-// Mutually exclusive with Role.WorkingDir.
+const detachedHeadBranchSentinel = "<detached_head>"
+
+// WorktreeConfig defines normalized git worktree settings for an agent.
+// This is an internal derived struct built from flattened Role worktree fields.
 type WorktreeConfig struct {
-	ProjectDir      string `yaml:"project_dir"`                 // required: source git repo
-	Name            string `yaml:"name"`                        // required: worktree dir name under <h2-dir>/worktrees/
-	BranchFrom      string `yaml:"branch_from,omitempty"`       // default: "main"
-	BranchName      string `yaml:"branch_name,omitempty"`       // default: Name
-	UseDetachedHead bool   `yaml:"use_detached_head,omitempty"` // default: false
+	ProjectDir string
+	Name       string
+	PathPrefix string
+	Path       string
+	BranchFrom string
+	Branch     string
 }
 
 // GetBranchFrom returns the branch to base the worktree on, defaulting to "main".
@@ -46,12 +48,39 @@ func (w *WorktreeConfig) GetBranchFrom() string {
 	return "main"
 }
 
-// GetBranchName returns the branch name for the worktree, defaulting to Name.
-func (w *WorktreeConfig) GetBranchName() string {
-	if w.BranchName != "" {
-		return w.BranchName
+// IsDetachedHead returns whether the worktree should be created in detached HEAD mode.
+func (w *WorktreeConfig) IsDetachedHead() bool {
+	return strings.TrimSpace(w.Branch) == detachedHeadBranchSentinel
+}
+
+// GetBranch returns the branch name for the worktree, defaulting to Name.
+// Returns empty for detached head mode.
+func (w *WorktreeConfig) GetBranch() string {
+	if w.IsDetachedHead() {
+		return ""
+	}
+	if w.Branch != "" {
+		return w.Branch
 	}
 	return w.Name
+}
+
+// GetPathPrefix returns the path prefix for worktree paths, defaulting to <h2-dir>/worktrees.
+func (w *WorktreeConfig) GetPathPrefix() string {
+	if w.PathPrefix != "" {
+		return w.PathPrefix
+	}
+	return WorktreesDir()
+}
+
+// GetPath returns the absolute path for the worktree.
+// If explicit Path is set, it is used as-is.
+// Otherwise: PathPrefix + "/" + Name.
+func (w *WorktreeConfig) GetPath() string {
+	if w.Path != "" {
+		return w.Path
+	}
+	return filepath.Join(w.GetPathPrefix(), w.Name)
 }
 
 // ResolveProjectDir returns the absolute path for the worktree's source git repo.
@@ -75,10 +104,13 @@ func (w *WorktreeConfig) ResolveProjectDir() (string, error) {
 // Validate checks that the WorktreeConfig has required fields.
 func (w *WorktreeConfig) Validate() error {
 	if w.ProjectDir == "" {
-		return fmt.Errorf("worktree.project_dir is required")
+		return fmt.Errorf("worktree requires a source repo; set working_dir (or leave default \".\")")
 	}
-	if w.Name == "" {
-		return fmt.Errorf("worktree.name is required")
+	if w.Path == "" && w.Name == "" {
+		return fmt.Errorf("worktree_name is required when worktree_path is not set")
+	}
+	if !w.IsDetachedHead() && w.GetBranch() == "" {
+		return fmt.Errorf("worktree_branch is required when worktree_name is empty")
 	}
 	return nil
 }
@@ -159,7 +191,13 @@ type Role struct {
 
 	WorkingDir              string                 `yaml:"working_dir,omitempty"`               // agent CWD (default ".")
 	AdditionalDirs          []string               `yaml:"additional_dirs,omitempty"`           // extra dirs passed via --add-dir
-	Worktree                *WorktreeConfig        `yaml:"worktree,omitempty"`                  // git worktree settings
+	WorktreeEnabled         bool                   `yaml:"worktree_enabled,omitempty"`          // enable git worktree mode
+	WorktreeName            string                 `yaml:"worktree_name,omitempty"`             // worktree name
+	WorktreePathPrefix      string                 `yaml:"worktree_path_prefix,omitempty"`      // defaults to <h2-dir>/worktrees
+	WorktreePath            string                 `yaml:"worktree_path,omitempty"`             // explicit worktree path override
+	WorktreeBranchFrom      string                 `yaml:"worktree_branch_from,omitempty"`      // defaults to "main"
+	WorktreeBranch          string                 `yaml:"worktree_branch,omitempty"`           // defaults to worktree_name; supports "<detached_head>"
+	Worktree                *WorktreeConfig        `yaml:"worktree,omitempty"`                  // deprecated legacy object (compat)
 	SystemPrompt            string                 `yaml:"system_prompt,omitempty"`             // replaces Claude's entire default system prompt (--system-prompt)
 	Instructions            string                 `yaml:"instructions,omitempty"`              // appended to default system prompt (--append-system-prompt)
 	InstructionsIntro       string                 `yaml:"instructions_intro,omitempty"`        // split instructions: intro
@@ -206,6 +244,77 @@ func (r *Role) ResolveWorkingDir(invocationCWD string) (string, error) {
 		return "", fmt.Errorf("resolve h2 dir for working_dir: %w", err)
 	}
 	return filepath.Join(h2Dir, dir), nil
+}
+
+func (r *Role) hasWorktreeFields() bool {
+	return r.WorktreeName != "" ||
+		r.WorktreePathPrefix != "" ||
+		r.WorktreePath != "" ||
+		r.WorktreeBranchFrom != "" ||
+		r.WorktreeBranch != ""
+}
+
+// BuildWorktreeConfig returns normalized worktree configuration derived from
+// flattened role fields. The source repository is resolved from working_dir.
+func (r *Role) BuildWorktreeConfig(invocationCWD, agentName string) (*WorktreeConfig, error) {
+	// Legacy object compatibility path.
+	if r.Worktree != nil {
+		cfg := *r.Worktree
+		if cfg.ProjectDir == "" {
+			projectDir, err := r.ResolveWorkingDir(invocationCWD)
+			if err != nil {
+				return nil, err
+			}
+			cfg.ProjectDir = projectDir
+		}
+		if cfg.Name == "" {
+			if agentName != "" {
+				cfg.Name = agentName
+			} else if r.AgentName != "" {
+				cfg.Name = r.AgentName
+			}
+		}
+		if cfg.Branch == "" && cfg.Name != "" {
+			cfg.Branch = cfg.Name
+		}
+		if err := cfg.Validate(); err != nil {
+			return nil, err
+		}
+		return &cfg, nil
+	}
+
+	if !r.WorktreeEnabled {
+		return nil, nil
+	}
+	projectDir, err := r.ResolveWorkingDir(invocationCWD)
+	if err != nil {
+		return nil, err
+	}
+	wtName := r.WorktreeName
+	if wtName == "" {
+		if agentName != "" {
+			wtName = agentName
+		} else if r.AgentName != "" {
+			wtName = r.AgentName
+		}
+	}
+	wtBranch := r.WorktreeBranch
+	if wtBranch == "" && wtName != "" {
+		wtBranch = wtName
+	}
+
+	cfg := &WorktreeConfig{
+		ProjectDir: projectDir,
+		Name:       wtName,
+		PathPrefix: r.WorktreePathPrefix,
+		Path:       r.WorktreePath,
+		BranchFrom: r.WorktreeBranchFrom,
+		Branch:     wtBranch,
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }
 
 // ResolveAdditionalDirs returns absolute paths for additional directories.
@@ -1279,12 +1388,11 @@ func (r *Role) Validate() error {
 			return err
 		}
 	}
-	// working_dir and worktree are mutually exclusive (working_dir "." or empty is allowed).
-	if r.Worktree != nil && r.WorkingDir != "" && r.WorkingDir != "." {
-		return fmt.Errorf("working_dir and worktree are mutually exclusive; use worktree.project_dir instead")
+	if !r.WorktreeEnabled && r.hasWorktreeFields() {
+		return fmt.Errorf("worktree_* fields require worktree_enabled=true")
 	}
-	if r.Worktree != nil {
-		if err := r.Worktree.Validate(); err != nil {
+	if r.WorktreeEnabled || r.Worktree != nil {
+		if _, err := r.BuildWorktreeConfig(".", r.AgentName); err != nil {
 			return err
 		}
 	}

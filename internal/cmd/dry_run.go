@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -61,14 +60,18 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 	// Resolve the working directory without side effects.
 	var agentCWD string
 	var isWorktree bool
-	if role.Worktree != nil {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("get working directory: %w", err)
+	}
+	worktreeCfg, err := role.BuildWorktreeConfig(cwd, name)
+	if err != nil {
+		return nil, fmt.Errorf("build worktree config: %w", err)
+	}
+	if worktreeCfg != nil {
 		isWorktree = true
-		agentCWD = filepath.Join(config.WorktreesDir(), role.Worktree.Name)
+		agentCWD = worktreeCfg.GetPath()
 	} else {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("get working directory: %w", err)
-		}
 		agentCWD, err = role.ResolveWorkingDir(cwd)
 		if err != nil {
 			return nil, fmt.Errorf("resolve working_dir: %w", err)

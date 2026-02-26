@@ -117,7 +117,12 @@ A **role** is a named YAML file in `~/.h2/roles/` that defines how to launch an 
 | **Runtime** | | | |
 | `working_dir` | string | `.` | Agent working directory (absolute, relative to h2 dir, or `.` for invocation CWD) |
 | `additional_dirs` | list | | Extra directories passed via `--add-dir` to Claude Code and Codex |
-| `worktree` | object | | Git worktree settings (mutually exclusive with `working_dir`) |
+| `worktree_enabled` | bool | `false` | Enable git worktree mode (agent runs from a worktree path) |
+| `worktree_name` | string | `agent_name` / launch name | Worktree name (used for default path + branch) |
+| `worktree_path_prefix` | string | `<h2-dir>/worktrees` | Prefix used when `worktree_path` is not set |
+| `worktree_path` | string | `<prefix>/<worktree_name>` | Explicit worktree path override |
+| `worktree_branch_from` | string | `main` | Base branch/ref for `git worktree add` |
+| `worktree_branch` | string | `worktree_name` | Worktree branch name. Special value: `<detached_head>` |
 | `heartbeat` | object | | Idle nudge configuration |
 | `hooks` | yaml node | | Merged into Claude Code settings.json hooks |
 | `settings` | yaml node | | Extra Claude Code settings.json keys |
@@ -125,27 +130,25 @@ A **role** is a named YAML file in `~/.h2/roles/` that defines how to launch an 
 
 All fields are optional except `role_name`.
 
-### `worktree` object fields
+### Worktree mode
 
-When `worktree` is present, h2 launches the agent inside a git worktree under `<h2-dir>/worktrees/<name>`.
+When `worktree_enabled: true`, h2 creates/reuses a git worktree and launches the agent in that worktree path.
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `project_dir` | string | *(required)* | Source git repository path. Absolute paths are used as-is; relative paths are resolved from `H2_DIR`. |
-| `name` | string | *(required)* | Worktree directory name under `<h2-dir>/worktrees/`. |
-| `branch_from` | string | `main` | Base branch used when creating the worktree branch. |
-| `branch_name` | string | `worktree.name` | Branch name for the worktree. |
-| `use_detached_head` | bool | `false` | If `true`, create/use the worktree in detached HEAD mode instead of creating/switching a branch. |
+Important behavior:
+- The **source repo** comes from `working_dir` (default `.`), and must resolve to a git repository.
+- The agent **runtime cwd** becomes the resolved worktree path.
+- `worktree_name` defaults to the launched agent name (explicit `--name` or generated name).
+- `worktree_branch` defaults to `worktree_name`.
+- Set `worktree_branch: "<detached_head>"` for detached HEAD mode.
 
 Example:
 
 ```yaml
-worktree:
-  project_dir: projects/my-repo
-  name: feat-auth
-  branch_from: main
-  branch_name: feat/auth-hardening
-  use_detached_head: false
+worktree_enabled: true
+working_dir: .
+worktree_name: feat-auth
+worktree_branch_from: main
+worktree_branch: feat/auth-hardening
 ```
 
 ### Role inheritance
