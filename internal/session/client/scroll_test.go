@@ -964,6 +964,43 @@ func TestMenu_EscExits(t *testing.T) {
 	}
 }
 
+func TestMenu_CtrlBackslashExits(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.Mode = ModeMenu
+	buf := []byte{0x1C} // ctrl+backslash
+	o.HandleMenuBytes(buf, 0, len(buf))
+	if o.Mode != ModeNormal {
+		t.Fatalf("expected ModeNormal after Ctrl+\\, got %d", o.Mode)
+	}
+}
+
+func TestMenu_UpDownArrowNavigatesHistory(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.Mode = ModeMenu
+	o.History = []string{"first", "second"}
+	o.HistIdx = -1
+	o.Input = []byte("draft")
+	o.CursorPos = len(o.Input)
+
+	// Up arrow should load newest history entry.
+	o.HandleMenuBytes([]byte{0x1B, '[', 'A'}, 0, 3)
+	if got := string(o.Input); got != "second" {
+		t.Fatalf("input after up = %q, want %q", got, "second")
+	}
+	if o.HistIdx != 1 {
+		t.Fatalf("HistIdx after up = %d, want 1", o.HistIdx)
+	}
+
+	// Down arrow should restore saved draft input.
+	o.HandleMenuBytes([]byte{0x1B, '[', 'B'}, 0, 3)
+	if got := string(o.Input); got != "draft" {
+		t.Fatalf("input after down = %q, want %q", got, "draft")
+	}
+	if o.HistIdx != -1 {
+		t.Fatalf("HistIdx after down = %d, want -1", o.HistIdx)
+	}
+}
+
 func TestMenu_OtherKeysIgnored(t *testing.T) {
 	o := newTestClient(10, 80)
 	o.Mode = ModeMenu

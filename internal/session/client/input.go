@@ -171,6 +171,17 @@ func (c *Client) HandleMenuBytes(buf []byte, start, n int) int {
 		b := buf[i]
 		i++
 		if b == 0x1B {
+			// In menu mode, up/down arrows navigate the local input history.
+			if i+1 < n && buf[i] == '[' && (buf[i+1] == 'A' || buf[i+1] == 'B') {
+				if buf[i+1] == 'A' {
+					c.HistoryUp()
+				} else {
+					c.HistoryDown()
+				}
+				c.RenderBar()
+				i += 2
+				continue
+			}
 			consumed, handled := c.HandleEscape(buf[i:n])
 			i += consumed
 			if handled {
@@ -184,6 +195,9 @@ func (c *Client) HandleMenuBytes(buf []byte, start, n int) int {
 			continue
 		}
 		switch b {
+		case 0x1C: // ctrl+\ — exit menu (toggle with default mode shortcut)
+			c.setMode(ModeNormal)
+			c.RenderBar()
 		case 'p', 'P': // passthrough mode
 			if c.TryPassthrough != nil && !c.TryPassthrough() {
 				// Locked by another client — stay in menu.
@@ -443,6 +457,13 @@ func (c *Client) HandleCSI(remaining []byte) (consumed int, handled bool) {
 		if c.Mode == ModeNormal {
 			// Pass up/down arrow through to PTY (e.g. shell history).
 			c.writePTYOrHang(append([]byte{0x1B, '['}, remaining[:i+1]...))
+		} else if c.Mode == ModeMenu {
+			if final == 'A' {
+				c.HistoryUp()
+			} else {
+				c.HistoryDown()
+			}
+			c.RenderBar()
 		}
 	case 'C', 'D':
 		if c.Mode == ModePassthrough {
