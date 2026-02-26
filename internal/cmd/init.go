@@ -251,27 +251,26 @@ func generateRoles(abs, style string, force bool, out io.Writer) error {
 	}
 
 	roleNames := config.RoleTemplateNamesWithStyle(style)
+	if !force {
+		for _, roleName := range roleNames {
+			for _, e := range []string{".yaml", ".yaml.tmpl"} {
+				p := filepath.Join(abs, "roles", roleName+e)
+				if _, err := os.Stat(p); err == nil {
+					return fmt.Errorf("roles/%s already exists; use --force to overwrite", filepath.Base(p))
+				} else if err != nil && !os.IsNotExist(err) {
+					return fmt.Errorf("check roles/%s: %w", filepath.Base(p), err)
+				}
+			}
+		}
+	}
+
 	for _, roleName := range roleNames {
 		content := config.RoleTemplateWithStyle(roleName, style)
 		ext := config.RoleFileExtension(content)
 		fileName := roleName + ext
 		rolePath := filepath.Join(abs, "roles", fileName)
 
-		if !force {
-			// Check both extensions.
-			existing := ""
-			for _, e := range []string{".yaml", ".yaml.tmpl"} {
-				p := filepath.Join(abs, "roles", roleName+e)
-				if _, err := os.Stat(p); err == nil {
-					existing = filepath.Base(p)
-					break
-				}
-			}
-			if existing != "" {
-				fmt.Fprintf(out, "  Skipped roles/%s (already exists, use --force to overwrite)\n", existing)
-				continue
-			}
-		} else {
+		if force {
 			// Force: remove old file with either extension.
 			for _, e := range []string{".yaml", ".yaml.tmpl"} {
 				_ = os.Remove(filepath.Join(abs, "roles", roleName+e))
@@ -316,19 +315,16 @@ func generateInstructions(abs, style string, force bool, out io.Writer) error {
 
 	if !force {
 		if _, err := os.Stat(sharedMDPath); err == nil {
-			fmt.Fprintf(out, "  Skipped account-profiles-shared/default/CLAUDE_AND_AGENTS.md (already exists, use --force to overwrite)\n")
-		} else {
-			if err := os.WriteFile(sharedMDPath, []byte(config.InstructionsTemplateWithStyle(style)), 0o644); err != nil {
-				return fmt.Errorf("write CLAUDE_AND_AGENTS.md: %w", err)
-			}
-			fmt.Fprintf(out, "  Wrote account-profiles-shared/default/CLAUDE_AND_AGENTS.md\n")
+			return fmt.Errorf("account-profiles-shared/default/CLAUDE_AND_AGENTS.md already exists; use --force to overwrite")
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("check account-profiles-shared/default/CLAUDE_AND_AGENTS.md: %w", err)
 		}
-	} else {
-		if err := os.WriteFile(sharedMDPath, []byte(config.InstructionsTemplateWithStyle(style)), 0o644); err != nil {
-			return fmt.Errorf("write CLAUDE_AND_AGENTS.md: %w", err)
-		}
-		fmt.Fprintf(out, "  Wrote account-profiles-shared/default/CLAUDE_AND_AGENTS.md\n")
 	}
+
+	if err := os.WriteFile(sharedMDPath, []byte(config.InstructionsTemplateWithStyle(style)), 0o644); err != nil {
+		return fmt.Errorf("write CLAUDE_AND_AGENTS.md: %w", err)
+	}
+	fmt.Fprintf(out, "  Wrote account-profiles-shared/default/CLAUDE_AND_AGENTS.md\n")
 
 	if err := ensureSymlink(claudeMDPath, sharedMDTarget, force, out, "claude-config/default/CLAUDE.md"); err != nil {
 		return err
@@ -361,6 +357,13 @@ func generateSkills(abs, style string, force bool, out io.Writer) error {
 	}
 	if err := validateSymlinkDestination(codexSkillsPath, sharedSkillsTarget, force, "codex-config/default/skills"); err != nil {
 		return err
+	}
+	if !force {
+		if entries, err := os.ReadDir(sharedSkillsDir); err == nil && len(entries) > 0 {
+			return fmt.Errorf("account-profiles-shared/default/skills already exists; use --force to overwrite")
+		} else if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("check account-profiles-shared/default/skills: %w", err)
+		}
 	}
 
 	if err := config.WriteSkillsTemplate(style, sharedSkillsDir, force); err != nil {
@@ -431,8 +434,9 @@ func generateConfig(abs, style string, force bool, out io.Writer) error {
 	configPath := filepath.Join(abs, "config.yaml")
 	if !force {
 		if _, err := os.Stat(configPath); err == nil {
-			fmt.Fprintf(out, "  Skipped config.yaml (already exists, use --force to overwrite)\n")
-			return nil
+			return fmt.Errorf("config.yaml already exists; use --force to overwrite")
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("check config.yaml: %w", err)
 		}
 	}
 	if err := os.WriteFile(configPath, []byte(config.ConfigTemplate(style)), 0o644); err != nil {
@@ -446,6 +450,17 @@ func generateHarnessPolicyFiles(abs, style string, force bool, out io.Writer) er
 	claudeSettingsPath := filepath.Join(abs, "claude-config", "default", "settings.json")
 	codexConfigPath := filepath.Join(abs, "codex-config", "default", "config.toml")
 	codexRequirementsPath := filepath.Join(abs, "codex-config", "default", "requirements.toml")
+	if !force {
+		if err := preflightGeneratedFile(claudeSettingsPath, "claude-config/default/settings.json"); err != nil {
+			return err
+		}
+		if err := preflightGeneratedFile(codexConfigPath, "codex-config/default/config.toml"); err != nil {
+			return err
+		}
+		if err := preflightGeneratedFile(codexRequirementsPath, "codex-config/default/requirements.toml"); err != nil {
+			return err
+		}
+	}
 
 	if err := writeGeneratedFile(claudeSettingsPath, config.ClaudeSettingsTemplate(style), force, out, "claude-config/default/settings.json"); err != nil {
 		return err
@@ -461,15 +476,23 @@ func generateHarnessPolicyFiles(abs, style string, force bool, out io.Writer) er
 
 func writeGeneratedFile(path, content string, force bool, out io.Writer, label string) error {
 	if !force {
-		if _, err := os.Stat(path); err == nil {
-			fmt.Fprintf(out, "  Skipped %s (already exists, use --force to overwrite)\n", label)
-			return nil
+		if err := preflightGeneratedFile(path, label); err != nil {
+			return err
 		}
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", label, err)
 	}
 	fmt.Fprintf(out, "  Wrote %s\n", label)
+	return nil
+}
+
+func preflightGeneratedFile(path, label string) error {
+	if _, err := os.Stat(path); err == nil {
+		return fmt.Errorf("%s already exists; use --force to overwrite", label)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("check %s: %w", label, err)
+	}
 	return nil
 }
 

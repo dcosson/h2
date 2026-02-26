@@ -694,21 +694,22 @@ func TestInitCmd_GenerateInstructions(t *testing.T) {
 	}
 }
 
-func TestInitCmd_GenerateInstructionsSkipsExisting(t *testing.T) {
+func TestInitCmd_GenerateInstructions_RequiresForceWhenSharedInstructionsExists(t *testing.T) {
 	fakeHome := setupFakeHome(t)
 	dir := initH2Dir(t, fakeHome)
 
 	cmd := newInitCmd()
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
 	cmd.SetArgs([]string{dir, "--generate", "instructions"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("--generate instructions failed: %v", err)
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected --generate instructions to require --force when shared instructions exists")
 	}
-
-	if !strings.Contains(buf.String(), "Skipped") {
-		t.Errorf("output should mention skipping, got: %s", buf.String())
+	if !strings.Contains(err.Error(), "use --force") {
+		t.Errorf("expected force guidance error, got: %v", err)
 	}
 }
 
@@ -745,6 +746,11 @@ func TestInitCmd_GenerateInstructionsForce(t *testing.T) {
 func TestInitCmd_GenerateInstructions_DoesNotWriteHarnessConfigOrSkills(t *testing.T) {
 	fakeHome := setupFakeHome(t)
 	dir := initH2Dir(t, fakeHome)
+
+	sharedInstructions := filepath.Join(dir, "account-profiles-shared", "default", "CLAUDE_AND_AGENTS.md")
+	if err := os.Remove(sharedInstructions); err != nil {
+		t.Fatalf("remove shared instructions: %v", err)
+	}
 
 	for _, p := range []string{
 		filepath.Join(dir, "claude-config", "default", "settings.json"),
@@ -853,21 +859,22 @@ func TestInitCmd_GenerateRoles(t *testing.T) {
 	}
 }
 
-func TestInitCmd_GenerateRolesSkipsExisting(t *testing.T) {
+func TestInitCmd_GenerateRoles_RequiresForceWhenExisting(t *testing.T) {
 	fakeHome := setupFakeHome(t)
 	dir := initH2Dir(t, fakeHome)
 
 	cmd := newInitCmd()
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
 	cmd.SetArgs([]string{dir, "--generate", "roles"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("--generate roles failed: %v", err)
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected --generate roles to require --force when role files exist")
 	}
-
-	if !strings.Contains(buf.String(), "Skipped") {
-		t.Errorf("output should mention skipping, got: %s", buf.String())
+	if !strings.Contains(err.Error(), "use --force") {
+		t.Errorf("expected force guidance error, got: %v", err)
 	}
 }
 
@@ -934,6 +941,21 @@ func TestInitCmd_GenerateConfig(t *testing.T) {
 	}
 }
 
+func TestInitCmd_GenerateConfig_RequiresForceWhenExisting(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--generate", "config"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected --generate config to require --force when config.yaml exists")
+	}
+	if !strings.Contains(err.Error(), "use --force") {
+		t.Fatalf("expected force guidance error, got: %v", err)
+	}
+}
+
 func TestInitCmd_GenerateAll(t *testing.T) {
 	fakeHome := setupFakeHome(t)
 	dir := initH2Dir(t, fakeHome)
@@ -944,6 +966,11 @@ func TestInitCmd_GenerateAll(t *testing.T) {
 	os.Remove(filepath.Join(dir, "codex-config", "default", "AGENTS.md"))
 	os.Remove(filepath.Join(dir, "roles", "default.yaml"))
 	os.Remove(filepath.Join(dir, "roles", "default.yaml.tmpl"))
+	os.Remove(filepath.Join(dir, "claude-config", "default", "settings.json"))
+	os.Remove(filepath.Join(dir, "codex-config", "default", "config.toml"))
+	os.Remove(filepath.Join(dir, "codex-config", "default", "requirements.toml"))
+	os.RemoveAll(filepath.Join(dir, "account-profiles-shared", "default", "skills"))
+	os.MkdirAll(filepath.Join(dir, "account-profiles-shared", "default", "skills"), 0o755)
 
 	cmd := newInitCmd()
 	var buf bytes.Buffer
@@ -1068,9 +1095,32 @@ func TestInitCmd_GenerateSkills(t *testing.T) {
 	}
 }
 
+func TestInitCmd_GenerateSkills_RequiresForceWhenSharedSkillsExist(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--generate", "skills", "--style", "opinionated"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected --generate skills to require --force when shared skills already exist")
+	}
+	if !strings.Contains(err.Error(), "use --force") {
+		t.Fatalf("expected force guidance error, got: %v", err)
+	}
+}
+
 func TestInitCmd_GenerateSkills_CreatesMissingSkillSymlinks(t *testing.T) {
 	fakeHome := setupFakeHome(t)
 	dir := initH2Dir(t, fakeHome)
+
+	sharedSkills := filepath.Join(dir, "account-profiles-shared", "default", "skills")
+	if err := os.RemoveAll(sharedSkills); err != nil {
+		t.Fatalf("clear shared skills: %v", err)
+	}
+	if err := os.MkdirAll(sharedSkills, 0o755); err != nil {
+		t.Fatalf("recreate shared skills dir: %v", err)
+	}
 
 	claudeSkills := filepath.Join(dir, "claude-config", "default", "skills")
 	codexSkills := filepath.Join(dir, "codex-config", "default", "skills")
@@ -1163,6 +1213,21 @@ func TestInitCmd_GenerateSkills_ForceReplacesConflictingSkillPaths(t *testing.T)
 	}
 	if target != want {
 		t.Fatalf("claude skills symlink target = %q, want %q", target, want)
+	}
+}
+
+func TestInitCmd_GenerateHarnessConfig_RequiresForceWhenExisting(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--generate", "harness-config"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected --generate harness-config to require --force when files exist")
+	}
+	if !strings.Contains(err.Error(), "use --force") {
+		t.Fatalf("expected force guidance error, got: %v", err)
 	}
 }
 
