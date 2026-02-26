@@ -125,6 +125,29 @@ A **role** is a named YAML file in `~/.h2/roles/` that defines how to launch an 
 
 All fields are optional except `role_name`.
 
+### `worktree` object fields
+
+When `worktree` is present, h2 launches the agent inside a git worktree under `<h2-dir>/worktrees/<name>`.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `project_dir` | string | *(required)* | Source git repository path. Absolute paths are used as-is; relative paths are resolved from `H2_DIR`. |
+| `name` | string | *(required)* | Worktree directory name under `<h2-dir>/worktrees/`. |
+| `branch_from` | string | `main` | Base branch used when creating the worktree branch. |
+| `branch_name` | string | `worktree.name` | Branch name for the worktree. |
+| `use_detached_head` | bool | `false` | If `true`, create/use the worktree in detached HEAD mode instead of creating/switching a branch. |
+
+Example:
+
+```yaml
+worktree:
+  project_dir: projects/my-repo
+  name: feat-auth
+  branch_from: main
+  branch_name: feat/auth-hardening
+  use_detached_head: false
+```
+
 ### Role inheritance
 
 Roles can inherit from a parent role by setting `inherits: <parent-role-name>`.
