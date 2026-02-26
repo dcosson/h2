@@ -193,6 +193,40 @@ func TestEventHandler_PermissionDecisionDeny(t *testing.T) {
 	}
 }
 
+func TestEventHandler_IgnoresMismatchedSessionHookEvents(t *testing.T) {
+	events := make(chan monitor.AgentEvent, 64)
+	h := NewEventHandler(events, nil)
+	h.SetExpectedSessionID("parent-session")
+
+	payload, _ := json.Marshal(map[string]string{"tool_name": "Bash", "session_id": "reviewer-session"})
+	if !h.ProcessHookEvent("PreToolUse", payload) {
+		t.Fatal("expected PreToolUse to be recognized")
+	}
+
+	select {
+	case ev := <-events:
+		t.Fatalf("unexpected event emitted for mismatched session: %+v", ev)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestEventHandler_IgnoresMismatchedSessionPermissionDecision(t *testing.T) {
+	events := make(chan monitor.AgentEvent, 64)
+	h := NewEventHandler(events, nil)
+	h.SetExpectedSessionID("parent-session")
+
+	payload, _ := json.Marshal(map[string]string{"decision": "allow", "session_id": "reviewer-session"})
+	if !h.ProcessHookEvent("permission_decision", payload) {
+		t.Fatal("expected permission_decision to be recognized")
+	}
+
+	select {
+	case ev := <-events:
+		t.Fatalf("unexpected event emitted for mismatched session: %+v", ev)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
 func TestEventHandler_PostToolUseFailure(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
 	h := NewEventHandler(events, nil)

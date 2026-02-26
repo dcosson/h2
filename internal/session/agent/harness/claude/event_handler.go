@@ -12,8 +12,9 @@ import (
 // EventHandler coalesces Claude telemetry sources (OTEL logs, hooks,
 // and session JSONL lines) into normalized AgentEvents.
 type EventHandler struct {
-	events      chan<- monitor.AgentEvent
-	activityLog *activitylog.Logger
+	events            chan<- monitor.AgentEvent
+	activityLog       *activitylog.Logger
+	expectedSessionID string
 }
 
 // NewEventHandler creates an EventHandler that emits events on the given channel.
@@ -22,6 +23,13 @@ func NewEventHandler(events chan<- monitor.AgentEvent, log *activitylog.Logger) 
 		log = activitylog.Nop()
 	}
 	return &EventHandler{events: events, activityLog: log}
+}
+
+// SetExpectedSessionID sets the parent session ID for hook event filtering.
+// Hook events with a different non-empty session_id are ignored for state/event
+// emission, but still written to activity logs.
+func (h *EventHandler) SetExpectedSessionID(sessionID string) {
+	h.expectedSessionID = sessionID
 }
 
 // OnLogs is the callback for /v1/logs payloads from the OTEL server.
@@ -94,6 +102,9 @@ func (h *EventHandler) ProcessHookEvent(eventName string, payload json.RawMessag
 	} else {
 		h.activityLog.HookEvent(sessionID, eventName, toolName)
 	}
+	if h.shouldIgnoreHookSession(sessionID) {
+		return isKnownHookEvent(eventName)
+	}
 
 	switch eventName {
 	case "UserPromptSubmit":
@@ -160,6 +171,32 @@ func (h *EventHandler) ProcessHookEvent(eventName string, payload json.RawMessag
 		return false
 	}
 	return true
+}
+
+func (h *EventHandler) shouldIgnoreHookSession(sessionID string) bool {
+	if h.expectedSessionID == "" || sessionID == "" {
+		return false
+	}
+	return sessionID != h.expectedSessionID
+}
+
+func isKnownHookEvent(eventName string) bool {
+	switch eventName {
+	case "UserPromptSubmit",
+		"PreToolUse",
+		"PostToolUse",
+		"PostToolUseFailure",
+		"PermissionRequest",
+		"permission_decision",
+		"PreCompact",
+		"SessionStart",
+		"Stop",
+		"Interrupt",
+		"SessionEnd":
+		return true
+	default:
+		return false
+	}
 }
 
 // HandleInterrupt emits the normalized local interrupt transition.

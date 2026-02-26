@@ -122,6 +122,7 @@ func (h *ClaudeCodeHarness) PrepareForLaunch(agentName, sessionID string, dryRun
 	} else {
 		h.sessionID = uuid.New().String()
 	}
+	h.eventHandler.SetExpectedSessionID(h.sessionID)
 
 	endpoint := "http://127.0.0.1:<PORT>"
 	if !dryRun {
