@@ -1166,6 +1166,24 @@ func TestModeLabel_Normal(t *testing.T) {
 	}
 }
 
+func TestFormatWorkingDirForBar_RelativeToH2DirTwoPartsNoPrefix(t *testing.T) {
+	o := newTestClient(10, 80)
+	t.Setenv("H2_DIR", "/Users/dcosson/h2home")
+	got := o.formatWorkingDirForBar("/Users/dcosson/h2home/projects/h2/subdir")
+	if got != "h2/subdir" {
+		t.Fatalf("got %q, want %q", got, "h2/subdir")
+	}
+}
+
+func TestFormatWorkingDirForBar_OutsideH2DirTwoPartsWithDotDotPrefix(t *testing.T) {
+	o := newTestClient(10, 80)
+	t.Setenv("H2_DIR", "/Users/dcosson/h2home")
+	got := o.formatWorkingDirForBar("/tmp/build/output")
+	if got != "../build/output" {
+		t.Fatalf("got %q, want %q", got, "../build/output")
+	}
+}
+
 // --- ModePassthroughScroll ---
 
 func TestEnterScrollFromPassthrough_EntersPassthroughScroll(t *testing.T) {

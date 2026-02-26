@@ -62,6 +62,7 @@ type Client struct {
 	OnModeChange        func(mode InputMode)
 	QueueStatus         func() (int, bool)
 	OtelMetrics         func() (inputTokens int64, outputTokens int64, totalCostUSD float64, connected bool, port int) // returns OTEL metrics for status bar
+	WorkingDir          func() string                                                                                  // returns agent working directory for status bar
 	AgentState          func() (state string, subState string, duration string)                                        // returns Agent's derived state + sub-state
 	HookState           func() (lastToolName string)                                                                   // returns hook collector state
 	OnInterrupt         func()                                                                                         // called when Ctrl+C is written to the PTY

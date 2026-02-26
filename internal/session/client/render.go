@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -225,6 +227,11 @@ func (c *Client) RenderBar() {
 		if c.Mode != ModeMenu {
 			status := c.StatusLabel()
 			label += " | " + status
+			if c.WorkingDir != nil {
+				if wd := strings.TrimSpace(c.WorkingDir()); wd != "" {
+					label += " | " + c.formatWorkingDirForBar(wd)
+				}
+			}
 
 			// OTEL metrics (tokens and cost)
 			if c.OtelMetrics != nil {
@@ -416,6 +423,63 @@ func (c *Client) StatusLabel() string {
 		return "Active"
 	}
 	return "Idle " + virtualterminal.FormatIdleDuration(idleFor)
+}
+
+func (c *Client) formatWorkingDirForBar(cwd string) string {
+	cleanCWD := filepath.Clean(cwd)
+	h2Dir := strings.TrimSpace(os.Getenv("H2_DIR"))
+	if h2Dir != "" {
+		cleanH2 := filepath.Clean(h2Dir)
+		if rel, ok := relToRoot(cleanCWD, cleanH2); ok {
+			if rel == "." {
+				return "."
+			}
+			return lastPathParts(rel, 2, "")
+		}
+	}
+	return lastPathParts(cleanCWD, 2, "../")
+}
+
+func relToRoot(path, root string) (string, bool) {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return "", false
+	}
+	if rel == "." {
+		return rel, true
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return rel, true
+}
+
+func lastPathParts(path string, n int, truncatedPrefix string) string {
+	if n <= 0 {
+		return ""
+	}
+	clean := filepath.Clean(path)
+	parts := strings.Split(clean, string(filepath.Separator))
+	filtered := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p != "" && p != "." {
+			filtered = append(filtered, p)
+		}
+	}
+	if len(filtered) == 0 {
+		return clean
+	}
+	if len(filtered) <= n {
+		if filepath.IsAbs(clean) {
+			return string(filepath.Separator) + strings.Join(filtered, string(filepath.Separator))
+		}
+		return strings.Join(filtered, string(filepath.Separator))
+	}
+	tail := strings.Join(filtered[len(filtered)-n:], string(filepath.Separator))
+	if truncatedPrefix != "" {
+		return truncatedPrefix + tail
+	}
+	return tail
 }
 
 // MenuLabel returns the formatted menu display.

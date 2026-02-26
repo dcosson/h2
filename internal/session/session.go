@@ -33,30 +33,31 @@ import (
 // Session manages the message queue, delivery loop, observable state,
 // child process lifecycle, and client connections for an h2 session.
 type Session struct {
-	Name             string
-	Command          string
-	Args             []string
-	SessionID        string   // Claude Code session ID (UUID), set for claude commands
-	RoleName         string   // Role name, if launched with --role
-	SessionDir       string   // Session directory path (~/.h2/sessions/<name>/)
-	Instructions        string // Role instructions, passed via --append-system-prompt
-	SystemPrompt        string // Replaces default system prompt, passed via --system-prompt
-	Model               string // Model selection, passed via --model
-	PermissionMode      string // Claude Code --permission-mode
-	CodexSandboxMode    string // Codex --sandbox
+	Name                string
+	Command             string
+	Args                []string
+	SessionID           string   // Claude Code session ID (UUID), set for claude commands
+	RoleName            string   // Role name, if launched with --role
+	SessionDir          string   // Session directory path (~/.h2/sessions/<name>/)
+	WorkingDir          string   // Working directory for the child process/session
+	Instructions        string   // Role instructions, passed via --append-system-prompt
+	SystemPrompt        string   // Replaces default system prompt, passed via --system-prompt
+	Model               string   // Model selection, passed via --model
+	PermissionMode      string   // Claude Code --permission-mode
+	CodexSandboxMode    string   // Codex --sandbox
 	CodexAskForApproval string   // Codex --ask-for-approval
 	AdditionalDirs      []string // extra dirs passed via --add-dir
-	Queue            *message.MessageQueue
-	AgentName        string
-	harness          harness.Harness
-	monitor          *monitor.AgentMonitor
-	agentCancel      context.CancelFunc
-	activityLog      *activitylog.Logger
-	VT               *virtualterminal.VT
-	Client           *client.Client // primary/interactive client (nil in daemon-only)
-	Clients          []*client.Client
-	clientsMu        sync.Mutex
-	PassthroughOwner *client.Client // which client owns passthrough mode (nil = none)
+	Queue               *message.MessageQueue
+	AgentName           string
+	harness             harness.Harness
+	monitor             *monitor.AgentMonitor
+	agentCancel         context.CancelFunc
+	activityLog         *activitylog.Logger
+	VT                  *virtualterminal.VT
+	Client              *client.Client // primary/interactive client (nil in daemon-only)
+	Clients             []*client.Client
+	clientsMu           sync.Mutex
+	PassthroughOwner    *client.Client // which client owns passthrough mode (nil = none)
 
 	// prependArgs holds CLI args from the adapter's launch config
 	// (e.g. --session-id for Claude Code). Set by setupAgent().
@@ -358,6 +359,16 @@ func (s *Session) NewClient() *client.Client {
 	cl.AgentState = func() (string, string, string) {
 		st, sub := s.State()
 		return st.String(), sub.String(), virtualterminal.FormatIdleDuration(s.StateDuration())
+	}
+	cl.WorkingDir = func() string {
+		if s.WorkingDir != "" {
+			return s.WorkingDir
+		}
+		cwd, err := os.Getwd()
+		if err != nil {
+			return ""
+		}
+		return cwd
 	}
 	cl.HookState = func() string {
 		return s.ActivitySnapshot().LastToolName

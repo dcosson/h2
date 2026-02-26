@@ -63,6 +63,9 @@ func RunDaemon(opts RunDaemonOpts) error {
 	s.CodexSandboxMode = opts.CodexSandboxMode
 	s.CodexAskForApproval = opts.CodexAskForApproval
 	s.AdditionalDirs = opts.AdditionalDirs
+	if cwd, err := os.Getwd(); err == nil {
+		s.WorkingDir = cwd
+	}
 	s.HeartbeatIdleTimeout = opts.Heartbeat.IdleTimeout
 	s.HeartbeatMessage = opts.Heartbeat.Message
 	s.HeartbeatCondition = opts.Heartbeat.Condition
