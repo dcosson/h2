@@ -41,6 +41,8 @@ type RunDaemonOpts struct {
 	Instructions         string   // role instructions → --append-system-prompt
 	SystemPrompt         string   // replaces default system prompt → --system-prompt
 	Model                string   // model selection → --model
+	HarnessType          string   // resolved harness type from launcher
+	HarnessConfigDir     string   // resolved harness config dir from launcher
 	ClaudePermissionMode string   // Claude Code --permission-mode
 	CodexSandboxMode     string   // Codex --sandbox
 	CodexAskForApproval  string   // Codex --ask-for-approval
@@ -59,6 +61,8 @@ func RunDaemon(opts RunDaemonOpts) error {
 	s.Instructions = opts.Instructions
 	s.SystemPrompt = opts.SystemPrompt
 	s.Model = opts.Model
+	s.HarnessType = opts.HarnessType
+	s.HarnessConfigDir = opts.HarnessConfigDir
 	s.ClaudePermissionMode = opts.ClaudePermissionMode
 	s.CodexSandboxMode = opts.CodexSandboxMode
 	s.CodexAskForApproval = opts.CodexAskForApproval
@@ -197,6 +201,8 @@ type ForkDaemonOpts struct {
 	Instructions         string // role instructions → --append-system-prompt
 	SystemPrompt         string // replaces default system prompt → --system-prompt
 	Model                string // model selection → --model
+	HarnessType          string // resolved harness type from launcher
+	HarnessConfigDir     string // resolved harness config dir from launcher
 	ClaudePermissionMode string // Claude Code --permission-mode
 	CodexSandboxMode     string // Codex --sandbox
 	CodexAskForApproval  string // Codex --ask-for-approval
@@ -242,6 +248,12 @@ func ForkDaemon(opts ForkDaemonOpts) error {
 	}
 	if opts.Model != "" {
 		daemonArgs = append(daemonArgs, "--model", opts.Model)
+	}
+	if opts.HarnessType != "" {
+		daemonArgs = append(daemonArgs, "--harness-type", opts.HarnessType)
+	}
+	if opts.HarnessConfigDir != "" {
+		daemonArgs = append(daemonArgs, "--harness-config-dir", opts.HarnessConfigDir)
 	}
 	if opts.ClaudePermissionMode != "" {
 		daemonArgs = append(daemonArgs, "--permission-mode", opts.ClaudePermissionMode)

@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/google/uuid"
 
@@ -36,6 +37,26 @@ func roleHarnessConfig(role *config.Role) harness.HarnessConfig {
 		cfg.ConfigDir = role.GetCodexConfigDir()
 	}
 	return cfg
+}
+
+// commandHarnessConfig builds a harness.HarnessConfig from a raw command path.
+// Used for non-role launches so daemon startup does not need to re-derive harness.
+func commandHarnessConfig(command string) harness.HarnessConfig {
+	base := filepath.Base(command)
+	ht := "generic"
+	configDir := ""
+	switch base {
+	case "claude":
+		ht = "claude_code"
+		configDir = config.DefaultClaudeConfigDir()
+	case "codex":
+		ht = "codex"
+	}
+	return harness.HarnessConfig{
+		HarnessType: ht,
+		Command:     command,
+		ConfigDir:   configDir,
+	}
 }
 
 // setupAndForkAgent sets up the agent session, forks the daemon,
@@ -132,6 +153,8 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 		Instructions:         role.GetInstructions(),
 		SystemPrompt:         role.SystemPrompt,
 		Model:                roleCfg.Model,
+		HarnessType:          roleCfg.HarnessType,
+		HarnessConfigDir:     roleCfg.ConfigDir,
 		ClaudePermissionMode: role.ClaudePermissionMode,
 		CodexSandboxMode:     role.CodexSandboxMode,
 		CodexAskForApproval:  role.CodexAskForApproval,

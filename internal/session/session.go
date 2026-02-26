@@ -183,27 +183,20 @@ func (s *Session) setupAgent() error {
 	actLog := activitylog.New(true, logPath, s.Name, s.SessionID)
 	s.activityLog = actLog
 
-	// Resolve harness with proper config (logger, configDir).
-	// Prefer launcher-provided harness config to avoid re-rendering roles in daemon mode.
-	if s.HarnessType != "" {
-		h, err := harness.Resolve(harness.HarnessConfig{
-			HarnessType: s.HarnessType,
-			Command:     s.Command,
-			Model:       s.Model,
-			ConfigDir:   s.HarnessConfigDir,
-		}, actLog)
-		if err != nil {
-			return fmt.Errorf("resolve harness: %w", err)
-		}
-		s.harness = h
-	} else {
-		// Backward compatibility for older launchers that don't pass harness fields.
-		h, err := resolveFullHarness(s.Command, s.RoleName, actLog)
-		if err != nil {
-			return fmt.Errorf("resolve harness: %w", err)
-		}
-		s.harness = h
+	// Resolve harness with launcher-provided config.
+	if s.HarnessType == "" {
+		return fmt.Errorf("resolve harness: missing harness type from launcher")
 	}
+	h, err := harness.Resolve(harness.HarnessConfig{
+		HarnessType: s.HarnessType,
+		Command:     s.Command,
+		Model:       s.Model,
+		ConfigDir:   s.HarnessConfigDir,
+	}, actLog)
+	if err != nil {
+		return fmt.Errorf("resolve harness: %w", err)
+	}
+	s.harness = h
 
 	// Prepare harness and get launch config (env vars, prepend args).
 	launchCfg, err := s.harness.PrepareForLaunch(s.Name, s.SessionID, false)

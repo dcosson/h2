@@ -20,6 +20,8 @@ func newDaemonCmd() *cobra.Command {
 	var instructions string
 	var systemPrompt string
 	var model string
+	var harnessType string
+	var harnessConfigDir string
 	var permissionMode string
 	var codexSandboxMode string
 	var codexAskForApproval string
@@ -72,6 +74,8 @@ func newDaemonCmd() *cobra.Command {
 				Instructions:         instructions,
 				SystemPrompt:         systemPrompt,
 				Model:                model,
+				HarnessType:          harnessType,
+				HarnessConfigDir:     harnessConfigDir,
 				ClaudePermissionMode: permissionMode,
 				CodexSandboxMode:     codexSandboxMode,
 				CodexAskForApproval:  codexAskForApproval,
@@ -96,6 +100,8 @@ func newDaemonCmd() *cobra.Command {
 	cmd.Flags().StringVar(&instructions, "instructions", "", "Role instructions to pass via --append-system-prompt")
 	cmd.Flags().StringVar(&systemPrompt, "system-prompt", "", "System prompt to pass via --system-prompt")
 	cmd.Flags().StringVar(&model, "model", "", "Model selection to pass via --model")
+	cmd.Flags().StringVar(&harnessType, "harness-type", "", "Resolved harness type (internal)")
+	cmd.Flags().StringVar(&harnessConfigDir, "harness-config-dir", "", "Resolved harness config dir (internal)")
 	cmd.Flags().StringVar(&permissionMode, "permission-mode", "", "Claude Code permission mode (--permission-mode)")
 	cmd.Flags().StringVar(&codexSandboxMode, "codex-sandbox-mode", "", "Codex sandbox mode (read-only, workspace-write, danger-full-access)")
 	cmd.Flags().StringVar(&codexAskForApproval, "codex-ask-for-approval", "", "Codex ask for approval (untrusted, on-request, never)")

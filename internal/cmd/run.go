@@ -168,23 +168,26 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 			if err := ensureAgentSocketAvailable(name); err != nil {
 				return err
 			}
+			hcfg := commandHarnessConfig(cmdCommand)
 
 			sessionID := uuid.New().String()
 			colorHints := detectTerminalColorHints()
 
 			// Fork a daemon process.
 			if err := forkDaemonFunc(session.ForkDaemonOpts{
-				Name:      name,
-				SessionID: sessionID,
-				Command:   cmdCommand,
-				Args:      cmdArgs,
-				Heartbeat: heartbeat,
-				Pod:       pod,
-				OscFg:     colorHints.OscFg,
-				OscBg:     colorHints.OscBg,
-				ColorFGBG: colorHints.ColorFGBG,
-				Term:      colorHints.Term,
-				ColorTerm: colorHints.ColorTerm,
+				Name:             name,
+				SessionID:        sessionID,
+				Command:          cmdCommand,
+				HarnessType:      hcfg.HarnessType,
+				HarnessConfigDir: hcfg.ConfigDir,
+				Args:             cmdArgs,
+				Heartbeat:        heartbeat,
+				Pod:              pod,
+				OscFg:            colorHints.OscFg,
+				OscBg:            colorHints.OscBg,
+				ColorFGBG:        colorHints.ColorFGBG,
+				Term:             colorHints.Term,
+				ColorTerm:        colorHints.ColorTerm,
 			}); err != nil {
 				return err
 			}
