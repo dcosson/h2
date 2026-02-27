@@ -193,9 +193,16 @@ func (p *EventHandler) processEvent(name string, attrs []otelAttribute, ts time.
 			Type:      monitor.EventUserPrompt,
 			Timestamp: ts,
 		})
-		p.emitStateChange(ts, monitor.StateActive, monitor.SubStateThinking)
-		p.debugf("span=codex.user_prompt")
-		return spanProcessResult{recognized: true, emitted: 2}
+		// Don't flip to Active/Thinking if we're in usage limit — the agent
+		// can't actually do anything until the limit resets. Avoid a brief
+		// misleading Active flash before the next 429 puts us back.
+		if !p.isUsageLimited() {
+			p.emitStateChange(ts, monitor.StateActive, monitor.SubStateThinking)
+			p.debugf("span=codex.user_prompt")
+			return spanProcessResult{recognized: true, emitted: 2}
+		}
+		p.debugf("span=codex.user_prompt (usage_limit, skipped state change)")
+		return spanProcessResult{recognized: true, emitted: 1}
 
 	case "codex.sse_event":
 		eventKind := getAttr(attrs, "event.kind")
@@ -256,6 +263,17 @@ func (p *EventHandler) processEvent(name string, attrs []otelAttribute, ts time.
 			return spanProcessResult{recognized: true, emitted: 1}
 		}
 		p.debugf("span=codex.tool_result missing tool_name")
+		return spanProcessResult{recognized: true}
+
+	case "codex.api_request":
+		statusCode := getAttr(attrs, "http.response.status_code")
+		errMsg := getAttr(attrs, "error.message")
+		p.debugf("span=codex.api_request status=%s error=%q", statusCode, errMsg)
+		if statusCode == "429" && strings.Contains(errMsg, "usage_limit_reached") {
+			p.cancelPendingIdle()
+			p.emitStateChange(ts, monitor.StateIdle, monitor.SubStateUsageLimit)
+			return spanProcessResult{recognized: true, emitted: 1}
+		}
 		return spanProcessResult{recognized: true}
 
 	case "codex.tool_decision":
@@ -378,6 +396,12 @@ func (p *EventHandler) setState(state monitor.State, subState monitor.SubState) 
 	defer p.stateMu.Unlock()
 	p.currentState = state
 	p.currentSubState = subState
+}
+
+func (p *EventHandler) isUsageLimited() bool {
+	p.stateMu.Lock()
+	defer p.stateMu.Unlock()
+	return p.currentSubState == monitor.SubStateUsageLimit
 }
 
 func (p *EventHandler) shouldScheduleIdleAfterCompletion() bool {
@@ -508,7 +532,7 @@ type otelAttrValue struct {
 func getAttr(attrs []otelAttribute, key string) string {
 	for _, a := range attrs {
 		if a.Key == key {
-			return a.Value.StringValue
+			return attrValueString(a.Value)
 		}
 	}
 	return ""

@@ -41,6 +41,7 @@ const (
 	SubStateToolUse                              // executing a tool
 	SubStateWaitingForPermission                 // blocked on user permission approval
 	SubStateCompacting                           // context compaction in progress
+	SubStateUsageLimit                           // API usage limit reached, waiting for reset
 )
 
 // String returns a human-readable name for the sub-state.
@@ -56,6 +57,8 @@ func (ss SubState) String() string {
 		return "waiting_for_permission"
 	case SubStateCompacting:
 		return "compacting"
+	case SubStateUsageLimit:
+		return "usage_limit"
 	default:
 		return ""
 	}
@@ -102,6 +105,8 @@ func FormatStateLabel(state, subState string, toolName ...string) string {
 		pretty = "permission"
 	case "compacting":
 		pretty = "compacting"
+	case "usage_limit":
+		pretty = "usage limit"
 	default:
 		pretty = subState
 	}
