@@ -531,20 +531,162 @@ func TestEventHandler_ToolDecision_Allow_NoEmit(t *testing.T) {
 	}
 }
 
-func TestEventHandler_UnknownSpan_NoEmit(t *testing.T) {
+func TestEventHandler_APIRequest_Success_NoEmit(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
 	p := NewEventHandler(events)
 
 	body := makeLogsPayload("codex.api_request", []otelAttribute{
 		{Key: "duration_ms", Value: otelAttrValue{IntValue: json.RawMessage("200")}},
+		{Key: "http.response.status_code", Value: otelAttrValue{StringValue: "200"}},
 	})
 	p.OnLogs(body)
 
 	select {
 	case ev := <-events:
-		t.Errorf("unexpected event for api_request: %+v", ev)
+		t.Errorf("unexpected event for successful api_request: %+v", ev)
 	case <-time.After(50 * time.Millisecond):
-		// OK
+		// OK — successful requests are recognized but don't emit events.
+	}
+}
+
+func TestEventHandler_APIRequest_UsageLimitReached(t *testing.T) {
+	events := make(chan monitor.AgentEvent, 64)
+	p := NewEventHandler(events)
+
+	// Move to active/thinking first.
+	p.OnLogs(makeLogsPayload("codex.user_prompt", nil))
+	_ = drainEvents(events, 2)
+
+	body := makeLogsPayload("codex.api_request", []otelAttribute{
+		{Key: "http.response.status_code", Value: otelAttrValue{StringValue: "429"}},
+		{Key: "error.message", Value: otelAttrValue{StringValue: `http 429 Too Many Requests: Some("{\"error\":{\"type\":\"usage_limit_reached\",\"message\":\"The usage limit has been reached\",\"resets_in_seconds\":112523}}")`}},
+		{Key: "duration_ms", Value: otelAttrValue{IntValue: json.RawMessage("559")}},
+	})
+	p.OnLogs(body)
+
+	got := drainEvents(events, 1)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(got))
+	}
+	if got[0].Type != monitor.EventStateChange {
+		t.Fatalf("Type = %v, want EventStateChange", got[0].Type)
+	}
+	state := got[0].Data.(monitor.StateChangeData)
+	if state.State != monitor.StateIdle || state.SubState != monitor.SubStateUsageLimit {
+		t.Errorf("state = (%v,%v), want (Idle,UsageLimit)", state.State, state.SubState)
+	}
+}
+
+func TestEventHandler_APIRequest_UsageLimitReached_IntStatusCode(t *testing.T) {
+	events := make(chan monitor.AgentEvent, 64)
+	p := NewEventHandler(events)
+
+	// Codex sends http.response.status_code as intValue, not stringValue.
+	body := makeLogsPayload("codex.api_request", []otelAttribute{
+		{Key: "http.response.status_code", Value: otelAttrValue{IntValue: json.RawMessage(`"429"`)}},
+		{Key: "error.message", Value: otelAttrValue{StringValue: `http 429 Too Many Requests: Some("{\"error\":{\"type\":\"usage_limit_reached\"}}")`}},
+	})
+	p.OnLogs(body)
+
+	got := drainEvents(events, 1)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(got))
+	}
+	state := got[0].Data.(monitor.StateChangeData)
+	if state.State != monitor.StateIdle || state.SubState != monitor.SubStateUsageLimit {
+		t.Errorf("state = (%v,%v), want (Idle,UsageLimit)", state.State, state.SubState)
+	}
+}
+
+func TestEventHandler_APIRequest_429_NonUsageLimit_NoEmit(t *testing.T) {
+	events := make(chan monitor.AgentEvent, 64)
+	p := NewEventHandler(events)
+
+	// A 429 that is NOT usage_limit_reached (e.g. short-term rate limit) should not emit.
+	body := makeLogsPayload("codex.api_request", []otelAttribute{
+		{Key: "http.response.status_code", Value: otelAttrValue{StringValue: "429"}},
+		{Key: "error.message", Value: otelAttrValue{StringValue: `http 429 Too Many Requests: rate_limit_exceeded`}},
+	})
+	p.OnLogs(body)
+
+	select {
+	case ev := <-events:
+		t.Errorf("unexpected event for non-usage-limit 429: %+v", ev)
+	case <-time.After(50 * time.Millisecond):
+		// OK — short-term throttle should not trigger usage limit state.
+	}
+}
+
+func TestEventHandler_APIRequest_UsageLimit_RecoveredByResponseCreated(t *testing.T) {
+	events := make(chan monitor.AgentEvent, 64)
+	p := NewEventHandler(events)
+
+	// Move to active/thinking.
+	p.OnLogs(makeLogsPayload("codex.user_prompt", nil))
+	_ = drainEvents(events, 2)
+
+	// Hit usage limit.
+	p.OnLogs(makeLogsPayload("codex.api_request", []otelAttribute{
+		{Key: "http.response.status_code", Value: otelAttrValue{StringValue: "429"}},
+		{Key: "error.message", Value: otelAttrValue{StringValue: `usage_limit_reached`}},
+	}))
+	got := drainEvents(events, 1)
+	if len(got) != 1 {
+		t.Fatalf("expected usage limit state change, got %d events", len(got))
+	}
+	state := got[0].Data.(monitor.StateChangeData)
+	if state.State != monitor.StateIdle || state.SubState != monitor.SubStateUsageLimit {
+		t.Fatalf("state = (%v,%v), want (Idle,UsageLimit)", state.State, state.SubState)
+	}
+
+	// Recovery: Codex retries and gets a successful response.
+	p.OnLogs(makeLogsPayload("codex.sse_event", []otelAttribute{
+		{Key: "event.kind", Value: otelAttrValue{StringValue: "response.created"}},
+	}))
+	got = drainEvents(events, 1)
+	if len(got) != 1 {
+		t.Fatalf("expected recovery state change, got %d events", len(got))
+	}
+	state = got[0].Data.(monitor.StateChangeData)
+	if state.State != monitor.StateActive || state.SubState != monitor.SubStateThinking {
+		t.Errorf("recovered state = (%v,%v), want (Active,Thinking)", state.State, state.SubState)
+	}
+}
+
+func TestEventHandler_UserPrompt_DuringUsageLimit_NoStateChange(t *testing.T) {
+	events := make(chan monitor.AgentEvent, 64)
+	p := NewEventHandler(events)
+
+	// Move to active/thinking, then hit usage limit.
+	p.OnLogs(makeLogsPayload("codex.user_prompt", nil))
+	_ = drainEvents(events, 2)
+
+	p.OnLogs(makeLogsPayload("codex.api_request", []otelAttribute{
+		{Key: "http.response.status_code", Value: otelAttrValue{StringValue: "429"}},
+		{Key: "error.message", Value: otelAttrValue{StringValue: `usage_limit_reached`}},
+	}))
+	got := drainEvents(events, 1)
+	state := got[0].Data.(monitor.StateChangeData)
+	if state.SubState != monitor.SubStateUsageLimit {
+		t.Fatalf("expected UsageLimit, got %v", state.SubState)
+	}
+
+	// Now send another user prompt — should NOT flip to Active/Thinking.
+	p.OnLogs(makeLogsPayload("codex.user_prompt", nil))
+	got = drainEvents(events, 1)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 event (user_prompt only), got %d", len(got))
+	}
+	if got[0].Type != monitor.EventUserPrompt {
+		t.Fatalf("Type = %v, want EventUserPrompt", got[0].Type)
+	}
+
+	// Verify no state change event followed.
+	select {
+	case ev := <-events:
+		t.Fatalf("unexpected state change during usage limit: %+v", ev)
+	case <-time.After(50 * time.Millisecond):
+		// OK — stayed in Idle/UsageLimit.
 	}
 }
 
