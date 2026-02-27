@@ -84,4 +84,12 @@ Commit the review doc and report the hash and a one-line summary of findings.
 
 ## Orchestration Note
 
-A concierge or scheduler typically assigns 2 reviewers to the same doc in parallel. Both run `/plan-review` independently. All review hashes are collected before anyone runs `/plan-incorporate`.
+A concierge or scheduler typically assigns reviewers to docs in batches. Reviewers should complete all their assigned reviews before any discussion begins — this preserves cross-document pattern detection (a reviewer reading many docs in sequence can spot systemic gaps that single-doc reviews miss).
+
+After all reviews for a round are committed, the incorporator initiates a **discussion phase** per doc (see `/plan-incorporate`). During this phase, a reviewer may re-read their own review doc to refresh context before responding to the incorporator's proposed dispositions.
+
+The full flow is:
+1. All reviewers write reviews independently (batch, parallel)
+2. All review hashes collected
+3. Per doc: incorporator proposes dispositions → reviewer(s) confirm or push back → consensus reached
+4. Per doc: incorporator applies agreed changes and writes disposition table

@@ -31,7 +31,7 @@ Before writing anything, check for unresolved questions from the shaping doc or 
 - Missing context (e.g., deployment constraints, team size, timeline expectations)
 - Contradictions between different parts of the requirements
 
-Ask the user to resolve these BEFORE proceeding (inline in chat, or via `h2 send` if communicating through h2 messaging). Do not paper over ambiguity — surface it now. It's much cheaper to resolve questions at this stage than after detailed plans are written.
+Resolve these BEFORE proceeding. Ask questions directly inline in your response text, or via `h2 send` if communicating through h2 messaging. **Do NOT use the AskUserQuestion tool** — communicate questions conversationally in your output or via h2 messages. Do not paper over ambiguity — surface it now. It's much cheaper to resolve questions at this stage than after detailed plans are written.
 
 ## Phase 3: Write Architecture Doc
 
@@ -50,7 +50,7 @@ Commit the architecture doc.
 
 ## Phase 4: Decide — Single Plan or Multiple Sub-Plans?
 
-Not every project needs a plan index with dozens of sub-plans. Ask the user to confirm (inline or via `h2 send`), but make a recommendation based on:
+Not every project needs a plan index with dozens of sub-plans. Confirm with the user (inline in your response text, or via `h2 send`) — make a recommendation based on:
 
 **Single plan doc is sufficient when:**
 - The project has one main component or a small, tightly-coupled set of components
@@ -92,7 +92,7 @@ Commit the plan index.
 
 ## Phase 6: Validate
 
-Present the result to the user for approval (inline or via `h2 send`):
+Present the result to the user for approval (inline in your response text, or via `h2 send`):
 
 - For single-plan projects: confirm the architecture doc captures the right scope
 - For multi-plan projects: present the list of batches and sub-plan names, key dependency choices, and open questions

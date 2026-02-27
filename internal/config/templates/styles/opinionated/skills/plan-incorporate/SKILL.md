@@ -32,14 +32,57 @@ For every finding in the current round's review files:
 
 1. **Check if it duplicates a prior-round finding** — if the same issue was already dispositioned in an earlier round, skip it (do NOT add to the new disposition table)
 2. **Check if already addressed** in the current doc text
-3. **If valid and not yet addressed** — incorporate the change into the source doc
+3. **If valid and not yet addressed** — plan to incorporate the change into the source doc
 4. **If the finding disagrees with a prior-round disposition** — only re-open if the reviewer makes a compelling case that the prior decision was genuinely wrong at P1+ severity. Do not bikeshed on settled decisions. If re-opening, note which prior finding it overrides.
-5. **If reviewers disagree** — discuss via `h2 send` with the original reviewers to reach consensus (if agents are available), or make the call and document the rationale
-6. **If intentionally not incorporating** — document the rationale
+5. **If intentionally not incorporating** — prepare the rationale
 
 **Avoid bikeshedding:** Later rounds should be higher-level reviews. Do not flag minor style, wording, or organizational preferences that don't affect correctness or completeness. Only push back on genuinely important issues (P1+).
 
-## Phase 3: Update Source Docs
+## Phase 3: Discussion with Reviewer(s)
+
+**Do not apply changes yet.** Before modifying any source docs, reach consensus with the reviewer(s) who wrote the findings.
+
+### Step 1: Send Proposed Dispositions
+
+Send a single `h2 send` message to each reviewer with your proposed disposition for every finding in their review. Format:
+
+```
+Proposed R{N} dispositions for {doc-name}:
+
+1. P0 - {title}: Incorporate — {brief description of planned fix}
+2. P1 - {title}: Not Incorporate — {rationale}
+3. P2 - {title}: Incorporate — {brief description}
+...
+
+Please confirm, or push back on any you disagree with.
+```
+
+### Step 2: Reviewer Responds
+
+The reviewer re-reads their review doc if needed to refresh context, then responds:
+- **Agree** with all dispositions → proceed to Phase 4
+- **Push back** on specific findings → provide rationale
+
+### Step 3: Iterate Until Consensus
+
+For findings where the reviewer pushes back:
+1. Discuss the specific finding via `h2 send` messages
+2. Either the incorporator updates the disposition or the reviewer accepts the rationale
+3. Repeat until all findings have agreed dispositions
+
+### Consensus Requirements by Severity
+
+- **P0/P1 findings**: Explicit reviewer agreement required. The reviewer must confirm they accept the disposition (whether Incorporated or Not Incorporated). Do not proceed without sign-off.
+- **P2/P3 findings**: Notification with implicit consent. If the reviewer does not object after seeing the proposed disposition, silence is agreement. The reviewer may still push back if they disagree.
+- **If consensus cannot be reached on a P0/P1**: Escalate to the concierge or user for a final decision.
+
+### When Reviewers Are Unavailable
+
+If a reviewer agent is not responding (crashed, session ended):
+1. For P0/P1: Escalate to the concierge or user — do not unilaterally disposition high-severity findings
+2. For P2/P3: Proceed with your proposed disposition and document "reviewer unavailable" in the Notes column
+
+## Phase 4: Update Source Docs
 
 1. Apply all incorporated changes to `docs/plans/$0.md`
 2. Apply test harness changes to `docs/plans/$0-test-harness.md` (if applicable)
@@ -72,17 +115,9 @@ First, rename the existing `## Review Disposition` header to `## Round 1 Review 
 
 Disposition values: `Incorporated` or `Not Incorporated`. Notes column must have rationale for every Not Incorporated finding.
 
-## Phase 4: Clean Up & Commit
+## Phase 5: Clean Up & Commit
 
 1. Delete all current-round review files: `git rm docs/plans/$0*review*r2*.md` (adjust pattern for the round)
 2. Commit everything together: `Incorporate Round N reviews: $0`
 3. Report commit hash
 
-## Conflict Resolution Protocol
-
-When reviewers disagree or a finding is ambiguous:
-
-1. Summarize the disagreement via `h2 send` to the original reviewers (if available)
-2. Reviewers respond with their position
-3. Incorporator makes final call, documents rationale in Disposition table Notes column
-4. If a P0/blocking disagreement cannot be resolved, escalate to concierge or user
