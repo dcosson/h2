@@ -16,6 +16,8 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/dcosson/midterm v0.2.4-0.20260223063146-90c26b8b1b84 h1:3cYPtV8BdgkqK9MlE5JjPR7IIWncKas2c/c/GlbybZo=
 github.com/dcosson/midterm v0.2.4-0.20260223063146-90c26b8b1b84/go.mod h1:WkbqZBIhH4jfxXkE2bjhosM1BdF/dCp7sR4x9wQB6fA=
+github.com/dcosson/midterm v0.2.4-0.20260227002018-dc3436126736 h1:KFPEBDl/Ixy1giO/vFjmVKaPB0EMm5N8DYCBJJqHquM=
+github.com/dcosson/midterm v0.2.4-0.20260227002018-dc3436126736/go.mod h1:WkbqZBIhH4jfxXkE2bjhosM1BdF/dCp7sR4x9wQB6fA=
 github.com/gofrs/flock v0.13.0 h1:95JolYOvGMqeH31+FC7D2+uULf6mG61mEZ/A8dRYMzw=
 github.com/gofrs/flock v0.13.0/go.mod h1:jxeyy9R1auM5S6JYDBhDt+E2TCo7DkratH4Pgi8P+Z0=
 github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 h1:El6M4kTTCOh6aBiKaUGG7oYTSPP8MxqL4YI3kZKwcP4=
