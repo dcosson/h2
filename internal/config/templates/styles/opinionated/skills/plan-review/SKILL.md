@@ -88,7 +88,15 @@ A concierge or scheduler typically assigns reviewers to docs in batches. Reviewe
 
 After all reviews for a round are committed, the incorporator initiates a **discussion phase** per doc (see `/plan-incorporate`). During this phase, a reviewer may re-read their own review doc to refresh context before responding to the incorporator's proposed dispositions.
 
-The full flow is:
+### Reviewer Rotation
+
+The concierge or scheduler should **rotate doc assignments across rounds** so that no reviewer sees the same doc in consecutive rounds. Fresh eyes are more valuable than continuity in later rounds — familiarity breeds blind spots. The disposition tables in each doc provide enough context for a new reviewer to understand prior decisions without re-litigating them.
+
+- **Round 1**: Assign by area/expertise (reviewers benefit from domain knowledge)
+- **Round 2+**: Shuffle assignments so each doc gets a different reviewer than the previous round. If there are 4 agents and 33 docs, rotate the batches (e.g., agent A's R1 batch goes to agent B in R2, B's to C, etc.)
+
+### Full Flow
+
 1. All reviewers write reviews independently (batch, parallel)
 2. All review hashes collected
 3. Per doc: incorporator proposes dispositions → reviewer(s) confirm or push back → consensus reached
