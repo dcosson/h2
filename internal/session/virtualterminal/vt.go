@@ -47,6 +47,14 @@ type VT struct {
 	// to arrow key sequences instead of entering h2's scroll mode.
 	AltScrollEnabled bool
 
+	// SyncOutputActive is set when the child sends CSI ? 2026 h (begin
+	// synchronized update). When true, render callbacks in PipeOutput are
+	// suppressed until CSI ? 2026 l is received, so the screen is only
+	// updated with the final state of the atomic update. This prevents
+	// rendering intermediate states (e.g. cleared screen before redraw)
+	// that cause flickering in apps like Claude Code.
+	SyncOutputActive bool
+
 	// ScrollHistory stores ANSI-formatted lines that scrolled off the top of
 	// VT.Vt via midterm's OnScrollback callback. This captures scrollback from
 	// apps that use scroll regions (e.g. codex inline viewport).
@@ -138,7 +146,9 @@ func (vt *VT) PipeOutput(onData func()) {
 				vt.Scrollback.Write(buf[:n])
 			}
 			vt.ScanPTYOutput(buf[:n])
-			onData()
+			if !vt.SyncOutputActive {
+				onData()
+			}
 			vt.Mu.Unlock()
 		}
 		if err != nil {
@@ -156,9 +166,10 @@ const (
 	scanOSCEsc
 )
 
-// ScanPTYOutput scans child output for escape sequences that affect scroll
-// behavior. Detects DECSTBM (CSI...r) to set ScrollRegionUsed, and
-// DEC private mode 1007 (CSI?1007h/l) to toggle AltScrollEnabled.
+// ScanPTYOutput scans child output for escape sequences that affect rendering
+// behavior. Detects DECSTBM (CSI...r) to set ScrollRegionUsed,
+// DEC private mode 1007 (CSI?1007h/l) to toggle AltScrollEnabled, and
+// DEC private mode 2026 (CSI?2026h/l) to toggle SyncOutputActive.
 func (vt *VT) ScanPTYOutput(data []byte) {
 	for _, b := range data {
 		switch vt.scanState {
@@ -191,11 +202,15 @@ func (vt *VT) ScanPTYOutput(data []byte) {
 			} else if b == 'h' {
 				if vt.scanCSIPrivateNum == 1007 {
 					vt.AltScrollEnabled = true
+				} else if vt.scanCSIPrivateNum == 2026 {
+					vt.SyncOutputActive = true
 				}
 				vt.scanState = scanNormal
 			} else if b == 'l' {
 				if vt.scanCSIPrivateNum == 1007 {
 					vt.AltScrollEnabled = false
+				} else if vt.scanCSIPrivateNum == 2026 {
+					vt.SyncOutputActive = false
 				}
 				vt.scanState = scanNormal
 			} else {
@@ -227,6 +242,7 @@ func (vt *VT) ResetScanState() {
 	vt.scanCSIPrivateNum = 0
 	vt.ScrollRegionUsed = false
 	vt.AltScrollEnabled = false
+	vt.SyncOutputActive = false
 }
 
 // RespondTerminalQueries responds to terminal capability queries from the

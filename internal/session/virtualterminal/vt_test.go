@@ -269,6 +269,70 @@ func TestScanPTYOutput_PrivateModeWithSemicolon(t *testing.T) {
 	}
 }
 
+// --- ScanPTYOutput (synchronized output detection) ---
+
+func TestScanPTYOutput_DetectsSyncOutputEnable(t *testing.T) {
+	vt := &VT{}
+	vt.ScanPTYOutput([]byte("\033[?2026h"))
+	if !vt.SyncOutputActive {
+		t.Fatal("expected SyncOutputActive=true after ?2026h")
+	}
+}
+
+func TestScanPTYOutput_DetectsSyncOutputDisable(t *testing.T) {
+	vt := &VT{}
+	vt.SyncOutputActive = true
+	vt.ScanPTYOutput([]byte("\033[?2026l"))
+	if vt.SyncOutputActive {
+		t.Fatal("expected SyncOutputActive=false after ?2026l")
+	}
+}
+
+func TestScanPTYOutput_SyncOutputToggle(t *testing.T) {
+	vt := &VT{}
+	vt.ScanPTYOutput([]byte("\033[?2026h"))
+	if !vt.SyncOutputActive {
+		t.Fatal("expected SyncOutputActive=true")
+	}
+	vt.ScanPTYOutput([]byte("\033[?2026l"))
+	if vt.SyncOutputActive {
+		t.Fatal("expected SyncOutputActive=false after disable")
+	}
+}
+
+func TestScanPTYOutput_SyncOutputSplitAcrossChunks(t *testing.T) {
+	vt := &VT{}
+	// Split ESC [ ? 2 0 2 6 h across two chunks.
+	vt.ScanPTYOutput([]byte("\033[?20"))
+	if vt.SyncOutputActive {
+		t.Fatal("should not enable mid-sequence")
+	}
+	vt.ScanPTYOutput([]byte("26h"))
+	if !vt.SyncOutputActive {
+		t.Fatal("expected SyncOutputActive=true after completing ?2026h across chunks")
+	}
+}
+
+func TestScanPTYOutput_SyncOutputBothInSameChunk(t *testing.T) {
+	vt := &VT{}
+	// Both enable and disable in the same chunk — should end up disabled.
+	vt.ScanPTYOutput([]byte("\033[?2026h\033[2J\033[H\033[?2026l"))
+	if vt.SyncOutputActive {
+		t.Fatal("expected SyncOutputActive=false when both ?2026h and ?2026l are in same chunk")
+	}
+}
+
+func TestScanPTYOutput_SyncOutputDoesNotAffectOtherModes(t *testing.T) {
+	vt := &VT{}
+	vt.ScanPTYOutput([]byte("\033[?2026h"))
+	if vt.AltScrollEnabled {
+		t.Fatal("?2026h should not affect AltScrollEnabled")
+	}
+	if vt.ScrollRegionUsed {
+		t.Fatal("?2026h should not affect ScrollRegionUsed")
+	}
+}
+
 // --- RespondTerminalQueries ---
 
 func TestRespondTerminalQueries_DA2(t *testing.T) {
@@ -365,6 +429,7 @@ func TestResetScanState(t *testing.T) {
 	vt := &VT{}
 	vt.ScrollRegionUsed = true
 	vt.AltScrollEnabled = true
+	vt.SyncOutputActive = true
 	vt.scanState = scanCSI
 	vt.scanCSIPrivateNum = 42
 	vt.ResetScanState()
@@ -373,6 +438,9 @@ func TestResetScanState(t *testing.T) {
 	}
 	if vt.AltScrollEnabled {
 		t.Fatal("expected AltScrollEnabled=false after reset")
+	}
+	if vt.SyncOutputActive {
+		t.Fatal("expected SyncOutputActive=false after reset")
 	}
 	if vt.scanState != scanNormal {
 		t.Fatal("expected scanState=scanNormal after reset")
