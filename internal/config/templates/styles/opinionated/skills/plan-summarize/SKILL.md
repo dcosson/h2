@@ -1,6 +1,6 @@
 ---
 name: plan-summarize
-description: Generate a planning summary doc with review statistics, incorporation rates, finding patterns, and document metrics across multiple plan docs.
+description: Generate a planning summary doc with review statistics, incorporation rates, finding patterns, and document metrics across multiple plan docs. Supports multiple review rounds — each round gets its own section.
 user-invocable: true
 allowed-tools: Bash Read Write Edit Grep Glob Task
 argument-hint: [output-path] [docs-glob-pattern]
@@ -8,7 +8,7 @@ argument-hint: [output-path] [docs-glob-pattern]
 
 # Plan Summarize
 
-Generate a planning summary doc with aggregate statistics across multiple plan docs.
+Generate a planning summary doc with aggregate statistics across multiple plan docs. Supports multiple review rounds — each round is summarized in its own section.
 
 ## Inputs
 
@@ -23,50 +23,70 @@ Generate a planning summary doc with aggregate statistics across multiple plan d
 
 ## Phase 2: Parse Disposition Tables
 
-For each doc (plan and TH), find the `## Review Disposition` table at the bottom and extract:
+For each doc (plan and TH), find ALL disposition table sections. Docs may have:
+- `## Review Disposition` (single round, treat as Round 1)
+- `## Round 1 Review Disposition`, `## Round 2 Review Disposition`, etc. (multi-round)
 
-- Finding ID
+For each disposition table, extract and tag with the round number:
+- Finding number
 - Reviewer
 - Severity (P0/P1/P2/P3 or Critical/Blocking/High/Medium/Low)
 - Summary
 - Disposition (Incorporated / Not Incorporated / Deferred)
 - Notes
 
-## Phase 3: Compute Statistics
+Also check git history for deleted review files to count review doc line totals:
+```
+git log --all --diff-filter=D --name-only --pretty=format: -- 'docs/plans/*-review-*.md' | sort -u
+```
+Then for each: `git show <last-commit-with-file>:<path> | wc -l`
 
-**Aggregate counts:**
+## Phase 3: Compute Statistics Per Round
+
+Compute the following statistics **separately for each round**, plus an **overall aggregate**:
+
+**Per-round counts:**
 - Total findings
 - Incorporated vs Not Incorporated vs Deferred (counts and percentages)
 - Breakdown by severity level
 - Incorporation rate per severity level
 - Per-doc finding counts
+- Docs with zero findings (review found nothing new)
 
-**Pattern analysis:**
-- Group findings by theme (correctness, testing gaps, API contracts, performance, scope/completeness)
-- Common reasons for non-incorporation (scope exclusion, deferred optimization, covered elsewhere, intentional simplification)
+**Per-round pattern analysis:**
+- Group findings by theme (correctness, cross-doc consistency, testing gaps, API contracts, performance, scope/completeness)
+- Common reasons for non-incorporation
 - Distribution of non-incorporation reasons
 
-**Document metrics:**
+**Overall aggregate counts** (all rounds combined):
+- Same metrics as above, summed across rounds
+
+**Document metrics** (computed once, not per-round):
 - Total line count across all plan docs: `wc -l docs/plans/[0-9]*.md`
 - Total line count across all test harness docs: `wc -l docs/plans/*-test-harness.md`
-- Total line count of deleted review docs (from git history):
-  ```
-  git log --all --diff-filter=D --name-only --pretty=format: -- 'docs/plans/*-review-*.md' | sort -u
-  ```
-  Then for each: `git show <last-commit-with-file>:<path> | wc -l`
+- Total line count of deleted review docs (from git history, as above)
 - Per-doc line counts
 
 ## Phase 4: Write Summary
 
-Write `$0` with:
+If the summary doc already exists, read it first. Each round gets its own section — **append new round sections** rather than rewriting existing ones (unless the data has changed, in which case update in place).
 
-1. **Header** — what this doc covers, how many docs analyzed
-2. **Incorporation Rate** — total table (count, incorporated, rate)
-3. **Severity Breakdown** — table per severity level with incorporation rate
-4. **Common Finding Patterns** — grouped by theme with examples
-5. **Non-Incorporation Reasons** — table with reason, share percentage, examples
+Structure of the summary doc:
+
+1. **Header** — what this doc covers, how many docs analyzed, how many review rounds completed
+2. **Overall Aggregate** — combined stats across all rounds
+3. **Round 1 Review Summary** — stats, severity breakdown, patterns, non-incorporation reasons for Round 1
+4. **Round 2 Review Summary** — same structure for Round 2 (if exists)
+5. **Round N Review Summary** — additional rounds as needed
 6. **Document Metrics** — line counts for plans, test harnesses, and (deleted) review docs
-7. **Quality Signals** — notable observations about the review process
+7. **Quality Signals** — notable observations about the review process and how later rounds compared to earlier ones (convergence, new themes, etc.)
+
+When adding a new round to an existing summary doc:
+- Update the Header to reflect the new round count
+- Update the Overall Aggregate with combined numbers
+- Add the new round section after the last existing round section
+- Update Document Metrics if line counts have changed
+- Update Quality Signals with observations about the new round
 
 ## Phase 5: Commit & Report
 
