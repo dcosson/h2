@@ -61,20 +61,6 @@ func TestResolve_ClaudeCode_NotRegistered(t *testing.T) {
 	}
 }
 
-func TestResolve_ClaudeLegacy_NotRegistered(t *testing.T) {
-	// Same as above but for "claude" legacy name.
-	h, err := Resolve(HarnessConfig{HarnessType: "claude"}, nil)
-	if h != nil {
-		t.Skip("claude harness already registered")
-	}
-	if err == nil {
-		t.Fatal("expected error for unregistered claude harness")
-	}
-	if !strings.Contains(err.Error(), "not registered") {
-		t.Errorf("error = %q, want it to contain 'not registered'", err.Error())
-	}
-}
-
 func TestResolve_Codex_NotRegistered(t *testing.T) {
 	// Without importing harness/codex, the factory is not registered.
 	// Skip if already registered.

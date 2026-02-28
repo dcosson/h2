@@ -20,7 +20,7 @@ import (
 
 func init() {
 	harness.Register(harness.HarnessSpec{
-		Names: []string{"claude_code", "claude"},
+		Names: []string{"claude_code"},
 		Factory: func(cfg harness.HarnessConfig, log *activitylog.Logger) harness.Harness {
 			return New(cfg, log)
 		},

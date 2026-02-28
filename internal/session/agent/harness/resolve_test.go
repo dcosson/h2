@@ -24,19 +24,6 @@ func TestResolve_ClaudeCode(t *testing.T) {
 	}
 }
 
-func TestResolve_ClaudeLegacy(t *testing.T) {
-	h, err := harness.Resolve(harness.HarnessConfig{HarnessType: "claude"}, nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if h == nil {
-		t.Fatal("expected non-nil harness")
-	}
-	if h.Name() != "claude_code" {
-		t.Errorf("Name() = %q, want %q", h.Name(), "claude_code")
-	}
-}
-
 func TestResolve_Codex(t *testing.T) {
 	h, err := harness.Resolve(harness.HarnessConfig{HarnessType: "codex"}, nil)
 	if err != nil {
