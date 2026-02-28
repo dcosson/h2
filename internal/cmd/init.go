@@ -49,10 +49,8 @@ func newInitCmd() *cobra.Command {
 Use --global to initialize ~/.h2/, or pass a directory path.
 
 Use --generate to regenerate specific config files in an existing h2 directory:
-  h2 init <path> --generate roles         # regenerate roles/default.yaml
-  h2 init <path> --generate instructions  # regenerate CLAUDE.md + AGENTS.md symlink
-  h2 init <path> --generate skills        # regenerate shared profile skills
-  h2 init <path> --generate harness-config # regenerate claude/codex policy files
+  h2 init <path> --generate role          # regenerate the default role file
+  h2 init <path> --generate profile       # regenerate default account profile files
   h2 init <path> --generate config        # regenerate config.yaml
   h2 init <path> --generate all           # regenerate all generated files
 
@@ -96,7 +94,7 @@ Use --force with --generate to overwrite existing files.`,
 
 	cmd.Flags().BoolVar(&global, "global", false, "Initialize ~/.h2/ as the h2 directory")
 	cmd.Flags().StringVar(&prefix, "prefix", "", "Custom prefix for this h2 directory in the routes registry")
-	cmd.Flags().StringVar(&generate, "generate", "", "Regenerate specific config: roles, instructions, skills, harness-config, config, all")
+	cmd.Flags().StringVar(&generate, "generate", "", "Regenerate specific config: role, profile, config, all")
 	cmd.Flags().BoolVar(&force, "force", false, "Overwrite existing files when using --generate")
 	cmd.Flags().StringVar(&style, "style", initStyleOpinionated, "Generation style: minimal, opinionated")
 	return cmd
@@ -181,14 +179,9 @@ func runFullInit(cmd *cobra.Command, abs, prefix, style string, out io.Writer) e
 	fmt.Fprintf(out, "  Wrote config.yaml\n")
 
 	// Write CLAUDE.md and symlink AGENTS.md.
-	if err := writeInstructions(abs, style); err != nil {
-		return fmt.Errorf("write instructions: %w", err)
+	if err := scaffoldProfile(abs, "default", style, profileHarnessAll, out, false); err != nil {
+		return fmt.Errorf("scaffold default profile: %w", err)
 	}
-	fmt.Fprintf(out, "  Wrote account-profiles-shared/default/CLAUDE_AND_AGENTS.md\n")
-	fmt.Fprintf(out, "  Symlinked claude-config/default/CLAUDE.md -> ../../account-profiles-shared/default/CLAUDE_AND_AGENTS.md\n")
-	fmt.Fprintf(out, "  Symlinked codex-config/default/AGENTS.md -> ../../account-profiles-shared/default/CLAUDE_AND_AGENTS.md\n")
-	fmt.Fprintf(out, "  Symlinked claude-config/default/skills -> ../../account-profiles-shared/default/skills\n")
-	fmt.Fprintf(out, "  Symlinked codex-config/default/skills -> ../../account-profiles-shared/default/skills\n")
 
 	// Register this h2 directory in the routes registry (pre-flight check already passed).
 	resolvedPrefix, err := config.RegisterRouteWithAutoPrefix(rootDir, explicitPrefix, abs)
@@ -197,12 +190,11 @@ func runFullInit(cmd *cobra.Command, abs, prefix, style string, out io.Writer) e
 	}
 
 	// Create the default role.
-	rolesDir := filepath.Join(abs, "roles")
-	rolePath, err := createRoleWithStyle(rolesDir, "default", style)
+	rolePath, err := upsertDefaultRole(abs, style, true, out)
 	if err != nil {
 		return fmt.Errorf("create default role: %w", err)
 	}
-	fmt.Fprintf(out, "  Wrote roles/%s\n", filepath.Base(rolePath))
+	_ = rolePath
 
 	fmt.Fprintf(out, "  Registered route (prefix: %s)\n", resolvedPrefix)
 	fmt.Fprintf(out, "Initialized h2 directory at %s (prefix: %s)\n", abs, resolvedPrefix)
@@ -216,6 +208,11 @@ func runGenerate(abs, what, style string, force bool, out io.Writer) error {
 	}
 
 	switch what {
+	case "role":
+		return generateDefaultRole(abs, style, force, out)
+	case "profile":
+		return generateDefaultProfile(abs, style, force, out)
+	// Legacy aliases kept for compatibility; prefer role/profile.
 	case "roles":
 		return generateRoles(abs, style, force, out)
 	case "instructions":
@@ -230,19 +227,76 @@ func runGenerate(abs, what, style string, force bool, out io.Writer) error {
 		if err := generateConfig(abs, style, force, out); err != nil {
 			return err
 		}
-		if err := generateInstructions(abs, style, force, out); err != nil {
-			return err
-		}
-		if err := generateSkills(abs, style, force, out); err != nil {
-			return err
-		}
-		if err := generateHarnessPolicyFiles(abs, style, force, out); err != nil {
+		if err := generateDefaultProfile(abs, style, force, out); err != nil {
 			return err
 		}
 		return generateRoles(abs, style, force, out)
 	default:
-		return fmt.Errorf("unknown --generate type %q; valid: roles, instructions, skills, harness-config, config, all", what)
+		return fmt.Errorf("unknown --generate type %q; valid: role, profile, config, all", what)
 	}
+}
+
+func generateDefaultProfile(abs, style string, force bool, out io.Writer) error {
+	if !force {
+		items := []generatePreflightItem{
+			checkFilePreflight(filepath.Join(abs, "account-profiles-shared", "default", "CLAUDE_AND_AGENTS.md"), "account-profiles-shared/default/CLAUDE_AND_AGENTS.md")[0],
+			checkDirPreflight(filepath.Join(abs, "account-profiles-shared", "default", "skills"), "account-profiles-shared/default/skills"),
+			checkSymlinkPreflight(filepath.Join(abs, "claude-config", "default", "CLAUDE.md"), filepath.Join("..", "..", "account-profiles-shared", "default", "CLAUDE_AND_AGENTS.md"), "claude-config/default/CLAUDE.md"),
+			checkSymlinkPreflight(filepath.Join(abs, "claude-config", "default", "skills"), filepath.Join("..", "..", "account-profiles-shared", "default", "skills"), "claude-config/default/skills"),
+			checkFilePreflight(filepath.Join(abs, "claude-config", "default", "settings.json"), "claude-config/default/settings.json")[0],
+			checkSymlinkPreflight(filepath.Join(abs, "codex-config", "default", "AGENTS.md"), filepath.Join("..", "..", "account-profiles-shared", "default", "CLAUDE_AND_AGENTS.md"), "codex-config/default/AGENTS.md"),
+			checkSymlinkPreflight(filepath.Join(abs, "codex-config", "default", "skills"), filepath.Join("..", "..", "account-profiles-shared", "default", "skills"), "codex-config/default/skills"),
+			checkFilePreflight(filepath.Join(abs, "codex-config", "default", "config.toml"), "codex-config/default/config.toml")[0],
+			checkFilePreflight(filepath.Join(abs, "codex-config", "default", "requirements.toml"), "codex-config/default/requirements.toml")[0],
+		}
+		if err := summarizePreflight("profile", items); err != nil {
+			return err
+		}
+	}
+	return scaffoldProfile(abs, "default", style, profileHarnessAll, out, false)
+}
+
+func generateDefaultRole(abs, style string, force bool, out io.Writer) error {
+	_, err := upsertDefaultRole(abs, style, force, out)
+	return err
+}
+
+func upsertDefaultRole(abs, style string, force bool, out io.Writer) (string, error) {
+	rolesDir := filepath.Join(abs, "roles")
+	if err := os.MkdirAll(rolesDir, 0o755); err != nil {
+		return "", fmt.Errorf("create roles dir: %w", err)
+	}
+	content := config.RoleTemplateWithStyle("default", style)
+	ext := config.RoleFileExtension(content)
+	targetPath := filepath.Join(rolesDir, "default"+ext)
+	targetLabel := filepath.Join("roles", "default"+ext)
+	if !force {
+		items := []generatePreflightItem{}
+		for _, e := range []string{".yaml", ".yaml.tmpl"} {
+			path := filepath.Join(rolesDir, "default"+e)
+			label := filepath.Join("roles", "default"+e)
+			if _, err := os.Stat(path); err == nil {
+				items = append(items, generatePreflightItem{Label: label, Status: "exists", Conflict: true})
+			} else if err != nil && !os.IsNotExist(err) {
+				items = append(items, generatePreflightItem{Label: label, Status: fmt.Sprintf("error: %v", err), Conflict: true})
+			}
+		}
+		if len(items) == 0 {
+			items = append(items, checkFilePreflight(targetPath, targetLabel)[0])
+		}
+		if err := summarizePreflight("role", items); err != nil {
+			return "", err
+		}
+	}
+	if force {
+		_ = os.Remove(filepath.Join(rolesDir, "default.yaml"))
+		_ = os.Remove(filepath.Join(rolesDir, "default.yaml.tmpl"))
+	}
+	if err := os.WriteFile(targetPath, []byte(content), 0o644); err != nil {
+		return "", fmt.Errorf("write %s: %w", targetLabel, err)
+	}
+	fmt.Fprintf(out, "  Wrote %s\n", targetLabel)
+	return targetPath, nil
 }
 
 // generateRoles regenerates role files for the selected style.
