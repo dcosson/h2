@@ -31,7 +31,7 @@ func roleHarnessConfig(role *config.Role) harness.HarnessConfig {
 		Model:       role.GetModel(),
 	}
 	switch ht {
-	case "claude_code", "claude":
+	case "claude_code":
 		cfg.ConfigDir = role.GetClaudeConfigDir()
 	case "codex":
 		cfg.ConfigDir = role.GetCodexConfigDir()

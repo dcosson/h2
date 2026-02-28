@@ -139,6 +139,13 @@ var ValidCodexSandboxModes = []string{
 	"danger-full-access", // no filesystem restrictions
 }
 
+// ValidHarnessTypes lists valid values for the agent_harness field.
+var ValidHarnessTypes = []string{
+	"claude_code",
+	"codex",
+	"generic",
+}
+
 // PermissionReviewAgent configures the AI permission reviewer.
 type PermissionReviewAgent struct {
 	Enabled                 *bool  `yaml:"enabled,omitempty"` // defaults to true if instructions are set
@@ -365,9 +372,6 @@ func validateInstructionsMutualExclusivity(label, single, intro, body, add1, add
 // GetHarnessType returns the canonical harness type name, defaulting to "claude_code".
 func (r *Role) GetHarnessType() string {
 	if r.AgentHarness != "" {
-		if r.AgentHarness == "claude" {
-			return "claude_code"
-		}
 		return r.AgentHarness
 	}
 	return "claude_code"
@@ -1305,6 +1309,19 @@ func GetRoleInheritanceMetadata(name string) (*RoleInheritanceMetadata, error) {
 func (r *Role) Validate() error {
 	if r.RoleName == "" {
 		return fmt.Errorf("role_name is required")
+	}
+	if r.AgentHarness != "" {
+		valid := false
+		for _, harnessType := range ValidHarnessTypes {
+			if r.AgentHarness == harnessType {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return fmt.Errorf("invalid agent_harness %q; valid values: %s",
+				r.AgentHarness, strings.Join(ValidHarnessTypes, ", "))
+		}
 	}
 	if r.ClaudePermissionMode != "" {
 		valid := false

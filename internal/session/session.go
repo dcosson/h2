@@ -254,7 +254,7 @@ func resolveFullHarness(command, roleName string, log *activitylog.Logger) (harn
 			Model:       role.GetModel(),
 		}
 		switch ht {
-		case "claude_code", "claude":
+		case "claude_code":
 			cfg.ConfigDir = role.GetClaudeConfigDir()
 		case "codex":
 			cfg.ConfigDir = role.GetCodexConfigDir()

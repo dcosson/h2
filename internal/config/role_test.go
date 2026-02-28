@@ -1437,6 +1437,21 @@ codex_sandbox_mode: invalid_mode
 	}
 }
 
+func TestLoadRoleFrom_InvalidAgentHarness(t *testing.T) {
+	yaml := `
+role_name: bad
+agent_harness: claude
+`
+	path := writeTempFile(t, "bad-harness.yaml", yaml)
+	_, err := LoadRoleFrom(path)
+	if err == nil {
+		t.Fatal("expected error for invalid agent_harness")
+	}
+	if !strings.Contains(err.Error(), "invalid agent_harness") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 // --- Harness config tests ---
 
 func TestGetHarnessType_Default(t *testing.T) {
