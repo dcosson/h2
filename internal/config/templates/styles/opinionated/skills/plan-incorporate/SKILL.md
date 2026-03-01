@@ -115,6 +115,18 @@ First, rename the existing `## Review Disposition` header to `## Round 1 Review 
 
 Disposition values: `Incorporated` or `Not Incorporated`. Notes column must have rationale for every Not Incorporated finding.
 
+### If a review has zero findings:
+
+Simply add the round's disposition header with a text note — **do NOT add a table with placeholder/N/A rows**:
+
+```markdown
+## Round 4 Review Disposition
+
+No new findings.
+```
+
+This keeps the disposition section clean and avoids inflating finding counts in the aggregation script. Delete the review file as normal.
+
 ## Phase 4.5: Validate Disposition Tables
 
 After updating the source docs, validate that all disposition tables (including any newly added ones) are parseable:
