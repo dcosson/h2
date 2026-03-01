@@ -15,6 +15,19 @@ Generate a planning summary doc with aggregate statistics across plan docs AND t
 - `$0`: Output file path (e.g., `docs/plans/99-planning-review-summary.md`)
 - `$1` (optional): Glob pattern for plan docs (default: `docs/plans/0*.md`, excluding index/architecture/shaping/summary docs)
 
+## Phase 0: Run Automated Aggregation
+
+**Before reading any files manually**, run the aggregation script to get accurate numbers:
+
+```bash
+python3 "$(dirname "$0")/aggregate-dispositions.py" docs/plans/ --format json > /tmp/disposition-aggregate.json
+python3 "$(dirname "$0")/aggregate-dispositions.py" docs/plans/ --format markdown
+```
+
+The JSON output provides machine-precise numbers. The markdown output gives you a human-readable overview. **Use these numbers as the source of truth** for all convergence numbers, severity breakdowns, per-file findings, and incorporation rates. Do NOT manually count findings by reading files — that is error-prone and slow.
+
+The script handles all known disposition table format variants (numbered section headers, Round N labels, severity normalization from Critical/Blocker to P0, etc.) and produces consistent normalized output.
+
 ## Phase 1: Discover Documents
 
 1. Find all plan docs matching the pattern (exclude `00-*`, `99-*`, `*-test-harness*`, `SKILL-*`)
