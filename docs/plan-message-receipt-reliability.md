@@ -291,7 +291,8 @@ e2etests/
 
 ```yaml
 name: receipt-test
-agent_type: claude
+agent_harness:
+  harness_type: claude_code
 model: haiku    # fast + cheap for testing
 permission_mode: default
 instructions: |

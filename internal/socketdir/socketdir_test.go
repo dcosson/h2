@@ -1,6 +1,7 @@
 package socketdir
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,8 +110,8 @@ func TestList(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "agent.concierge.sock"), nil, 0o600)
 	os.WriteFile(filepath.Join(dir, "bridge.dcosson.sock"), nil, 0o600)
 	os.WriteFile(filepath.Join(dir, "agent.worker.sock"), nil, 0o600)
-	os.WriteFile(filepath.Join(dir, "random.txt"), nil, 0o600)       // ignored
-	os.WriteFile(filepath.Join(dir, "old-format.sock"), nil, 0o600)  // ignored (no type.name format)
+	os.WriteFile(filepath.Join(dir, "random.txt"), nil, 0o600)      // ignored
+	os.WriteFile(filepath.Join(dir, "old-format.sock"), nil, 0o600) // ignored (no type.name format)
 
 	entries, err := ListIn(dir)
 	if err != nil {
@@ -178,6 +179,53 @@ func TestListIn_NonexistentDir(t *testing.T) {
 	}
 	if entries != nil {
 		t.Errorf("expected nil, got %v", entries)
+	}
+}
+
+func TestProbeSocket_NoFile(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "nonexistent.sock")
+	if err := ProbeSocket(sockPath, "test"); err != nil {
+		t.Errorf("ProbeSocket on nonexistent path: %v", err)
+	}
+}
+
+func TestProbeSocket_StaleSocket(t *testing.T) {
+	dir := t.TempDir()
+	sockPath := filepath.Join(dir, "stale.sock")
+
+	// Create a regular file pretending to be a stale socket.
+	os.WriteFile(sockPath, nil, 0o600)
+
+	if err := ProbeSocket(sockPath, "test"); err != nil {
+		t.Errorf("ProbeSocket on stale socket: %v", err)
+	}
+	// File should be removed.
+	if _, err := os.Stat(sockPath); !os.IsNotExist(err) {
+		t.Error("stale socket file was not removed")
+	}
+}
+
+func TestProbeSocket_LiveListener(t *testing.T) {
+	dir := t.TempDir()
+	sockPath := filepath.Join(dir, "live.sock")
+
+	// Start a real listener.
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	err = ProbeSocket(sockPath, `agent "concierge"`)
+	if err == nil {
+		t.Fatal("expected error for live listener, got nil")
+	}
+	if want := `agent "concierge" is already running`; err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+	// Socket file should NOT be removed.
+	if _, err := os.Stat(sockPath); err != nil {
+		t.Error("live socket file was incorrectly removed")
 	}
 }
 

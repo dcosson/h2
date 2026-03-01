@@ -13,7 +13,7 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print the h2 version",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Fprintln(cmd.OutOrStdout(), version.Version)
+			fmt.Fprintln(cmd.OutOrStdout(), version.DisplayVersion())
 		},
 	}
 }

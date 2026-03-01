@@ -86,7 +86,7 @@ func GenerateOrchestratorRole(model, extraInstructions, testPlanContent, planNam
 	// to preserve newlines and avoid YAML escaping issues.
 	yaml := fmt.Sprintf(`name: qa-orchestrator
 model: %s
-permission_mode: bypassPermissions
+claude_permission_mode: bypassPermissions
 instructions: |
 %s`, model, indentBlock(instructions, "  "))
 

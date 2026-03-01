@@ -1,40 +1,41 @@
 package session
 
 import (
+	"context"
 	"testing"
 	"time"
 
-	"h2/internal/session/agent"
-	"h2/internal/session/agent/collector"
+	"h2/internal/session/agent/monitor"
 	"h2/internal/session/message"
 )
 
-// newTestAgent creates a minimal Agent for testing heartbeat.
-// It uses a generic agent type so no collectors are started.
-func newTestAgent() *agent.Agent {
-	return agent.New(agent.ResolveAgentType("generic"))
+// newTestSession creates a minimal Session with the output collector bridge
+// started, ready for heartbeat testing.
+func newHeartbeatTestSession() *Session {
+	s := New("test", "generic-test", nil)
+	s.harness.PrepareForLaunch("test", "", false) //nolint:errcheck // test setup
+	s.startAgentPipeline(context.Background())
+	return s
 }
 
 func setFastIdleHeartbeat(t *testing.T) {
 	t.Helper()
-	old := collector.IdleThreshold
-	collector.IdleThreshold = 10 * time.Millisecond
-	t.Cleanup(func() { collector.IdleThreshold = old })
+	old := monitor.IdleThreshold
+	monitor.IdleThreshold = 10 * time.Millisecond
+	t.Cleanup(func() { monitor.IdleThreshold = old })
 }
 
 func TestHeartbeat_NudgeAfterIdleTimeout(t *testing.T) {
 	setFastIdleHeartbeat(t)
-	a := newTestAgent()
-	defer a.Stop()
-	// Start the watchState goroutine so agent can transition to idle.
-	a.StartCollectors()
+	s := newHeartbeatTestSession()
+	defer s.Stop()
 	q := message.NewMessageQueue()
 	stop := make(chan struct{})
 
 	go RunHeartbeat(HeartbeatConfig{
 		IdleTimeout: 100 * time.Millisecond,
 		Message:     "wake up",
-		Agent:       a,
+		Session:     s,
 		Queue:       q,
 		AgentName:   "test-agent",
 		Stop:        stop,
@@ -73,16 +74,15 @@ func TestHeartbeat_NudgeAfterIdleTimeout(t *testing.T) {
 
 func TestHeartbeat_CancelledWhenAgentGoesActive(t *testing.T) {
 	setFastIdleHeartbeat(t)
-	a := newTestAgent()
-	defer a.Stop()
-	a.StartCollectors()
+	s := newHeartbeatTestSession()
+	defer s.Stop()
 	q := message.NewMessageQueue()
 	stop := make(chan struct{})
 
 	go RunHeartbeat(HeartbeatConfig{
 		IdleTimeout: 500 * time.Millisecond,
 		Message:     "should not arrive",
-		Agent:       a,
+		Session:     s,
 		Queue:       q,
 		AgentName:   "test-agent",
 		Stop:        stop,
@@ -90,11 +90,11 @@ func TestHeartbeat_CancelledWhenAgentGoesActive(t *testing.T) {
 
 	// Wait for agent to go idle.
 	deadline := time.After(2 * time.Second)
-	for st, _ := a.State(); st != agent.StateIdle; st, _ = a.State() {
+	for st, _ := s.State(); st != monitor.StateIdle; st, _ = s.State() {
 		select {
 		case <-deadline:
 			t.Fatal("timed out waiting for idle")
-		case <-a.StateChanged():
+		case <-s.StateChanged():
 		}
 	}
 
@@ -108,7 +108,7 @@ func TestHeartbeat_CancelledWhenAgentGoesActive(t *testing.T) {
 		for {
 			select {
 			case <-ticker.C:
-				a.NoteOutput()
+				s.HandleOutput()
 			case <-stopOutput:
 				return
 			}
@@ -128,9 +128,8 @@ func TestHeartbeat_CancelledWhenAgentGoesActive(t *testing.T) {
 
 func TestHeartbeat_ConditionGates(t *testing.T) {
 	setFastIdleHeartbeat(t)
-	a := newTestAgent()
-	defer a.Stop()
-	a.StartCollectors()
+	s := newHeartbeatTestSession()
+	defer s.Stop()
 	q := message.NewMessageQueue()
 	stop := make(chan struct{})
 
@@ -139,7 +138,7 @@ func TestHeartbeat_ConditionGates(t *testing.T) {
 		IdleTimeout: 100 * time.Millisecond,
 		Message:     "gated message",
 		Condition:   "false",
-		Agent:       a,
+		Session:     s,
 		Queue:       q,
 		AgentName:   "test-agent",
 		Stop:        stop,
@@ -147,11 +146,11 @@ func TestHeartbeat_ConditionGates(t *testing.T) {
 
 	// Wait for idle + timeout + buffer.
 	deadline := time.After(2 * time.Second)
-	for st, _ := a.State(); st != agent.StateIdle; st, _ = a.State() {
+	for st, _ := s.State(); st != monitor.StateIdle; st, _ = s.State() {
 		select {
 		case <-deadline:
 			t.Fatal("timed out waiting for idle")
-		case <-a.StateChanged():
+		case <-s.StateChanged():
 		}
 	}
 
@@ -167,9 +166,8 @@ func TestHeartbeat_ConditionGates(t *testing.T) {
 
 func TestHeartbeat_ConditionTrue(t *testing.T) {
 	setFastIdleHeartbeat(t)
-	a := newTestAgent()
-	defer a.Stop()
-	a.StartCollectors()
+	s := newHeartbeatTestSession()
+	defer s.Stop()
 	q := message.NewMessageQueue()
 	stop := make(chan struct{})
 
@@ -178,7 +176,7 @@ func TestHeartbeat_ConditionTrue(t *testing.T) {
 		IdleTimeout: 100 * time.Millisecond,
 		Message:     "conditional nudge",
 		Condition:   "true",
-		Agent:       a,
+		Session:     s,
 		Queue:       q,
 		AgentName:   "test-agent",
 		Stop:        stop,
@@ -210,9 +208,8 @@ func TestHeartbeat_ConditionTrue(t *testing.T) {
 
 func TestHeartbeat_StopTerminatesLoop(t *testing.T) {
 	setFastIdleHeartbeat(t)
-	a := newTestAgent()
-	defer a.Stop()
-	a.StartCollectors()
+	s := newHeartbeatTestSession()
+	defer s.Stop()
 	q := message.NewMessageQueue()
 	stop := make(chan struct{})
 
@@ -221,7 +218,7 @@ func TestHeartbeat_StopTerminatesLoop(t *testing.T) {
 		RunHeartbeat(HeartbeatConfig{
 			IdleTimeout: 10 * time.Second, // long timeout
 			Message:     "should not arrive",
-			Agent:       a,
+			Session:     s,
 			Queue:       q,
 			AgentName:   "test-agent",
 			Stop:        stop,

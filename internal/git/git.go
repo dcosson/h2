@@ -23,10 +23,10 @@ func CreateWorktree(cfg *config.WorktreeConfig) (string, error) {
 
 	// Verify repoDir is a git repo.
 	if !isGitRepo(repoDir) {
-		return "", fmt.Errorf("worktree.project_dir %q is not a git repository", repoDir)
+		return "", fmt.Errorf("worktree source repo %q is not a git repository", repoDir)
 	}
 
-	worktreePath := filepath.Join(config.WorktreesDir(), cfg.Name)
+	worktreePath := cfg.GetPath()
 
 	// Check if worktree already exists.
 	gitFile := filepath.Join(worktreePath, ".git")
@@ -62,10 +62,10 @@ func CreateWorktree(cfg *config.WorktreeConfig) (string, error) {
 	}
 
 	branchFrom := cfg.GetBranchFrom()
-	branchName := cfg.GetBranchName()
+	branchName := cfg.GetBranch()
 
 	var args []string
-	if cfg.UseDetachedHead {
+	if cfg.IsDetachedHead() {
 		args = []string{"worktree", "add", "--detach", worktreePath, branchFrom}
 	} else {
 		args = []string{"worktree", "add", "-b", branchName, worktreePath, branchFrom}

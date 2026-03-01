@@ -14,7 +14,9 @@ func TestWorkingDir_Default(t *testing.T) {
 	h2Dir := createTestH2Dir(t)
 	createRole(t, h2Dir, "default-cwd", `
 name: default-cwd
-agent_type: "true"
+agent_harness:
+  harness_type: generic
+  command: "true"
 instructions: test default working_dir
 `)
 
@@ -39,7 +41,9 @@ func TestWorkingDir_Absolute(t *testing.T) {
 
 	createRole(t, h2Dir, "abs-dir", `
 name: abs-dir
-agent_type: "true"
+agent_harness:
+  harness_type: generic
+  command: "true"
 instructions: test absolute working_dir
 working_dir: "`+absDir+`"
 `)
@@ -69,7 +73,9 @@ func TestWorkingDir_Relative(t *testing.T) {
 
 	createRole(t, h2Dir, "rel-dir", `
 name: rel-dir
-agent_type: "true"
+agent_harness:
+  harness_type: generic
+  command: "true"
 instructions: test relative working_dir
 working_dir: projects/myapp
 `)
@@ -95,7 +101,9 @@ func TestWorktree_NewBranch(t *testing.T) {
 
 	createRole(t, h2Dir, "wt-agent", `
 name: wt-agent
-agent_type: "true"
+agent_harness:
+  harness_type: generic
+  command: "true"
 instructions: test worktree agent
 worktree:
   project_dir: projects/myrepo
@@ -154,7 +162,9 @@ func TestWorktree_DetachedHead(t *testing.T) {
 
 	createRole(t, h2Dir, "wt-detached", `
 name: wt-detached
-agent_type: "true"
+agent_harness:
+  harness_type: generic
+  command: "true"
 instructions: test detached worktree
 worktree:
   project_dir: projects/myrepo
@@ -199,7 +209,9 @@ func TestWorktree_NonGitProjectDir(t *testing.T) {
 
 	createRole(t, h2Dir, "wt-nogit", `
 name: wt-nogit
-agent_type: "true"
+agent_harness:
+  harness_type: generic
+  command: "true"
 instructions: test
 worktree:
   project_dir: projects/not-a-repo
@@ -225,7 +237,9 @@ func TestWorktree_CorruptWorktreeDir(t *testing.T) {
 
 	createRole(t, h2Dir, "wt-corrupt", `
 name: wt-corrupt
-agent_type: "true"
+agent_harness:
+  harness_type: generic
+  command: "true"
 instructions: test
 worktree:
   project_dir: projects/myrepo
@@ -257,7 +271,9 @@ func TestWorktree_ReuseExisting(t *testing.T) {
 
 	createRole(t, h2Dir, "wt-reuse", `
 name: wt-reuse
-agent_type: "true"
+agent_harness:
+  harness_type: generic
+  command: "true"
 instructions: test worktree reuse
 worktree:
   project_dir: projects/myrepo

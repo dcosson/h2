@@ -1,0 +1,43 @@
+{
+  "id": "h2-b0c.6",
+  "title": "Update Agent struct to use single harness field",
+  "description": "Replace agentType+adapter fields with single harness harness.Harness. Remove NewAdapter() call, all 6 nil-adapter branches, bridgeOutputToMonitor(), OtelMetrics struct, SetOtelLogFiles(), otelLogsFile/otelMetricsFile fields, outputCollector field. Agent.HandleOutput() delegates to harness.HandleOutput(). Agent.Start() calls harness.Start() + monitor.Run() uniformly. Metrics() always reads from monitor. PrepareForLaunch/HandleHookEvent/Stop dispatch directly. This is the high-risk commit — comprehensive test updates needed.",
+  "status": "closed",
+  "priority": 1,
+  "type": "task",
+  "parent": "h2-b0c",
+  "dependencies": [
+    {
+      "id": "h2-b0c",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-b0c.2",
+      "type": "blocks"
+    },
+    {
+      "id": "h2-b0c.3",
+      "type": "blocks"
+    },
+    {
+      "id": "h2-b0c.4",
+      "type": "blocks"
+    },
+    {
+      "id": "h2-b0c.5",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "h2-b0c.7",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-20T12:15:55.869671-08:00",
+  "updated_at": "2026-02-20T15:41:14.940229-08:00",
+  "closed_at": "2026-02-20T15:41:14.940229-08:00",
+  "close_reason": "Closed"
+}

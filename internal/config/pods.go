@@ -36,7 +36,7 @@ func PodTemplatesDir() string {
 // Only called when --pod is specified. Without --pod, use LoadRole() (global only).
 func LoadPodRole(name string) (*Role, error) {
 	// Try pod-scoped role first.
-	podPath := filepath.Join(PodRolesDir(), name+".yaml")
+	podPath, _ := resolveRolePath(PodRolesDir(), name)
 	if _, err := os.Stat(podPath); err == nil {
 		return LoadRoleFrom(podPath)
 	}
@@ -47,7 +47,7 @@ func LoadPodRole(name string) (*Role, error) {
 // IsPodScopedRole returns true if the role exists under pods/roles/ (pod-scoped),
 // false if it would fall back to the global roles/ directory.
 func IsPodScopedRole(name string) bool {
-	podPath := filepath.Join(PodRolesDir(), name+".yaml")
+	podPath, _ := resolveRolePath(PodRolesDir(), name)
 	_, err := os.Stat(podPath)
 	return err == nil
 }
@@ -56,7 +56,7 @@ func IsPodScopedRole(name string) bool {
 // first then global roles. If ctx is nil, behaves like LoadPodRole.
 func LoadPodRoleRendered(name string, ctx *tmpl.Context) (*Role, error) {
 	// Try pod-scoped role first.
-	podPath := filepath.Join(PodRolesDir(), name+".yaml")
+	podPath, _ := resolveRolePath(PodRolesDir(), name)
 	if _, err := os.Stat(podPath); err == nil {
 		return LoadRoleRenderedFrom(podPath, ctx)
 	}
@@ -66,45 +66,14 @@ func LoadPodRoleRendered(name string, ctx *tmpl.Context) (*Role, error) {
 
 // ListPodRoles returns roles from <h2-dir>/pods/roles/.
 func ListPodRoles() ([]*Role, error) {
-	dir := PodRolesDir()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("read pod roles dir: %w", err)
-	}
-
-	var roles []*Role
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
-			continue
-		}
-		path := filepath.Join(dir, entry.Name())
-		roleName := strings.TrimSuffix(entry.Name(), ".yaml")
-		// Try rendered load first (handles template files like role init generates).
-		ctx := &tmpl.Context{
-			RoleName: roleName,
-			H2Dir:    ConfigDir(),
-		}
-		role, err := LoadRoleRenderedFrom(path, ctx)
-		if err != nil {
-			// Fallback to plain load (handles roles with required vars).
-			role, err = LoadRoleFrom(path)
-			if err != nil {
-				continue
-			}
-		}
-		roles = append(roles, role)
-	}
-	return roles, nil
+	return listRolesFromDir(PodRolesDir())
 }
 
 // PodTemplate defines a set of agents to launch together as a pod.
 type PodTemplate struct {
-	PodName   string                  `yaml:"pod_name"`
-	Variables map[string]tmpl.VarDef  `yaml:"variables"`
-	Agents    []PodTemplateAgent      `yaml:"agents"`
+	PodName   string                 `yaml:"pod_name"`
+	Variables map[string]tmpl.VarDef `yaml:"variables"`
+	Agents    []PodTemplateAgent     `yaml:"agents"`
 }
 
 // PodTemplateAgent defines a single agent within a pod template.

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -19,6 +18,34 @@ func SessionDir(agentName string) string {
 	return filepath.Join(SessionsDir(), agentName)
 }
 
+// FindSessionDirByID returns the session directory whose metadata contains
+// the given session ID. Empty string means not found.
+func FindSessionDirByID(sessionID string) string {
+	if sessionID == "" {
+		return ""
+	}
+
+	root := SessionsDir()
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return ""
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		dir := filepath.Join(root, entry.Name())
+		meta, err := ReadSessionMetadata(dir)
+		if err != nil {
+			continue
+		}
+		if meta != nil && meta.SessionID == sessionID {
+			return dir
+		}
+	}
+	return ""
+}
+
 // SetupSessionDir creates the session directory for an agent and writes
 // per-agent files (e.g. permission-reviewer.md). Claude Code config
 // (auth, hooks, settings) lives in the shared claude config dir, not here.
@@ -29,10 +56,10 @@ func SetupSessionDir(agentName string, role *Role) (string, error) {
 		return "", fmt.Errorf("create session dir: %w", err)
 	}
 
-	// Write permission-reviewer.md if permissions.agent is configured.
-	if role.Permissions.Agent != nil && role.Permissions.Agent.IsEnabled() {
+	// Write permission-reviewer.md if permission_review_agent is configured.
+	if role.PermissionReviewAgent != nil && role.PermissionReviewAgent.IsEnabled() {
 		reviewerPath := filepath.Join(sessionDir, "permission-reviewer.md")
-		if err := os.WriteFile(reviewerPath, []byte(role.Permissions.Agent.Instructions), 0o644); err != nil {
+		if err := os.WriteFile(reviewerPath, []byte(role.PermissionReviewAgent.GetInstructions()), 0o644); err != nil {
 			return "", fmt.Errorf("write permission-reviewer.md: %w", err)
 		}
 	}
@@ -43,21 +70,14 @@ func SetupSessionDir(agentName string, role *Role) (string, error) {
 // SessionMetadata holds metadata about a running session, written to
 // ~/.h2/sessions/<name>/session.metadata.json for use by h2 peek and other tools.
 type SessionMetadata struct {
-	AgentName              string            `json:"agent_name"`
-	SessionID              string            `json:"session_id"`
-	ClaudeConfigDir        string            `json:"claude_config_dir"`
-	CWD                    string            `json:"cwd"`
-	ClaudeCodeSessionLogPath string          `json:"claude_code_session_log_path"`
-	Command                string            `json:"command"`
-	Role                   string            `json:"role,omitempty"`
-	Overrides              map[string]string `json:"overrides,omitempty"`
-	StartedAt              string            `json:"started_at"`
-}
-
-// ClaudeCodeSessionLogPath computes the path to Claude Code's session transcript JSONL.
-func ClaudeCodeSessionLogPath(claudeConfigDir, cwd, sessionID string) string {
-	projectDir := strings.ReplaceAll(cwd, "/", "-")
-	return filepath.Join(claudeConfigDir, "projects", projectDir, sessionID+".jsonl")
+	AgentName       string            `json:"agent_name"`
+	SessionID       string            `json:"session_id"`
+	ClaudeConfigDir string            `json:"claude_config_dir"`
+	CWD             string            `json:"cwd"`
+	Command         string            `json:"command"`
+	Role            string            `json:"role,omitempty"`
+	Overrides       map[string]string `json:"overrides,omitempty"`
+	StartedAt       string            `json:"started_at"`
 }
 
 // WriteSessionMetadata writes session.metadata.json to the session directory.
@@ -137,24 +157,23 @@ func buildH2Settings() map[string]any {
 }
 
 // buildH2Hooks creates the hooks section with h2 standard hooks.
+// All events use the unified "h2 handle-hook" command which forwards
+// events to the agent and handles PermissionRequest review.
 func buildH2Hooks() map[string][]hookMatcher {
-	collectHook := hookEntry{
+	hook := hookEntry{
 		Type:    "command",
-		Command: "h2 hook collect",
+		Command: "h2 handle-hook",
 		Timeout: 5,
 	}
 
-	permissionHook := hookEntry{
-		Type:    "command",
-		Command: "h2 permission-request",
-		Timeout: 60,
-	}
-
-	// Standard hook events that get the collect hook.
+	// Standard hook events.
 	standardEvents := []string{
 		"PreToolUse",
 		"PostToolUse",
+		"PostToolUseFailure",
+		"PreCompact",
 		"SessionStart",
+		"SessionEnd",
 		"Stop",
 		"UserPromptSubmit",
 	}
@@ -164,16 +183,20 @@ func buildH2Hooks() map[string][]hookMatcher {
 	for _, event := range standardEvents {
 		hooks[event] = []hookMatcher{{
 			Matcher: "",
-			Hooks:   []hookEntry{collectHook},
+			Hooks:   []hookEntry{hook},
 		}}
 	}
 
-	// PermissionRequest gets the permission handler + collect hook.
+	// PermissionRequest needs a longer timeout for the AI reviewer.
+	permissionHook := hookEntry{
+		Type:    "command",
+		Command: "h2 handle-hook",
+		Timeout: 60,
+	}
 	hooks["PermissionRequest"] = []hookMatcher{{
 		Matcher: "",
-		Hooks:   []hookEntry{permissionHook, collectHook},
+		Hooks:   []hookEntry{permissionHook},
 	}}
 
 	return hooks
 }
-

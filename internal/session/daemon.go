@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"h2/internal/config"
-	"h2/internal/session/agent"
+	"h2/internal/session/agent/monitor"
 	"h2/internal/session/message"
 	"h2/internal/session/virtualterminal"
 	"h2/internal/socketdir"
@@ -32,21 +32,23 @@ type DaemonHeartbeat struct {
 
 // RunDaemonOpts holds all options for running a daemon.
 type RunDaemonOpts struct {
-	Name            string
-	SessionID       string
-	Command         string
-	Args            []string
-	RoleName        string
-	SessionDir      string
-	ClaudeConfigDir string
-	Instructions    string   // role instructions → --append-system-prompt
-	SystemPrompt    string   // replaces default system prompt → --system-prompt
-	Model           string   // model selection → --model
-	PermissionMode  string   // permission mode → --permission-mode
-	AllowedTools    []string // allowed tools → --allowedTools (comma-joined)
-	DisallowedTools []string // disallowed tools → --disallowedTools (comma-joined)
-	Heartbeat       DaemonHeartbeat
-	Overrides       map[string]string // --override key=value pairs for metadata
+	Name                 string
+	SessionID            string
+	Command              string
+	Args                 []string
+	RoleName             string
+	SessionDir           string
+	Instructions         string   // role instructions → --append-system-prompt
+	SystemPrompt         string   // replaces default system prompt → --system-prompt
+	Model                string   // model selection → --model
+	HarnessType          string   // resolved harness type from launcher
+	HarnessConfigDir     string   // resolved harness config dir from launcher
+	ClaudePermissionMode string   // Claude Code --permission-mode
+	CodexSandboxMode     string   // Codex --sandbox
+	CodexAskForApproval  string   // Codex --ask-for-approval
+	AdditionalDirs       []string // extra dirs passed via --add-dir
+	Heartbeat            DaemonHeartbeat
+	Overrides            map[string]string // --override key=value pairs for metadata
 }
 
 // RunDaemon creates a Session and Daemon, sets up the socket, and runs
@@ -56,13 +58,18 @@ func RunDaemon(opts RunDaemonOpts) error {
 	s.SessionID = opts.SessionID
 	s.RoleName = opts.RoleName
 	s.SessionDir = opts.SessionDir
-	s.ClaudeConfigDir = opts.ClaudeConfigDir
 	s.Instructions = opts.Instructions
 	s.SystemPrompt = opts.SystemPrompt
 	s.Model = opts.Model
-	s.PermissionMode = opts.PermissionMode
-	s.AllowedTools = opts.AllowedTools
-	s.DisallowedTools = opts.DisallowedTools
+	s.HarnessType = opts.HarnessType
+	s.HarnessConfigDir = opts.HarnessConfigDir
+	s.ClaudePermissionMode = opts.ClaudePermissionMode
+	s.CodexSandboxMode = opts.CodexSandboxMode
+	s.CodexAskForApproval = opts.CodexAskForApproval
+	s.AdditionalDirs = opts.AdditionalDirs
+	if cwd, err := os.Getwd(); err == nil {
+		s.WorkingDir = cwd
+	}
 	s.HeartbeatIdleTimeout = opts.Heartbeat.IdleTimeout
 	s.HeartbeatMessage = opts.Heartbeat.Message
 	s.HeartbeatCondition = opts.Heartbeat.Condition
@@ -75,14 +82,8 @@ func RunDaemon(opts RunDaemonOpts) error {
 
 	sockPath := socketdir.Path(socketdir.TypeAgent, opts.Name)
 
-	// Check if socket already exists.
-	if _, err := os.Stat(sockPath); err == nil {
-		conn, err := net.DialTimeout("unix", sockPath, 500*time.Millisecond)
-		if err == nil {
-			conn.Close()
-			return fmt.Errorf("agent %q is already running", opts.Name)
-		}
-		os.Remove(sockPath)
+	if err := socketdir.ProbeSocket(sockPath, fmt.Sprintf("agent %q", opts.Name)); err != nil {
+		return err
 	}
 
 	// Create Unix socket.
@@ -96,18 +97,18 @@ func RunDaemon(opts RunDaemonOpts) error {
 	}()
 
 	// Write session metadata for h2 peek and other tools.
-	if s.SessionDir != "" && s.ClaudeConfigDir != "" {
+	if s.SessionDir != "" {
+		agentEnvVars := s.harness.BuildCommandEnvVars(config.ConfigDir())
 		cwd, _ := os.Getwd()
 		meta := config.SessionMetadata{
-			AgentName:              opts.Name,
-			SessionID:              opts.SessionID,
-			ClaudeConfigDir:        s.ClaudeConfigDir,
-			CWD:                    cwd,
-			ClaudeCodeSessionLogPath: config.ClaudeCodeSessionLogPath(s.ClaudeConfigDir, cwd, opts.SessionID),
-			Command:                opts.Command,
-			Role:                   opts.RoleName,
-			Overrides:              opts.Overrides,
-			StartedAt:              s.StartTime.UTC().Format(time.RFC3339),
+			AgentName:       opts.Name,
+			SessionID:       opts.SessionID,
+			ClaudeConfigDir: agentEnvVars["CLAUDE_CONFIG_DIR"],
+			CWD:             cwd,
+			Command:         opts.Command,
+			Role:            opts.RoleName,
+			Overrides:       opts.Overrides,
+			StartedAt:       s.StartTime.UTC().Format(time.RFC3339),
 		}
 		if err := config.WriteSessionMetadata(s.SessionDir, meta); err != nil {
 			log.Printf("warning: write session metadata: %v", err)
@@ -133,11 +134,10 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 	s := d.Session
 	uptime := time.Since(d.StartTime)
 	st, sub := s.State()
+	activity := s.ActivitySnapshot()
 	var toolName string
-	if st == agent.StateActive {
-		if hc := s.Agent.HookCollector(); hc != nil {
-			toolName = hc.Snapshot().LastToolName
-		}
+	if st == monitor.StateActive {
+		toolName = activity.LastToolName
 	}
 	info := &message.AgentInfo{
 		Name:             s.Name,
@@ -148,24 +148,19 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 		Uptime:           virtualterminal.FormatIdleDuration(uptime),
 		State:            st.String(),
 		SubState:         sub.String(),
-		StateDisplayText: agent.FormatStateLabel(st.String(), sub.String(), toolName),
+		StateDisplayText: monitor.FormatStateLabel(st.String(), sub.String(), toolName),
 		StateDuration:    virtualterminal.FormatIdleDuration(s.StateDuration()),
 		QueuedCount:      s.Queue.PendingCount(),
 	}
 
 	// Pull from OTEL collector if active.
-	m := s.Agent.Metrics()
+	m := s.Metrics()
 	if m.EventsReceived {
 		info.InputTokens = m.InputTokens
 		info.OutputTokens = m.OutputTokens
 		info.TotalTokens = m.TotalTokens
 		info.TotalCostUSD = m.TotalCostUSD
-		info.LinesAdded = m.LinesAdded
-		info.LinesRemoved = m.LinesRemoved
 		info.ToolCounts = m.ToolCounts
-
-		// Build per-model stats from OTEL metrics endpoint data.
-		info.ModelStats = buildModelStats(m)
 	}
 
 	// Point-in-time git stats.
@@ -175,48 +170,12 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 		info.GitLinesRemoved = gs.LinesRemoved
 	}
 
-	// Pull from hook collector if active.
-	if hc := s.Agent.HookCollector(); hc != nil {
-		hs := hc.Snapshot()
-		info.LastToolUse = hs.LastToolName
-		info.ToolUseCount = hs.ToolUseCount
-		info.BlockedOnPermission = hs.BlockedOnPermission
-		info.BlockedToolName = hs.BlockedToolName
-	}
+	info.LastToolUse = activity.LastToolName
+	info.ToolUseCount = activity.ToolUseCount
+	info.BlockedOnPermission = activity.BlockedOnPermission
+	info.BlockedToolName = activity.BlockedToolName
 
 	return info
-}
-
-// buildModelStats converts per-model maps into a sorted slice of ModelStat.
-func buildModelStats(m agent.OtelMetricsSnapshot) []message.ModelStat {
-	if len(m.ModelCosts) == 0 && len(m.ModelTokens) == 0 {
-		return nil
-	}
-
-	// Collect all model names.
-	models := make(map[string]bool)
-	for model := range m.ModelCosts {
-		models[model] = true
-	}
-	for model := range m.ModelTokens {
-		models[model] = true
-	}
-
-	var stats []message.ModelStat
-	for model := range models {
-		stat := message.ModelStat{
-			Model:   model,
-			CostUSD: m.ModelCosts[model],
-		}
-		if tokens, ok := m.ModelTokens[model]; ok {
-			stat.InputTokens = tokens["input"]
-			stat.OutputTokens = tokens["output"]
-			stat.CacheRead = tokens["cacheRead"]
-			stat.CacheCreate = tokens["cacheCreation"]
-		}
-		stats = append(stats, stat)
-	}
-	return stats
 }
 
 // gitDiffStats holds parsed git diff --numstat output.
@@ -233,23 +192,30 @@ func gitStats() *gitDiffStats {
 
 // ForkDaemonOpts holds all options for forking a daemon process.
 type ForkDaemonOpts struct {
-	Name            string
-	SessionID       string
-	Command         string
-	Args            []string
-	RoleName        string
-	SessionDir      string
-	ClaudeConfigDir string
-	Instructions    string   // role instructions → --append-system-prompt
-	SystemPrompt    string   // replaces default system prompt → --system-prompt
-	Model           string   // model selection → --model
-	PermissionMode  string   // permission mode → --permission-mode
-	AllowedTools    []string // allowed tools → --allowedTools (comma-joined)
-	DisallowedTools []string // disallowed tools → --disallowedTools (comma-joined)
-	Heartbeat       DaemonHeartbeat
-	CWD             string   // working directory for the child process
-	Pod             string   // pod name (set as H2_POD env var)
-	Overrides       []string // --override key=value pairs (recorded in session metadata)
+	Name                 string
+	SessionID            string
+	Command              string
+	Args                 []string
+	RoleName             string
+	SessionDir           string
+	Instructions         string // role instructions → --append-system-prompt
+	SystemPrompt         string // replaces default system prompt → --system-prompt
+	Model                string // model selection → --model
+	HarnessType          string // resolved harness type from launcher
+	HarnessConfigDir     string // resolved harness config dir from launcher
+	ClaudePermissionMode string // Claude Code --permission-mode
+	CodexSandboxMode     string // Codex --sandbox
+	CodexAskForApproval  string // Codex --ask-for-approval
+	Heartbeat            DaemonHeartbeat
+	CWD                  string   // working directory for the child process
+	AdditionalDirs       []string // extra dirs passed via --add-dir
+	Pod                  string   // pod name (set as H2_POD env var)
+	Overrides            []string // --override key=value pairs (recorded in session metadata)
+	OscFg                string   // startup terminal foreground color (X11 rgb)
+	OscBg                string   // startup terminal background color (X11 rgb)
+	ColorFGBG            string   // startup COLORFGBG hint
+	Term                 string   // TERM value from launching terminal
+	ColorTerm            string   // COLORTERM value from launching terminal
 }
 
 // ForkDaemon starts a daemon in a background process by re-execing with
@@ -267,9 +233,6 @@ func ForkDaemon(opts ForkDaemonOpts) error {
 	if opts.SessionDir != "" {
 		daemonArgs = append(daemonArgs, "--session-dir", opts.SessionDir)
 	}
-	if opts.ClaudeConfigDir != "" {
-		daemonArgs = append(daemonArgs, "--claude-config-dir", opts.ClaudeConfigDir)
-	}
 	if opts.Heartbeat.IdleTimeout > 0 {
 		daemonArgs = append(daemonArgs, "--heartbeat-idle-timeout", opts.Heartbeat.IdleTimeout.String())
 		daemonArgs = append(daemonArgs, "--heartbeat-message", opts.Heartbeat.Message)
@@ -286,14 +249,23 @@ func ForkDaemon(opts ForkDaemonOpts) error {
 	if opts.Model != "" {
 		daemonArgs = append(daemonArgs, "--model", opts.Model)
 	}
-	if opts.PermissionMode != "" {
-		daemonArgs = append(daemonArgs, "--permission-mode", opts.PermissionMode)
+	if opts.HarnessType != "" {
+		daemonArgs = append(daemonArgs, "--harness-type", opts.HarnessType)
 	}
-	for _, tool := range opts.AllowedTools {
-		daemonArgs = append(daemonArgs, "--allowed-tool", tool)
+	if opts.HarnessConfigDir != "" {
+		daemonArgs = append(daemonArgs, "--harness-config-dir", opts.HarnessConfigDir)
 	}
-	for _, tool := range opts.DisallowedTools {
-		daemonArgs = append(daemonArgs, "--disallowed-tool", tool)
+	if opts.ClaudePermissionMode != "" {
+		daemonArgs = append(daemonArgs, "--permission-mode", opts.ClaudePermissionMode)
+	}
+	if opts.CodexSandboxMode != "" {
+		daemonArgs = append(daemonArgs, "--codex-sandbox-mode", opts.CodexSandboxMode)
+	}
+	if opts.CodexAskForApproval != "" {
+		daemonArgs = append(daemonArgs, "--codex-ask-for-approval", opts.CodexAskForApproval)
+	}
+	for _, dir := range opts.AdditionalDirs {
+		daemonArgs = append(daemonArgs, "--additional-dir", dir)
 	}
 	for _, ov := range opts.Overrides {
 		daemonArgs = append(daemonArgs, "--override", ov)
@@ -314,6 +286,21 @@ func ForkDaemon(opts ForkDaemonOpts) error {
 	}
 	if opts.Pod != "" {
 		env = append(env, "H2_POD="+opts.Pod)
+	}
+	if opts.OscFg != "" {
+		env = append(env, "H2_OSC_FG="+opts.OscFg)
+	}
+	if opts.OscBg != "" {
+		env = append(env, "H2_OSC_BG="+opts.OscBg)
+	}
+	if opts.ColorFGBG != "" {
+		env = append(env, "H2_COLORFGBG="+opts.ColorFGBG)
+	}
+	if opts.Term != "" {
+		env = append(env, "H2_TERM="+opts.Term)
+	}
+	if opts.ColorTerm != "" {
+		env = append(env, "H2_COLORTERM="+opts.ColorTerm)
 	}
 	cmd.Env = env
 

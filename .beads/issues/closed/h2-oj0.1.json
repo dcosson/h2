@@ -1,0 +1,30 @@
+{
+  "id": "h2-oj0.1",
+  "title": "Template inheritance metadata and variable contract helpers",
+  "description": "In internal/tmpl, add inheritance metadata extraction and variable-definition helpers needed by role inheritance. Implement MergeVarDefs and required-var coverage validation, with clear semantics for required vs optional parent vars. Add unit tests in internal/tmpl/tmpl_test.go for merge overlay behavior, required var enforcement, and inherits extraction/parsing edge cases.",
+  "status": "closed",
+  "priority": 2,
+  "type": "task",
+  "parent": "h2-oj0",
+  "dependencies": [
+    {
+      "id": "h2-oj0",
+      "type": "parent-child"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "h2-oj0.2",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=role-inheritance"
+  ],
+  "created_at": "2026-02-25T09:53:37.400364-08:00",
+  "updated_at": "2026-02-25T10:00:10.533843-08:00",
+  "closed_at": "2026-02-25T10:00:10.533843-08:00",
+  "close_reason": "Closed"
+}

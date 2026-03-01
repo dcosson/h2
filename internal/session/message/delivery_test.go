@@ -3,10 +3,14 @@ package message
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"h2/internal/config"
 )
 
 // threadSafeBuffer is a bytes.Buffer safe for concurrent Write calls.
@@ -353,7 +357,7 @@ func TestDeliver_InterruptCallsNoteInterrupt(t *testing.T) {
 		WaitForIdle: func(ctx context.Context) bool {
 			return true
 		},
-		NoteInterrupt: func() {
+		SignalInterrupt: func() {
 			interruptCalls++
 		},
 		OnDeliver: func() {
@@ -373,7 +377,7 @@ func TestDeliver_InterruptCallsNoteInterrupt(t *testing.T) {
 	close(stop)
 
 	if interruptCalls != 1 {
-		t.Fatalf("expected 1 NoteInterrupt call, got %d", interruptCalls)
+		t.Fatalf("expected 1 SignalInterrupt call, got %d", interruptCalls)
 	}
 }
 
@@ -398,7 +402,7 @@ func TestDeliver_NormalDoesNotCallNoteInterrupt(t *testing.T) {
 		Queue:     q,
 		PtyWriter: &buf,
 		IsIdle:    func() bool { return true },
-		NoteInterrupt: func() {
+		SignalInterrupt: func() {
 			interruptCalls++
 		},
 		OnDeliver: func() {
@@ -418,7 +422,7 @@ func TestDeliver_NormalDoesNotCallNoteInterrupt(t *testing.T) {
 	close(stop)
 
 	if interruptCalls != 0 {
-		t.Fatalf("NoteInterrupt should not be called for normal priority, got %d calls", interruptCalls)
+		t.Fatalf("SignalInterrupt should not be called for normal priority, got %d calls", interruptCalls)
 	}
 }
 
@@ -473,6 +477,37 @@ func TestEnqueueRaw_BypassesBlockedAndNoPrefix(t *testing.T) {
 	}
 	if !strings.HasSuffix(out, "\r") {
 		t.Fatal("expected output to end with \\r")
+	}
+}
+
+func TestPrepareMessage_UsesH2Dir(t *testing.T) {
+	// Create a custom h2 dir.
+	customH2Dir := filepath.Join(t.TempDir(), "custom-h2")
+	if err := os.MkdirAll(customH2Dir, 0o755); err != nil {
+		t.Fatalf("create custom h2 dir: %v", err)
+	}
+	if err := config.WriteMarker(customH2Dir); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	t.Setenv("H2_DIR", customH2Dir)
+	config.ResetResolveCache()
+	t.Cleanup(config.ResetResolveCache)
+
+	q := NewMessageQueue()
+	_, err := PrepareMessage(q, "test-agent", "sender", "hello", PriorityNormal)
+	if err != nil {
+		t.Fatalf("PrepareMessage: %v", err)
+	}
+
+	// Message file should be under customH2Dir/messages/test-agent/.
+	msgDir := filepath.Join(customH2Dir, "messages", "test-agent")
+	entries, err := os.ReadDir(msgDir)
+	if err != nil {
+		t.Fatalf("read message dir: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 message file, got %d", len(entries))
 	}
 }
 

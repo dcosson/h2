@@ -153,7 +153,9 @@ h2 init /tmp/test-h2-propagate
 # Create a minimal role
 cat > /tmp/test-h2-propagate/roles/echo-env.yaml <<'EOF'
 name: echo-env
-agent_type: bash
+agent_harness:
+  harness_type: generic
+  command: bash
 instructions: unused
 EOF
 
@@ -396,7 +398,8 @@ cat ~/.h2/sessions/test-meta/session.metadata.json | grep overrides
 # Ensure roles exist
 cat > ~/.h2/roles/worker.yaml <<'EOF'
 name: worker
-agent_type: claude
+agent_harness:
+  harness_type: claude_code
 instructions: You are a worker agent.
 EOF
 ```

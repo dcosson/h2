@@ -202,7 +202,9 @@ func TestReliability_IdleFirstPriority_Ordering(t *testing.T) {
 			tokens := extractTokensFromText(line)
 			if len(tokens) > 0 {
 				// Extract timestamp from the JSON line.
-				var entry struct{ Ts string `json:"ts"` }
+				var entry struct {
+					Ts string `json:"ts"`
+				}
 				json.Unmarshal([]byte(line), &entry)
 				t.Logf("  %s: %v", entry.Ts, tokens)
 			}

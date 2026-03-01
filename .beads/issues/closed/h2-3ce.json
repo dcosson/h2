@@ -1,0 +1,39 @@
+{
+  "id": "h2-3ce",
+  "title": "Create monitor/ package with AgentEvent types and State/SubState",
+  "description": "Create internal/session/agent/monitor/ package. Define AgentEvent, AgentEventType enum (EventSessionStarted, EventTurnStarted, EventTurnCompleted, EventToolStarted, EventToolCompleted, EventApprovalRequested, EventAgentMessage, EventStateChange, EventSessionEnded). Define event payload structs (SessionStartedData, TurnCompletedData, ToolCompletedData, StateChangeData). Move State and SubState types from collector/ to monitor/. Update all imports.",
+  "status": "closed",
+  "priority": 1,
+  "type": "task",
+  "parent": "h2-meo",
+  "dependencies": [
+    {
+      "id": "h2-meo",
+      "type": "parent-child"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "h2-hbe",
+      "type": "blocks"
+    },
+    {
+      "id": "h2-uqd",
+      "type": "blocks"
+    },
+    {
+      "id": "h2-gsk",
+      "type": "blocks"
+    },
+    {
+      "id": "h2-ok3",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-19T16:02:12.907605-08:00",
+  "updated_at": "2026-02-19T16:28:59.870905-08:00",
+  "closed_at": "2026-02-19T16:28:59.870905-08:00",
+  "close_reason": "Closed"
+}

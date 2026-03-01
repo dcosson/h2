@@ -10,6 +10,7 @@ import (
 
 	"h2/internal/config"
 	"h2/internal/session"
+	"h2/internal/socketdir"
 	"h2/internal/tmpl"
 )
 
@@ -25,14 +26,17 @@ func newRunCmd() *cobra.Command {
 	var varFlags []string
 
 	cmd := &cobra.Command{
-		Use:   "run [flags]",
+		Use:   "run [name] [flags]",
 		Short: "Start a new agent",
 		Long: `Start a new agent, optionally configured from a role.
 
 By default, uses the "default" role from ~/.h2/roles/default.yaml.
 
   h2 run                        Use the default role
+  h2 run coder-1                Use explicit agent name
   h2 run --role concierge       Use a specific role
+  h2 run coder-1 --role concierge
+                                Use a specific role with explicit agent name
   h2 run --agent-type claude    Run an agent type without a role
   h2 run --command "vim"        Run an explicit command`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -69,13 +73,25 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 				return fmt.Errorf("--role, --agent-type, and --command are mutually exclusive")
 			}
 
-			if cmd.Flags().Changed("agent-type") {
-				// Run agent type without a role.
-				cmdCommand = agentType
-			} else if cmd.Flags().Changed("command") {
+			// Positional name is supported for role/agent-type modes.
+			var positionalName string
+			if cmd.Flags().Changed("command") {
 				// Run explicit command without a role.
 				cmdCommand = command
 				cmdArgs = args
+			} else {
+				if len(args) > 1 {
+					return fmt.Errorf("accepts at most one positional name argument, got %d", len(args))
+				}
+				if len(args) == 1 {
+					positionalName = args[0]
+				}
+			}
+			name = positionalName
+
+			if cmd.Flags().Changed("agent-type") {
+				// Run agent type without a role.
+				cmdCommand = agentType
 			} else {
 				// Use a role (specified or default).
 				if roleName == "" {
@@ -89,25 +105,44 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 				}
 
 				// Build template context for role rendering.
-				agentName := name
-				if agentName == "" {
-					agentName = session.GenerateName()
-					name = agentName
-				}
+				rootDir, _ := config.RootDir()
 				ctx := &tmpl.Context{
-					AgentName: agentName,
 					RoleName:  roleName,
 					PodName:   pod,
 					H2Dir:     config.ConfigDir(),
+					H2RootDir: rootDir,
 					Var:       vars,
 				}
 
-				// When --pod is specified, check pod roles first then global.
+				// Create name template functions with collision avoidance.
+				existingNames := getExistingAgentNames()
+				nameFuncs := tmpl.NameFuncs(session.GenerateName, existingNames)
+
+				// Load the role with two-pass agent name resolution.
 				var role *config.Role
 				if pod != "" {
+					// Pod roles use existing flow — pods handle their own name resolution.
+					agentName := name
+					if agentName == "" {
+						if dryRun {
+							agentName = dryRunAgentNamePlaceholder
+						} else {
+							agentName = session.GenerateName()
+						}
+					}
+					ctx.AgentName = agentName
+					name = agentName
 					role, err = config.LoadPodRoleRendered(roleName, ctx)
 				} else {
-					role, err = config.LoadRoleRendered(roleName, ctx)
+					rolePath := config.ResolveRolePath(roleName)
+					resolvedCLIName := name
+					if dryRun && resolvedCLIName == "" {
+						// Keep dry-run deterministic and avoid rendering random names.
+						resolvedCLIName = dryRunAgentNamePlaceholder
+					}
+					role, name, err = config.LoadRoleWithNameResolution(
+						rolePath, ctx, nameFuncs, resolvedCLIName, session.GenerateName,
+					)
 				}
 				if err != nil {
 					if errors.Is(err, os.ErrNotExist) {
@@ -126,7 +161,7 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 					}
 				}
 				if dryRun {
-					rc, err := resolveAgentConfig(name, role, pod, overrides)
+					rc, err := resolveAgentConfig(name, role, pod, overrides, nil)
 					if err != nil {
 						return err
 					}
@@ -145,17 +180,29 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 			if name == "" {
 				name = session.GenerateName()
 			}
+			if err := ensureAgentSocketAvailable(name); err != nil {
+				return err
+			}
+			hcfg := commandHarnessConfig(cmdCommand)
 
 			sessionID := uuid.New().String()
+			colorHints := detectTerminalHints()
 
 			// Fork a daemon process.
 			if err := forkDaemonFunc(session.ForkDaemonOpts{
-				Name:      name,
-				SessionID: sessionID,
-				Command:   cmdCommand,
-				Args:      cmdArgs,
-				Heartbeat: heartbeat,
-				Pod:       pod,
+				Name:             name,
+				SessionID:        sessionID,
+				Command:          cmdCommand,
+				HarnessType:      hcfg.HarnessType,
+				HarnessConfigDir: hcfg.ConfigDir,
+				Args:             cmdArgs,
+				Heartbeat:        heartbeat,
+				Pod:              pod,
+				OscFg:            colorHints.OscFg,
+				OscBg:            colorHints.OscBg,
+				ColorFGBG:        colorHints.ColorFGBG,
+				Term:             colorHints.Term,
+				ColorTerm:        colorHints.ColorTerm,
 			}); err != nil {
 				return err
 			}
@@ -170,15 +217,27 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 		},
 	}
 
-	cmd.Flags().StringVar(&name, "name", "", "Agent name (auto-generated if omitted)")
 	cmd.Flags().BoolVar(&detach, "detach", false, "Don't auto-attach after starting")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show resolved config without launching")
 	cmd.Flags().StringVar(&roleName, "role", "", "Role to use (defaults to 'default')")
 	cmd.Flags().StringVar(&agentType, "agent-type", "", "Agent type to run without a role (e.g. claude)")
 	cmd.Flags().StringVar(&command, "command", "", "Explicit command to run without a role")
 	cmd.Flags().StringVar(&pod, "pod", "", "Pod name for the agent (sets H2_POD env var)")
-	cmd.Flags().StringArrayVar(&overrides, "override", nil, "Override role field (key=value, e.g. worktree.enabled=true)")
+	cmd.Flags().StringArrayVar(&overrides, "override", nil, "Override role field (key=value, e.g. worktree_enabled=true)")
 	cmd.Flags().StringArrayVar(&varFlags, "var", nil, "Set template variable (key=value, repeatable)")
 
 	return cmd
+}
+
+// getExistingAgentNames returns the names of currently running agents.
+func getExistingAgentNames() []string {
+	entries, err := socketdir.ListByType(socketdir.TypeAgent)
+	if err != nil {
+		return nil
+	}
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name
+	}
+	return names
 }

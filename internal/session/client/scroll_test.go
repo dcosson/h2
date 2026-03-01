@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"io"
+	"os"
 	"testing"
 
 	"github.com/vito/midterm"
@@ -91,10 +92,35 @@ func TestClampScrollOffset_Negative(t *testing.T) {
 	}
 }
 
+func TestClampScrollOffset_UsesCursorYNotContentLen(t *testing.T) {
+	o := newTestClient(10, 80)
+	for i := 0; i < 40; i++ {
+		o.VT.Scrollback.Write([]byte("line\n"))
+	}
+	// Simulate a TUI where Content is inflated (AutoResizeY grew it)
+	// but cursor is at a reasonable position.
+	o.VT.Scrollback.Cursor.Y = 20
+
+	o.ScrollOffset = 999
+	o.ClampScrollOffset()
+
+	// maxOffset should be based on Cursor.Y, not len(Content).
+	want := 20 - o.VT.ChildRows + 1
+	if want < 0 {
+		want = 0
+	}
+	if o.ScrollOffset != want {
+		t.Fatalf("expected offset %d based on Cursor.Y, got %d", want, o.ScrollOffset)
+	}
+}
+
 // --- EnterScrollMode / ExitScrollMode ---
 
 func TestEnterExitScrollMode(t *testing.T) {
 	o := newTestClient(10, 80)
+	for i := 0; i < 20; i++ {
+		o.VT.Scrollback.Write([]byte("line\n"))
+	}
 	if o.Mode != ModeNormal {
 		t.Fatalf("expected ModeNormal, got %d", o.Mode)
 	}
@@ -106,6 +132,9 @@ func TestEnterExitScrollMode(t *testing.T) {
 	if o.ScrollOffset != 0 {
 		t.Fatalf("expected offset 0 on enter, got %d", o.ScrollOffset)
 	}
+	if o.ScrollAnchorY != o.scrollbackBottomRow() {
+		t.Fatalf("expected anchor %d, got %d", o.scrollbackBottomRow(), o.ScrollAnchorY)
+	}
 
 	o.ScrollOffset = 5
 	o.ExitScrollMode()
@@ -114,6 +143,36 @@ func TestEnterExitScrollMode(t *testing.T) {
 	}
 	if o.ScrollOffset != 0 {
 		t.Fatalf("expected offset 0 after exit, got %d", o.ScrollOffset)
+	}
+	if o.ScrollAnchorY != 0 {
+		t.Fatalf("expected anchor reset to 0, got %d", o.ScrollAnchorY)
+	}
+	if o.ScrollHistoryAnchor != 0 {
+		t.Fatalf("expected ScrollHistoryAnchor reset to 0, got %d", o.ScrollHistoryAnchor)
+	}
+}
+
+func TestClampScrollOffset_UsesFrozenAnchorInScrollMode(t *testing.T) {
+	o := newTestClient(10, 80)
+	for i := 0; i < 30; i++ {
+		o.VT.Scrollback.Write([]byte("line\n"))
+	}
+	o.EnterScrollMode()
+	anchor := o.ScrollAnchorY
+
+	// Simulate new output arriving while scrolled.
+	for i := 0; i < 50; i++ {
+		o.VT.Scrollback.Write([]byte("new\n"))
+	}
+
+	o.ScrollOffset = 999
+	o.ClampScrollOffset()
+	want := anchor - o.VT.ChildRows + 1
+	if want < 0 {
+		want = 0
+	}
+	if o.ScrollOffset != want {
+		t.Fatalf("expected clamped offset %d with frozen anchor, got %d", want, o.ScrollOffset)
 	}
 }
 
@@ -132,7 +191,7 @@ func TestScrollUpDown(t *testing.T) {
 		t.Fatalf("expected offset 5, got %d", o.ScrollOffset)
 	}
 
-	o.ScrollDown(3)
+	o.ScrollDown(3, true)
 	if o.ScrollOffset != 2 {
 		t.Fatalf("expected offset 2, got %d", o.ScrollOffset)
 	}
@@ -169,7 +228,7 @@ func TestScrollDown_ExitsAtZero(t *testing.T) {
 	}
 
 	// Scroll down past zero should exit scroll mode.
-	o.ScrollDown(10)
+	o.ScrollDown(10, true)
 	if o.Mode != ModeNormal {
 		t.Fatalf("expected ModeNormal after scrolling to bottom, got %d", o.Mode)
 	}
@@ -178,18 +237,53 @@ func TestScrollDown_ExitsAtZero(t *testing.T) {
 	}
 }
 
+func TestScrollDown_StaysInModeWhenNoExit(t *testing.T) {
+	o := newTestClient(10, 80)
+	for i := 0; i < 30; i++ {
+		o.VT.Scrollback.Write([]byte("line\n"))
+	}
+
+	o.EnterScrollMode()
+	o.ScrollUp(3)
+
+	// Scroll down past zero with exitAtBottom=false should stay in scroll mode.
+	o.ScrollDown(10, false)
+	if !o.IsScrollMode() {
+		t.Fatal("expected to stay in scroll mode with exitAtBottom=false")
+	}
+	if o.ScrollOffset != 0 {
+		t.Fatalf("expected offset 0, got %d", o.ScrollOffset)
+	}
+}
+
 // --- HandleSGRMouse ---
 
-func TestHandleSGRMouse_ScrollUpEntersMode(t *testing.T) {
+func TestHandleSGRMouse_ScrollUpEntersScrollMode(t *testing.T) {
+	// Scroll up should always enter h2's scroll mode.
 	o := newTestClient(10, 80)
 	for i := 0; i < 20; i++ {
 		o.VT.Scrollback.Write([]byte("line\n"))
 	}
 
-	// SGR mouse scroll up: button 64. Params = "<64;1;1"
 	o.HandleSGRMouse([]byte("<64;1;1"), true)
 	if o.Mode != ModeScroll {
 		t.Fatalf("expected ModeScroll, got %d", o.Mode)
+	}
+	if o.ScrollOffset != scrollStep {
+		t.Fatalf("expected offset %d, got %d", scrollStep, o.ScrollOffset)
+	}
+}
+
+func TestHandleSGRMouse_ScrollUpEntersModeWhenChildExited(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.VT.ChildExited = true
+	for i := 0; i < 20; i++ {
+		o.VT.Scrollback.Write([]byte("line\n"))
+	}
+
+	o.HandleSGRMouse([]byte("<64;1;1"), true)
+	if o.Mode != ModeScroll {
+		t.Fatalf("expected ModeScroll when child exited, got %d", o.Mode)
 	}
 	if o.ScrollOffset != scrollStep {
 		t.Fatalf("expected offset %d, got %d", scrollStep, o.ScrollOffset)
@@ -212,25 +306,24 @@ func TestHandleSGRMouse_ScrollDownInMode(t *testing.T) {
 	}
 }
 
-func TestHandleSGRMouse_ScrollInPassthrough(t *testing.T) {
+func TestHandleSGRMouse_ScrollInPassthrough_EntersPassthroughScroll(t *testing.T) {
+	// Scroll up in passthrough mode enters ModePassthroughScroll.
 	o := newTestClient(10, 80)
 	o.Mode = ModePassthrough
 	o.HandleSGRMouse([]byte("<64;1;1"), true)
 	if o.Mode != ModePassthroughScroll {
-		t.Fatalf("expected ModePassthroughScroll from passthrough, got %d", o.Mode)
+		t.Fatalf("expected ModePassthroughScroll, got %d", o.Mode)
 	}
 }
 
-func TestPassthrough_ScrollSequenceIntercepted(t *testing.T) {
-	// SGR mouse scroll-up sequence sent during passthrough should enter
-	// passthrough scroll mode rather than being forwarded as raw escape chars.
+func TestPassthrough_ScrollSequenceEntersScrollMode(t *testing.T) {
+	// SGR mouse scroll-up sequence in passthrough enters ModePassthroughScroll.
 	o := newTestClient(10, 80)
 	o.Mode = ModePassthrough
-	// ESC [ < 64 ; 1 ; 1 M  (scroll up press)
 	buf := []byte("\x1b[<64;1;1M")
 	o.HandlePassthroughBytes(buf, 0, len(buf))
 	if o.Mode != ModePassthroughScroll {
-		t.Fatalf("expected ModePassthroughScroll after scroll-up in passthrough, got %d", o.Mode)
+		t.Fatalf("expected ModePassthroughScroll, got %d", o.Mode)
 	}
 }
 
@@ -308,6 +401,51 @@ func TestRenderSelectHint_NotShownWhenFalse(t *testing.T) {
 	o.renderSelectHint(&buf)
 	if buf.Len() != 0 {
 		t.Fatal("expected no output when SelectHint is false")
+	}
+}
+
+func TestRenderScrollView_UsesScrollHistoryWhenAvailable(t *testing.T) {
+	o := newTestClient(5, 80)
+	var out bytes.Buffer
+	o.Output = &out
+
+	// Mark that scroll regions are used (e.g. codex).
+	o.VT.ScrollRegionUsed = true
+	// Populate ScrollHistory with captured lines.
+	o.VT.ScrollHistory = []string{
+		"history-line-0",
+		"history-line-1",
+		"history-line-2",
+		"history-line-3",
+		"history-line-4",
+		"history-target",
+	}
+
+	o.EnterScrollMode()
+	// Scroll up to see ScrollHistory content.
+	o.ScrollUp(3)
+	o.RenderScreen()
+
+	if !bytes.Contains(out.Bytes(), []byte("history-target")) {
+		t.Fatalf("expected scroll render to include ScrollHistory content")
+	}
+}
+
+func TestRenderScrollView_DoesNotBlankOnFirstScrollTick(t *testing.T) {
+	o := newTestClient(5, 80)
+	var out bytes.Buffer
+	o.Output = &out
+
+	// Write content to scrollback.
+	o.VT.Scrollback.Write([]byte("line-a\nline-b\nline-c\n"))
+
+	// Scroll up enters scroll mode.
+	o.HandleSGRMouse([]byte("<64;1;1"), true)
+
+	if !bytes.Contains(out.Bytes(), []byte("line-a")) &&
+		!bytes.Contains(out.Bytes(), []byte("line-b")) &&
+		!bytes.Contains(out.Bytes(), []byte("line-c")) {
+		t.Fatalf("expected first scroll render to include existing scrollback lines")
 	}
 }
 
@@ -409,6 +547,109 @@ func TestHandleScrollBytes_ArrowDownScrolls(t *testing.T) {
 	o.HandleScrollBytes(buf, 0, len(buf))
 	if o.ScrollOffset != 4 {
 		t.Fatalf("expected offset 4, got %d", o.ScrollOffset)
+	}
+}
+
+func TestHandleScrollBytes_PageUpScrolls(t *testing.T) {
+	o := newTestClient(10, 80)
+	for i := 0; i < 50; i++ {
+		o.VT.Scrollback.Write([]byte("line\n"))
+	}
+	o.EnterScrollMode()
+
+	// ESC [ 5 ~ = Page Up
+	buf := []byte{0x1B, '[', '5', '~'}
+	o.HandleScrollBytes(buf, 0, len(buf))
+	if o.ScrollOffset != o.VT.ChildRows {
+		t.Fatalf("expected offset %d (one page), got %d", o.VT.ChildRows, o.ScrollOffset)
+	}
+}
+
+func TestHandleScrollBytes_PageDownScrolls(t *testing.T) {
+	o := newTestClient(10, 80)
+	for i := 0; i < 50; i++ {
+		o.VT.Scrollback.Write([]byte("line\n"))
+	}
+	o.EnterScrollMode()
+	o.ScrollUp(20)
+
+	// ESC [ 6 ~ = Page Down
+	buf := []byte{0x1B, '[', '6', '~'}
+	o.HandleScrollBytes(buf, 0, len(buf))
+	if o.ScrollOffset != 20-o.VT.ChildRows {
+		t.Fatalf("expected offset %d, got %d", 20-o.VT.ChildRows, o.ScrollOffset)
+	}
+}
+
+func TestHandleScrollBytes_HomeScrollsToTop(t *testing.T) {
+	o := newTestClient(10, 80)
+	for i := 0; i < 50; i++ {
+		o.VT.Scrollback.Write([]byte("line\n"))
+	}
+	o.EnterScrollMode()
+
+	// ESC [ H = Home
+	buf := []byte{0x1B, '[', 'H'}
+	o.HandleScrollBytes(buf, 0, len(buf))
+
+	maxOffset, _ := o.scrollMaxOffset()
+	if o.ScrollOffset != maxOffset {
+		t.Fatalf("expected offset %d (max), got %d", maxOffset, o.ScrollOffset)
+	}
+}
+
+func TestHandleScrollBytes_EndExitsScrollMode(t *testing.T) {
+	o := newTestClient(10, 80)
+	for i := 0; i < 50; i++ {
+		o.VT.Scrollback.Write([]byte("line\n"))
+	}
+	o.EnterScrollMode()
+	o.ScrollUp(20)
+
+	// ESC [ F = End
+	buf := []byte{0x1B, '[', 'F'}
+	o.HandleScrollBytes(buf, 0, len(buf))
+
+	if o.IsScrollMode() {
+		t.Fatal("expected End to exit scroll mode")
+	}
+	if o.ScrollOffset != 0 {
+		t.Fatalf("expected offset 0, got %d", o.ScrollOffset)
+	}
+}
+
+func TestPageUp_EntersScrollModeFromNormal(t *testing.T) {
+	o := newTestClient(10, 80)
+	for i := 0; i < 30; i++ {
+		o.VT.Scrollback.Write([]byte("line\n"))
+	}
+
+	// ESC [ 5 ~ = Page Up in normal mode
+	buf := []byte{0x1B, '[', '5', '~'}
+	o.HandleDefaultBytes(buf, 0, len(buf))
+	if !o.IsScrollMode() {
+		t.Fatal("expected PageUp to enter scroll mode from normal mode")
+	}
+	if o.ScrollOffset != o.VT.ChildRows {
+		t.Fatalf("expected offset %d (one page), got %d", o.VT.ChildRows, o.ScrollOffset)
+	}
+}
+
+func TestHome_EntersScrollModeFromNormal(t *testing.T) {
+	o := newTestClient(10, 80)
+	for i := 0; i < 30; i++ {
+		o.VT.Scrollback.Write([]byte("line\n"))
+	}
+
+	// ESC [ H = Home in normal mode (no params)
+	buf := []byte{0x1B, '[', 'H'}
+	o.HandleDefaultBytes(buf, 0, len(buf))
+	if !o.IsScrollMode() {
+		t.Fatal("expected Home to enter scroll mode from normal mode")
+	}
+	maxOffset, _ := o.scrollMaxOffset()
+	if o.ScrollOffset != maxOffset {
+		t.Fatalf("expected offset %d (max), got %d", maxOffset, o.ScrollOffset)
 	}
 }
 
@@ -555,7 +796,7 @@ func TestExitedScrollMode_ScrollDownToBottomExits(t *testing.T) {
 	}
 
 	// Scroll down past zero exits scroll mode.
-	o.ScrollDown(10)
+	o.ScrollDown(10, true)
 	if o.Mode != ModeNormal {
 		t.Fatalf("expected ModeNormal after scrolling to bottom, got %d", o.Mode)
 	}
@@ -723,6 +964,43 @@ func TestMenu_EscExits(t *testing.T) {
 	}
 }
 
+func TestMenu_CtrlBackslashExits(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.Mode = ModeMenu
+	buf := []byte{0x1C} // ctrl+backslash
+	o.HandleMenuBytes(buf, 0, len(buf))
+	if o.Mode != ModeNormal {
+		t.Fatalf("expected ModeNormal after Ctrl+\\, got %d", o.Mode)
+	}
+}
+
+func TestMenu_UpDownArrowNavigatesHistory(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.Mode = ModeMenu
+	o.History = []string{"first", "second"}
+	o.HistIdx = -1
+	o.Input = []byte("draft")
+	o.CursorPos = len(o.Input)
+
+	// Up arrow should load newest history entry.
+	o.HandleMenuBytes([]byte{0x1B, '[', 'A'}, 0, 3)
+	if got := string(o.Input); got != "second" {
+		t.Fatalf("input after up = %q, want %q", got, "second")
+	}
+	if o.HistIdx != 1 {
+		t.Fatalf("HistIdx after up = %d, want 1", o.HistIdx)
+	}
+
+	// Down arrow should restore saved draft input.
+	o.HandleMenuBytes([]byte{0x1B, '[', 'B'}, 0, 3)
+	if got := string(o.Input); got != "draft" {
+		t.Fatalf("input after down = %q, want %q", got, "draft")
+	}
+	if o.HistIdx != -1 {
+		t.Fatalf("HistIdx after down = %d, want -1", o.HistIdx)
+	}
+}
+
 func TestMenu_OtherKeysIgnored(t *testing.T) {
 	o := newTestClient(10, 80)
 	o.Mode = ModeMenu
@@ -737,8 +1015,8 @@ func TestMenu_HelpLabel(t *testing.T) {
 	o := newTestClient(10, 80)
 	o.Mode = ModeMenu
 	got := o.HelpLabel()
-	if got != "esc exit" {
-		t.Fatalf("expected 'esc exit', got %q", got)
+	if got != `Ctrl+\ back | Up/Down history` {
+		t.Fatalf("unexpected menu help label: %q", got)
 	}
 }
 
@@ -925,6 +1203,24 @@ func TestModeLabel_Normal(t *testing.T) {
 	}
 }
 
+func TestFormatWorkingDirForBar_RelativeToH2DirTwoPartsNoPrefix(t *testing.T) {
+	o := newTestClient(10, 80)
+	t.Setenv("H2_DIR", "/Users/dcosson/h2home")
+	got := o.formatWorkingDirForBar("/Users/dcosson/h2home/projects/h2/subdir")
+	if got != "h2/subdir" {
+		t.Fatalf("got %q, want %q", got, "h2/subdir")
+	}
+}
+
+func TestFormatWorkingDirForBar_OutsideH2DirTwoPartsWithDotDotPrefix(t *testing.T) {
+	o := newTestClient(10, 80)
+	t.Setenv("H2_DIR", "/Users/dcosson/h2home")
+	got := o.formatWorkingDirForBar("/tmp/build/output")
+	if got != "../build/output" {
+		t.Fatalf("got %q, want %q", got, "../build/output")
+	}
+}
+
 // --- ModePassthroughScroll ---
 
 func TestEnterScrollFromPassthrough_EntersPassthroughScroll(t *testing.T) {
@@ -1021,7 +1317,7 @@ func TestScrollDownToBottom_FromPassthroughScroll_RestoresPassthrough(t *testing
 	}
 
 	// Scroll down past zero exits back to passthrough.
-	o.ScrollDown(10)
+	o.ScrollDown(10, true)
 	if o.Mode != ModePassthrough {
 		t.Fatalf("expected ModePassthrough after scrolling to bottom, got %d", o.Mode)
 	}
@@ -1030,24 +1326,22 @@ func TestScrollDownToBottom_FromPassthroughScroll_RestoresPassthrough(t *testing
 	}
 }
 
-func TestPassthrough_SGRMouseScroll_EntersPassthroughScroll(t *testing.T) {
+func TestPassthrough_SGRMouseScroll_EntersScrollMode(t *testing.T) {
+	// Scroll up in passthrough enters ModePassthroughScroll.
 	o := newTestClient(10, 80)
 	for i := 0; i < 20; i++ {
 		o.VT.Scrollback.Write([]byte("line\n"))
 	}
 	o.Mode = ModePassthrough
-	// SGR mouse scroll up: button 64
 	o.HandleSGRMouse([]byte("<64;1;1"), true)
 	if o.Mode != ModePassthroughScroll {
 		t.Fatalf("expected ModePassthroughScroll, got %d", o.Mode)
 	}
-	if o.ScrollOffset != scrollStep {
-		t.Fatalf("expected offset %d, got %d", scrollStep, o.ScrollOffset)
-	}
 }
 
-func TestPassthrough_ScrollSequence_EntersPassthroughScroll(t *testing.T) {
-	// Full SGR mouse scroll-up sequence via HandlePassthroughBytes.
+func TestPassthrough_ScrollSequence_EntersScrollMode(t *testing.T) {
+	// Full SGR mouse scroll-up sequence via HandlePassthroughBytes
+	// should enter passthrough scroll mode.
 	o := newTestClient(10, 80)
 	for i := 0; i < 20; i++ {
 		o.VT.Scrollback.Write([]byte("line\n"))
@@ -1056,7 +1350,7 @@ func TestPassthrough_ScrollSequence_EntersPassthroughScroll(t *testing.T) {
 	buf := []byte("\x1b[<64;1;1M")
 	o.HandlePassthroughBytes(buf, 0, len(buf))
 	if o.Mode != ModePassthroughScroll {
-		t.Fatalf("expected ModePassthroughScroll after scroll-up in passthrough, got %d", o.Mode)
+		t.Fatalf("expected ModePassthroughScroll, got %d", o.Mode)
 	}
 }
 
@@ -1091,5 +1385,227 @@ func TestRenderSelectHint_PassthroughScrollMode(t *testing.T) {
 	// Hint should be on row 2 when in passthrough scroll mode (same as ModeScroll).
 	if !bytes.Contains([]byte(output), []byte("[2;")) {
 		t.Fatal("expected hint on row 2 in passthrough scroll mode")
+	}
+}
+
+// --- ScrollHistory tests ---
+
+func TestScrollMaxOffset_WithScrollHistory(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.VT.ScrollRegionUsed = true
+	// With 25 ScrollHistory lines, max offset should be 25
+	// (total = 25 history + 10 live = 35, max = 35 - 10 = 25).
+	o.VT.ScrollHistory = make([]string, 25)
+	for i := range o.VT.ScrollHistory {
+		o.VT.ScrollHistory[i] = "line"
+	}
+	maxOff, ok := o.scrollMaxOffset()
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if maxOff != 25 {
+		t.Fatalf("expected maxOffset 25, got %d", maxOff)
+	}
+}
+
+func TestScrollHistoryAnchor_FrozenInScrollMode(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.VT.ScrollRegionUsed = true
+	o.VT.ScrollHistory = make([]string, 20)
+	for i := range o.VT.ScrollHistory {
+		o.VT.ScrollHistory[i] = "line"
+	}
+
+	o.EnterScrollMode()
+	if o.ScrollHistoryAnchor != 20 {
+		t.Fatalf("expected anchor 20, got %d", o.ScrollHistoryAnchor)
+	}
+
+	// New lines arrive after entering scroll mode.
+	o.VT.ScrollHistory = append(o.VT.ScrollHistory, "new1", "new2", "new3")
+
+	// scrollHistoryLen should use the frozen anchor, not live length.
+	got := o.scrollHistoryLen()
+	if got != 20 {
+		t.Fatalf("expected frozen scrollHistoryLen 20, got %d", got)
+	}
+}
+
+func TestRenderScrollViewHistory_ShowsHistoryAndLive(t *testing.T) {
+	o := newTestClient(5, 40)
+	var out bytes.Buffer
+	o.Output = &out
+
+	o.VT.ScrollRegionUsed = true
+	// Populate ScrollHistory.
+	o.VT.ScrollHistory = []string{
+		"scroll-line-0",
+		"scroll-line-1",
+		"scroll-line-2",
+	}
+	// Write some content to the live terminal.
+	o.VT.Vt.Write([]byte("live-content\r\n"))
+
+	o.EnterScrollMode()
+	// Scroll up enough to see ScrollHistory lines.
+	o.ScrollUp(3)
+	o.RenderScreen()
+
+	output := out.String()
+	if !bytes.Contains([]byte(output), []byte("scroll-line-0")) {
+		t.Fatalf("expected output to contain ScrollHistory line, got: %q", output)
+	}
+}
+
+func TestScrollHistory_IgnoredWithoutScrollRegion(t *testing.T) {
+	// When ScrollRegionUsed is false (e.g. Claude Code), ScrollHistory
+	// should NOT be used even if it has content.
+	o := newTestClient(10, 80)
+	o.VT.ScrollHistory = make([]string, 25)
+	for i := range o.VT.ScrollHistory {
+		o.VT.ScrollHistory[i] = "line"
+	}
+	// ScrollRegionUsed is false (default).
+	if o.hasScrollHistory() {
+		t.Fatal("expected hasScrollHistory=false when ScrollRegionUsed is false")
+	}
+	// scrollMaxOffset should fall through to Scrollback path.
+	for i := 0; i < 30; i++ {
+		o.VT.Scrollback.Write([]byte("sb\n"))
+	}
+	maxOff, ok := o.scrollMaxOffset()
+	if !ok {
+		t.Fatal("expected ok=true from Scrollback path")
+	}
+	if maxOff == 25 {
+		t.Fatal("maxOffset should NOT be based on ScrollHistory when ScrollRegionUsed is false")
+	}
+}
+
+func TestScrollHistory_FallsBackToScrollbackWhenEmpty(t *testing.T) {
+	o := newTestClient(5, 40)
+	var out bytes.Buffer
+	o.Output = &out
+
+	// No ScrollHistory, but Scrollback has content.
+	for i := 0; i < 15; i++ {
+		o.VT.Scrollback.Write([]byte("sb-line\n"))
+	}
+
+	o.EnterScrollMode()
+	o.ScrollUp(3)
+	o.RenderScreen()
+
+	output := out.String()
+	if !bytes.Contains([]byte(output), []byte("sb-line")) {
+		t.Fatalf("expected output to contain Scrollback content when ScrollHistory is empty")
+	}
+}
+
+// newTestClientWithPTY creates a test client with a pipe as the PTY so
+// writePTYOrHang works. Returns the client and a reader for the PTY output.
+func newTestClientWithPTY(childRows, cols int) (*Client, *os.File) {
+	r, w, _ := os.Pipe()
+	vt := &virtualterminal.VT{
+		Rows:      childRows + 2,
+		Cols:      cols,
+		ChildRows: childRows,
+		Vt:        midterm.NewTerminal(childRows, cols),
+		Output:    io.Discard,
+		Ptm:       w,
+	}
+	sb := midterm.NewTerminal(childRows, cols)
+	sb.AutoResizeY = true
+	sb.AppendOnly = true
+	vt.Scrollback = sb
+	c := &Client{
+		VT:     vt,
+		Output: io.Discard,
+		Mode:   ModeNormal,
+	}
+	return c, r
+}
+
+func TestHandleSGRMouse_AltScrollUp_SendsArrowKeys(t *testing.T) {
+	c, r := newTestClientWithPTY(10, 80)
+	defer r.Close()
+	defer c.VT.Ptm.Close()
+
+	c.VT.AltScrollEnabled = true
+	c.HandleSGRMouse([]byte("<64;1;1"), true)
+
+	// Should NOT enter scroll mode.
+	if c.IsScrollMode() {
+		t.Fatal("expected NOT to enter scroll mode when AltScrollEnabled")
+	}
+	if c.Mode != ModeNormal {
+		t.Fatalf("expected ModeNormal, got %d", c.Mode)
+	}
+
+	// Read what was written to the PTY.
+	buf := make([]byte, 256)
+	n, _ := r.Read(buf)
+	got := string(buf[:n])
+	// scrollStep=3, so expect 3 arrow up sequences.
+	want := "\033[A\033[A\033[A"
+	if got != want {
+		t.Fatalf("expected PTY output %q, got %q", want, got)
+	}
+}
+
+func TestHandleSGRMouse_AltScrollDown_SendsArrowKeys(t *testing.T) {
+	c, r := newTestClientWithPTY(10, 80)
+	defer r.Close()
+	defer c.VT.Ptm.Close()
+
+	c.VT.AltScrollEnabled = true
+	c.HandleSGRMouse([]byte("<65;1;1"), true)
+
+	if c.IsScrollMode() {
+		t.Fatal("expected NOT to enter scroll mode when AltScrollEnabled")
+	}
+
+	buf := make([]byte, 256)
+	n, _ := r.Read(buf)
+	got := string(buf[:n])
+	want := "\033[B\033[B\033[B"
+	if got != want {
+		t.Fatalf("expected PTY output %q, got %q", want, got)
+	}
+}
+
+func TestHandleSGRMouse_AltScrollDisabled_NormalBehavior(t *testing.T) {
+	o := newTestClient(10, 80)
+	for i := 0; i < 20; i++ {
+		o.VT.Scrollback.Write([]byte("line\n"))
+	}
+	o.VT.AltScrollEnabled = false
+
+	o.HandleSGRMouse([]byte("<64;1;1"), true)
+	if !o.IsScrollMode() {
+		t.Fatal("expected scroll mode when AltScrollEnabled is false")
+	}
+}
+
+func TestHandleSGRMouse_AltScrollInPassthrough(t *testing.T) {
+	c, r := newTestClientWithPTY(10, 80)
+	defer r.Close()
+	defer c.VT.Ptm.Close()
+
+	c.Mode = ModePassthrough
+	c.VT.AltScrollEnabled = true
+	c.HandleSGRMouse([]byte("<64;1;1"), true)
+
+	// Should stay in passthrough, not enter scroll mode.
+	if c.Mode != ModePassthrough {
+		t.Fatalf("expected ModePassthrough, got %d", c.Mode)
+	}
+
+	buf := make([]byte, 256)
+	n, _ := r.Read(buf)
+	got := string(buf[:n])
+	want := "\033[A\033[A\033[A"
+	if got != want {
+		t.Fatalf("expected PTY output %q, got %q", want, got)
 	}
 }

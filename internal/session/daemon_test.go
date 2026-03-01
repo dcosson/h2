@@ -76,15 +76,13 @@ func TestForkDaemonOpts_InstructionsField(t *testing.T) {
 
 func TestRunDaemonOpts_AllNewFieldsStoredOnSession(t *testing.T) {
 	opts := RunDaemonOpts{
-		Name:            "test-agent",
-		SessionID:       "test-uuid",
-		Command:         "claude",
-		Instructions:    "Instructions here",
-		SystemPrompt:    "Custom system prompt",
-		Model:           "claude-opus-4-6",
-		PermissionMode:  "plan",
-		AllowedTools:    []string{"Bash", "Read"},
-		DisallowedTools: []string{"Write"},
+		Name:                 "test-agent",
+		SessionID:            "test-uuid",
+		Command:              "claude",
+		Instructions:         "Instructions here",
+		SystemPrompt:         "Custom system prompt",
+		Model:                "claude-opus-4-6",
+		ClaudePermissionMode: "plan",
 	}
 
 	s := New(opts.Name, opts.Command, opts.Args)
@@ -92,9 +90,7 @@ func TestRunDaemonOpts_AllNewFieldsStoredOnSession(t *testing.T) {
 	s.Instructions = opts.Instructions
 	s.SystemPrompt = opts.SystemPrompt
 	s.Model = opts.Model
-	s.PermissionMode = opts.PermissionMode
-	s.AllowedTools = opts.AllowedTools
-	s.DisallowedTools = opts.DisallowedTools
+	s.ClaudePermissionMode = opts.ClaudePermissionMode
 
 	if s.SystemPrompt != "Custom system prompt" {
 		t.Fatalf("SystemPrompt not stored: got %q", s.SystemPrompt)
@@ -102,14 +98,8 @@ func TestRunDaemonOpts_AllNewFieldsStoredOnSession(t *testing.T) {
 	if s.Model != "claude-opus-4-6" {
 		t.Fatalf("Model not stored: got %q", s.Model)
 	}
-	if s.PermissionMode != "plan" {
-		t.Fatalf("PermissionMode not stored: got %q", s.PermissionMode)
-	}
-	if len(s.AllowedTools) != 2 || s.AllowedTools[0] != "Bash" || s.AllowedTools[1] != "Read" {
-		t.Fatalf("AllowedTools not stored: got %v", s.AllowedTools)
-	}
-	if len(s.DisallowedTools) != 1 || s.DisallowedTools[0] != "Write" {
-		t.Fatalf("DisallowedTools not stored: got %v", s.DisallowedTools)
+	if s.ClaudePermissionMode != "plan" {
+		t.Fatalf("ClaudePermissionMode not stored: got %q", s.ClaudePermissionMode)
 	}
 
 	// Verify all fields appear in childArgs.
@@ -119,8 +109,6 @@ func TestRunDaemonOpts_AllNewFieldsStoredOnSession(t *testing.T) {
 		"--append-system-prompt": "Instructions here",
 		"--model":                "claude-opus-4-6",
 		"--permission-mode":      "plan",
-		"--allowedTools":         "Bash,Read",
-		"--disallowedTools":      "Write",
 	}
 	for flag, wantVal := range expectPairs {
 		found := false
@@ -140,14 +128,12 @@ func TestRunDaemonOpts_AllNewFieldsStoredOnSession(t *testing.T) {
 
 func TestForkDaemonOpts_AllNewFields(t *testing.T) {
 	opts := ForkDaemonOpts{
-		Name:            "test-agent",
-		SessionID:       "test-uuid",
-		Command:         "claude",
-		SystemPrompt:    "Custom prompt",
-		Model:           "claude-sonnet-4-5-20250929",
-		PermissionMode:  "bypassPermissions",
-		AllowedTools:    []string{"Bash", "Read", "Write"},
-		DisallowedTools: []string{"Edit"},
+		Name:                 "test-agent",
+		SessionID:            "test-uuid",
+		Command:              "claude",
+		SystemPrompt:         "Custom prompt",
+		Model:                "claude-sonnet-4-5-20250929",
+		ClaudePermissionMode: "bypassPermissions",
 	}
 
 	if opts.SystemPrompt != "Custom prompt" {
@@ -156,13 +142,48 @@ func TestForkDaemonOpts_AllNewFields(t *testing.T) {
 	if opts.Model != "claude-sonnet-4-5-20250929" {
 		t.Fatalf("Model not preserved: got %q", opts.Model)
 	}
-	if opts.PermissionMode != "bypassPermissions" {
-		t.Fatalf("PermissionMode not preserved: got %q", opts.PermissionMode)
+	if opts.ClaudePermissionMode != "bypassPermissions" {
+		t.Fatalf("ClaudePermissionMode not preserved: got %q", opts.ClaudePermissionMode)
 	}
-	if len(opts.AllowedTools) != 3 {
-		t.Fatalf("AllowedTools not preserved: got %v", opts.AllowedTools)
+}
+
+func TestRunDaemonOpts_CodexAskForApprovalFields(t *testing.T) {
+	opts := RunDaemonOpts{
+		Name:                "test-agent",
+		SessionID:           "test-uuid",
+		Command:             "codex",
+		Instructions:        "Do work",
+		CodexAskForApproval: "never",
+		CodexSandboxMode:    "danger-full-access",
 	}
-	if len(opts.DisallowedTools) != 1 || opts.DisallowedTools[0] != "Edit" {
-		t.Fatalf("DisallowedTools not preserved: got %v", opts.DisallowedTools)
+
+	s := New(opts.Name, opts.Command, opts.Args)
+	s.SessionID = opts.SessionID
+	s.Instructions = opts.Instructions
+	s.CodexAskForApproval = opts.CodexAskForApproval
+	s.CodexSandboxMode = opts.CodexSandboxMode
+
+	if s.CodexAskForApproval != "never" {
+		t.Fatalf("CodexAskForApproval not stored: got %q", s.CodexAskForApproval)
+	}
+	if s.CodexSandboxMode != "danger-full-access" {
+		t.Fatalf("CodexSandboxMode not stored: got %q", s.CodexSandboxMode)
+	}
+}
+
+func TestForkDaemonOpts_CodexAskForApprovalFields(t *testing.T) {
+	opts := ForkDaemonOpts{
+		Name:                "test-agent",
+		SessionID:           "test-uuid",
+		Command:             "codex",
+		CodexAskForApproval: "on-request",
+		CodexSandboxMode:    "workspace-write",
+	}
+
+	if opts.CodexAskForApproval != "on-request" {
+		t.Fatalf("CodexAskForApproval not preserved: got %q", opts.CodexAskForApproval)
+	}
+	if opts.CodexSandboxMode != "workspace-write" {
+		t.Fatalf("CodexSandboxMode not preserved: got %q", opts.CodexSandboxMode)
 	}
 }

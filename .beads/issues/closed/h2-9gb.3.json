@@ -1,0 +1,27 @@
+{
+  "id": "h2-9gb.3",
+  "title": "Add EnsureConfigDir to AgentType interface",
+  "description": "Add EnsureConfigDir(h2Dir, roleName string) error to AgentType. Each type sets up its own config:\n- ClaudeCodeType: creates \u003ch2Dir\u003e/claude-config/\u003croleName\u003e/settings.json with h2 hook registrations (moves current EnsureClaudeConfigDir logic)\n- CodexType: no-op\n- GenericType: no-op\n\nUpdate agent_setup.go to call agentType.EnsureConfigDir() instead of unconditionally calling EnsureClaudeConfigDir. Remove role.GetClaudeConfigDir() — the type owns the path computation.",
+  "status": "closed",
+  "priority": 1,
+  "type": "task",
+  "parent": "h2-9gb",
+  "dependencies": [
+    {
+      "id": "h2-9gb",
+      "type": "parent-child"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "h2-9gb.4",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-20T08:26:41.966033-08:00",
+  "updated_at": "2026-02-20T09:24:06.676588-08:00",
+  "closed_at": "2026-02-20T09:24:06.676588-08:00",
+  "close_reason": "Closed"
+}

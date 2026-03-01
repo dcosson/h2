@@ -19,7 +19,7 @@ func TestVersionCmd(t *testing.T) {
 	}
 
 	got := strings.TrimSpace(buf.String())
-	if got != version.Version {
-		t.Errorf("version command output = %q, want %q", got, version.Version)
+	if got != version.DisplayVersion() {
+		t.Errorf("version command output = %q, want %q", got, version.DisplayVersion())
 	}
 }

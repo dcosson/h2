@@ -1,4 +1,6 @@
 /h2
+coverage.out
+coverage.html
 qa/results/
 
 # Credentials and secrets

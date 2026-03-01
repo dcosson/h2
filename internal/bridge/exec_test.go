@@ -60,4 +60,3 @@ func TestExecCommand_ArgumentQuoting(t *testing.T) {
 		t.Errorf("ExecCommand(echo, 'hello world') = %q, want %q", got, "hello world")
 	}
 }
-

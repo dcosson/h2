@@ -376,7 +376,7 @@ Before merging, all of the following must pass:
 
 - [ ] `make build` compiles without errors
 - [ ] `make test` — all unit and integration tests pass
-- [ ] Manual: `h2 run --name test --role <parameterized-role> --var team=backend` — agent starts with rendered instructions
+- [ ] Manual: `h2 run test --role <parameterized-role> --var team=backend` — agent starts with rendered instructions
 - [ ] Manual: `h2 run --role <role-with-required-var>` (no --var) — fails with clear error listing missing variables
 - [ ] Manual: `h2 pod launch <template-with-count>` — correct number of agents launched with correct names
 - [ ] Manual: `h2 pod launch <template> --var num_coders=5` — count responds to variable

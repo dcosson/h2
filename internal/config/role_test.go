@@ -2,35 +2,31 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"h2/internal/tmpl"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestLoadRoleFrom_FullRole(t *testing.T) {
 	yaml := `
-name: architect
+role_name: architect
 description: "Designs systems"
-model: opus
+agent_model: opus
 instructions: |
   You are an architect agent.
   Design system architecture.
-permissions:
-  allow:
-    - "Read"
-    - "Glob"
-    - "Write(docs/**)"
-  deny:
-    - "Bash(rm -rf *)"
-  agent:
-    enabled: true
-    instructions: |
-      You are reviewing permissions for an architect.
-      ALLOW: read-only tools
-      DENY: destructive operations
+permission_review_agent:
+  enabled: true
+  instructions: |
+    You are reviewing permissions for an architect.
+    ALLOW: read-only tools
+    DENY: destructive operations
 `
 	path := writeTempFile(t, "architect.yaml", yaml)
 
@@ -39,41 +35,31 @@ permissions:
 		t.Fatalf("LoadRoleFrom: %v", err)
 	}
 
-	if role.Name != "architect" {
-		t.Errorf("Name = %q, want %q", role.Name, "architect")
+	if role.RoleName != "architect" {
+		t.Errorf("RoleName = %q, want %q", role.RoleName, "architect")
 	}
 	if role.Description != "Designs systems" {
 		t.Errorf("Description = %q, want %q", role.Description, "Designs systems")
 	}
-	if role.Model != "opus" {
-		t.Errorf("Model = %q, want %q", role.Model, "opus")
+	if role.GetModel() != "opus" {
+		t.Errorf("GetModel() = %q, want %q", role.GetModel(), "opus")
 	}
-	if len(role.Permissions.Allow) != 3 {
-		t.Errorf("Allow len = %d, want 3", len(role.Permissions.Allow))
+	if role.PermissionReviewAgent == nil {
+		t.Fatal("PermissionReviewAgent is nil")
 	}
-	if len(role.Permissions.Deny) != 1 {
-		t.Errorf("Deny len = %d, want 1", len(role.Permissions.Deny))
+	if !role.PermissionReviewAgent.IsEnabled() {
+		t.Error("PermissionReviewAgent should be enabled")
 	}
-	if role.Permissions.Agent == nil {
-		t.Fatal("Agent is nil")
-	}
-	if !role.Permissions.Agent.IsEnabled() {
-		t.Error("Agent should be enabled")
-	}
-	if role.Permissions.Agent.Instructions == "" {
-		t.Error("Agent instructions should not be empty")
+	if role.PermissionReviewAgent.Instructions == "" {
+		t.Error("PermissionReviewAgent instructions should not be empty")
 	}
 }
 
 func TestLoadRoleFrom_MinimalRole(t *testing.T) {
 	yaml := `
-name: coder
+role_name: coder
 instructions: |
   You are a coding agent.
-permissions:
-  allow:
-    - "Read"
-    - "Bash"
 `
 	path := writeTempFile(t, "coder.yaml", yaml)
 
@@ -82,19 +68,19 @@ permissions:
 		t.Fatalf("LoadRoleFrom: %v", err)
 	}
 
-	if role.Name != "coder" {
-		t.Errorf("Name = %q, want %q", role.Name, "coder")
+	if role.RoleName != "coder" {
+		t.Errorf("RoleName = %q, want %q", role.RoleName, "coder")
 	}
-	if role.Model != "" {
-		t.Errorf("Model = %q, want empty", role.Model)
+	if role.GetModel() != "" {
+		t.Errorf("GetModel() = %q, want empty", role.GetModel())
 	}
-	if role.Permissions.Agent != nil {
-		t.Error("Agent should be nil for minimal role")
+	if role.PermissionReviewAgent != nil {
+		t.Error("PermissionReviewAgent should be nil for minimal role")
 	}
 }
 
 func TestLoadRoleFrom_ValidationError(t *testing.T) {
-	// Missing name.
+	// Missing role_name.
 	yaml := `
 instructions: |
   Some instructions.
@@ -102,41 +88,33 @@ instructions: |
 	path := writeTempFile(t, "bad.yaml", yaml)
 	_, err := LoadRoleFrom(path)
 	if err == nil {
-		t.Fatal("expected error for missing name")
-	}
-
-	// Missing instructions.
-	yaml2 := `name: test`
-	path2 := writeTempFile(t, "bad2.yaml", yaml2)
-	_, err2 := LoadRoleFrom(path2)
-	if err2 == nil {
-		t.Fatal("expected error for missing instructions")
+		t.Fatal("expected error for missing role_name")
 	}
 }
 
-func TestPermissionAgent_IsEnabled(t *testing.T) {
+func TestPermissionReviewAgent_IsEnabled(t *testing.T) {
 	// Explicit enabled: true
 	tr := true
-	pa := &PermissionAgent{Enabled: &tr, Instructions: "test"}
+	pa := &PermissionReviewAgent{Enabled: &tr, Instructions: "test"}
 	if !pa.IsEnabled() {
 		t.Error("should be enabled when Enabled=true")
 	}
 
 	// Explicit enabled: false
 	fa := false
-	pa2 := &PermissionAgent{Enabled: &fa, Instructions: "test"}
+	pa2 := &PermissionReviewAgent{Enabled: &fa, Instructions: "test"}
 	if pa2.IsEnabled() {
 		t.Error("should be disabled when Enabled=false")
 	}
 
 	// Implicit: instructions present → enabled
-	pa3 := &PermissionAgent{Instructions: "test"}
+	pa3 := &PermissionReviewAgent{Instructions: "test"}
 	if !pa3.IsEnabled() {
 		t.Error("should be enabled when instructions present")
 	}
 
 	// Implicit: no instructions → disabled
-	pa4 := &PermissionAgent{}
+	pa4 := &PermissionReviewAgent{}
 	if pa4.IsEnabled() {
 		t.Error("should be disabled when no instructions")
 	}
@@ -149,13 +127,13 @@ func TestListRoles(t *testing.T) {
 
 	// Write two valid role files.
 	os.WriteFile(filepath.Join(rolesDir, "architect.yaml"), []byte(`
-name: architect
+role_name: architect
 instructions: |
   Architect agent.
 `), 0o644)
 
 	os.WriteFile(filepath.Join(rolesDir, "coder.yaml"), []byte(`
-name: coder
+role_name: coder
 instructions: |
   Coder agent.
 `), 0o644)
@@ -190,15 +168,11 @@ func TestSetupSessionDir(t *testing.T) {
 	setupFakeHome(t)
 
 	role := &Role{
-		Name:  "architect",
-		Model: "opus",
+		RoleName:     "architect",
+		AgentModel:   "opus",
 		Instructions: "You are an architect agent.\nDesign systems.\n",
-		Permissions: Permissions{
-			Allow: []string{"Read", "Glob", "Write(docs/**)"},
-			Deny:  []string{"Bash(rm -rf *)"},
-			Agent: &PermissionAgent{
-				Instructions: "Review permissions for architect.\nALLOW: read-only\n",
-			},
+		PermissionReviewAgent: &PermissionReviewAgent{
+			Instructions: "Review permissions for architect.\nALLOW: read-only\n",
 		},
 	}
 
@@ -217,8 +191,8 @@ func TestSetupSessionDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read permission-reviewer.md: %v", err)
 	}
-	if string(reviewerData) != role.Permissions.Agent.Instructions {
-		t.Errorf("permission-reviewer.md content = %q, want %q", string(reviewerData), role.Permissions.Agent.Instructions)
+	if string(reviewerData) != role.PermissionReviewAgent.Instructions {
+		t.Errorf("permission-reviewer.md content = %q, want %q", string(reviewerData), role.PermissionReviewAgent.Instructions)
 	}
 
 	// No .claude subdir should be created.
@@ -270,11 +244,8 @@ func TestSetupSessionDir_NoAgent(t *testing.T) {
 	setupFakeHome(t)
 
 	role := &Role{
-		Name:         "coder",
+		RoleName:     "coder",
 		Instructions: "Code stuff.\n",
-		Permissions: Permissions{
-			Allow: []string{"Read", "Bash"},
-		},
 	}
 
 	sessionDir, err := SetupSessionDir("coder-1", role)
@@ -290,10 +261,10 @@ func TestSetupSessionDir_NoAgent(t *testing.T) {
 
 func TestIsClaudeConfigAuthenticated(t *testing.T) {
 	tests := []struct {
-		name           string
-		claudeJSON     string
-		want           bool
-		wantErr        bool
+		name       string
+		claudeJSON string
+		want       bool
+		wantErr    bool
 	}{
 		{
 			name: "authenticated with oauthAccount",
@@ -387,43 +358,42 @@ func TestRole_GetClaudeConfigDir(t *testing.T) {
 	t.Setenv("H2_ACTOR", "")
 
 	tests := []struct {
-		name            string
-		claudeConfigDir string
-		want            string
+		name             string
+		claudeConfigPath string
+		want             string
 	}{
 		{
-			name:            "default when not specified",
-			claudeConfigDir: "",
-			want:            filepath.Join(h2Dir, "claude-config", "default"),
+			name:             "default when not specified",
+			claudeConfigPath: "",
+			want:             filepath.Join(h2Dir, "claude-config", "default"),
 		},
 		{
-			name:            "absolute path",
-			claudeConfigDir: "/custom/path/to/config",
-			want:            "/custom/path/to/config",
+			name:             "absolute path",
+			claudeConfigPath: "/custom/path/to/config",
+			want:             "/custom/path/to/config",
 		},
 		{
-			name:            "tilde expansion",
-			claudeConfigDir: "~/my-claude-config",
-			want:            "/Users/testuser/my-claude-config",
+			name:             "tilde expansion",
+			claudeConfigPath: "~/my-claude-config",
+			want:             "/Users/testuser/my-claude-config",
 		},
 		{
-			name:            "relative path within h2",
-			claudeConfigDir: "/Users/testuser/.h2/claude-config/custom",
-			want:            "/Users/testuser/.h2/claude-config/custom",
+			name:             "relative path within h2",
+			claudeConfigPath: "/Users/testuser/.h2/claude-config/custom",
+			want:             "/Users/testuser/.h2/claude-config/custom",
 		},
 		{
-			name:            "tilde only means system default",
-			claudeConfigDir: "~/",
-			want:            "",
+			name:             "tilde only means system default",
+			claudeConfigPath: "~/",
+			want:             "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			role := &Role{
-				Name:            "test",
-				ClaudeConfigDir: tt.claudeConfigDir,
-				Instructions:    "test",
+				RoleName:             "test",
+				ClaudeCodeConfigPath: tt.claudeConfigPath,
 			}
 			got := role.GetClaudeConfigDir()
 			if got != tt.want {
@@ -435,7 +405,7 @@ func TestRole_GetClaudeConfigDir(t *testing.T) {
 
 func TestLoadRoleFrom_WithHeartbeat(t *testing.T) {
 	yaml := `
-name: scheduler
+role_name: scheduler
 instructions: |
   You are a scheduler agent.
 heartbeat:
@@ -466,7 +436,7 @@ heartbeat:
 
 func TestLoadRoleFrom_HeartbeatOptional(t *testing.T) {
 	yaml := `
-name: simple
+role_name: simple
 instructions: |
   A simple agent.
 `
@@ -515,7 +485,7 @@ func TestHeartbeatConfig_ParseIdleTimeout(t *testing.T) {
 }
 
 func TestResolveWorkingDir_Default(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test"}
+	role := &Role{RoleName: "test"}
 	got, err := role.ResolveWorkingDir("/my/cwd")
 	if err != nil {
 		t.Fatalf("ResolveWorkingDir: %v", err)
@@ -526,7 +496,7 @@ func TestResolveWorkingDir_Default(t *testing.T) {
 }
 
 func TestResolveWorkingDir_Dot(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test", WorkingDir: "."}
+	role := &Role{RoleName: "test", WorkingDir: "."}
 	got, err := role.ResolveWorkingDir("/my/cwd")
 	if err != nil {
 		t.Fatalf("ResolveWorkingDir: %v", err)
@@ -537,7 +507,7 @@ func TestResolveWorkingDir_Dot(t *testing.T) {
 }
 
 func TestResolveWorkingDir_Absolute(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "test", WorkingDir: "/some/absolute/path"}
+	role := &Role{RoleName: "test", WorkingDir: "/some/absolute/path"}
 	got, err := role.ResolveWorkingDir("/my/cwd")
 	if err != nil {
 		t.Fatalf("ResolveWorkingDir: %v", err)
@@ -556,7 +526,7 @@ func TestResolveWorkingDir_Relative(t *testing.T) {
 	WriteMarker(h2Dir)
 	t.Setenv("H2_DIR", h2Dir)
 
-	role := &Role{Name: "test", Instructions: "test", WorkingDir: "projects/myapp"}
+	role := &Role{RoleName: "test", WorkingDir: "projects/myapp"}
 	got, err := role.ResolveWorkingDir("/my/cwd")
 	if err != nil {
 		t.Fatalf("ResolveWorkingDir: %v", err)
@@ -569,7 +539,7 @@ func TestResolveWorkingDir_Relative(t *testing.T) {
 
 func TestResolveWorkingDir_FromYAML(t *testing.T) {
 	yaml := `
-name: worker
+role_name: worker
 instructions: |
   A worker agent.
 working_dir: /workspace/project
@@ -584,64 +554,37 @@ working_dir: /workspace/project
 	}
 }
 
-func TestValidate_WorktreeAndWorkingDirMutualExclusivity(t *testing.T) {
-	// worktree + non-trivial working_dir should fail.
+func TestValidate_WorktreeUsesWorkingDirAsSourceRepo(t *testing.T) {
 	role := &Role{
-		Name:         "test",
-		Instructions: "test",
-		WorkingDir:   "projects/myapp",
-		Worktree:     &WorktreeConfig{ProjectDir: "/tmp/repo", Name: "test-wt"},
+		RoleName:        "test",
+		WorkingDir:      "projects/myapp",
+		WorktreeEnabled: true,
+		WorktreeName:    "test-wt",
+		WorktreeBranch:  "test-wt",
+		WorktreePath:    "/tmp/test-wt",
 	}
-	err := role.Validate()
-	if err == nil {
-		t.Fatal("expected error for worktree + working_dir")
-	}
-	if !strings.Contains(err.Error(), "mutually exclusive") {
-		t.Errorf("error = %q, want it to contain 'mutually exclusive'", err.Error())
-	}
-
-	// worktree + working_dir="." should be OK.
-	role2 := &Role{
-		Name:         "test",
-		Instructions: "test",
-		WorkingDir:   ".",
-		Worktree:     &WorktreeConfig{ProjectDir: "/tmp/repo", Name: "test-wt"},
-	}
-	if err := role2.Validate(); err != nil {
-		t.Errorf("worktree + working_dir='.' should be allowed: %v", err)
-	}
-
-	// worktree + empty working_dir should be OK.
-	role3 := &Role{
-		Name:         "test",
-		Instructions: "test",
-		Worktree:     &WorktreeConfig{ProjectDir: "/tmp/repo", Name: "test-wt"},
-	}
-	if err := role3.Validate(); err != nil {
-		t.Errorf("worktree + empty working_dir should be allowed: %v", err)
+	if err := role.Validate(); err != nil {
+		t.Fatalf("worktree + working_dir should be allowed: %v", err)
 	}
 }
 
 func TestValidate_WorktreeMissingProjectDir(t *testing.T) {
 	role := &Role{
-		Name:         "test",
-		Instructions: "test",
-		Worktree:     &WorktreeConfig{Name: "test-wt"},
+		RoleName:        "test",
+		WorktreeEnabled: true,
+		WorktreeName:    "test-wt",
 	}
 	err := role.Validate()
-	if err == nil {
-		t.Fatal("expected error for missing project_dir")
-	}
-	if !strings.Contains(err.Error(), "project_dir") {
-		t.Errorf("error = %q, want it to contain 'project_dir'", err.Error())
+	if err != nil {
+		t.Fatalf("worktree should use default working_dir when not explicitly set: %v", err)
 	}
 }
 
 func TestValidate_WorktreeMissingName(t *testing.T) {
 	role := &Role{
-		Name:         "test",
-		Instructions: "test",
-		Worktree:     &WorktreeConfig{ProjectDir: "/tmp/repo"},
+		RoleName:        "test",
+		WorktreeEnabled: true,
+		WorkingDir:      "/tmp/repo",
 	}
 	err := role.Validate()
 	if err == nil {
@@ -652,11 +595,73 @@ func TestValidate_WorktreeMissingName(t *testing.T) {
 	}
 }
 
+func TestValidate_WorktreeFieldsRequireEnabled(t *testing.T) {
+	role := &Role{
+		RoleName:       "test",
+		WorktreeName:   "wt-1",
+		WorktreeBranch: "wt-1",
+	}
+	err := role.Validate()
+	if err == nil {
+		t.Fatal("expected error when worktree_* fields are set without worktree_enabled")
+	}
+	if !strings.Contains(err.Error(), "worktree_enabled=true") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBuildWorktreeConfig_DefaultsFromAgentName(t *testing.T) {
+	role := &Role{
+		RoleName:        "test",
+		WorktreeEnabled: true,
+		WorkingDir:      ".",
+	}
+	cfg, err := role.BuildWorktreeConfig("/tmp/repo", "coder-7")
+	if err != nil {
+		t.Fatalf("BuildWorktreeConfig: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected worktree config")
+	}
+	if cfg.Name != "coder-7" {
+		t.Fatalf("Name = %q, want %q", cfg.Name, "coder-7")
+	}
+	if cfg.GetBranch() != "coder-7" {
+		t.Fatalf("GetBranch() = %q, want %q", cfg.GetBranch(), "coder-7")
+	}
+	if cfg.GetPath() != filepath.Join(WorktreesDir(), "coder-7") {
+		t.Fatalf("GetPath() = %q, want default worktree path", cfg.GetPath())
+	}
+}
+
+func TestBuildWorktreeConfig_DetachedHeadSentinel(t *testing.T) {
+	role := &Role{
+		RoleName:        "test",
+		WorktreeEnabled: true,
+		WorkingDir:      ".",
+		WorktreeName:    "wt-1",
+		WorktreeBranch:  "<detached_head>",
+	}
+	cfg, err := role.BuildWorktreeConfig("/tmp/repo", "coder-1")
+	if err != nil {
+		t.Fatalf("BuildWorktreeConfig: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected worktree config")
+	}
+	if !cfg.IsDetachedHead() {
+		t.Fatal("expected detached head mode")
+	}
+	if cfg.GetBranch() != "" {
+		t.Fatalf("GetBranch() = %q, want empty in detached head mode", cfg.GetBranch())
+	}
+}
+
 func TestLoadRoleFrom_QuotedTemplateValues(t *testing.T) {
 	// Quoted {{ }} values should be valid YAML and parse correctly.
 	yaml := `
-name: "{{ .RoleName }}"
-claude_config_dir: "{{ .H2Dir }}/claude-config/default"
+role_name: "{{ .RoleName }}"
+claude_code_config_path: "{{ .H2Dir }}/claude-config/default"
 instructions: |
   You are a {{ .RoleName }} agent.
 `
@@ -666,11 +671,11 @@ instructions: |
 	if err != nil {
 		t.Fatalf("LoadRoleFrom: %v", err)
 	}
-	if role.Name != "{{ .RoleName }}" {
-		t.Errorf("Name = %q, want %q", role.Name, "{{ .RoleName }}")
+	if role.RoleName != "{{ .RoleName }}" {
+		t.Errorf("RoleName = %q, want %q", role.RoleName, "{{ .RoleName }}")
 	}
-	if role.ClaudeConfigDir != "{{ .H2Dir }}/claude-config/default" {
-		t.Errorf("ClaudeConfigDir = %q, want %q", role.ClaudeConfigDir, "{{ .H2Dir }}/claude-config/default")
+	if role.ClaudeCodeConfigPath != "{{ .H2Dir }}/claude-config/default" {
+		t.Errorf("ClaudeCodeConfigPath = %q, want %q", role.ClaudeCodeConfigPath, "{{ .H2Dir }}/claude-config/default")
 	}
 }
 
@@ -678,7 +683,7 @@ instructions: |
 
 func TestLoadRoleRenderedFrom_BasicRendering(t *testing.T) {
 	yamlContent := `
-name: coder
+role_name: coder
 variables:
   team:
     description: "Team name"
@@ -712,13 +717,13 @@ instructions: |
 
 func TestLoadRoleRenderedFrom_WorktreeRendering(t *testing.T) {
 	yamlContent := `
-name: coder
+role_name: coder
 instructions: |
   Work on ticket.
-worktree:
-  project_dir: /tmp/repo
-  name: "{{ .AgentName }}-wt"
-  branch_name: "feature/{{ .Var.ticket }}"
+worktree_enabled: true
+working_dir: /tmp/repo
+worktree_name: "{{ .AgentName }}-wt"
+worktree_branch: "feature/{{ .Var.ticket }}"
 `
 	path := writeTempFile(t, "worktree.yaml", yamlContent)
 	ctx := &tmpl.Context{
@@ -731,20 +736,20 @@ worktree:
 		t.Fatalf("LoadRoleRenderedFrom: %v", err)
 	}
 
-	if role.Worktree == nil {
-		t.Fatal("Worktree should not be nil")
+	if !role.WorktreeEnabled {
+		t.Fatal("WorktreeEnabled should be true")
 	}
-	if role.Worktree.Name != "coder-1-wt" {
-		t.Errorf("Worktree.Name = %q, want %q", role.Worktree.Name, "coder-1-wt")
+	if role.WorktreeName != "coder-1-wt" {
+		t.Errorf("WorktreeName = %q, want %q", role.WorktreeName, "coder-1-wt")
 	}
-	if role.Worktree.BranchName != "feature/123" {
-		t.Errorf("Worktree.BranchName = %q, want %q", role.Worktree.BranchName, "feature/123")
+	if role.WorktreeBranch != "feature/123" {
+		t.Errorf("WorktreeBranch = %q, want %q", role.WorktreeBranch, "feature/123")
 	}
 }
 
 func TestLoadRoleRenderedFrom_WorkingDirRendering(t *testing.T) {
 	yamlContent := `
-name: coder
+role_name: coder
 instructions: |
   Work on project.
 working_dir: "/projects/{{ .Var.project }}"
@@ -764,10 +769,10 @@ working_dir: "/projects/{{ .Var.project }}"
 
 func TestLoadRoleRenderedFrom_ModelRendering(t *testing.T) {
 	yamlContent := `
-name: coder
+role_name: coder
 instructions: |
   Code.
-model: "{{ .Var.model }}"
+agent_model: "{{ .Var.model }}"
 `
 	path := writeTempFile(t, "model.yaml", yamlContent)
 	ctx := &tmpl.Context{Var: map[string]string{"model": "haiku"}}
@@ -777,14 +782,14 @@ model: "{{ .Var.model }}"
 		t.Fatalf("LoadRoleRenderedFrom: %v", err)
 	}
 
-	if role.Model != "haiku" {
-		t.Errorf("Model = %q, want %q", role.Model, "haiku")
+	if role.GetModel() != "haiku" {
+		t.Errorf("GetModel() = %q, want %q", role.GetModel(), "haiku")
 	}
 }
 
 func TestLoadRoleRenderedFrom_HeartbeatRendering(t *testing.T) {
 	yamlContent := `
-name: scheduler
+role_name: scheduler
 instructions: |
   Schedule.
 heartbeat:
@@ -809,7 +814,7 @@ heartbeat:
 
 func TestLoadRoleRenderedFrom_RequiredVarMissing(t *testing.T) {
 	yamlContent := `
-name: coder
+role_name: coder
 variables:
   team:
     description: "Team name"
@@ -830,7 +835,7 @@ instructions: |
 
 func TestLoadRoleRenderedFrom_RequiredVarProvided(t *testing.T) {
 	yamlContent := `
-name: coder
+role_name: coder
 variables:
   team:
     description: "Team name"
@@ -851,7 +856,7 @@ instructions: |
 
 func TestLoadRoleRenderedFrom_NilContext(t *testing.T) {
 	yamlContent := `
-name: coder
+role_name: coder
 instructions: |
   Hello {{ .AgentName }}.
 `
@@ -870,7 +875,7 @@ instructions: |
 func TestLoadRoleRenderedFrom_BackwardCompat(t *testing.T) {
 	// Role with no template expressions and no variables section.
 	yamlContent := `
-name: simple
+role_name: simple
 instructions: |
   A simple static role.
 `
@@ -881,8 +886,8 @@ instructions: |
 	if err != nil {
 		t.Fatalf("LoadRoleRenderedFrom: %v", err)
 	}
-	if role.Name != "simple" {
-		t.Errorf("Name = %q, want %q", role.Name, "simple")
+	if role.RoleName != "simple" {
+		t.Errorf("RoleName = %q, want %q", role.RoleName, "simple")
 	}
 	if !strings.Contains(role.Instructions, "simple static role") {
 		t.Errorf("Instructions should be unchanged, got: %s", role.Instructions)
@@ -891,7 +896,7 @@ instructions: |
 
 func TestLoadRoleRenderedFrom_Conditionals(t *testing.T) {
 	yamlContent := `
-name: coder
+role_name: coder
 instructions: |
   You are {{ .AgentName }}.
   {{ if .PodName }}You are in pod {{ .PodName }}.{{ else }}Standalone.{{ end }}
@@ -921,7 +926,7 @@ instructions: |
 
 func TestLoadRoleRenderedFrom_StandaloneZeroValues(t *testing.T) {
 	yamlContent := `
-name: pod-aware
+role_name: pod-aware
 instructions: |
   Index: {{ .Index }}, Count: {{ .Count }}.
   {{ if .PodName }}In pod.{{ else }}Not in pod.{{ end }}
@@ -946,7 +951,7 @@ instructions: |
 
 func TestLoadRoleRenderedFrom_VariablesFieldPopulated(t *testing.T) {
 	yamlContent := `
-name: coder
+role_name: coder
 variables:
   team:
     description: "Team name"
@@ -980,11 +985,11 @@ instructions: |
 func TestOverrideBeatsTemplateRenderedValue(t *testing.T) {
 	// Template renders working_dir to /foo, override sets it to /bar.
 	yamlContent := `
-name: coder
+role_name: coder
 instructions: |
   Work.
 working_dir: "/projects/{{ .Var.project }}"
-model: "{{ .Var.model }}"
+agent_model: "{{ .Var.model }}"
 `
 	path := writeTempFile(t, "override.yaml", yamlContent)
 	ctx := &tmpl.Context{Var: map[string]string{"project": "foo", "model": "opus"}}
@@ -998,12 +1003,12 @@ model: "{{ .Var.model }}"
 	if role.WorkingDir != "/projects/foo" {
 		t.Fatalf("pre-override WorkingDir = %q, want %q", role.WorkingDir, "/projects/foo")
 	}
-	if role.Model != "opus" {
-		t.Fatalf("pre-override Model = %q, want %q", role.Model, "opus")
+	if role.GetModel() != "opus" {
+		t.Fatalf("pre-override GetModel() = %q, want %q", role.GetModel(), "opus")
 	}
 
 	// Apply overrides — these should win over template-rendered values.
-	err = ApplyOverrides(role, []string{"working_dir=/bar", "model=haiku"})
+	err = ApplyOverrides(role, []string{"working_dir=/bar", "agent_model=haiku"})
 	if err != nil {
 		t.Fatalf("ApplyOverrides: %v", err)
 	}
@@ -1011,8 +1016,8 @@ model: "{{ .Var.model }}"
 	if role.WorkingDir != "/bar" {
 		t.Errorf("post-override WorkingDir = %q, want %q", role.WorkingDir, "/bar")
 	}
-	if role.Model != "haiku" {
-		t.Errorf("post-override Model = %q, want %q", role.Model, "haiku")
+	if role.GetModel() != "haiku" {
+		t.Errorf("post-override GetModel() = %q, want %q", role.GetModel(), "haiku")
 	}
 }
 
@@ -1025,21 +1030,21 @@ func TestListRoles_WithTemplatedRoles(t *testing.T) {
 
 	// Write a static role.
 	os.WriteFile(filepath.Join(rolesDir, "static.yaml"), []byte(`
-name: static
+role_name: static
 instructions: |
   A static agent.
 `), 0o644)
 
 	// Write a templated role with {{ }} expressions.
 	os.WriteFile(filepath.Join(rolesDir, "templated.yaml"), []byte(`
-name: templated
+role_name: templated
 instructions: |
   You are {{ .AgentName }} on team {{ .Var.team }}.
 `), 0o644)
 
 	// Write a templated role with variables section.
 	os.WriteFile(filepath.Join(rolesDir, "parameterized.yaml"), []byte(`
-name: parameterized
+role_name: parameterized
 variables:
   team:
     description: "Team"
@@ -1073,12 +1078,12 @@ instructions: |
 
 	// Verify templated role has raw template expressions in instructions.
 	for _, role := range roles {
-		if role.Name == "templated" {
+		if role.RoleName == "templated" {
 			if !strings.Contains(role.Instructions, "{{ .AgentName }}") {
 				t.Error("templated role instructions should contain raw {{ .AgentName }}")
 			}
 		}
-		if role.Name == "parameterized" {
+		if role.RoleName == "parameterized" {
 			if !strings.Contains(role.Instructions, "{{ .Var.team }}") {
 				t.Error("parameterized role instructions should contain raw {{ .Var.team }}")
 			}
@@ -1140,8 +1145,8 @@ func TestE2E_StaticRole_BackwardCompat(t *testing.T) {
 		t.Fatalf("LoadRoleFrom: %v", err)
 	}
 
-	if roleRendered.Name != roleStatic.Name {
-		t.Errorf("Name mismatch: rendered=%q, static=%q", roleRendered.Name, roleStatic.Name)
+	if roleRendered.RoleName != roleStatic.RoleName {
+		t.Errorf("Name mismatch: rendered=%q, static=%q", roleRendered.RoleName, roleStatic.RoleName)
 	}
 	if roleRendered.Instructions != roleStatic.Instructions {
 		t.Errorf("Instructions mismatch: rendered=%q, static=%q", roleRendered.Instructions, roleStatic.Instructions)
@@ -1175,57 +1180,88 @@ func TestE2E_PodAwareRole_StandaloneZeroValues(t *testing.T) {
 	}
 }
 
-// --- Validate tests for system_prompt and permission_mode ---
+// --- Validate tests for system_prompt and claude_permission_mode ---
 
 func TestValidate_InstructionsOnly(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "Do stuff"}
+	role := &Role{RoleName: "test", Instructions: "Do stuff"}
 	if err := role.Validate(); err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 }
 
 func TestValidate_SystemPromptOnly(t *testing.T) {
-	role := &Role{Name: "test", SystemPrompt: "You are a custom agent."}
+	role := &Role{RoleName: "test", SystemPrompt: "You are a custom agent."}
 	if err := role.Validate(); err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 }
 
 func TestValidate_BothInstructionsAndSystemPrompt(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "Do stuff", SystemPrompt: "Custom prompt"}
+	role := &Role{RoleName: "test", Instructions: "Do stuff", SystemPrompt: "Custom prompt"}
 	if err := role.Validate(); err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 }
 
-func TestValidate_NeitherInstructionsNorSystemPrompt(t *testing.T) {
-	role := &Role{Name: "test"}
-	err := role.Validate()
-	if err == nil {
-		t.Fatal("expected error when both instructions and system_prompt are empty")
-	}
-	if !strings.Contains(err.Error(), "at least one of instructions or system_prompt") {
-		t.Errorf("unexpected error message: %v", err)
+func TestValidate_SplitInstructionsOnly(t *testing.T) {
+	role := &Role{RoleName: "test", InstructionsIntro: "Intro", InstructionsBody: "Body"}
+	if err := role.Validate(); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
 	}
 }
 
-func TestValidate_PermissionMode_Valid(t *testing.T) {
-	for _, mode := range ValidPermissionModes {
-		role := &Role{Name: "test", Instructions: "Do stuff", PermissionMode: mode}
+func TestValidate_InstructionsAndSplitMutuallyExclusive(t *testing.T) {
+	role := &Role{RoleName: "test", Instructions: "Do stuff", InstructionsIntro: "Intro"}
+	err := role.Validate()
+	if err == nil {
+		t.Fatal("expected error when both instructions and split fields are set")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("expected mutually exclusive error, got: %v", err)
+	}
+}
+
+func TestValidate_PermissionReviewAgentInstructionsMutuallyExclusive(t *testing.T) {
+	role := &Role{
+		RoleName: "test",
+		PermissionReviewAgent: &PermissionReviewAgent{
+			Instructions:      "single",
+			InstructionsIntro: "intro",
+		},
+	}
+	err := role.Validate()
+	if err == nil {
+		t.Fatal("expected error when permission_review_agent has both instructions and split fields")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("expected mutually exclusive error, got: %v", err)
+	}
+}
+
+func TestValidate_NeitherInstructionsNorSplit(t *testing.T) {
+	role := &Role{RoleName: "test"}
+	if err := role.Validate(); err != nil {
+		t.Fatalf("expected no error when neither is set, got: %v", err)
+	}
+}
+
+func TestValidate_ClaudePermissionMode_Valid(t *testing.T) {
+	for _, mode := range ValidClaudePermissionModes {
+		role := &Role{RoleName: "test", ClaudePermissionMode: mode}
 		if err := role.Validate(); err != nil {
-			t.Errorf("expected no error for permission_mode %q, got: %v", mode, err)
+			t.Errorf("expected no error for claude_permission_mode %q, got: %v", mode, err)
 		}
 	}
 }
 
-func TestValidate_PermissionMode_Invalid(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "Do stuff", PermissionMode: "yolo"}
+func TestValidate_ClaudePermissionMode_Invalid(t *testing.T) {
+	role := &Role{RoleName: "test", ClaudePermissionMode: "yolo"}
 	err := role.Validate()
 	if err == nil {
-		t.Fatal("expected error for invalid permission_mode")
+		t.Fatal("expected error for invalid claude_permission_mode")
 	}
-	if !strings.Contains(err.Error(), "invalid permission_mode") {
-		t.Errorf("expected 'invalid permission_mode' in error, got: %v", err)
+	if !strings.Contains(err.Error(), "invalid claude_permission_mode") {
+		t.Errorf("expected 'invalid claude_permission_mode' in error, got: %v", err)
 	}
 	if !strings.Contains(err.Error(), "yolo") {
 		t.Errorf("error should contain the invalid value 'yolo', got: %v", err)
@@ -1236,16 +1272,16 @@ func TestValidate_PermissionMode_Invalid(t *testing.T) {
 	}
 }
 
-func TestValidate_PermissionMode_Empty(t *testing.T) {
-	role := &Role{Name: "test", Instructions: "Do stuff", PermissionMode: ""}
+func TestValidate_ClaudePermissionMode_Empty(t *testing.T) {
+	role := &Role{RoleName: "test", ClaudePermissionMode: ""}
 	if err := role.Validate(); err != nil {
-		t.Fatalf("empty permission_mode should be valid, got: %v", err)
+		t.Fatalf("empty claude_permission_mode should be valid, got: %v", err)
 	}
 }
 
 func TestLoadRoleFrom_SystemPromptField(t *testing.T) {
 	yaml := `
-name: custom
+role_name: custom
 system_prompt: |
   You are a completely custom agent with no default behavior.
 `
@@ -1262,38 +1298,1038 @@ system_prompt: |
 	}
 }
 
-func TestLoadRoleFrom_PermissionModeField(t *testing.T) {
+func TestLoadRoleFrom_ClaudePermissionModeField(t *testing.T) {
 	yaml := `
-name: permissive
+role_name: permissive
 instructions: |
   Do stuff.
-permission_mode: bypassPermissions
+claude_permission_mode: bypassPermissions
 `
 	path := writeTempFile(t, "permissive.yaml", yaml)
 	role, err := LoadRoleFrom(path)
 	if err != nil {
 		t.Fatalf("LoadRoleFrom: %v", err)
 	}
-	if role.PermissionMode != "bypassPermissions" {
-		t.Errorf("PermissionMode = %q, want %q", role.PermissionMode, "bypassPermissions")
+	if role.ClaudePermissionMode != "bypassPermissions" {
+		t.Errorf("ClaudePermissionMode = %q, want %q", role.ClaudePermissionMode, "bypassPermissions")
 	}
 }
 
-func TestLoadRoleFrom_InvalidPermissionMode(t *testing.T) {
+func TestLoadRoleFrom_InvalidClaudePermissionMode(t *testing.T) {
 	yaml := `
-name: bad
+role_name: bad
 instructions: |
   Do stuff.
-permission_mode: invalid_mode
+claude_permission_mode: invalid_mode
 `
 	path := writeTempFile(t, "bad.yaml", yaml)
 	_, err := LoadRoleFrom(path)
 	if err == nil {
-		t.Fatal("expected error for invalid permission_mode")
+		t.Fatal("expected error for invalid claude_permission_mode")
 	}
-	if !strings.Contains(err.Error(), "invalid permission_mode") {
+	if !strings.Contains(err.Error(), "invalid claude_permission_mode") {
 		t.Errorf("unexpected error: %v", err)
 	}
+}
+
+// --- CodexAskForApproval validation tests ---
+
+func TestValidate_CodexAskForApproval_Valid(t *testing.T) {
+	for _, val := range ValidCodexAskForApproval {
+		role := &Role{RoleName: "test", CodexAskForApproval: val}
+		if err := role.Validate(); err != nil {
+			t.Errorf("expected no error for codex_ask_for_approval %q, got: %v", val, err)
+		}
+	}
+}
+
+func TestValidate_CodexAskForApproval_Invalid(t *testing.T) {
+	role := &Role{RoleName: "test", CodexAskForApproval: "yolo"}
+	err := role.Validate()
+	if err == nil {
+		t.Fatal("expected error for invalid codex_ask_for_approval")
+	}
+	if !strings.Contains(err.Error(), "invalid codex_ask_for_approval") {
+		t.Errorf("expected 'invalid codex_ask_for_approval' in error, got: %v", err)
+	}
+}
+
+func TestValidate_CodexAskForApproval_Empty(t *testing.T) {
+	role := &Role{RoleName: "test", CodexAskForApproval: ""}
+	if err := role.Validate(); err != nil {
+		t.Fatalf("empty codex_ask_for_approval should be valid, got: %v", err)
+	}
+}
+
+func TestValidate_CodexSandboxMode_Valid(t *testing.T) {
+	for _, mode := range ValidCodexSandboxModes {
+		role := &Role{RoleName: "test", CodexSandboxMode: mode}
+		if err := role.Validate(); err != nil {
+			t.Errorf("expected no error for codex_sandbox_mode %q, got: %v", mode, err)
+		}
+	}
+}
+
+func TestValidate_CodexSandboxMode_Invalid(t *testing.T) {
+	role := &Role{RoleName: "test", CodexSandboxMode: "yolo"}
+	err := role.Validate()
+	if err == nil {
+		t.Fatal("expected error for invalid codex_sandbox_mode")
+	}
+	if !strings.Contains(err.Error(), "invalid codex_sandbox_mode") {
+		t.Errorf("expected 'invalid codex_sandbox_mode' in error, got: %v", err)
+	}
+}
+
+func TestValidate_CodexSandboxMode_Empty(t *testing.T) {
+	role := &Role{RoleName: "test", CodexSandboxMode: ""}
+	if err := role.Validate(); err != nil {
+		t.Fatalf("empty codex_sandbox_mode should be valid, got: %v", err)
+	}
+}
+
+func TestLoadRoleFrom_CodexAskForApprovalField(t *testing.T) {
+	yaml := `
+role_name: test
+codex_ask_for_approval: on-request
+codex_sandbox_mode: workspace-write
+`
+	path := writeTempFile(t, "codex.yaml", yaml)
+	role, err := LoadRoleFrom(path)
+	if err != nil {
+		t.Fatalf("LoadRoleFrom: %v", err)
+	}
+	if role.CodexAskForApproval != "on-request" {
+		t.Errorf("CodexAskForApproval = %q, want %q", role.CodexAskForApproval, "on-request")
+	}
+	if role.CodexSandboxMode != "workspace-write" {
+		t.Errorf("CodexSandboxMode = %q, want %q", role.CodexSandboxMode, "workspace-write")
+	}
+}
+
+func TestLoadRoleFrom_InvalidCodexAskForApproval(t *testing.T) {
+	yaml := `
+role_name: bad
+codex_ask_for_approval: invalid_policy
+`
+	path := writeTempFile(t, "bad-codex.yaml", yaml)
+	_, err := LoadRoleFrom(path)
+	if err == nil {
+		t.Fatal("expected error for invalid codex_ask_for_approval")
+	}
+	if !strings.Contains(err.Error(), "invalid codex_ask_for_approval") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadRoleFrom_InvalidCodexSandboxMode(t *testing.T) {
+	yaml := `
+role_name: bad
+codex_sandbox_mode: invalid_mode
+`
+	path := writeTempFile(t, "bad-sandbox.yaml", yaml)
+	_, err := LoadRoleFrom(path)
+	if err == nil {
+		t.Fatal("expected error for invalid codex_sandbox_mode")
+	}
+	if !strings.Contains(err.Error(), "invalid codex_sandbox_mode") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestLoadRoleFrom_InvalidAgentHarness(t *testing.T) {
+	yaml := `
+role_name: bad
+agent_harness: claude
+`
+	path := writeTempFile(t, "bad-harness.yaml", yaml)
+	_, err := LoadRoleFrom(path)
+	if err == nil {
+		t.Fatal("expected error for invalid agent_harness")
+	}
+	if !strings.Contains(err.Error(), "invalid agent_harness") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// --- Harness config tests ---
+
+func TestGetHarnessType_Default(t *testing.T) {
+	role := &Role{RoleName: "test"}
+	if got := role.GetHarnessType(); got != "claude_code" {
+		t.Errorf("GetHarnessType() = %q, want %q", got, "claude_code")
+	}
+}
+
+func TestGetHarnessType_ExplicitConfig(t *testing.T) {
+	role := &Role{RoleName: "test", AgentHarness: "codex"}
+	if got := role.GetHarnessType(); got != "codex" {
+		t.Errorf("GetHarnessType() = %q, want %q", got, "codex")
+	}
+}
+
+func TestGetAgentType_MapsClaudeCodeToClaude(t *testing.T) {
+	role := &Role{RoleName: "test", AgentHarness: "claude_code"}
+	if got := role.GetAgentType(); got != "" {
+		t.Errorf("GetAgentType() = %q, want empty explicit command", got)
+	}
+}
+
+func TestGetAgentType_GenericWithCommand(t *testing.T) {
+	role := &Role{
+		RoleName:            "test",
+		AgentHarness:        "generic",
+		AgentHarnessCommand: "/usr/local/bin/my-agent",
+	}
+	if got := role.GetAgentType(); got != "/usr/local/bin/my-agent" {
+		t.Errorf("GetAgentType() = %q, want %q", got, "/usr/local/bin/my-agent")
+	}
+}
+
+func TestGetModel(t *testing.T) {
+	role := &Role{RoleName: "test", AgentModel: "sonnet"}
+	if got := role.GetModel(); got != "sonnet" {
+		t.Errorf("GetModel() = %q, want %q", got, "sonnet")
+	}
+}
+
+func TestGetClaudeConfigDir_ExplicitPath(t *testing.T) {
+	role := &Role{RoleName: "test", ClaudeCodeConfigPath: "/new/config/dir"}
+	if got := role.GetClaudeConfigDir(); got != "/new/config/dir" {
+		t.Errorf("GetClaudeConfigDir() = %q, want %q", got, "/new/config/dir")
+	}
+}
+
+func TestGetCodexConfigDir(t *testing.T) {
+	// Not set → defaults to codex-config/default.
+	role := &Role{RoleName: "test"}
+	wantDefault := filepath.Join(ConfigDir(), "codex-config", "default")
+	if got := role.GetCodexConfigDir(); got != wantDefault {
+		t.Errorf("GetCodexConfigDir() = %q, want %q", got, wantDefault)
+	}
+
+	// Set via explicit codex path.
+	role2 := &Role{RoleName: "test", CodexConfigPath: "/codex/config"}
+	if got := role2.GetCodexConfigDir(); got != "/codex/config" {
+		t.Errorf("GetCodexConfigDir() = %q, want %q", got, "/codex/config")
+	}
+}
+
+// --- LoadRoleWithNameResolution tests ---
+
+func TestLoadRoleWithNameResolution_CLINameSkipsTwoPass(t *testing.T) {
+	yaml := `
+role_name: test
+agent_name: ignored-template-name
+instructions: |
+  You are {{ .AgentName }}.
+`
+	path := writeTempFile(t, "cli-name.yaml", yaml)
+	ctx := &tmpl.Context{RoleName: "test", H2Dir: "/tmp/h2"}
+
+	role, name, err := LoadRoleWithNameResolution(path, ctx, nil, "cli-provided", func() string {
+		t.Fatal("generateFallback should not be called when CLI name is provided")
+		return ""
+	})
+	if err != nil {
+		t.Fatalf("LoadRoleWithNameResolution: %v", err)
+	}
+	if name != "cli-provided" {
+		t.Errorf("name = %q, want %q", name, "cli-provided")
+	}
+	if !strings.Contains(role.Instructions, "cli-provided") {
+		t.Errorf("instructions should contain CLI name: %q", role.Instructions)
+	}
+}
+
+func TestLoadRoleWithNameResolution_AgentNameFromRole(t *testing.T) {
+	yaml := `
+role_name: test
+agent_name: my-static-agent
+instructions: |
+  You are {{ .AgentName }}.
+`
+	path := writeTempFile(t, "static-name.yaml", yaml)
+	ctx := &tmpl.Context{RoleName: "test", H2Dir: "/tmp/h2"}
+
+	role, name, err := LoadRoleWithNameResolution(path, ctx, nil, "", func() string {
+		t.Fatal("generateFallback should not be called when agent_name is set")
+		return ""
+	})
+	if err != nil {
+		t.Fatalf("LoadRoleWithNameResolution: %v", err)
+	}
+	if name != "my-static-agent" {
+		t.Errorf("name = %q, want %q", name, "my-static-agent")
+	}
+	if !strings.Contains(role.Instructions, "my-static-agent") {
+		t.Errorf("instructions should contain resolved name: %q", role.Instructions)
+	}
+}
+
+func TestLoadRoleWithNameResolution_RandomName(t *testing.T) {
+	yaml := `
+role_name: test
+agent_name: '{{ randomName }}'
+instructions: |
+  You are {{ .AgentName }}.
+`
+	path := writeTempFile(t, "random-name.yaml", yaml)
+	ctx := &tmpl.Context{RoleName: "test", H2Dir: "/tmp/h2"}
+	nameFuncs := tmpl.NameFuncs(func() string { return "bright-hare" }, nil)
+
+	role, name, err := LoadRoleWithNameResolution(path, ctx, nameFuncs, "", func() string {
+		t.Fatal("generateFallback should not be called when agent_name uses randomName")
+		return ""
+	})
+	if err != nil {
+		t.Fatalf("LoadRoleWithNameResolution: %v", err)
+	}
+	if name != "bright-hare" {
+		t.Errorf("name = %q, want %q", name, "bright-hare")
+	}
+	if !strings.Contains(role.Instructions, "bright-hare") {
+		t.Errorf("instructions should contain random name: %q", role.Instructions)
+	}
+}
+
+func TestLoadRoleWithNameResolution_AutoIncrement(t *testing.T) {
+	yaml := `
+role_name: test
+agent_name: '{{ autoIncrement "worker" }}'
+instructions: |
+  You are {{ .AgentName }}.
+`
+	path := writeTempFile(t, "autoincr-name.yaml", yaml)
+	ctx := &tmpl.Context{RoleName: "test", H2Dir: "/tmp/h2"}
+	nameFuncs := tmpl.NameFuncs(nil, []string{"worker-1", "worker-3"})
+
+	role, name, err := LoadRoleWithNameResolution(path, ctx, nameFuncs, "", func() string {
+		t.Fatal("generateFallback should not be called")
+		return ""
+	})
+	if err != nil {
+		t.Fatalf("LoadRoleWithNameResolution: %v", err)
+	}
+	if name != "worker-4" {
+		t.Errorf("name = %q, want %q", name, "worker-4")
+	}
+	if !strings.Contains(role.Instructions, "worker-4") {
+		t.Errorf("instructions should contain auto-incremented name: %q", role.Instructions)
+	}
+}
+
+func TestLoadRoleWithNameResolution_FallbackWhenNoAgentName(t *testing.T) {
+	yaml := `
+role_name: test
+instructions: |
+  You are {{ .AgentName }}.
+`
+	path := writeTempFile(t, "no-agent-name.yaml", yaml)
+	ctx := &tmpl.Context{RoleName: "test", H2Dir: "/tmp/h2"}
+
+	fallbackCalled := false
+	role, name, err := LoadRoleWithNameResolution(path, ctx, nil, "", func() string {
+		fallbackCalled = true
+		return "fallback-name"
+	})
+	if err != nil {
+		t.Fatalf("LoadRoleWithNameResolution: %v", err)
+	}
+	if !fallbackCalled {
+		t.Error("expected generateFallback to be called")
+	}
+	if name != "fallback-name" {
+		t.Errorf("name = %q, want %q", name, "fallback-name")
+	}
+	if !strings.Contains(role.Instructions, "fallback-name") {
+		t.Errorf("instructions should contain fallback name: %q", role.Instructions)
+	}
+}
+
+func TestLoadRoleWithNameResolution_CircularReference(t *testing.T) {
+	yaml := `
+role_name: test
+agent_name: '{{ .AgentName }}-suffix'
+instructions: test
+`
+	path := writeTempFile(t, "circular.yaml", yaml)
+	ctx := &tmpl.Context{RoleName: "test", H2Dir: "/tmp/h2"}
+
+	_, _, err := LoadRoleWithNameResolution(path, ctx, nil, "", func() string { return "x" })
+	if err == nil {
+		t.Fatal("expected error for circular agent_name reference")
+	}
+	if !strings.Contains(err.Error(), "circular reference") {
+		t.Errorf("error = %q, want it to mention 'circular reference'", err.Error())
+	}
+}
+
+func TestLoadRoleWithNameResolution_NameFuncsCached(t *testing.T) {
+	// Both passes should get the same randomName value (caching).
+	yaml := `
+role_name: test
+agent_name: '{{ randomName }}'
+instructions: |
+  You are {{ .AgentName }} running {{ randomName }}.
+`
+	path := writeTempFile(t, "cached-funcs.yaml", yaml)
+	ctx := &tmpl.Context{RoleName: "test", H2Dir: "/tmp/h2"}
+
+	calls := 0
+	nameFuncs := tmpl.NameFuncs(func() string {
+		calls++
+		return "cached-name"
+	}, nil)
+
+	role, name, err := LoadRoleWithNameResolution(path, ctx, nameFuncs, "", func() string {
+		return "unused"
+	})
+	if err != nil {
+		t.Fatalf("LoadRoleWithNameResolution: %v", err)
+	}
+	if name != "cached-name" {
+		t.Errorf("name = %q, want %q", name, "cached-name")
+	}
+	// randomName in instructions should also be "cached-name" (cached).
+	if !strings.Contains(role.Instructions, "cached-name running cached-name") {
+		t.Errorf("instructions should use cached name: %q", role.Instructions)
+	}
+	// Generator should only be called once (cached).
+	if calls != 1 {
+		t.Errorf("expected 1 generate call (cached), got %d", calls)
+	}
+}
+
+// --- Role inheritance tests ---
+
+func TestLoadRoleRenderedFrom_InheritanceSingleLevelDeepMerge(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+
+	writeRoleFile(t, rolesDir, "coder.yaml.tmpl", `
+role_name: coder
+variables:
+  team:
+    description: "Team"
+  model:
+    description: "Model"
+    default: "sonnet"
+agent_model: "{{ .Var.model }}"
+additional_dirs:
+  - /parent/a
+settings:
+  shell: bash
+  retries: 1
+instructions: |
+  Parent {{ .AgentName }} on {{ .Var.team }} using {{ .Var.model }}.
+`)
+
+	childPath := writeRoleFile(t, rolesDir, "backend.yaml.tmpl", `
+role_name: backend
+inherits: coder
+variables:
+  team:
+    description: "Team override"
+    default: "platform"
+  service:
+    description: "Service"
+additional_dirs:
+  - /child/only
+settings:
+  retries: 5
+  nested:
+    mode: strict
+instructions: |
+  Child {{ .AgentName }} for {{ .Var.service }}.
+`)
+
+	role, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{
+		AgentName: "agent-x",
+		Var:       map[string]string{"service": "auth"},
+	})
+	if err != nil {
+		t.Fatalf("LoadRoleRenderedFrom: %v", err)
+	}
+	if role.RoleName != "backend" {
+		t.Errorf("RoleName = %q, want %q", role.RoleName, "backend")
+	}
+	if role.GetModel() != "sonnet" {
+		t.Errorf("AgentModel = %q, want %q", role.GetModel(), "sonnet")
+	}
+	if len(role.AdditionalDirs) != 1 || role.AdditionalDirs[0] != "/child/only" {
+		t.Errorf("AdditionalDirs = %#v, want child list replacement", role.AdditionalDirs)
+	}
+	if !strings.Contains(role.Instructions, "Child agent-x for auth.") {
+		t.Errorf("Instructions = %q, want child-rendered content", role.Instructions)
+	}
+
+	var settings map[string]interface{}
+	if err := role.Settings.Decode(&settings); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	if settings["shell"] != "bash" {
+		t.Errorf("settings.shell = %v, want %q", settings["shell"], "bash")
+	}
+	if settings["retries"] != 5 {
+		t.Errorf("settings.retries = %v, want 5", settings["retries"])
+	}
+	nested, ok := settings["nested"].(map[string]interface{})
+	if !ok || nested["mode"] != "strict" {
+		t.Errorf("settings.nested = %#v, want nested.mode=strict", settings["nested"])
+	}
+
+	if _, ok := role.Variables["model"]; ok {
+		t.Errorf("exposed vars should hide omitted optional parent var 'model': %#v", role.Variables)
+	}
+	if _, ok := role.Variables["service"]; !ok {
+		t.Errorf("expected child var 'service' in exposed vars: %#v", role.Variables)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceRequiredParentVarMustBeDefined(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+variables:
+  team:
+    description: "Team"
+instructions: hi
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+variables:
+  service:
+    description: "Service"
+instructions: hi
+`)
+
+	_, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{Var: map[string]string{"service": "api"}})
+	if err == nil {
+		t.Fatal("expected missing-required-parent-var error")
+	}
+	if !strings.Contains(err.Error(), "team") {
+		t.Errorf("error should mention missing parent required var 'team': %v", err)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceParentInstructionsChildSplitErrors(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+instructions: |
+  Parent instructions
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+instructions_body: |
+  Child body
+`)
+
+	_, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err == nil {
+		t.Fatal("expected error when parent sets instructions and child sets split instructions")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("expected mutually exclusive error, got: %v", err)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceParentSplitChildInstructionsErrors(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+instructions_intro: Parent intro
+instructions_body: Parent body
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+instructions: |
+  Child instructions
+`)
+
+	_, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err == nil {
+		t.Fatal("expected error when parent sets split instructions and child sets instructions")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("expected mutually exclusive error, got: %v", err)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceChildCanNullParentInstructions(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+instructions: |
+  Parent instructions
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+instructions: null
+instructions_body: |
+  Child body
+`)
+
+	role, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err != nil {
+		t.Fatalf("LoadRoleRenderedFrom: %v", err)
+	}
+	if got := role.GetInstructions(); !strings.Contains(got, "Child body") {
+		t.Fatalf("expected child split instructions to remain after nulling parent instructions, got: %q", got)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceChildCanNullParentSplit(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+instructions_intro: Parent intro
+instructions_body: Parent body
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+instructions_intro: null
+instructions_body: null
+instructions: |
+  Child instructions
+`)
+
+	role, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err != nil {
+		t.Fatalf("LoadRoleRenderedFrom: %v", err)
+	}
+	if got := role.GetInstructions(); !strings.Contains(got, "Child instructions") {
+		t.Fatalf("expected child instructions to remain after nulling parent split fields, got: %q", got)
+	}
+}
+
+func TestLoadRoleWithNameResolution_InheritanceRejectsUnknownAgainstExposedContract(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+variables:
+  model:
+    description: "Model"
+    default: "sonnet"
+instructions: |
+  Model {{ .Var.model }}
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+variables:
+  service:
+    description: "Service"
+instructions: |
+  Service {{ .Var.service }}
+`)
+
+	_, _, err := LoadRoleWithNameResolution(
+		childPath,
+		&tmpl.Context{Var: map[string]string{"service": "api", "model": "opus"}},
+		nil,
+		"agent-1",
+		func() string { return "unused" },
+	)
+	if err == nil {
+		t.Fatal("expected unknown-var error")
+	}
+	if !strings.Contains(err.Error(), "model") {
+		t.Errorf("error should mention unknown var 'model': %v", err)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceParentNotFound(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: missing-parent
+instructions: hi
+`)
+	_, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err == nil {
+		t.Fatal("expected parent-not-found error")
+	}
+	if !strings.Contains(err.Error(), "missing-parent") {
+		t.Errorf("error should mention missing parent name: %v", err)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceCycle(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	aPath := writeRoleFile(t, rolesDir, "a.yaml", `
+role_name: a
+inherits: b
+instructions: A
+`)
+	writeRoleFile(t, rolesDir, "b.yaml", `
+role_name: b
+inherits: a
+instructions: B
+`)
+
+	_, err := LoadRoleRenderedFrom(aPath, &tmpl.Context{})
+	if err == nil {
+		t.Fatal("expected cycle error")
+	}
+	if !strings.Contains(err.Error(), "circular") {
+		t.Errorf("error should mention circular inheritance: %v", err)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceDepthLimit(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "r01.yaml", `
+role_name: r01
+instructions: base
+`)
+	for i := 2; i <= 11; i++ {
+		name := fmt.Sprintf("r%02d", i)
+		parent := fmt.Sprintf("r%02d", i-1)
+		writeRoleFile(t, rolesDir, name+".yaml", fmt.Sprintf(`
+role_name: %s
+inherits: %s
+instructions: %s
+`, name, parent, name))
+	}
+
+	deepPath := filepath.Join(rolesDir, "r11.yaml")
+	_, err := LoadRoleRenderedFrom(deepPath, &tmpl.Context{})
+	if err == nil {
+		t.Fatal("expected depth-limit error")
+	}
+	if !strings.Contains(err.Error(), "depth") {
+		t.Errorf("error should mention depth limit: %v", err)
+	}
+}
+
+func TestLoadRoleWithNameResolution_InheritanceTwoPassAgentName(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+instructions: |
+  Parent sees {{ .AgentName }}
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+agent_name: '{{ randomName }}'
+`)
+
+	nameFuncs := tmpl.NameFuncs(func() string { return "bright-hare" }, nil)
+	role, name, err := LoadRoleWithNameResolution(
+		childPath,
+		&tmpl.Context{},
+		nameFuncs,
+		"",
+		func() string { return "fallback" },
+	)
+	if err != nil {
+		t.Fatalf("LoadRoleWithNameResolution: %v", err)
+	}
+	if name != "bright-hare" {
+		t.Errorf("name = %q, want %q", name, "bright-hare")
+	}
+	if !strings.Contains(role.Instructions, "bright-hare") {
+		t.Errorf("instructions should include resolved AgentName from pass2: %q", role.Instructions)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceHooksOmittedKeyPreserved(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+hooks:
+  pre:
+    cmd: check
+settings:
+  shell: bash
+instructions: parent
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+hooks:
+  post:
+    cmd: done
+instructions: child
+`)
+
+	role, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err != nil {
+		t.Fatalf("LoadRoleRenderedFrom: %v", err)
+	}
+
+	var hooks map[string]interface{}
+	if err := role.Hooks.Decode(&hooks); err != nil {
+		t.Fatalf("decode hooks: %v", err)
+	}
+	if _, ok := hooks["pre"]; !ok {
+		t.Fatalf("expected parent hook key to be preserved: %#v", hooks)
+	}
+	if _, ok := hooks["post"]; !ok {
+		t.Fatalf("expected child hook key to be merged in: %#v", hooks)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceSettingsSequenceReplacement(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+settings:
+  allow:
+    - read
+    - write
+instructions: parent
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+settings:
+  allow:
+    - execute
+instructions: child
+`)
+
+	role, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err != nil {
+		t.Fatalf("LoadRoleRenderedFrom: %v", err)
+	}
+
+	var settings map[string]interface{}
+	if err := role.Settings.Decode(&settings); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	allow, ok := settings["allow"].([]interface{})
+	if !ok {
+		t.Fatalf("settings.allow = %#v, want sequence", settings["allow"])
+	}
+	if len(allow) != 1 || allow[0] != "execute" {
+		t.Fatalf("settings.allow = %#v, want [execute]", allow)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceHooksNullClearsParent(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+hooks:
+  pre:
+    cmd: check
+instructions: parent
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+hooks: null
+instructions: child
+`)
+
+	role, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err != nil {
+		t.Fatalf("LoadRoleRenderedFrom: %v", err)
+	}
+
+	var hooks interface{}
+	if err := role.Hooks.Decode(&hooks); err != nil {
+		t.Fatalf("decode hooks: %v", err)
+	}
+	if hooks != nil {
+		t.Fatalf("hooks should be nil after explicit null clear, got %#v", hooks)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceShapeTypeReplacement(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+settings:
+  x:
+    nested: value
+instructions: parent
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+settings:
+  x:
+    - a
+    - b
+instructions: child
+`)
+
+	role, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err != nil {
+		t.Fatalf("LoadRoleRenderedFrom: %v", err)
+	}
+	var settings map[string]interface{}
+	if err := role.Settings.Decode(&settings); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	x, ok := settings["x"].([]interface{})
+	if !ok {
+		t.Fatalf("settings.x = %#v, want replaced sequence", settings["x"])
+	}
+	if len(x) != 2 || x[0] != "a" || x[1] != "b" {
+		t.Fatalf("settings.x = %#v, want [a b]", x)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceAnchorAliasNormalization(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+settings:
+  defaults: &defs
+    retries: 3
+  applied: *defs
+instructions: parent
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+instructions: child
+`)
+
+	role, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err != nil {
+		t.Fatalf("LoadRoleRenderedFrom: %v", err)
+	}
+
+	var settings map[string]interface{}
+	if err := role.Settings.Decode(&settings); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	defaults, ok := settings["defaults"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("settings.defaults = %#v, want map", settings["defaults"])
+	}
+	applied, ok := settings["applied"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("settings.applied = %#v, want map", settings["applied"])
+	}
+	if defaults["retries"] != applied["retries"] {
+		t.Fatalf("anchor/alias semantic value mismatch: defaults=%#v applied=%#v", defaults, applied)
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceStandardTagAllowed(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+settings:
+  str_number: !!str 123
+instructions: parent
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+instructions: child
+`)
+
+	role, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err != nil {
+		t.Fatalf("LoadRoleRenderedFrom: %v", err)
+	}
+
+	var settings map[string]interface{}
+	if err := role.Settings.Decode(&settings); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	if settings["str_number"] != "123" {
+		t.Fatalf("settings.str_number = %#v, want string 123", settings["str_number"])
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceCustomTagPreservedInHooks(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	writeRoleFile(t, rolesDir, "parent.yaml", `
+role_name: parent
+hooks:
+  tagged: !customTag "v1"
+instructions: parent
+`)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+inherits: parent
+instructions: child
+`)
+
+	role, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err != nil {
+		t.Fatalf("LoadRoleRenderedFrom: %v", err)
+	}
+	if !yamlNodeHasTag(&role.Hooks, "!customTag") {
+		t.Fatalf("expected custom tag !customTag to be preserved in hooks node")
+	}
+}
+
+func TestLoadRoleRenderedFrom_InheritanceCustomTagOutsideHooksSettingsFails(t *testing.T) {
+	rolesDir := setupInheritanceRolesEnv(t)
+	childPath := writeRoleFile(t, rolesDir, "child.yaml", `
+role_name: child
+agent_model: !myTag "sonnet"
+instructions: child
+`)
+
+	_, err := LoadRoleRenderedFrom(childPath, &tmpl.Context{})
+	if err == nil {
+		t.Fatal("expected deterministic custom-tag rejection error")
+	}
+	if !strings.Contains(err.Error(), "custom YAML tags outside hooks/settings are not supported") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "agent_model") {
+		t.Fatalf("error should include offending path: %v", err)
+	}
+}
+
+func setupInheritanceRolesEnv(t *testing.T) string {
+	t.Helper()
+	h2Dir := t.TempDir()
+	rolesDir := filepath.Join(h2Dir, "roles")
+	if err := os.MkdirAll(rolesDir, 0o755); err != nil {
+		t.Fatalf("mkdir roles dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(h2Dir, ".h2-dir.txt"), []byte("vtest\n"), 0o644); err != nil {
+		t.Fatalf("write h2 marker: %v", err)
+	}
+	t.Setenv("H2_DIR", h2Dir)
+	ResetResolveCache()
+	t.Cleanup(ResetResolveCache)
+	return rolesDir
+}
+
+func writeRoleFile(t *testing.T, rolesDir, name, content string) string {
+	t.Helper()
+	path := filepath.Join(rolesDir, name)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write role file %s: %v", name, err)
+	}
+	return path
+}
+
+func yamlNodeHasTag(node *yaml.Node, tag string) bool {
+	if node == nil {
+		return false
+	}
+	if node.Tag == tag {
+		return true
+	}
+	for _, child := range node.Content {
+		if yamlNodeHasTag(child, tag) {
+			return true
+		}
+	}
+	if node.Kind == yaml.AliasNode && node.Alias != nil {
+		return yamlNodeHasTag(node.Alias, tag)
+	}
+	return false
 }
 
 func writeTempFile(t *testing.T, name, content string) string {

@@ -62,11 +62,8 @@ func (c *Client) HandleExitedBytes(buf []byte, start, n int) int {
 			}
 			return n
 		case 0x1B:
-			consumed, handled := c.HandleEscape(buf[i:n])
+			consumed, _ := c.HandleEscape(buf[i:n])
 			i += consumed
-			if handled {
-				continue
-			}
 		}
 	}
 	return n
@@ -174,6 +171,17 @@ func (c *Client) HandleMenuBytes(buf []byte, start, n int) int {
 		b := buf[i]
 		i++
 		if b == 0x1B {
+			// In menu mode, up/down arrows navigate the local input history.
+			if i+1 < n && buf[i] == '[' && (buf[i+1] == 'A' || buf[i+1] == 'B') {
+				if buf[i+1] == 'A' {
+					c.HistoryUp()
+				} else {
+					c.HistoryDown()
+				}
+				c.RenderBar()
+				i += 2
+				continue
+			}
 			consumed, handled := c.HandleEscape(buf[i:n])
 			i += consumed
 			if handled {
@@ -187,10 +195,13 @@ func (c *Client) HandleMenuBytes(buf []byte, start, n int) int {
 			continue
 		}
 		switch b {
+		case 0x1C: // ctrl+\ — exit menu (toggle with default mode shortcut)
+			c.setMode(ModeNormal)
+			c.RenderBar()
 		case 'p', 'P': // passthrough mode
 			if c.TryPassthrough != nil && !c.TryPassthrough() {
 				// Locked by another client — stay in menu.
-				c.RenderBar()
+				c.RenderStatusBar()
 				continue
 			}
 			c.setMode(ModePassthrough)
@@ -239,11 +250,8 @@ func (c *Client) HandleDefaultBytes(buf []byte, start, n int) int {
 		i++
 
 		if b == 0x1B {
-			consumed, handled := c.HandleEscape(buf[i:n])
+			consumed, _ := c.HandleEscape(buf[i:n])
 			i += consumed
-			if handled {
-				continue
-			}
 			continue
 		}
 
@@ -254,7 +262,7 @@ func (c *Client) HandleDefaultBytes(buf []byte, start, n int) int {
 
 		case 0x09:
 			c.CyclePriority()
-			c.RenderBar()
+			c.RenderInputBar()
 
 		case 0x0D, 0x0A:
 			if len(c.Input) > 0 {
@@ -284,18 +292,18 @@ func (c *Client) HandleDefaultBytes(buf []byte, start, n int) int {
 			}
 			c.HistIdx = -1
 			c.Saved = nil
-			c.RenderBar()
+			c.RenderInputBar()
 
 		case 0x7F, 0x08:
 			if c.CursorPos > 0 {
 				c.DeleteBackward()
-				c.RenderBar()
+				c.RenderInputBar()
 			}
 
 		case 0x01: // ctrl+a — move to start (pass through if input empty)
 			if len(c.Input) > 0 {
 				c.CursorToStart()
-				c.RenderBar()
+				c.RenderInputBar()
 			} else {
 				if !c.writePTYOrHang([]byte{b}) {
 					return n
@@ -305,7 +313,7 @@ func (c *Client) HandleDefaultBytes(buf []byte, start, n int) int {
 		case 0x05: // ctrl+e — move to end (pass through if input empty)
 			if len(c.Input) > 0 {
 				c.CursorToEnd()
-				c.RenderBar()
+				c.RenderInputBar()
 			} else {
 				if !c.writePTYOrHang([]byte{b}) {
 					return n
@@ -315,7 +323,7 @@ func (c *Client) HandleDefaultBytes(buf []byte, start, n int) int {
 		case 0x0B: // ctrl+k — kill to end of line (pass through if input empty)
 			if len(c.Input) > 0 {
 				c.KillToEnd()
-				c.RenderBar()
+				c.RenderInputBar()
 			} else {
 				if !c.writePTYOrHang([]byte{b}) {
 					return n
@@ -325,7 +333,7 @@ func (c *Client) HandleDefaultBytes(buf []byte, start, n int) int {
 		case 0x15: // ctrl+u — kill to start of line (pass through if input empty)
 			if len(c.Input) > 0 {
 				c.KillToStart()
-				c.RenderBar()
+				c.RenderInputBar()
 			} else {
 				if !c.writePTYOrHang([]byte{b}) {
 					return n
@@ -339,7 +347,7 @@ func (c *Client) HandleDefaultBytes(buf []byte, start, n int) int {
 				}
 			} else {
 				c.InsertByte(b)
-				c.RenderBar()
+				c.RenderInputBar()
 			}
 		}
 	}
@@ -395,14 +403,14 @@ func (c *Client) HandleEscape(remaining []byte) (consumed int, handled bool) {
 	case 'f': // meta+f — forward word
 		if c.Mode == ModeNormal && len(c.Input) > 0 {
 			c.CursorForwardWord()
-			c.RenderBar()
+			c.RenderInputBar()
 			return 1, true
 		}
 		return 0, false
 	case 'b': // meta+b — backward word
 		if c.Mode == ModeNormal && len(c.Input) > 0 {
 			c.CursorBackwardWord()
-			c.RenderBar()
+			c.RenderInputBar()
 			return 1, true
 		}
 		return 0, false
@@ -442,13 +450,20 @@ func (c *Client) HandleCSI(remaining []byte) (consumed int, handled bool) {
 			if final == 'A' {
 				c.ScrollUp(1)
 			} else {
-				c.ScrollDown(1)
+				c.ScrollDown(1, false)
 			}
 			break
 		}
 		if c.Mode == ModeNormal {
 			// Pass up/down arrow through to PTY (e.g. shell history).
 			c.writePTYOrHang(append([]byte{0x1B, '['}, remaining[:i+1]...))
+		} else if c.Mode == ModeMenu {
+			if final == 'A' {
+				c.HistoryUp()
+			} else {
+				c.HistoryDown()
+			}
+			c.RenderInputBar()
 		}
 	case 'C', 'D':
 		if c.Mode == ModePassthrough {
@@ -462,7 +477,7 @@ func (c *Client) HandleCSI(remaining []byte) (consumed int, handled bool) {
 				} else {
 					c.CursorRight()
 				}
-				c.RenderBar()
+				c.RenderInputBar()
 			} else {
 				c.writePTYOrHang(append([]byte{0x1B, '['}, remaining[:i+1]...))
 			}
@@ -475,18 +490,69 @@ func (c *Client) HandleCSI(remaining []byte) (consumed int, handled bool) {
 				c.setMode(ModeMenu)
 				c.RenderBar()
 			}
+		} else if c.Mode == ModeNormal || c.Mode == ModePassthrough {
+			c.writePTYOrHang(append([]byte{0x1B, '['}, remaining[:i+1]...))
+		}
+	case 'H', 'F':
+		// CSI H = Home, CSI F = End (also used for cursor position with params).
+		if params == "" && final == 'H' && c.Mode == ModeNormal {
+			c.EnterScrollMode()
+			c.ScrollUp(1 << 20) // clamps to max
+			break
+		}
+		if c.IsScrollMode() && params == "" {
+			if final == 'H' {
+				c.ScrollUp(1 << 20) // clamps to max
+			} else {
+				c.ScrollDown(1<<20, true) // exits scroll mode
+			}
+			break
+		}
+		if c.Mode == ModeNormal || c.Mode == ModePassthrough {
+			c.writePTYOrHang(append([]byte{0x1B, '['}, remaining[:i+1]...))
 		}
 	case '~':
-		// xterm modifyOtherKeys format: CSI 27;<modifiers>;<code> ~
+		// CSI 5~ = PageUp, CSI 6~ = PageDown.
+		// CSI 27;5;13~ = xterm Ctrl+Enter (modifyOtherKeys format).
+		if params == "5" && c.Mode == ModeNormal {
+			c.EnterScrollMode()
+			page := c.VT.ChildRows
+			if page < 1 {
+				page = 1
+			}
+			c.ScrollUp(page)
+			break
+		}
+		if c.IsScrollMode() && (params == "5" || params == "6") {
+			page := c.VT.ChildRows
+			if page < 1 {
+				page = 1
+			}
+			if params == "5" {
+				c.ScrollUp(page)
+			} else {
+				c.ScrollDown(page, false)
+			}
+			break
+		}
 		if params == "27;5;13" {
 			// Ctrl+Enter — open menu in normal mode.
 			if c.Mode == ModeNormal {
 				c.setMode(ModeMenu)
 				c.RenderBar()
 			}
+		} else if c.Mode == ModeNormal || c.Mode == ModePassthrough {
+			// Pass through unhandled ~ sequences (PageUp, PageDown, etc.)
+			c.writePTYOrHang(append([]byte{0x1B, '['}, remaining[:i+1]...))
 		}
 	case 'M', 'm':
 		c.HandleSGRMouse(remaining[:i], final == 'M')
+	default:
+		// Pass through unhandled CSI sequences (Home, End, etc.) in
+		// normal and passthrough modes.
+		if c.Mode == ModeNormal || c.Mode == ModePassthrough {
+			c.writePTYOrHang(append([]byte{0x1B, '['}, remaining[:i+1]...))
+		}
 	}
 
 	return totalConsumed, true
@@ -535,11 +601,8 @@ func (c *Client) HandleScrollBytes(buf []byte, start, n int) int {
 		case 0x1B:
 			if i < n {
 				// More data in buffer — try to parse escape sequence.
-				consumed, handled := c.HandleEscape(buf[i:n])
+				consumed, _ := c.HandleEscape(buf[i:n])
 				i += consumed
-				if handled {
-					continue
-				}
 				// ESC followed by unrecognized byte — ignore.
 			} else {
 				// ESC at end of buffer — wait to see if it's bare Esc.
@@ -560,6 +623,8 @@ func (c *Client) HandleScrollBytes(buf []byte, start, n int) int {
 // EnterScrollMode switches to scroll mode, freezing the display.
 // If currently in passthrough, enters ModePassthroughScroll to preserve state.
 func (c *Client) EnterScrollMode() {
+	c.ScrollAnchorY = c.scrollbackBottomRow()
+	c.ScrollHistoryAnchor = len(c.VT.ScrollHistory)
 	if c.Mode == ModePassthrough {
 		c.setMode(ModePassthroughScroll)
 	} else {
@@ -574,6 +639,8 @@ func (c *Client) EnterScrollMode() {
 // ModePassthroughScroll restores ModePassthrough; ModeScroll restores ModeNormal.
 func (c *Client) ExitScrollMode() {
 	c.ScrollOffset = 0
+	c.ScrollAnchorY = 0
+	c.ScrollHistoryAnchor = 0
 	if c.Mode == ModePassthroughScroll {
 		c.setMode(ModePassthrough)
 	} else {
@@ -597,12 +664,16 @@ func (c *Client) ScrollUp(lines int) {
 }
 
 // ScrollDown moves the scroll view down by the given number of lines.
-// If we reach the bottom (offset 0), exits scroll mode.
-func (c *Client) ScrollDown(lines int) {
+// If exitAtBottom is true and we reach offset 0, exits scroll mode.
+// If exitAtBottom is false, clamps to offset 0 and stays in scroll mode.
+func (c *Client) ScrollDown(lines int, exitAtBottom bool) {
 	c.ScrollOffset -= lines
 	if c.ScrollOffset <= 0 {
-		c.ExitScrollMode()
-		return
+		if exitAtBottom {
+			c.ExitScrollMode()
+			return
+		}
+		c.ScrollOffset = 0
 	}
 	c.ClampScrollOffset()
 	c.RenderScreen()
@@ -611,13 +682,10 @@ func (c *Client) ScrollDown(lines int) {
 
 // ClampScrollOffset ensures ScrollOffset is within valid bounds.
 func (c *Client) ClampScrollOffset() {
-	if c.VT.Scrollback == nil {
+	maxOffset, ok := c.scrollMaxOffset()
+	if !ok {
 		c.ScrollOffset = 0
 		return
-	}
-	maxOffset := c.VT.Scrollback.Cursor.Y - c.VT.ChildRows + 1
-	if maxOffset < 0 {
-		maxOffset = 0
 	}
 	if c.ScrollOffset > maxOffset {
 		c.ScrollOffset = maxOffset
@@ -625,6 +693,72 @@ func (c *Client) ClampScrollOffset() {
 	if c.ScrollOffset < 0 {
 		c.ScrollOffset = 0
 	}
+}
+
+// scrollbackBottomRow returns the effective last row in scrollback.
+// Uses Cursor.Y rather than len(Content) because AutoResizeY grows Content
+// via ensureHeight but never shrinks it, so len(Content) can be massively
+// inflated for TUI apps that reposition the cursor.
+func (c *Client) scrollbackBottomRow() int {
+	if c.VT == nil || c.VT.Scrollback == nil {
+		return 0
+	}
+	y := c.VT.Scrollback.Cursor.Y
+	if y < 0 {
+		return 0
+	}
+	return y
+}
+
+// scrollbackScrollBottom returns the effective bottom for midterm scrollback rendering.
+func (c *Client) scrollbackScrollBottom() int {
+	if c.IsScrollMode() {
+		return c.ScrollAnchorY
+	}
+	return c.scrollbackBottomRow()
+}
+
+func (c *Client) scrollMaxOffset() (int, bool) {
+	if c.VT == nil {
+		return 0, false
+	}
+	// Prefer ScrollHistory (from midterm OnScrollback callback) when available.
+	if c.hasScrollHistory() {
+		histLen := c.scrollHistoryLen()
+		// Total content = ScrollHistory + live screen (ChildRows).
+		// Max offset = total - ChildRows = histLen.
+		if histLen < 0 {
+			histLen = 0
+		}
+		return histLen, true
+	}
+	// Fallback to AppendOnly scrollback for apps without scroll regions.
+	if c.VT.Scrollback == nil {
+		return 0, false
+	}
+	bottom := c.scrollbackScrollBottom()
+	maxOffset := bottom - c.VT.ChildRows + 1
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	return maxOffset, true
+}
+
+// hasScrollHistory returns true if ScrollHistory should be used for scrollback.
+// This is only preferred when the child uses scroll regions (DECSTBM), which
+// breaks the AppendOnly Scrollback terminal. For apps without scroll regions
+// (e.g. Claude Code), Scrollback works better.
+func (c *Client) hasScrollHistory() bool {
+	return c.VT != nil && c.VT.ScrollRegionUsed && len(c.VT.ScrollHistory) > 0
+}
+
+// scrollHistoryLen returns the ScrollHistory length to use for rendering.
+// In scroll mode, uses the frozen anchor; otherwise the live length.
+func (c *Client) scrollHistoryLen() int {
+	if c.IsScrollMode() && c.ScrollHistoryAnchor > 0 {
+		return c.ScrollHistoryAnchor
+	}
+	return len(c.VT.ScrollHistory)
 }
 
 // isSGRMouseSequence returns true if seq is an SGR mouse event
@@ -664,13 +798,27 @@ func (c *Client) HandleSGRMouse(params []byte, press bool) {
 			c.ShowSelectHint()
 		}
 	case 64: // scroll up
-		if !c.IsScrollMode() {
+		if c.VT != nil && c.VT.AltScrollEnabled {
+			for i := 0; i < scrollStep; i++ {
+				if !c.writePTYOrHang([]byte("\033[A")) {
+					break
+				}
+			}
+		} else if c.IsScrollMode() {
+			c.ScrollUp(scrollStep)
+		} else {
 			c.EnterScrollMode()
+			c.ScrollUp(scrollStep)
 		}
-		c.ScrollUp(scrollStep)
 	case 65: // scroll down
-		if c.IsScrollMode() {
-			c.ScrollDown(scrollStep)
+		if c.VT != nil && c.VT.AltScrollEnabled {
+			for i := 0; i < scrollStep; i++ {
+				if !c.writePTYOrHang([]byte("\033[B")) {
+					break
+				}
+			}
+		} else if c.IsScrollMode() {
+			c.ScrollDown(scrollStep, true)
 		}
 	}
 }

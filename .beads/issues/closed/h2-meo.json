@@ -1,0 +1,72 @@
+{
+  "id": "h2-meo",
+  "title": "Phase 1: Adapter infrastructure (Claude Code refactor)",
+  "description": "Refactor existing Claude Code agent observation into the adapter pattern. Define AgentAdapter interface, AgentEvent schema, InputSender interface. Extract shared packages (otelserver, outputcollector, eventstore). Refactor Claude Code agent to use claude/ adapter with OtelServer + HookHandler + SessionLogCollector. Wire AgentMonitor to consume normalized events. Add unified event store (JSONL per session).",
+  "status": "closed",
+  "priority": 1,
+  "type": "epic",
+  "dependents": [
+    {
+      "id": "h2-9gb",
+      "type": "blocks"
+    },
+    {
+      "id": "h2-3ce",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-hbe",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-uqd",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-gsk",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-ok3",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-vih",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-6sp",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-af0",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-p8o",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-waf",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-5qi",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-gmp",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-0hw",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-19T16:00:02.190992-08:00",
+  "updated_at": "2026-02-19T17:56:26.0973-08:00",
+  "closed_at": "2026-02-19T17:56:26.097299-08:00",
+  "close_reason": "Closed"
+}

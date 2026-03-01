@@ -72,7 +72,7 @@ When YAML has no `default:` key, Go's YAML parser leaves `Default` as `nil` → 
 
 **Validation rules:**
 - If a variable has no `default`, it is **required** — launching an agent with a role that has unsatisfied required variables fails with a clear error listing all missing variables
-- Variables can be provided via CLI: `h2 run --name coder --role coding --var team=backend`
+- Variables can be provided via CLI: `h2 run coder --role coding --var team=backend`
 - Variables can be provided via CLI on pod launch: `h2 pod launch backend --var num_coders=5`
 - Pod templates can pass variables to roles via per-agent `vars` (see section 4)
 - Variable values are always strings (consistent with Go templates — use template functions for conversion)
@@ -381,7 +381,7 @@ instructions: |
   {{ end }}
 ```
 
-Launch: `h2 run --name api-coder --role service-coder --var service=api`
+Launch: `h2 run api-coder --role service-coder --var service=api`
 
 ### Example 2: Scaled Pod
 

@@ -5,3 +5,5 @@ defaults.priority: "2"
 defaults.type: task
 hierarchy.max_depth: "3"
 issue_prefix: h2
+graph.auto_close_parent: "true"
+graph.cascade_parent_blocking: "true"

@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -12,22 +14,33 @@ import (
 
 	"github.com/vito/midterm"
 
-	"h2/internal/session/agent"
+	"h2/internal/session/agent/monitor"
 	"h2/internal/session/message"
 	"h2/internal/session/virtualterminal"
 )
 
 // RenderScreen renders the virtual terminal buffer to the output.
+// Wrapped in synchronized output mode (DEC private mode 2026) so the
+// terminal buffers all intermediate cursor movements and applies the
+// final state atomically. This prevents screen tearing and avoids
+// resetting the cursor blink timer on every PipeOutput chunk.
+// DECSC/DECRC save and restore cursor position so the cursor stays on
+// the input bar (positioned by RenderInputBar).
 func (c *Client) RenderScreen() {
 	var buf bytes.Buffer
-	buf.WriteString("\033[?25l")
+	buf.WriteString("\033[?2026h") // begin synchronized update
+	buf.WriteString("\0337")       // DECSC: save cursor position
 	if c.IsScrollMode() {
 		c.renderScrollView(&buf)
 	} else {
 		c.renderLiveView(&buf)
 	}
 	c.renderSelectHint(&buf)
+	buf.WriteString("\0338")       // DECRC: restore cursor position
+	buf.WriteString("\033[?2026l") // end synchronized update
+	c.OutputMu.Lock()
 	c.Output.Write(buf.Bytes())
+	c.OutputMu.Unlock()
 }
 
 // renderSelectHint draws the "hold shift to select" hint when active.
@@ -56,29 +69,100 @@ func (c *Client) renderLiveView(buf *bytes.Buffer) {
 		startRow = 0
 	}
 	for i := 0; i < c.VT.ChildRows; i++ {
-		fmt.Fprintf(buf, "\033[%d;1H\033[2K", i+1)
+		fmt.Fprintf(buf, "\033[%d;1H", i+1)
 		c.RenderLineFrom(buf, c.VT.Vt, startRow+i)
+		buf.WriteString("\033[0m\033[K") // erase trailing stale content with default bg
 	}
 }
 
 // renderScrollView renders the scrollback buffer at the current ScrollOffset.
 func (c *Client) renderScrollView(buf *bytes.Buffer) {
+	// Prefer ScrollHistory (captured via midterm OnScrollback) when available.
+	// This is populated for apps that use scroll regions (e.g. codex inline viewport).
+	if c.hasScrollHistory() {
+		c.renderScrollViewHistory(buf)
+		return
+	}
+	// Fallback to AppendOnly scrollback for apps without scroll regions (e.g. Claude Code).
 	sb := c.VT.Scrollback
 	if sb == nil {
 		c.renderLiveView(buf)
 		return
 	}
-	bottom := sb.Cursor.Y
+	bottom := c.scrollbackScrollBottom()
 	startRow := bottom - c.VT.ChildRows + 1 - c.ScrollOffset
 	if startRow < 0 {
 		startRow = 0
 	}
 	for i := 0; i < c.VT.ChildRows; i++ {
-		fmt.Fprintf(buf, "\033[%d;1H\033[2K", i+1)
-		c.RenderLineFrom(buf, sb, startRow+i)
+		fmt.Fprintf(buf, "\033[%d;1H", i+1)
+		row := startRow + i
+		if row >= 0 && row < len(sb.Content) {
+			c.RenderLineFrom(buf, sb, row)
+		}
+		buf.WriteString("\033[0m\033[K")
 	}
-	// Draw "(scrolling)" indicator at row 1, right-aligned, in inverse video.
+	c.renderScrollIndicator(buf)
+}
+
+// renderScrollViewHistory renders using ScrollHistory (scrolled-off lines from
+// VT.Vt's OnScrollback callback) combined with the live VT.Vt screen content.
+// The full content is: [ScrollHistory...] ++ [VT.Vt.Content rows].
+func (c *Client) renderScrollViewHistory(buf *bytes.Buffer) {
+	histLen := c.scrollHistoryLen()
+	totalRows := histLen + c.VT.ChildRows
+
+	// startRow is the index into the combined [ScrollHistory + live] buffer.
+	startRow := totalRows - c.VT.ChildRows - c.ScrollOffset
+	if startRow < 0 {
+		startRow = 0
+	}
+
+	for i := 0; i < c.VT.ChildRows; i++ {
+		fmt.Fprintf(buf, "\033[%d;1H", i+1)
+		row := startRow + i
+		if row >= 0 && row < totalRows {
+			if row < histLen {
+				// Render from ScrollHistory (ANSI-formatted string).
+				line := c.VT.ScrollHistory[row]
+				buf.WriteString(line)
+			} else {
+				// Render from live VT.Vt content.
+				vtRow := row - histLen
+				c.RenderLineFrom(buf, c.VT.Vt, vtRow)
+			}
+		}
+		buf.WriteString("\033[0m\033[K")
+	}
+	c.renderScrollIndicator(buf)
+}
+
+// renderScrollIndicator draws the "(scrolling)" indicator at row 1, right-aligned.
+func (c *Client) renderScrollIndicator(buf *bytes.Buffer) {
 	indicator := "(scrolling)"
+	if c.DebugScroll {
+		maxOffset, _ := c.scrollMaxOffset()
+		mode := "sb"
+		if c.hasScrollHistory() {
+			mode = "hist"
+		}
+		sbLen, sbCurY := 0, 0
+		if c.VT.Scrollback != nil {
+			sbLen = len(c.VT.Scrollback.Content)
+			sbCurY = c.VT.Scrollback.Cursor.Y
+		}
+		indicator = fmt.Sprintf(
+			"(scroll %s off=%d/%d hist=%d sb=%d curY=%d child=%d sr=%v)",
+			mode,
+			c.ScrollOffset,
+			maxOffset,
+			len(c.VT.ScrollHistory),
+			sbLen,
+			sbCurY,
+			c.VT.ChildRows,
+			c.VT.ScrollRegionUsed,
+		)
+	}
 	col := c.VT.Cols - len(indicator) + 1
 	if col < 1 {
 		col = 1
@@ -87,6 +171,9 @@ func (c *Client) renderScrollView(buf *bytes.Buffer) {
 }
 
 // RenderLineFrom writes one row of the given terminal to buf.
+// This uses explicit SGR resets between format regions to prevent
+// background colors from bleeding across regions (midterm's RenderLine
+// does not reset between regions).
 func (c *Client) RenderLineFrom(buf *bytes.Buffer, vt *midterm.Terminal, row int) {
 	if row >= len(vt.Content) {
 		return
@@ -102,7 +189,6 @@ func (c *Client) RenderLineFrom(buf *bytes.Buffer, vt *midterm.Terminal, row int
 			lastFormat = f
 		}
 		end := pos + region.Size
-
 		if pos < len(line) {
 			contentEnd := end
 			if contentEnd > len(line) {
@@ -110,15 +196,6 @@ func (c *Client) RenderLineFrom(buf *bytes.Buffer, vt *midterm.Terminal, row int
 			}
 			buf.WriteString(string(line[pos:contentEnd]))
 		}
-
-		padStart := len(line)
-		if padStart < pos {
-			padStart = pos
-		}
-		if padStart < end {
-			buf.WriteString(strings.Repeat(" ", end-padStart))
-		}
-
 		pos = end
 	}
 	buf.WriteString("\033[0m")
@@ -129,17 +206,17 @@ func (c *Client) RenderLine(buf *bytes.Buffer, row int) {
 	c.RenderLineFrom(buf, c.VT.Vt, row)
 }
 
-// RenderBar draws the separator line and input bar.
-func (c *Client) RenderBar() {
+// RenderStatusBar draws the separator line with mode, status, and help text.
+// Uses DECSC/DECRC to preserve cursor position so the 1-second TickStatus
+// doesn't move the cursor away from the input bar.
+func (c *Client) RenderStatusBar() {
 	var buf bytes.Buffer
+	buf.WriteString("\033[?2026h") // begin synchronized update
+	buf.WriteString("\0337")       // DECSC: save cursor position
 
 	sepRow := c.VT.Rows - 1
-	inputRow := c.VT.Rows
-	debugRow := 0
 	if c.DebugKeys {
 		sepRow = c.VT.Rows - 2
-		inputRow = c.VT.Rows - 1
-		debugRow = c.VT.Rows
 	}
 
 	// --- Separator line ---
@@ -161,12 +238,17 @@ func (c *Client) RenderBar() {
 		if c.Mode != ModeMenu {
 			status := c.StatusLabel()
 			label += " | " + status
+			if c.WorkingDir != nil {
+				if wd := strings.TrimSpace(c.WorkingDir()); wd != "" {
+					label += " | " + c.formatWorkingDirForBar(wd)
+				}
+			}
 
 			// OTEL metrics (tokens and cost)
 			if c.OtelMetrics != nil {
 				inTok, outTok, cost, connected, port := c.OtelMetrics()
 				if connected {
-					label += " | " + agent.FormatTokens(inTok) + "/" + agent.FormatTokens(outTok) + " " + agent.FormatCost(cost)
+					label += " | " + monitor.FormatTokens(inTok) + "/" + monitor.FormatTokens(outTok) + " " + monitor.FormatCost(cost)
 				} else {
 					label += fmt.Sprintf(" | [otel:%d]", port)
 				}
@@ -219,6 +301,26 @@ func (c *Client) RenderBar() {
 	}
 	buf.WriteString(right)
 	buf.WriteString("\033[0m")
+	buf.WriteString("\0338")       // DECRC: restore cursor position
+	buf.WriteString("\033[?2026l") // end synchronized update
+
+	c.OutputMu.Lock()
+	c.Output.Write(buf.Bytes())
+	c.OutputMu.Unlock()
+}
+
+// RenderInputBar draws the input prompt, text, cursor, and debug line.
+// Cursor visibility (show/hide) is managed here so that it only changes
+// on user-initiated renders, preserving the terminal's cursor blink timer.
+func (c *Client) RenderInputBar() {
+	var buf bytes.Buffer
+
+	inputRow := c.VT.Rows
+	debugRow := 0
+	if c.DebugKeys {
+		inputRow = c.VT.Rows - 1
+		debugRow = c.VT.Rows
+	}
 
 	// --- Input line ---
 	prompt := c.InputPriority.String() + " > "
@@ -272,6 +374,8 @@ func (c *Client) RenderBar() {
 		if pad := c.VT.Cols - len(debugLabel); pad > 0 {
 			buf.WriteString(strings.Repeat(" ", pad))
 		}
+		// Reposition cursor back to input line after debug row.
+		fmt.Fprintf(&buf, "\033[%d;%dH", inputRow, cursorCol)
 	}
 
 	if c.Mode == ModePassthrough || c.Mode == ModePassthroughScroll {
@@ -279,7 +383,18 @@ func (c *Client) RenderBar() {
 	} else {
 		buf.WriteString("\033[?25h")
 	}
+
+	c.OutputMu.Lock()
 	c.Output.Write(buf.Bytes())
+	c.OutputMu.Unlock()
+}
+
+// RenderBar draws both the status bar and input bar.
+// Use this for full bar repaints (mode changes, resize, child exit).
+// For targeted updates, prefer RenderStatusBar or RenderInputBar.
+func (c *Client) RenderBar() {
+	c.RenderStatusBar()
+	c.RenderInputBar()
 }
 
 // ModeLabel returns the display name for the current mode.
@@ -318,7 +433,7 @@ func (c *Client) HelpLabel() string {
 	case ModePassthrough:
 		return c.keybindingHelp().PassthroughMode
 	case ModeMenu:
-		return "esc exit"
+		return `Ctrl+\ back | Up/Down history`
 	case ModeScroll, ModePassthroughScroll:
 		return "Scroll/Up/Down navigate | Esc exit scroll"
 	default:
@@ -335,7 +450,7 @@ func (c *Client) StatusLabel() string {
 		if c.HookState != nil && state == "active" {
 			toolName = c.HookState()
 		}
-		label := agent.FormatStateLabel(state, subState, toolName)
+		label := monitor.FormatStateLabel(state, subState, toolName)
 		if state == "idle" && dur != "" {
 			label += " " + dur
 		}
@@ -352,6 +467,63 @@ func (c *Client) StatusLabel() string {
 		return "Active"
 	}
 	return "Idle " + virtualterminal.FormatIdleDuration(idleFor)
+}
+
+func (c *Client) formatWorkingDirForBar(cwd string) string {
+	cleanCWD := filepath.Clean(cwd)
+	h2Dir := strings.TrimSpace(os.Getenv("H2_DIR"))
+	if h2Dir != "" {
+		cleanH2 := filepath.Clean(h2Dir)
+		if rel, ok := relToRoot(cleanCWD, cleanH2); ok {
+			if rel == "." {
+				return "."
+			}
+			return lastPathParts(rel, 2, "")
+		}
+	}
+	return lastPathParts(cleanCWD, 2, "../")
+}
+
+func relToRoot(path, root string) (string, bool) {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return "", false
+	}
+	if rel == "." {
+		return rel, true
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return rel, true
+}
+
+func lastPathParts(path string, n int, truncatedPrefix string) string {
+	if n <= 0 {
+		return ""
+	}
+	clean := filepath.Clean(path)
+	parts := strings.Split(clean, string(filepath.Separator))
+	filtered := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p != "" && p != "." {
+			filtered = append(filtered, p)
+		}
+	}
+	if len(filtered) == 0 {
+		return clean
+	}
+	if len(filtered) <= n {
+		if filepath.IsAbs(clean) {
+			return string(filepath.Separator) + strings.Join(filtered, string(filepath.Separator))
+		}
+		return strings.Join(filtered, string(filepath.Separator))
+	}
+	tail := strings.Join(filtered[len(filtered)-n:], string(filepath.Separator))
+	if truncatedPrefix != "" {
+		return truncatedPrefix + tail
+	}
+	return tail
 }
 
 // MenuLabel returns the formatted menu display.

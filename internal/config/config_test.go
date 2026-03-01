@@ -16,9 +16,17 @@ func setupFakeHome(t *testing.T) string {
 	t.Helper()
 	fakeHome := t.TempDir()
 	fakeRootDir := filepath.Join(fakeHome, ".h2")
+	// Create the fake h2 dir with a marker so resolveDir() finds it
+	// via H2_DIR instead of walking up from CWD to the real h2 dir.
+	if err := os.MkdirAll(fakeRootDir, 0o755); err != nil {
+		t.Fatalf("create fake h2 dir: %v", err)
+	}
+	if err := WriteMarker(fakeRootDir); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
 	t.Setenv("HOME", fakeHome)
 	t.Setenv("H2_ROOT_DIR", fakeRootDir)
-	t.Setenv("H2_DIR", "")
+	t.Setenv("H2_DIR", fakeRootDir)
 	ResetResolveCache()
 	t.Cleanup(ResetResolveCache)
 	return fakeHome
@@ -243,7 +251,7 @@ func TestReadMarkerVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadMarkerVersion: %v", err)
 	}
-	want := "v" + version.Version
+	want := version.DisplayVersion()
 	if got != want {
 		t.Errorf("ReadMarkerVersion = %q, want %q", got, want)
 	}
@@ -269,7 +277,7 @@ func TestWriteMarker(t *testing.T) {
 		t.Fatalf("ReadFile: %v", err)
 	}
 	content := strings.TrimSpace(string(data))
-	want := "v" + version.Version
+	want := version.DisplayVersion()
 	if content != want {
 		t.Errorf("marker content = %q, want %q", content, want)
 	}

@@ -1,0 +1,39 @@
+{
+  "id": "h2-uqd",
+  "title": "Extract shared/otelserver/ from existing OTEL collector",
+  "description": "Extract the OTEL HTTP server from Agent.StartOtelCollector() (otel.go) into shared/otelserver/ package. Create OtelServer struct with Callbacks (OnLogs, OnMetrics, OnTraces). Binds 127.0.0.1:0 random port. Both Claude and Codex adapters will embed this.",
+  "status": "closed",
+  "priority": 1,
+  "type": "task",
+  "parent": "h2-meo",
+  "dependencies": [
+    {
+      "id": "h2-meo",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-3ce",
+      "type": "blocks"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "h2-vih",
+      "type": "blocks"
+    },
+    {
+      "id": "h2-ok3",
+      "type": "blocks"
+    },
+    {
+      "id": "h2-gsk",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-19T16:02:35.247798-08:00",
+  "updated_at": "2026-02-19T16:38:59.077302-08:00",
+  "closed_at": "2026-02-19T16:38:59.077301-08:00",
+  "close_reason": "Closed"
+}

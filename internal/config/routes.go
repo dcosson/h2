@@ -342,6 +342,42 @@ func resolvePrefix(rootDir string, desired string, h2Path string, existing []Rou
 	return "", fmt.Errorf("could not find unique prefix for %q after 100 attempts", desired)
 }
 
+// CheckRouteAvailable verifies that a route can be registered without actually writing it.
+// Checks for path duplicates and (if explicit) prefix conflicts.
+// This is a pre-flight check subject to TOCTOU, but the actual RegisterRouteWithAutoPrefix
+// call will do the authoritative check under an exclusive lock.
+func CheckRouteAvailable(rootDir string, explicitPrefix string, h2Path string) error {
+	absPath, err := filepath.Abs(h2Path)
+	if err != nil {
+		return fmt.Errorf("resolve h2 path: %w", err)
+	}
+
+	existing, err := ReadRoutes(rootDir)
+	if err != nil {
+		return err
+	}
+
+	for _, r := range existing {
+		existingAbs, absErr := filepath.Abs(r.Path)
+		if absErr != nil {
+			continue
+		}
+		if existingAbs == absPath {
+			return fmt.Errorf("path %s already registered with prefix %q", absPath, r.Prefix)
+		}
+	}
+
+	if explicitPrefix != "" {
+		for _, r := range existing {
+			if r.Prefix == explicitPrefix {
+				return fmt.Errorf("prefix %q already registered (path: %s)", explicitPrefix, r.Path)
+			}
+		}
+	}
+
+	return nil
+}
+
 // ResolvePrefix is the public API for resolving a prefix. It reads routes
 // from disk (without holding a lock, so it's subject to TOCTOU races).
 // Prefer RegisterRouteWithAutoPrefix for atomic resolve+register.

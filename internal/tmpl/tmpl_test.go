@@ -9,9 +9,9 @@ import (
 
 func TestVarDef_Required(t *testing.T) {
 	tests := []struct {
-		name     string
-		def      VarDef
-		wantReq  bool
+		name    string
+		def     VarDef
+		wantReq bool
 	}{
 		{
 			name:    "no default key → required",
@@ -928,6 +928,281 @@ agents:
 		}
 		if !strings.Contains(remaining, "{{ range") {
 			t.Error("remaining should preserve range expression")
+		}
+	})
+}
+
+// --- Section 5: Unknown Variable Validation ---
+
+func TestValidateNoUnknownVars(t *testing.T) {
+	tests := []struct {
+		name     string
+		defs     map[string]VarDef
+		provided map[string]string
+		wantErr  bool
+		errParts []string
+	}{
+		{
+			name:     "no extra vars",
+			defs:     map[string]VarDef{"team": {Description: "Team"}},
+			provided: map[string]string{"team": "backend"},
+			wantErr:  false,
+		},
+		{
+			name:     "single unknown var",
+			defs:     map[string]VarDef{"team": {Description: "Team"}},
+			provided: map[string]string{"team": "backend", "teaam": "typo"},
+			wantErr:  true,
+			errParts: []string{"teaam", "team"},
+		},
+		{
+			name:     "multiple unknown vars",
+			defs:     map[string]VarDef{"team": {Description: "Team"}},
+			provided: map[string]string{"teaam": "x", "env": "y"},
+			wantErr:  true,
+			errParts: []string{"teaam", "env"},
+		},
+		{
+			name:     "empty provided",
+			defs:     map[string]VarDef{"team": {Description: "Team"}},
+			provided: map[string]string{},
+			wantErr:  false,
+		},
+		{
+			name:     "nil defs skips validation",
+			defs:     nil,
+			provided: map[string]string{"anything": "x"},
+			wantErr:  false,
+		},
+		{
+			name:     "nil defs empty provided",
+			defs:     nil,
+			provided: map[string]string{},
+			wantErr:  false,
+		},
+		{
+			name:     "empty defs skips validation",
+			defs:     map[string]VarDef{},
+			provided: map[string]string{"x": "1"},
+			wantErr:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateNoUnknownVars(tt.defs, tt.provided)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateNoUnknownVars() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil {
+				for _, part := range tt.errParts {
+					if !strings.Contains(err.Error(), part) {
+						t.Errorf("error %q does not contain %q", err.Error(), part)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestValidateNoUnknownVars_ErrorFormat(t *testing.T) {
+	t.Run("lists unknown vars and available vars", func(t *testing.T) {
+		defs := map[string]VarDef{
+			"agent_harness": {Description: "Harness", Default: strPtr("claude_code")},
+			"agent_model":   {Description: "Model"},
+		}
+		err := ValidateNoUnknownVars(defs, map[string]string{"agent_harnesss": "codex"})
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "agent_harnesss") {
+			t.Error("error should contain the unknown var name")
+		}
+		if !strings.Contains(msg, "unknown") {
+			t.Error("error should say 'unknown'")
+		}
+		// Should list available vars.
+		if !strings.Contains(msg, "agent_harness") {
+			t.Error("error should list available var 'agent_harness'")
+		}
+		if !strings.Contains(msg, "agent_model") {
+			t.Error("error should list available var 'agent_model'")
+		}
+	})
+
+	t.Run("unknown vars sorted alphabetically", func(t *testing.T) {
+		defs := map[string]VarDef{"a": {}}
+		err := ValidateNoUnknownVars(defs, map[string]string{"zebra": "1", "alpha": "2"})
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		msg := err.Error()
+		alphaIdx := strings.Index(msg, "alpha")
+		zebraIdx := strings.Index(msg, "zebra")
+		if alphaIdx > zebraIdx {
+			t.Error("unknown vars should be sorted alphabetically")
+		}
+	})
+}
+
+// --- Section 6: Inheritance Helpers ---
+
+func TestMergeVarDefs(t *testing.T) {
+	parent := map[string]VarDef{
+		"team": {Description: "Team (parent)"},
+		"env":  {Description: "Environment", Default: strPtr("dev")},
+	}
+	child := map[string]VarDef{
+		"team":    {Description: "Team (child)", Default: strPtr("platform")},
+		"service": {Description: "Service"},
+	}
+
+	merged := MergeVarDefs(parent, child)
+	if len(merged) != 3 {
+		t.Fatalf("got %d defs, want 3", len(merged))
+	}
+
+	if got := merged["team"].Description; got != "Team (child)" {
+		t.Errorf("team description = %q, want child override", got)
+	}
+	if merged["team"].Default == nil || *merged["team"].Default != "platform" {
+		t.Errorf("team default = %v, want %q", merged["team"].Default, "platform")
+	}
+	if got := merged["env"].Description; got != "Environment" {
+		t.Errorf("env description = %q, want parent value", got)
+	}
+	if got := merged["service"].Description; got != "Service" {
+		t.Errorf("service description = %q, want child value", got)
+	}
+
+	// Ensure input maps are not mutated.
+	if parent["team"].Default != nil {
+		t.Fatal("parent map should not be mutated")
+	}
+}
+
+func TestValidateChildCoversRequired(t *testing.T) {
+	t.Run("missing required parent var errors", func(t *testing.T) {
+		parent := map[string]VarDef{
+			"team": {Description: "Team name"},
+			"env":  {Default: strPtr("dev")},
+		}
+		child := map[string]VarDef{
+			"service": {Description: "Service name"},
+		}
+
+		err := ValidateChildCoversRequired(parent, child)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "team") {
+			t.Error("error should list missing required var 'team'")
+		}
+		if strings.Contains(msg, "env") {
+			t.Error("error should not include optional parent var 'env'")
+		}
+		if !strings.Contains(msg, "Team name") {
+			t.Error("error should include parent var description")
+		}
+	})
+
+	t.Run("child can satisfy required parent var by adding default", func(t *testing.T) {
+		parent := map[string]VarDef{
+			"team": {Description: "Team name"},
+		}
+		child := map[string]VarDef{
+			"team": {Description: "Team name", Default: strPtr("platform")},
+		}
+
+		if err := ValidateChildCoversRequired(parent, child); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("missing required vars are sorted", func(t *testing.T) {
+		parent := map[string]VarDef{
+			"zeta":  {Description: "Z"},
+			"alpha": {Description: "A"},
+		}
+		child := map[string]VarDef{}
+
+		err := ValidateChildCoversRequired(parent, child)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		msg := err.Error()
+		alphaIdx := strings.Index(msg, "alpha")
+		zetaIdx := strings.Index(msg, "zeta")
+		if alphaIdx > zetaIdx {
+			t.Error("missing vars should be sorted alphabetically")
+		}
+	})
+}
+
+func TestParseInherits(t *testing.T) {
+	t.Run("extracts inherits and removes section", func(t *testing.T) {
+		input := `role_name: backend
+inherits: coder
+instructions: |
+  Hello
+`
+		inherits, remaining, err := ParseInherits(input)
+		if err != nil {
+			t.Fatalf("ParseInherits: %v", err)
+		}
+		if inherits != "coder" {
+			t.Errorf("inherits = %q, want %q", inherits, "coder")
+		}
+		if strings.Contains(remaining, "inherits:") {
+			t.Error("remaining should not contain inherits section")
+		}
+		if !strings.Contains(remaining, "role_name: backend") {
+			t.Error("remaining should preserve other top-level keys")
+		}
+	})
+
+	t.Run("supports quoted and commented inherits value", func(t *testing.T) {
+		input := `inherits: "base-coder" # parent role
+role_name: child
+`
+		inherits, _, err := ParseInherits(input)
+		if err != nil {
+			t.Fatalf("ParseInherits: %v", err)
+		}
+		if inherits != "base-coder" {
+			t.Errorf("inherits = %q, want %q", inherits, "base-coder")
+		}
+	})
+
+	t.Run("missing inherits returns empty and unchanged text", func(t *testing.T) {
+		input := `role_name: child
+instructions: hi
+`
+		inherits, remaining, err := ParseInherits(input)
+		if err != nil {
+			t.Fatalf("ParseInherits: %v", err)
+		}
+		if inherits != "" {
+			t.Errorf("inherits = %q, want empty", inherits)
+		}
+		if remaining != input {
+			t.Error("remaining should be unchanged when inherits is missing")
+		}
+	})
+
+	t.Run("non-string inherits value errors", func(t *testing.T) {
+		input := `inherits:
+  parent: coder
+role_name: child
+`
+		_, _, err := ParseInherits(input)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "inherits must be a string") {
+			t.Errorf("unexpected error: %v", err)
 		}
 	})
 }

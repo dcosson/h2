@@ -19,7 +19,9 @@ func createPodRole(t *testing.T, h2Dir, name, content string) {
 // workerRole is a minimal role that starts and stays running.
 const workerRole = `
 name: worker
-agent_type: "true"
+agent_harness:
+  harness_type: generic
+  command: "true"
 instructions: test worker
 `
 
@@ -261,16 +263,20 @@ func TestPod_NameValidation(t *testing.T) {
 func TestPodRole_PodOverridesGlobal(t *testing.T) {
 	h2Dir := createTestH2Dir(t)
 
-	// Create global and pod role with same name but different agent_type.
+	// Create global and pod role with same name but different descriptions.
 	createRole(t, h2Dir, "shared-role", `
 name: shared-role
-agent_type: "true"
+agent_harness:
+  harness_type: generic
+  command: "true"
 instructions: global version
 description: global
 `)
 	createPodRole(t, h2Dir, "shared-role", `
 name: shared-role
-agent_type: "true"
+agent_harness:
+  harness_type: generic
+  command: "true"
 instructions: pod version
 description: pod-override
 `)
@@ -308,13 +314,17 @@ func TestPodRole_RoleListShowsBothScopes(t *testing.T) {
 	h2Dir := createTestH2Dir(t)
 	createRole(t, h2Dir, "global-role", `
 name: global-role
-agent_type: "true"
+agent_harness:
+  harness_type: generic
+  command: "true"
 instructions: global
 description: a global role
 `)
 	createPodRole(t, h2Dir, "pod-role", `
 name: pod-role
-agent_type: "true"
+agent_harness:
+  harness_type: generic
+  command: "true"
 instructions: pod
 description: a pod role
 `)

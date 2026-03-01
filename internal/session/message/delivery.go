@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"h2/internal/config"
 )
 
 // IdleFunc returns true if the child process is considered idle.
@@ -24,16 +26,15 @@ type IsBlockedFunc func() bool
 
 // DeliveryConfig holds configuration for the delivery goroutine.
 type DeliveryConfig struct {
-	Queue       *MessageQueue
-	AgentName   string
-	PtyWriter   io.Writer        // writes to the child PTY
-	IsIdle      IdleFunc         // checks if child is idle
-	IsBlocked   IsBlockedFunc    // checks if agent is blocked (nil = never blocked)
-	WaitForIdle WaitForIdleFunc  // blocks until idle (for interrupt retry)
-	NoteInterrupt func()         // called when sending Ctrl+C for interrupt delivery
-	OnDeliver   func()           // called after each delivery (e.g. to render)
-	Stop        <-chan struct{}
-
+	Queue           *MessageQueue
+	AgentName       string
+	PtyWriter       io.Writer       // writes to the child PTY
+	IsIdle          IdleFunc        // checks if child is idle
+	IsBlocked       IsBlockedFunc   // checks if agent is blocked (nil = never blocked)
+	WaitForIdle     WaitForIdleFunc // blocks until idle (for interrupt retry)
+	SignalInterrupt func()          // called when sending Ctrl+C for interrupt delivery
+	OnDeliver       func()          // called after each delivery (e.g. to render)
+	Stop            <-chan struct{}
 }
 
 // EnqueueRaw creates a raw Message (no file, no prefix) with interrupt priority
@@ -61,7 +62,7 @@ func PrepareMessage(q *MessageQueue, agentName, from, body string, priority Prio
 	id := uuid.New().String()
 	now := time.Now()
 
-	dir := filepath.Join(os.Getenv("HOME"), ".h2", "messages", agentName)
+	dir := filepath.Join(config.ConfigDir(), "messages", agentName)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create message dir: %w", err)
 	}
@@ -126,8 +127,8 @@ func deliver(cfg DeliveryConfig, msg *Message) {
 		// If still not idle after retries, send anyway (like normal).
 		for attempt := 0; attempt < interruptRetries; attempt++ {
 			cfg.PtyWriter.Write([]byte{0x03})
-			if cfg.NoteInterrupt != nil {
-				cfg.NoteInterrupt()
+			if cfg.SignalInterrupt != nil {
+				cfg.SignalInterrupt()
 			}
 			if cfg.WaitForIdle != nil {
 				ctx, cancel := context.WithTimeout(context.Background(), interruptWaitTimeout)

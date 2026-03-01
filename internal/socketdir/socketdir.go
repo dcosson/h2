@@ -3,10 +3,12 @@ package socketdir
 import (
 	"crypto/sha256"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"h2/internal/config"
 )
@@ -103,6 +105,24 @@ func ResolveSocketDir(h2Dir string) string {
 		return realDir
 	}
 	return shortDir
+}
+
+// ProbeSocket checks whether a live process is listening on sockPath.
+// If the socket file does not exist, it returns nil (safe to proceed).
+// If a process is listening, it returns an error with the given label.
+// If the socket exists but nothing is listening (stale), it removes
+// the socket file and returns nil.
+func ProbeSocket(sockPath, label string) error {
+	if _, err := os.Stat(sockPath); err != nil {
+		return nil // no socket file, nothing to probe
+	}
+	conn, err := net.DialTimeout("unix", sockPath, 500*time.Millisecond)
+	if err == nil {
+		conn.Close()
+		return fmt.Errorf("%s is already running", label)
+	}
+	os.Remove(sockPath)
+	return nil
 }
 
 // Path returns the full socket path for a given type and name.

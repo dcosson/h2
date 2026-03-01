@@ -1,0 +1,21 @@
+{
+  "id": "h2-0hw",
+  "title": "Fix Agent.Metrics() to read from AgentMonitor for adapted agents",
+  "description": "REGRESSION: Agent.Metrics() returns OtelMetrics.Snapshot() but for adapted agents, OtelMetrics is never updated — the old onOtelLogs/onOtelMetrics callbacks were removed. Result: zero tokens/cost in status bar for all Claude/Codex sessions.\n\nFix: Bridge Agent.Metrics() to read from monitor.Metrics() for adapted agents (at least InputTokens, OutputTokens, CachedTokens, TotalCostUSD, TurnCount, ToolCounts, EventsReceived=true).\n\nAlso clean up:\n- SetOtelLogFiles: skip for adapted agents (files opened but never written to)\n- OtelParser interface: likely orphaned, can be removed\n- HookCollector for Codex: wastes goroutine, gate on adapter type",
+  "status": "closed",
+  "priority": 1,
+  "type": "task",
+  "parent": "h2-meo",
+  "dependencies": [
+    {
+      "id": "h2-meo",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-19T17:49:20.02989-08:00",
+  "updated_at": "2026-02-19T17:54:40.79866-08:00",
+  "closed_at": "2026-02-19T17:54:40.79866-08:00",
+  "close_reason": "Closed"
+}

@@ -2,11 +2,11 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -15,36 +15,58 @@ import (
 	"golang.org/x/term"
 
 	"h2/internal/activitylog"
-	"h2/internal/session/agent"
+	"h2/internal/config"
+	"h2/internal/session/agent/harness"
+	"h2/internal/session/agent/monitor"
+	"h2/internal/session/agent/shared/eventstore"
 	"h2/internal/session/client"
 	"h2/internal/session/message"
 	"h2/internal/session/virtualterminal"
+	"h2/internal/tmpl"
+
+	// Register harness implementations via init().
+	_ "h2/internal/session/agent/harness/claude"
+	_ "h2/internal/session/agent/harness/codex"
+	_ "h2/internal/session/agent/harness/generic"
 )
 
 // Session manages the message queue, delivery loop, observable state,
 // child process lifecycle, and client connections for an h2 session.
 type Session struct {
-	Name       string
-	Command    string
-	Args       []string
-	SessionID      string // Claude Code session ID (UUID), set for claude commands
-	RoleName       string // Role name, if launched with --role
-	SessionDir     string // Session directory path (~/.h2/sessions/<name>/)
-	ClaudeConfigDir string // Shared Claude config dir (used as CLAUDE_CONFIG_DIR)
-	Instructions    string   // Role instructions, passed via --append-system-prompt
-	SystemPrompt    string   // Replaces default system prompt, passed via --system-prompt
-	Model           string   // Model selection, passed via --model
-	PermissionMode  string   // Permission mode, passed via --permission-mode
-	AllowedTools    []string // Allowed tools, passed via --allowedTools (comma-joined)
-	DisallowedTools []string // Disallowed tools, passed via --disallowedTools (comma-joined)
-	Queue      *message.MessageQueue
-	AgentName  string
-	Agent      *agent.Agent
-	VT         *virtualterminal.VT
-	Client     *client.Client // primary/interactive client (nil in daemon-only)
-	Clients          []*client.Client
-	clientsMu        sync.Mutex
-	PassthroughOwner *client.Client // which client owns passthrough mode (nil = none)
+	Name                 string
+	Command              string
+	Args                 []string
+	SessionID            string   // Claude Code session ID (UUID), set for claude commands
+	RoleName             string   // Role name, if launched with --role
+	SessionDir           string   // Session directory path (~/.h2/sessions/<name>/)
+	WorkingDir           string   // Working directory for the child process/session
+	Instructions         string   // Role instructions, passed via --append-system-prompt
+	SystemPrompt         string   // Replaces default system prompt, passed via --system-prompt
+	Model                string   // Model selection, passed via --model
+	HarnessType          string   // Resolved harness type (when provided by launcher)
+	HarnessConfigDir     string   // Resolved harness config dir (when provided by launcher)
+	ClaudePermissionMode string   // Claude Code --permission-mode
+	CodexSandboxMode     string   // Codex --sandbox
+	CodexAskForApproval  string   // Codex --ask-for-approval
+	AdditionalDirs       []string // extra dirs passed via --add-dir
+	Queue                *message.MessageQueue
+	AgentName            string
+	harness              harness.Harness
+	monitor              *monitor.AgentMonitor
+	agentCancel          context.CancelFunc
+	activityLog          *activitylog.Logger
+	VT                   *virtualterminal.VT
+	Client               *client.Client // primary/interactive client (nil in daemon-only)
+	Clients              []*client.Client
+	clientsMu            sync.Mutex
+	PassthroughOwner     *client.Client // which client owns passthrough mode (nil = none)
+
+	// prependArgs holds CLI args from the adapter's launch config
+	// (e.g. --session-id for Claude Code). Set by setupAgent().
+	prependArgs []string
+
+	// eventStore persists AgentEvents to events.jsonl for peek/replay.
+	eventStore *eventstore.EventStore
 
 	// ExtraEnv holds additional environment variables to pass to the child process.
 	ExtraEnv map[string]string
@@ -73,19 +95,45 @@ type Session struct {
 
 // New creates a new Session with the given name and command.
 func New(name string, command string, args []string) *Session {
-	agentType := agent.ResolveAgentType(command)
+	h := resolveMinimalHarness(command)
 	return &Session{
 		Name:       name,
 		Command:    command,
 		Args:       args,
 		AgentName:  name,
 		Queue:      message.NewMessageQueue(),
-		Agent:      agent.New(agentType),
+		harness:    h,
+		monitor:    monitor.New(),
 		exitNotify: make(chan struct{}, 1),
 		stopCh:     make(chan struct{}),
 		relaunchCh: make(chan struct{}, 1),
 		quitCh:     make(chan struct{}, 1),
 	}
+}
+
+// resolveMinimalHarness maps a command name to a harness with minimal config.
+// Used by New() before full config (logger, configDir) is available.
+// setupAgent() replaces this with a properly configured harness.
+func resolveMinimalHarness(command string) harness.Harness {
+	harnessType := "generic"
+	switch filepath.Base(command) {
+	case "claude":
+		harnessType = "claude_code"
+	case "codex":
+		harnessType = "codex"
+	}
+	h, err := harness.Resolve(harness.HarnessConfig{
+		HarnessType: harnessType,
+		Command:     command,
+	}, nil)
+	if err != nil {
+		// Fallback to generic if specific harness not available.
+		h, _ = harness.Resolve(harness.HarnessConfig{
+			HarnessType: "generic",
+			Command:     command,
+		}, nil)
+	}
+	return h
 }
 
 // PtyWriter returns a writer that writes to the child PTY under VT.Mu.
@@ -123,35 +171,131 @@ func (s *Session) initVT(rows, cols int) {
 	s.VT.Cols = cols
 }
 
-// childArgs returns the command args, prepending any agent-type-specific args
-// (e.g. --session-id for Claude Code) and appending role-derived Claude CLI flags.
+// setupAgent configures the agent harness and launch config. Sets up
+// activity logger, re-resolves the harness with proper config, calls
+// PrepareForLaunch to get env vars and CLI args, and merges them into
+// the session's ExtraEnv and prependArgs.
+func (s *Session) setupAgent() error {
+	// Set up activity logger.
+	logDir := filepath.Join(config.ConfigDir(), "logs")
+	os.MkdirAll(logDir, 0o755)
+	logPath := filepath.Join(logDir, "session-activity.jsonl")
+	actLog := activitylog.New(true, logPath, s.Name, s.SessionID)
+	s.activityLog = actLog
+
+	// Resolve harness with launcher-provided config.
+	if s.HarnessType == "" {
+		return fmt.Errorf("resolve harness: missing harness type from launcher")
+	}
+	h, err := harness.Resolve(harness.HarnessConfig{
+		HarnessType: s.HarnessType,
+		Command:     s.Command,
+		Model:       s.Model,
+		ConfigDir:   s.HarnessConfigDir,
+	}, actLog)
+	if err != nil {
+		return fmt.Errorf("resolve harness: %w", err)
+	}
+	s.harness = h
+
+	// Prepare harness and get launch config (env vars, prepend args).
+	launchCfg, err := s.harness.PrepareForLaunch(s.Name, s.SessionID, false)
+	if err != nil {
+		return fmt.Errorf("prepare agent for launch: %w", err)
+	}
+
+	// Merge harness env with session env.
+	s.ExtraEnv = launchCfg.Env
+	if s.ExtraEnv == nil {
+		s.ExtraEnv = make(map[string]string)
+	}
+
+	// Store prepend args for childArgs().
+	s.prependArgs = launchCfg.PrependArgs
+
+	// Wire event store for event persistence (best-effort).
+	if s.SessionDir != "" {
+		if es, err := eventstore.Open(s.SessionDir); err == nil {
+			s.eventStore = es
+			s.monitor.SetEventWriter(es.Append)
+		}
+	}
+
+	return nil
+}
+
+// resolveFullHarness creates a properly-configured harness with logger and
+// config resolved from the role. Called from setupAgent() when all config
+// is available.
+func resolveFullHarness(command, roleName string, log *activitylog.Logger) (harness.Harness, error) {
+	// If we have a role name, load the role to get proper config
+	// (claude_config_dir, harness_type, model, etc.).
+	if roleName != "" {
+		rootDir, _ := config.RootDir()
+		ctx := &tmpl.Context{
+			RoleName:  roleName,
+			H2Dir:     config.ConfigDir(),
+			H2RootDir: rootDir,
+		}
+		// Use stub name functions since the daemon doesn't need real
+		// randomName/autoIncrement — it already has its agent name.
+		role, err := config.LoadRoleRenderedWithFuncs(roleName, ctx, config.NameStubFuncs)
+		if err != nil {
+			return nil, fmt.Errorf("load role %q: %w", roleName, err)
+		}
+		ht := harness.CanonicalName(role.GetHarnessType())
+		command := role.GetAgentType()
+		if command == "" {
+			command = harness.DefaultCommand(ht)
+		}
+		cfg := harness.HarnessConfig{
+			HarnessType: ht,
+			Command:     command,
+			Model:       role.GetModel(),
+		}
+		switch ht {
+		case "claude_code":
+			cfg.ConfigDir = role.GetClaudeConfigDir()
+		case "codex":
+			cfg.ConfigDir = role.GetCodexConfigDir()
+		}
+		return harness.Resolve(cfg, log)
+	}
+
+	// No role specified — resolve from command name alone.
+	// Always use "default" account profile — role name != account profile.
+	harnessType := "generic"
+	var configDir string
+	switch filepath.Base(command) {
+	case "claude":
+		harnessType = "claude_code"
+		configDir = config.DefaultClaudeConfigDir()
+	case "codex":
+		harnessType = "codex"
+	}
+	return harness.Resolve(harness.HarnessConfig{
+		HarnessType: harnessType,
+		Command:     command,
+		ConfigDir:   configDir,
+	}, log)
+}
+
+// childArgs returns the command args, prepending any adapter-supplied args
+// (e.g. --session-id for Claude Code) and appending agent-type-specific
+// role flags via BuildCommandArgs.
 func (s *Session) childArgs() []string {
-	prepend := s.Agent.PrependArgs(s.SessionID)
-	var args []string
-	if len(prepend) > 0 {
-		args = append(prepend, s.Args...)
-	} else {
-		args = s.Args
-	}
-	if s.SystemPrompt != "" {
-		args = append(args, "--system-prompt", s.SystemPrompt)
-	}
-	if s.Instructions != "" {
-		args = append(args, "--append-system-prompt", s.Instructions)
-	}
-	if s.Model != "" {
-		args = append(args, "--model", s.Model)
-	}
-	if s.PermissionMode != "" {
-		args = append(args, "--permission-mode", s.PermissionMode)
-	}
-	if len(s.AllowedTools) > 0 {
-		args = append(args, "--allowedTools", strings.Join(s.AllowedTools, ","))
-	}
-	if len(s.DisallowedTools) > 0 {
-		args = append(args, "--disallowedTools", strings.Join(s.DisallowedTools, ","))
-	}
-	return args
+	return s.harness.BuildCommandArgs(harness.CommandArgsConfig{
+		PrependArgs:          s.prependArgs,
+		ExtraArgs:            s.Args,
+		SessionID:            s.SessionID,
+		Instructions:         s.Instructions,
+		SystemPrompt:         s.SystemPrompt,
+		Model:                s.Model,
+		ClaudePermissionMode: s.ClaudePermissionMode,
+		CodexSandboxMode:     s.CodexSandboxMode,
+		CodexAskForApproval:  s.CodexAskForApproval,
+		AdditionalDirs:       s.AdditionalDirs,
+	})
 }
 
 // NewClient creates a new Client with all session callbacks wired.
@@ -218,21 +362,28 @@ func (s *Session) NewClient() *client.Client {
 		return s.Queue.PendingCount(), s.Queue.IsPaused()
 	}
 	cl.OtelMetrics = func() (int64, int64, float64, bool, int) {
-		m := s.Agent.Metrics()
-		return m.InputTokens, m.OutputTokens, m.TotalCostUSD, m.EventsReceived, s.Agent.OtelPort()
+		m := s.Metrics()
+		return m.InputTokens, m.OutputTokens, m.TotalCostUSD, m.EventsReceived, s.OtelPort()
 	}
 	cl.AgentState = func() (string, string, string) {
 		st, sub := s.State()
 		return st.String(), sub.String(), virtualterminal.FormatIdleDuration(s.StateDuration())
 	}
-	cl.HookState = func() string {
-		if hc := s.Agent.HookCollector(); hc != nil {
-			return hc.Snapshot().LastToolName
+	cl.WorkingDir = func() string {
+		if s.WorkingDir != "" {
+			return s.WorkingDir
 		}
-		return ""
+		cwd, err := os.Getwd()
+		if err != nil {
+			return ""
+		}
+		return cwd
+	}
+	cl.HookState = func() string {
+		return s.ActivitySnapshot().LastToolName
 	}
 	cl.OnInterrupt = func() {
-		s.Agent.NoteInterrupt()
+		s.SignalInterrupt()
 	}
 	cl.OnSubmit = func(text string, pri message.Priority) {
 		s.SubmitInput(text, pri)
@@ -273,30 +424,63 @@ func (s *Session) ForEachClient(fn func(cl *client.Client)) {
 
 // pipeOutputCallback returns the callback for VT.PipeOutput that renders
 // all connected clients. Called with VT.Mu held.
+// Only renders the screen content — status bar and input bar are rendered
+// by their own triggers (TickStatus and ReadInput respectively). This avoids
+// resetting the cursor blink timer on every PTY output chunk and reduces
+// mutex hold time.
 func (s *Session) pipeOutputCallback() func() {
 	return func() {
-		// NoteOutput for the session (only need to call once).
-		s.NoteOutput()
+		// HandleOutput for the session (only need to call once).
+		s.HandleOutput()
 		s.ForEachClient(func(cl *client.Client) {
 			if !cl.IsScrollMode() {
 				cl.RenderScreen()
-				cl.RenderBar()
 			}
 		})
 	}
 }
 
 // RunDaemon runs the session in daemon mode: creates VT, client, PTY,
-// starts collectors, socket listener, and manages the child process lifecycle.
+// starts adapter+monitor, socket listener, and manages the child process lifecycle.
 // Blocks until the child exits and the user quits.
 func (s *Session) RunDaemon() error {
 	// Initialize VT with default daemon dimensions.
 	s.initVT(24, 80)
+	if oscFg := os.Getenv("H2_OSC_FG"); oscFg != "" {
+		s.VT.OscFg = oscFg
+	}
+	if oscBg := os.Getenv("H2_OSC_BG"); oscBg != "" {
+		s.VT.OscBg = oscBg
+	}
+	if os.Getenv("COLORFGBG") == "" {
+		if c := os.Getenv("H2_COLORFGBG"); c != "" {
+			_ = os.Setenv("COLORFGBG", c)
+		}
+	}
+	// Ensure TERM and COLORTERM are set for the child PTY. Use the cached
+	// values from the launching terminal, falling back to safe defaults
+	// (h2's VT is xterm-compatible and passes through 24-bit color).
+	if os.Getenv("TERM") == "" {
+		t := os.Getenv("H2_TERM")
+		if t == "" {
+			t = "xterm-256color"
+		}
+		_ = os.Setenv("TERM", t)
+	}
+	if os.Getenv("COLORTERM") == "" {
+		ct := os.Getenv("H2_COLORTERM")
+		if ct == "" {
+			ct = "truecolor"
+		}
+		_ = os.Setenv("COLORTERM", ct)
+	}
 	s.VT.ChildRows = s.VT.Rows - 2 // default ReservedRows
 	s.VT.Vt = midterm.NewTerminal(s.VT.ChildRows, s.VT.Cols)
+	s.VT.SetupScrollCapture()
 	s.VT.Scrollback = midterm.NewTerminal(s.VT.ChildRows, s.VT.Cols)
 	s.VT.Scrollback.AutoResizeY = true
 	s.VT.Scrollback.AppendOnly = true
+
 	s.VT.LastOut = time.Now()
 	s.VT.Output = io.Discard
 
@@ -304,28 +488,18 @@ func (s *Session) RunDaemon() error {
 	s.Client = s.NewClient()
 	s.AddClient(s.Client)
 
-	// Set up delivery callback.
+	// Set up delivery callback (queue count update → status bar only).
 	s.OnDeliver = func() {
 		s.VT.Mu.Lock()
 		s.ForEachClient(func(cl *client.Client) {
-			cl.RenderBar()
+			cl.RenderStatusBar()
 		})
 		s.VT.Mu.Unlock()
 	}
 
-	// Set up activity logger and raw OTEL log files.
-	logDir := filepath.Join(os.Getenv("HOME"), ".h2", "logs")
-	logPath := filepath.Join(logDir, "session-activity.jsonl")
-	s.Agent.SetActivityLog(activitylog.New(true, logPath, s.Name, s.SessionID))
-	s.Agent.SetOtelLogFiles(logDir)
-
-	// Start collectors (OTEL, hooks) and Agent watchState goroutine.
-	if err := s.Agent.StartCollectors(); err != nil {
-		return fmt.Errorf("start collectors: %w", err)
-	}
-	s.ExtraEnv = s.Agent.ChildEnv()
-	if s.ExtraEnv == nil {
-		s.ExtraEnv = make(map[string]string)
+	// Set up agent: activity logger, adapter, launch config.
+	if err := s.setupAgent(); err != nil {
+		return err
 	}
 	s.ExtraEnv["H2_ACTOR"] = s.Name
 	if s.RoleName != "" {
@@ -334,8 +508,9 @@ func (s *Session) RunDaemon() error {
 	if s.SessionDir != "" {
 		s.ExtraEnv["H2_SESSION_DIR"] = s.SessionDir
 	}
-	if s.ClaudeConfigDir != "" {
-		s.ExtraEnv["CLAUDE_CONFIG_DIR"] = s.ClaudeConfigDir
+	// Merge harness-specific env vars (e.g. CLAUDE_CONFIG_DIR for Claude Code).
+	for k, v := range s.harness.BuildCommandEnvVars(config.ConfigDir()) {
+		s.ExtraEnv[k] = v
 	}
 
 	// Start child in a PTY.
@@ -344,6 +519,9 @@ func (s *Session) RunDaemon() error {
 	}
 	// Don't forward requests to stdout in daemon mode - there's no terminal.
 	s.VT.Vt.ForwardResponses = s.VT.Ptm
+
+	// Start adapter+monitor pipeline (after child process is running).
+	s.startAgentPipeline(context.Background())
 
 	// Start delivery loop.
 	go s.StartServices()
@@ -354,7 +532,7 @@ func (s *Session) RunDaemon() error {
 			IdleTimeout: s.HeartbeatIdleTimeout,
 			Message:     s.HeartbeatMessage,
 			Condition:   s.HeartbeatCondition,
-			Agent:       s.Agent,
+			Session:     s,
 			Queue:       s.Queue,
 			AgentName:   s.AgentName,
 			Stop:        s.stopCh,
@@ -402,36 +580,28 @@ func (s *Session) RunInteractive() error {
 
 	s.VT.ChildRows = rows - s.Client.ReservedRows()
 	s.VT.Vt = midterm.NewTerminal(s.VT.ChildRows, cols)
+	s.VT.SetupScrollCapture()
 	s.VT.Scrollback = midterm.NewTerminal(s.VT.ChildRows, cols)
 	s.VT.Scrollback.AutoResizeY = true
 	s.VT.Scrollback.AppendOnly = true
+
 	s.VT.LastOut = time.Now()
 	s.VT.Output = os.Stdout
 	s.Client.Output = os.Stdout
 	s.VT.InputSrc = os.Stdin
 
-	// Set up delivery callback.
+	// Set up delivery callback (queue count update → status bar only).
 	s.OnDeliver = func() {
 		s.VT.Mu.Lock()
 		s.ForEachClient(func(cl *client.Client) {
-			cl.RenderBar()
+			cl.RenderStatusBar()
 		})
 		s.VT.Mu.Unlock()
 	}
 
-	// Set up activity logger and raw OTEL log files.
-	logDir := filepath.Join(os.Getenv("HOME"), ".h2", "logs")
-	logPath := filepath.Join(logDir, "session-activity.jsonl")
-	s.Agent.SetActivityLog(activitylog.New(true, logPath, s.Name, s.SessionID))
-	s.Agent.SetOtelLogFiles(logDir)
-
-	// Start collectors (OTEL, hooks) and Agent watchState goroutine.
-	if err := s.Agent.StartCollectors(); err != nil {
-		return fmt.Errorf("start collectors: %w", err)
-	}
-	s.ExtraEnv = s.Agent.ChildEnv()
-	if s.ExtraEnv == nil {
-		s.ExtraEnv = make(map[string]string)
+	// Set up agent: activity logger, adapter, launch config.
+	if err := s.setupAgent(); err != nil {
+		return err
 	}
 	s.ExtraEnv["H2_ACTOR"] = s.Name
 
@@ -441,6 +611,9 @@ func (s *Session) RunInteractive() error {
 	}
 	s.VT.Vt.ForwardRequests = os.Stdout
 	s.VT.Vt.ForwardResponses = s.VT.Ptm
+
+	// Start adapter+monitor pipeline (after child process is running).
+	s.startAgentPipeline(context.Background())
 
 	// Set up interactive terminal (raw mode, mouse, SIGWINCH, input reading).
 	cleanup, stopStatus, err := s.Client.SetupInteractiveTerminal()
@@ -483,7 +656,7 @@ func (s *Session) lifecycleLoop(stopStatus chan struct{}, interactive bool) erro
 		})
 		s.VT.Mu.Unlock()
 
-		s.NoteExit()
+		s.SignalExit()
 		s.Queue.Pause()
 
 		select {
@@ -495,6 +668,7 @@ func (s *Session) lifecycleLoop(stopStatus chan struct{}, interactive bool) erro
 				return err
 			}
 			s.VT.Vt = midterm.NewTerminal(s.VT.ChildRows, s.VT.Cols)
+			s.VT.SetupScrollCapture()
 			if interactive {
 				s.VT.Vt.ForwardRequests = os.Stdout
 			}
@@ -502,6 +676,8 @@ func (s *Session) lifecycleLoop(stopStatus chan struct{}, interactive bool) erro
 			s.VT.Scrollback = midterm.NewTerminal(s.VT.ChildRows, s.VT.Cols)
 			s.VT.Scrollback.AutoResizeY = true
 			s.VT.Scrollback.AppendOnly = true
+			s.VT.ResetScanState()
+			s.VT.ResetScrollHistory()
 
 			s.VT.Mu.Lock()
 			s.VT.ChildExited = false
@@ -539,7 +715,7 @@ func (s *Session) TickStatus(stop <-chan struct{}) {
 		case <-ticker.C:
 			s.VT.Mu.Lock()
 			s.ForEachClient(func(cl *client.Client) {
-				cl.RenderBar()
+				cl.RenderStatusBar()
 			})
 			s.VT.Mu.Unlock()
 		case <-stop:
@@ -548,62 +724,73 @@ func (s *Session) TickStatus(stop <-chan struct{}) {
 	}
 }
 
-// --- Delegators to Agent ---
-
-// StartOtelCollector delegates to the Agent.
-func (s *Session) StartOtelCollector() error {
-	return s.Agent.StartOtelCollector()
-}
-
-// StopOtelCollector delegates to the Agent.
-func (s *Session) StopOtelCollector() {
-	s.Agent.StopOtelCollector()
-}
-
-// OtelPort delegates to the Agent.
+// OtelPort returns the OTEL collector port when supported by the harness.
 func (s *Session) OtelPort() int {
-	return s.Agent.OtelPort()
+	type otelPorter interface {
+		OtelPort() int
+	}
+	if op, ok := s.harness.(otelPorter); ok {
+		return op.OtelPort()
+	}
+	return 0
 }
 
-// ChildEnv delegates to the Agent.
-func (s *Session) ChildEnv() map[string]string {
-	return s.Agent.ChildEnv()
-}
-
-// Metrics delegates to the Agent.
-func (s *Session) Metrics() agent.OtelMetricsSnapshot {
-	return s.Agent.Metrics()
+// Metrics returns a snapshot of monitor metrics.
+func (s *Session) Metrics() monitor.AgentMetrics {
+	return s.monitor.MetricsSnapshot()
 }
 
 // State returns the current agent state and sub-state.
-func (s *Session) State() (agent.State, agent.SubState) {
-	return s.Agent.State()
+func (s *Session) State() (monitor.State, monitor.SubState) {
+	return s.monitor.State()
 }
 
 // StateChanged returns a channel that is closed when the agent state changes.
 func (s *Session) StateChanged() <-chan struct{} {
-	return s.Agent.StateChanged()
+	return s.monitor.StateChanged()
 }
 
 // WaitForState blocks until the agent reaches the target state or ctx is cancelled.
-func (s *Session) WaitForState(ctx context.Context, target agent.State) bool {
-	return s.Agent.WaitForState(ctx, target)
+func (s *Session) WaitForState(ctx context.Context, target monitor.State) bool {
+	return s.monitor.WaitForState(ctx, target)
 }
 
 // StateDuration returns how long the agent has been in its current state.
 func (s *Session) StateDuration() time.Duration {
-	return s.Agent.StateDuration()
+	return s.monitor.StateDuration()
 }
 
-// NoteOutput signals that the child process has produced output.
-// Feeds through to the Agent's state watcher.
-func (s *Session) NoteOutput() {
-	s.Agent.NoteOutput()
+// HandleOutput signals that the child process has produced output.
+// Delegates to the Agent's harness (e.g. generic harness feeds output collector).
+func (s *Session) HandleOutput() {
+	if s.harness != nil {
+		s.harness.HandleOutput()
+	}
 }
 
-// NoteExit signals that the child process has exited or hung.
-func (s *Session) NoteExit() {
-	s.Agent.SetExited()
+// HandleHookEvent forwards a hook payload to the active harness.
+func (s *Session) HandleHookEvent(eventName string, payload json.RawMessage) bool {
+	if s.harness != nil {
+		return s.harness.HandleHookEvent(eventName, payload)
+	}
+	return false
+}
+
+// SignalInterrupt notifies the harness of a user interrupt.
+func (s *Session) SignalInterrupt() {
+	if s.harness != nil {
+		s.harness.HandleInterrupt()
+	}
+}
+
+// SignalExit signals that the child process has exited or hung.
+func (s *Session) SignalExit() {
+	s.monitor.SetExited()
+}
+
+// ActivitySnapshot returns current monitor-derived activity fields.
+func (s *Session) ActivitySnapshot() monitor.ActivitySnapshot {
+	return s.monitor.Activity()
 }
 
 // SubmitInput enqueues user-typed input for priority-aware delivery.
@@ -626,18 +813,18 @@ func (s *Session) StartServices() {
 		AgentName: s.AgentName,
 		PtyWriter: s.PtyWriter(),
 		IsIdle: func() bool {
-			st, _ := s.Agent.State()
-			return st == agent.StateIdle
+			st, _ := s.State()
+			return st == monitor.StateIdle
 		},
 		IsBlocked: func() bool {
-			st, sub := s.Agent.State()
-			return st == agent.StateActive && sub == agent.SubStateWaitingForPermission
+			st, sub := s.State()
+			return st == monitor.StateActive && sub == monitor.SubStateWaitingForPermission
 		},
 		WaitForIdle: func(ctx context.Context) bool {
-			return s.Agent.WaitForState(ctx, agent.StateIdle)
+			return s.WaitForState(ctx, monitor.StateIdle)
 		},
-		NoteInterrupt: func() {
-			s.Agent.NoteInterrupt()
+		SignalInterrupt: func() {
+			s.SignalInterrupt()
 		},
 		OnDeliver: s.OnDeliver,
 		Stop:      s.stopCh,
@@ -655,35 +842,29 @@ func (s *Session) Stop() {
 
 	// Gather session summary data before stopping the agent (which closes files).
 	summary := s.buildSessionSummary()
-	s.Agent.ActivityLog().SessionSummary(summary)
+	if s.activityLog != nil {
+		s.activityLog.SessionSummary(summary)
+	}
+	s.stopAgentPipeline()
 
-	s.Agent.Stop()
+	if s.eventStore != nil {
+		s.eventStore.Close()
+	}
 }
 
 // buildSessionSummary collects metrics from all available sources.
 func (s *Session) buildSessionSummary() activitylog.SessionSummaryData {
-	snap := s.Agent.Metrics()
+	snap := s.Metrics()
 
 	d := activitylog.SessionSummaryData{
 		InputTokens:  snap.InputTokens,
 		OutputTokens: snap.OutputTokens,
 		TotalTokens:  snap.TotalTokens,
 		CostUSD:      snap.TotalCostUSD,
-		APIRequests:  snap.APIRequestCount,
-		ToolCalls:    snap.ToolResultCount,
-		LinesAdded:   snap.LinesAdded,
-		LinesRemoved: snap.LinesRemoved,
 		ToolCounts:   snap.ToolCounts,
-
-		ActiveTimeHrs: snap.ActiveTimeHrs,
-		ModelCosts:    snap.ModelCosts,
-		ModelTokens:   snap.ModelTokens,
 	}
 
-	// Hook collector metrics.
-	if hc := s.Agent.HookCollector(); hc != nil {
-		d.ToolUseCount = hc.Snapshot().ToolUseCount
-	}
+	d.ToolUseCount = s.ActivitySnapshot().ToolUseCount
 
 	// Session uptime.
 	if !s.StartTime.IsZero() {
@@ -698,4 +879,22 @@ func (s *Session) buildSessionSummary() activitylog.SessionSummaryData {
 	}
 
 	return d
+}
+
+func (s *Session) startAgentPipeline(ctx context.Context) {
+	ctx, s.agentCancel = context.WithCancel(ctx)
+	if s.harness != nil {
+		go s.harness.Start(ctx, s.monitor.Events()) //nolint:errcheck // harness startup loop is best-effort
+	}
+	go s.monitor.Run(ctx) //nolint:errcheck // monitor exits on context cancellation
+}
+
+func (s *Session) stopAgentPipeline() {
+	if s.agentCancel != nil {
+		s.agentCancel()
+		s.agentCancel = nil
+	}
+	if s.harness != nil {
+		s.harness.Stop()
+	}
 }

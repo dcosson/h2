@@ -2,14 +2,17 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"h2/internal/config"
 	s "h2/internal/termstyle"
+	"h2/internal/tmpl"
 )
 
 func newRoleCmd() *cobra.Command {
@@ -48,26 +51,38 @@ func newRoleListCmd() *cobra.Command {
 			if len(podRoles) > 0 {
 				if len(globalRoles) > 0 {
 					fmt.Printf("%s\n", s.Bold("Global roles"))
-					printRoleList(globalRoles)
+					printRoleList(globalRoles, config.RolesDir())
 				}
 				fmt.Printf("%s\n", s.Bold("Pod roles"))
-				printRoleList(podRoles)
+				printRoleList(podRoles, config.PodRolesDir())
 			} else {
 				// No pod roles — flat output (backward compatible).
-				printRoleList(globalRoles)
+				printRoleList(globalRoles, config.RolesDir())
 			}
 			return nil
 		},
 	}
 }
 
-func printRoleList(roles []*config.Role) {
+func printRoleList(roles []*config.Role, rolesDir string) {
 	for _, r := range roles {
 		desc := r.Description
 		if desc == "" {
 			desc = "(no description)"
 		}
-		fmt.Printf("  %-16s %s\n", r.Name, desc)
+		varInfo := ""
+		if n := len(r.Variables); n > 0 {
+			if n == 1 {
+				varInfo = " (1 variable)"
+			} else {
+				varInfo = fmt.Sprintf(" (%d variables)", n)
+			}
+		}
+		inheritInfo := ""
+		if parent := directParentFromRoleFile(rolesDir, r.RoleName); parent != "" {
+			inheritInfo = fmt.Sprintf(" (inherits: %s)", parent)
+		}
+		fmt.Printf("  %-16s %s%s%s\n", r.RoleName, desc, varInfo, inheritInfo)
 	}
 }
 
@@ -77,40 +92,137 @@ func newRoleShowCmd() *cobra.Command {
 		Short: "Display a role's configuration",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			role, err := config.LoadRole(args[0])
+			role, _, err := config.LoadRoleForDisplay(args[0])
+			if err != nil {
+				return err
+			}
+			meta, err := config.GetRoleInheritanceMetadata(args[0])
 			if err != nil {
 				return err
 			}
 
-			fmt.Printf("Name:        %s\n", role.Name)
-			if role.Model != "" {
-				fmt.Printf("Model:       %s\n", role.Model)
+			fmt.Printf("Role:        %s\n", role.RoleName)
+			if meta.DirectParent != "" {
+				fmt.Printf("Inherits:    %s\n", meta.DirectParent)
+			}
+			if len(meta.Chain) > 1 {
+				fmt.Printf("Chain:       %s\n", strings.Join(meta.Chain, " -> "))
+			}
+			if role.GetModel() != "" {
+				fmt.Printf("Model:       %s\n", role.GetModel())
 			}
 			if role.Description != "" {
 				fmt.Printf("Description: %s\n", role.Description)
 			}
-
-			fmt.Printf("\nInstructions:\n")
-			for _, line := range strings.Split(strings.TrimRight(role.Instructions, "\n"), "\n") {
-				fmt.Printf("  %s\n", line)
+			if role.ClaudePermissionMode != "" {
+				fmt.Printf("Permission Mode: %s\n", role.ClaudePermissionMode)
+			}
+			if role.CodexSandboxMode != "" {
+				fmt.Printf("Codex Sandbox: %s\n", role.CodexSandboxMode)
+			}
+			if role.CodexAskForApproval != "" {
+				fmt.Printf("Codex Ask For Approval: %s\n", role.CodexAskForApproval)
 			}
 
-			if len(role.Permissions.Allow) > 0 || len(role.Permissions.Deny) > 0 {
-				fmt.Printf("\nPermissions:\n")
-				if len(role.Permissions.Allow) > 0 {
-					fmt.Printf("  Allow: %s\n", strings.Join(role.Permissions.Allow, ", "))
+			if len(role.AdditionalDirs) > 0 {
+				fmt.Printf("Additional Dirs: %s\n", strings.Join(role.AdditionalDirs, ", "))
+			}
+
+			if instr := role.GetInstructions(); instr != "" {
+				fmt.Printf("\nInstructions:\n")
+				for _, line := range strings.Split(strings.TrimRight(instr, "\n"), "\n") {
+					fmt.Printf("  %s\n", line)
 				}
-				if len(role.Permissions.Deny) > 0 {
-					fmt.Printf("  Deny:  %s\n", strings.Join(role.Permissions.Deny, ", "))
-				}
-				if role.Permissions.Agent != nil && role.Permissions.Agent.IsEnabled() {
-					fmt.Printf("  Agent: enabled\n")
-				}
+			}
+
+			if role.PermissionReviewAgent != nil && role.PermissionReviewAgent.IsEnabled() {
+				fmt.Printf("\nPermission Review Agent: enabled\n")
+			}
+
+			if len(role.Variables) > 0 {
+				printVariables(role.Variables, meta.ExposedVarOrigins)
+			}
+			if len(meta.HiddenVarOrigins) > 0 {
+				printHiddenInheritedVariables(meta.HiddenVarOrigins)
 			}
 
 			return nil
 		},
 	}
+}
+
+// printVariables displays variable definitions in a formatted section.
+func printVariables(defs map[string]tmpl.VarDef, origins map[string]string) {
+	// Sort variable names for deterministic output.
+	names := make([]string, 0, len(defs))
+	for name := range defs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	fmt.Printf("\nVariables:\n")
+	for _, name := range names {
+		def := defs[name]
+		desc := def.Description
+		if desc != "" {
+			desc = fmt.Sprintf("%q", desc)
+		}
+		var defVal string
+		if def.Default != nil {
+			defVal = fmt.Sprintf("(default: %q)", *def.Default)
+		} else {
+			defVal = "(required)"
+		}
+		origin := ""
+		if from := origins[name]; from != "" {
+			origin = fmt.Sprintf(" [from: %s]", from)
+		}
+		if desc != "" {
+			fmt.Printf("  %-16s %s %s%s\n", name, desc, defVal, origin)
+		} else {
+			fmt.Printf("  %-16s %s%s\n", name, defVal, origin)
+		}
+	}
+}
+
+func printHiddenInheritedVariables(origins map[string]string) {
+	names := make([]string, 0, len(origins))
+	for name := range origins {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	fmt.Printf("\nInherited Defaults (not settable via --var on this role):\n")
+	fmt.Printf("  (Pinned from parent role templates; child must redefine under variables: to expose.)\n")
+	for _, name := range names {
+		fmt.Printf("  %-16s [from: %s]\n", name, origins[name])
+	}
+}
+
+func directParentFromRoleFile(rolesDir, roleName string) string {
+	path, ok := resolveRolePathForDir(rolesDir, roleName)
+	if !ok {
+		return ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	parent, _, err := tmpl.ParseInherits(string(data))
+	if err != nil {
+		return ""
+	}
+	return parent
+}
+
+func resolveRolePathForDir(dir, roleName string) (string, bool) {
+	for _, ext := range []string{".yaml.tmpl", ".yaml"} {
+		path := filepath.Join(dir, roleName+ext)
+		if _, err := os.Stat(path); err == nil {
+			return path, true
+		}
+	}
+	return "", false
 }
 
 func newRoleInitCmd() *cobra.Command {
@@ -119,7 +231,7 @@ func newRoleInitCmd() *cobra.Command {
 		Short: "Create a new role file with defaults",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			path, err := createRole(config.RolesDir(), args[0])
+			path, err := createOrUpdateRole(config.RolesDir(), args[0], "", true, false, false, cmd.OutOrStdout())
 			if err != nil {
 				return err
 			}
@@ -129,283 +241,88 @@ func newRoleInitCmd() *cobra.Command {
 	}
 }
 
-// createRole creates a role YAML file in rolesDir. Returns the path of the
-// created file. Returns an error if the role already exists.
-func createRole(rolesDir, name string) (string, error) {
-	if err := os.MkdirAll(rolesDir, 0o755); err != nil {
-		return "", fmt.Errorf("create roles dir: %w", err)
-	}
-
-	path := filepath.Join(rolesDir, name+".yaml")
-	if _, err := os.Stat(path); err == nil {
-		return "", fmt.Errorf("role %q already exists at %s", name, path)
-	}
-
-	template := roleTemplate(name)
-
-	if err := os.WriteFile(path, []byte(template), 0o644); err != nil {
-		return "", fmt.Errorf("write role file: %w", err)
-	}
-
-	return path, nil
-}
-
-// roleTemplate returns the YAML template for a role, with special templates
-// for well-known role names (e.g. "concierge").
-func roleTemplate(name string) string {
-	switch name {
-	case "concierge":
-		return conciergeRoleTemplate()
-	default:
-		return defaultRoleTemplate()
-	}
-}
-
-func defaultRoleTemplate() string {
-	return `name: "{{ .RoleName }}"
-description: "A {{ .RoleName }} agent for h2"
-
-# Agent type (currently only "claude" is supported)
-agent_type: claude
-
-# Model to use for this role
-model: opus
-
-# Permission mode for Claude Code
-# Valid: default, delegate, acceptEdits, plan, dontAsk, bypassPermissions
-# permission_mode: default
-
-# System prompt — replaces Claude Code's entire default system prompt.
-# Use this when you need full control over the prompt. Usually you want
-# "instructions" instead, which appends to the default system prompt.
-# system_prompt: |
-#   You are a specialized agent that ...
-
-# Claude config directory (for custom settings files, hooks, or auth)
-# You can create separate configs for roles with different requirements.
-# Set to ~/ to use the system default (no override).
-claude_config_dir: "{{ .H2Dir }}/claude-config/default"
-
-instructions: |
-  You are a {{ .RoleName }} agent running in h2, a terminal multiplexer with inter-agent messaging.
-
-  ## h2 Messaging Protocol
-
-  Messages from other agents or users appear in your input prefixed with:
-    [h2 message from: <sender>]
-
-  When you receive an h2 message:
-  1. Acknowledge quickly: h2 send <sender> "Working on it..."
-  2. Do the work
-  3. Reply with results: h2 send <sender> "Here's what I found: ..."
-
-  Example:
-    [h2 message from: orchestrator] Can you check the test coverage?
-
-  You should reply:
-    h2 send orchestrator "Checking test coverage now"
-    # ... do the work ...
-    h2 send orchestrator "Test coverage is 85%. Details: ..."
-
-  ## Available h2 Commands
-
-  - h2 list              - See active agents and users
-  - h2 send <name> "msg" - Send message to agent or user
-  - h2 whoami            - Check your agent name
-
-  ## Your Role
-
-  # Add role-specific instructions here.
-
-permissions:
-  allow:
-    - "Read"
-    - "Glob"
-    - "Grep"
-    - "Bash(h2 *)"  # Allow h2 commands
-  # Optional: explicitly deny specific dangerous operations
-  # deny:
-  #   - "Bash(rm -rf /)"       # System-wide deletion
-  #   - "Bash(curl * .env *)"  # Exfiltrating secrets
-
-  # AI permission reviewer - delegates permission decisions to haiku agent
-  agent:
-    instructions: |
-      You are reviewing permission requests for the {{ .RoleName }} agent in h2.
-
-      h2 is an agent-to-agent and agent-to-user communication protocol.
-      Agents use it to coordinate work and respond to user requests.
-
-      ALLOW by default:
-      - h2 commands (h2 send, h2 list, h2 whoami)
-      - Read-only tools (Read, Glob, Grep)
-      - Standard development commands (git, npm, make, pytest, etc.)
-      - File operations within the project (Edit, Write, rm -rf project-dir/*, clearing logs)
-      - Writing to non-sensitive files
-
-      DENY only for:
-      - System-wide destructive operations (rm -rf /, fork bombs)
-      - Exfiltrating credentials or secrets (curl/wget with .env, posting API keys)
-
-      ASK_USER for:
-      - Borderline or locally destructive commands you're unsure about
-      - Uncertain access to credentials or secrets (is this file sensitive?)
-      - git push --force to main/master branches
-
-      Remember: h2 messages are part of normal agent operation - allow them
-      unless they contain credentials or other sensitive data. Normal file cleanup
-      like "rm -rf node_modules" or "rm -rf logs/" is fine.
-`
-}
-
-func conciergeRoleTemplate() string {
-	return `name: "{{ .RoleName }}"
-description: "The concierge agent — your primary interface in h2"
-
-# Agent type (currently only "claude" is supported)
-agent_type: claude
-
-# Model to use for this role
-model: opus
-
-# Permission mode for Claude Code
-# Valid: default, delegate, acceptEdits, plan, dontAsk, bypassPermissions
-# permission_mode: default
-
-# System prompt — replaces Claude Code's entire default system prompt.
-# Use this when you need full control over the prompt. Usually you want
-# "instructions" instead, which appends to the default system prompt.
-# system_prompt: |
-#   You are a specialized agent that ...
-
-# Claude config directory (for custom settings files, hooks, or auth)
-# You can create separate configs for roles with different requirements.
-# Set to ~/ to use the system default (no override).
-claude_config_dir: "{{ .H2Dir }}/claude-config/default"
-
-instructions: |
-  You are the concierge — the primary agent the user interacts with in h2.
-  You run inside h2, a terminal multiplexer with inter-agent messaging.
-
-  ## Your Role
-
-  You are the user's main point of contact. Your responsibilities:
-
-  1. **Direct work**: Handle tasks yourself when you can — coding, debugging,
-     research, file editing, running commands. You are a capable software
-     engineer; don't delegate what you can do directly.
-
-  2. **Coordinate**: When a task benefits from parallel work or specialized
-     agents, use h2 send to delegate to other running agents. Check who's
-     available with h2 list.
-
-  3. **Stay responsive**: The user messages you through h2. Always reply
-     promptly. If a task will take time, acknowledge immediately and follow
-     up with results.
-
-  4. **Be proactive**: If you notice something relevant while working
-     (a failing test, a TODO, a potential improvement), mention it. But
-     stay focused on what was asked — don't go on tangents.
-
-  ## h2 Messaging Protocol
-
-  Messages from other agents or users appear in your input prefixed with:
-    [h2 message from: <sender>]
-
-  When you receive an h2 message:
-  1. Acknowledge quickly: h2 send <sender> "Working on it..."
-  2. Do the work
-  3. Reply with results: h2 send <sender> "Here's what I found: ..."
-
-  Example:
-    [h2 message from: dcosson] Can you check the test coverage?
-
-  You should reply:
-    h2 send dcosson "Checking test coverage now"
-    # ... do the work ...
-    h2 send dcosson "Test coverage is 85%. Details: ..."
-
-  ## Coordinating with Other Agents
-
-  Use h2 list to see who's running. You can send tasks to specialist agents:
-    h2 send coder "Please add unit tests for the new auth module"
-    h2 send researcher "What are the best practices for rate limiting?"
-
-  When delegating:
-  - Be specific about what you need
-  - Follow up if you don't hear back
-  - Synthesize results from multiple agents before reporting to the user
-
-  ## Available h2 Commands
-
-  - h2 list              - See active agents and users
-  - h2 send <name> "msg" - Send message to agent or user
-  - h2 whoami            - Check your agent name
-
-permissions:
-  allow:
-    - "Read"
-    - "Glob"
-    - "Grep"
-    - "Bash(h2 *)"  # Allow h2 commands
-  # Optional: explicitly deny specific dangerous operations
-  # deny:
-  #   - "Bash(rm -rf /)"       # System-wide deletion
-  #   - "Bash(curl * .env *)"  # Exfiltrating secrets
-
-  # AI permission reviewer - delegates permission decisions to haiku agent
-  agent:
-    instructions: |
-      You are reviewing permission requests for the {{ .RoleName }} (concierge) agent in h2.
-
-      The concierge is the user's primary agent. It handles direct work (coding,
-      debugging, file editing) and coordinates with other agents via h2 messaging.
-
-      ALLOW by default:
-      - h2 commands (h2 send, h2 list, h2 whoami)
-      - Read-only tools (Read, Glob, Grep)
-      - Standard development commands (git, npm, make, pytest, etc.)
-      - File operations within the project (Edit, Write, rm -rf project-dir/*, clearing logs)
-      - Writing to non-sensitive files
-
-      DENY only for:
-      - System-wide destructive operations (rm -rf /, fork bombs)
-      - Exfiltrating credentials or secrets (curl/wget with .env, posting API keys)
-
-      ASK_USER for:
-      - Borderline or locally destructive commands you're unsure about
-      - Uncertain access to credentials or secrets (is this file sensitive?)
-      - git push --force to main/master branches
-
-      Remember: h2 messages are part of normal agent operation - allow them
-      unless they contain credentials or other sensitive data. Normal file cleanup
-      like "rm -rf node_modules" or "rm -rf logs/" is fine.
-`
-}
-
 func newRoleCheckCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "check <name>",
 		Short: "Validate a role file",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			role, err := config.LoadRole(args[0])
+			meta, err := config.GetRoleInheritanceMetadata(args[0])
+			if err != nil {
+				return fmt.Errorf("role %q inheritance validation failed: %w", args[0], err)
+			}
+
+			role, _, err := config.LoadRoleForDisplay(args[0])
 			if err != nil {
 				return err
 			}
 
-			fmt.Printf("Role %q is valid.\n", role.Name)
-
-			fmt.Printf("  Agent type:  %s\n", role.GetAgentType())
-			if role.Model != "" {
-				fmt.Printf("  Model:       %s\n", role.Model)
+			fmt.Printf("Role %q is valid.\n", role.RoleName)
+			if meta.DirectParent != "" {
+				fmt.Printf("  Inherits:    %s\n", meta.DirectParent)
 			}
-			fmt.Printf("  Allow rules: %d\n", len(role.Permissions.Allow))
-			fmt.Printf("  Deny rules:  %d\n", len(role.Permissions.Deny))
-			if role.Permissions.Agent != nil && role.Permissions.Agent.IsEnabled() {
-				fmt.Printf("  Agent:       enabled\n")
+			if len(meta.Chain) > 1 {
+				fmt.Printf("  Chain:       %s\n", strings.Join(meta.Chain, " -> "))
+			}
+
+			fmt.Printf("  Harness type: %s\n", role.GetHarnessType())
+			if role.GetModel() != "" {
+				fmt.Printf("  Model:       %s\n", role.GetModel())
+			}
+			if role.PermissionReviewAgent != nil && role.PermissionReviewAgent.IsEnabled() {
+				fmt.Printf("  Review Agent: enabled\n")
 			}
 			return nil
 		},
 	}
+}
+
+// createOrUpdateRole writes a role template file.
+// - requireNew=true: fail if role already exists (role init semantics)
+// - requireNew=false: upsert mode; overwrite only when force=true
+// - style="": use default style template selection (RoleTemplate)
+// - style!= "": use style-specific template selection (RoleTemplateWithStyle)
+func createOrUpdateRole(rolesDir, name, style string, requireNew, force, announce bool, out io.Writer) (string, error) {
+	if err := os.MkdirAll(rolesDir, 0o755); err != nil {
+		return "", fmt.Errorf("create roles dir: %w", err)
+	}
+
+	var content string
+	if style == "" {
+		content = config.RoleTemplate(name)
+	} else {
+		content = config.RoleTemplateWithStyle(name, style)
+	}
+
+	ext := config.RoleFileExtension(content)
+	path := filepath.Join(rolesDir, name+ext)
+
+	// Check both extensions to prevent duplicates.
+	for _, existingExt := range []string{".yaml", ".yaml.tmpl"} {
+		existingPath := filepath.Join(rolesDir, name+existingExt)
+		if _, err := os.Stat(existingPath); err == nil {
+			if requireNew {
+				return "", fmt.Errorf("role %q already exists at %s", name, existingPath)
+			}
+			if !force {
+				return "", fmt.Errorf("role %q already exists at %s (use --force to overwrite)", name, existingPath)
+			}
+		} else if err != nil && !os.IsNotExist(err) {
+			return "", fmt.Errorf("check role file %s: %w", existingPath, err)
+		}
+	}
+
+	if !requireNew && force {
+		_ = os.Remove(filepath.Join(rolesDir, name+".yaml"))
+		_ = os.Remove(filepath.Join(rolesDir, name+".yaml.tmpl"))
+	}
+
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return "", fmt.Errorf("write role file: %w", err)
+	}
+
+	if announce {
+		fmt.Fprintf(out, "  Wrote roles/%s\n", filepath.Base(path))
+	}
+	return path, nil
 }

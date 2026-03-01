@@ -16,12 +16,12 @@ func TestResolveAgentConfig_Basic(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	role := &config.Role{
-		Name:         "test-role",
+		RoleName:     "test-role",
 		Description:  "A test role",
 		Instructions: "Do testing things",
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -53,11 +53,11 @@ func TestResolveAgentConfig_WithPod(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	role := &config.Role{
-		Name:         "test-role",
+		RoleName:     "test-role",
 		Instructions: "Test instructions",
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "my-pod", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "my-pod", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -74,11 +74,11 @@ func TestResolveAgentConfig_NoPodEnvWhenEmpty(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	role := &config.Role{
-		Name:         "test-role",
+		RoleName:     "test-role",
 		Instructions: "Test instructions",
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -88,21 +88,24 @@ func TestResolveAgentConfig_NoPodEnvWhenEmpty(t *testing.T) {
 	}
 }
 
-func TestResolveAgentConfig_GeneratesName(t *testing.T) {
+func TestResolveAgentConfig_UsesPlaceholderNameWhenEmpty(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	role := &config.Role{
-		Name:         "test-role",
+		RoleName:     "test-role",
 		Instructions: "Test instructions",
 	}
 
-	rc, err := resolveAgentConfig("", role, "", nil)
+	rc, err := resolveAgentConfig("", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
 
-	if rc.Name == "" {
-		t.Error("Name should be auto-generated")
+	if rc.Name != dryRunAgentNamePlaceholder {
+		t.Errorf("Name = %q, want %q", rc.Name, dryRunAgentNamePlaceholder)
+	}
+	if rc.EnvVars["H2_ACTOR"] != dryRunAgentNamePlaceholder {
+		t.Errorf("H2_ACTOR = %q, want %q", rc.EnvVars["H2_ACTOR"], dryRunAgentNamePlaceholder)
 	}
 }
 
@@ -110,12 +113,12 @@ func TestResolveAgentConfig_Overrides(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	role := &config.Role{
-		Name:         "test-role",
+		RoleName:     "test-role",
 		Instructions: "Test instructions",
 	}
 
 	overrides := []string{"model=opus", "description=custom"}
-	rc, err := resolveAgentConfig("test-agent", role, "", overrides)
+	rc, err := resolveAgentConfig("test-agent", role, "", overrides, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -129,15 +132,14 @@ func TestResolveAgentConfig_Worktree(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	role := &config.Role{
-		Name:         "test-role",
-		Instructions: "Test instructions",
-		Worktree: &config.WorktreeConfig{
-			ProjectDir: "/tmp/repo",
-			Name:       "test-wt",
-		},
+		RoleName:        "test-role",
+		Instructions:    "Test instructions",
+		WorktreeEnabled: true,
+		WorkingDir:      "/tmp/repo",
+		WorktreeName:    "test-wt",
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -154,11 +156,11 @@ func TestResolveAgentConfig_ChildArgsIncludeInstructions(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	role := &config.Role{
-		Name:         "test-role",
+		RoleName:     "test-role",
 		Instructions: "Do the thing\nLine 2",
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -189,11 +191,11 @@ func TestResolveAgentConfig_NoInstructionsNoAppendFlag(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	role := &config.Role{
-		Name:         "test-role",
+		RoleName:     "test-role",
 		Instructions: "",
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -209,7 +211,7 @@ func TestResolveAgentConfig_Heartbeat(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	role := &config.Role{
-		Name:         "test-role",
+		RoleName:     "test-role",
 		Instructions: "Test",
 		Heartbeat: &config.HeartbeatConfig{
 			IdleTimeout: "30s",
@@ -218,7 +220,7 @@ func TestResolveAgentConfig_Heartbeat(t *testing.T) {
 		},
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -235,13 +237,13 @@ func TestPrintDryRun_BasicOutput(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	role := &config.Role{
-		Name:         "test-role",
+		RoleName:     "test-role",
 		Description:  "A test role",
-		Model:        "opus",
+		AgentModel:   "opus",
 		Instructions: "Do testing things\nWith multiple lines",
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "my-pod", []string{"model=opus"})
+	rc, err := resolveAgentConfig("test-agent", role, "my-pod", []string{"model=opus"}, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -256,7 +258,8 @@ func TestPrintDryRun_BasicOutput(t *testing.T) {
 		"Model: opus",
 		"Instructions: (2 lines)",
 		"Do testing things",
-		"Command: claude",
+		"Command:",
+		"claude \\",
 		"H2_ACTOR=test-agent",
 		"H2_ROLE=test-role",
 		"H2_POD=my-pod",
@@ -278,11 +281,11 @@ func TestPrintDryRun_LongInstructionsTruncated(t *testing.T) {
 		lines = append(lines, fmt.Sprintf("Line %d of instructions", i+1))
 	}
 	role := &config.Role{
-		Name:         "test-role",
+		RoleName:     "test-role",
 		Instructions: strings.Join(lines, "\n"),
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -302,46 +305,33 @@ func TestPrintDryRun_LongInstructionsTruncated(t *testing.T) {
 	if !strings.Contains(output, "Line 10 of instructions") {
 		t.Errorf("should show line 10, got:\n%s", output)
 	}
-	// Line 11+ should not be shown.
-	if strings.Contains(output, "Line 11 of instructions") {
-		t.Errorf("should NOT show line 11, got:\n%s", output)
-	}
+	// The Instructions display section truncates at 10 lines, but the full
+	// content also appears in the Args section (so the user can copy-paste
+	// the command). We only verify the Instructions section truncates.
 }
 
-func TestPrintDryRun_Permissions(t *testing.T) {
+func TestPrintDryRun_PermissionReviewAgent(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	enabled := true
 	role := &config.Role{
-		Name:         "test-role",
+		RoleName:     "test-role",
 		Instructions: "Test",
-		Permissions: config.Permissions{
-			Allow: []string{"Read", "Write"},
-			Deny:  []string{"Bash"},
-			Agent: &config.PermissionAgent{
-				Enabled:      &enabled,
-				Instructions: "Review carefully",
-			},
+		PermissionReviewAgent: &config.PermissionReviewAgent{
+			Enabled:      &enabled,
+			Instructions: "Review carefully",
 		},
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
 
 	output := capturePrintDryRun(rc)
 
-	checks := []string{
-		"Permissions:",
-		"Allow: Read, Write",
-		"Deny: Bash",
-		"Agent Reviewer: true",
-	}
-	for _, check := range checks {
-		if !strings.Contains(output, check) {
-			t.Errorf("output should contain %q, got:\n%s", check, output)
-		}
+	if !strings.Contains(output, "Permission Review Agent: enabled") {
+		t.Errorf("output should contain 'Permission Review Agent: enabled', got:\n%s", output)
 	}
 }
 
@@ -349,7 +339,7 @@ func TestPrintDryRun_Heartbeat(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	role := &config.Role{
-		Name:         "test-role",
+		RoleName:     "test-role",
 		Instructions: "Test",
 		Heartbeat: &config.HeartbeatConfig{
 			IdleTimeout: "1m",
@@ -358,7 +348,7 @@ func TestPrintDryRun_Heartbeat(t *testing.T) {
 		},
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -382,15 +372,14 @@ func TestPrintDryRun_WorktreeLabel(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	role := &config.Role{
-		Name:         "test-role",
-		Instructions: "Test",
-		Worktree: &config.WorktreeConfig{
-			ProjectDir: "/tmp/repo",
-			Name:       "test-wt",
-		},
+		RoleName:        "test-role",
+		Instructions:    "Test",
+		WorktreeEnabled: true,
+		WorkingDir:      "/tmp/repo",
+		WorktreeName:    "test-wt",
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -406,20 +395,23 @@ func TestPrintDryRun_InstructionsArgTruncated(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	role := &config.Role{
-		Name:         "test-role",
+		RoleName:     "test-role",
 		Instructions: "Line 1\nLine 2\nLine 3",
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
 
 	output := capturePrintDryRun(rc)
 
-	// The Args line should show a truncated placeholder, not the full instructions.
-	if !strings.Contains(output, "<instructions: 3 lines>") {
-		t.Errorf("Args should show truncated instructions placeholder, got:\n%s", output)
+	// Args section should show the full multiline content so users can copy-paste.
+	if !strings.Contains(output, "Line 1") {
+		t.Errorf("Args should show multiline content, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Line 3") {
+		t.Errorf("Args should show all lines, got:\n%s", output)
 	}
 }
 
@@ -427,11 +419,11 @@ func TestResolveAgentConfig_ChildArgsIncludeSystemPrompt(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	role := &config.Role{
-		Name:         "test-role",
+		RoleName:     "test-role",
 		SystemPrompt: "You are a custom agent.\nDo custom things.",
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -454,17 +446,13 @@ func TestResolveAgentConfig_ChildArgsIncludeNewFields(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	role := &config.Role{
-		Name:           "test-role",
-		Instructions:   "Do work",
-		Model:          "opus",
-		PermissionMode: "plan",
-		Permissions: config.Permissions{
-			Allow: []string{"Read", "Write"},
-			Deny:  []string{"Bash(rm *)"},
-		},
+		RoleName:             "test-role",
+		Instructions:         "Do work",
+		AgentModel:           "opus",
+		ClaudePermissionMode: "plan",
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -472,8 +460,6 @@ func TestResolveAgentConfig_ChildArgsIncludeNewFields(t *testing.T) {
 	checks := map[string]string{
 		"--model":           "opus",
 		"--permission-mode": "plan",
-		"--allowedTools":    "Read,Write",
-		"--disallowedTools": "Bash(rm *)",
 	}
 	for flag, want := range checks {
 		found := false
@@ -500,11 +486,11 @@ func TestPrintDryRun_SystemPromptTruncated(t *testing.T) {
 		lines = append(lines, fmt.Sprintf("System line %d", i+1))
 	}
 	role := &config.Role{
-		Name:         "test-role",
+		RoleName:     "test-role",
 		SystemPrompt: strings.Join(lines, "\n"),
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -520,21 +506,18 @@ func TestPrintDryRun_SystemPromptTruncated(t *testing.T) {
 	if !strings.Contains(output, "System line 1") {
 		t.Errorf("should show first line, got:\n%s", output)
 	}
-	if strings.Contains(output, "System line 11") {
-		t.Errorf("should NOT show line 11, got:\n%s", output)
-	}
 }
 
-func TestPrintDryRun_PermissionMode(t *testing.T) {
+func TestPrintDryRun_ClaudePermissionMode(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	role := &config.Role{
-		Name:           "test-role",
-		Instructions:   "Test",
-		PermissionMode: "plan",
+		RoleName:             "test-role",
+		Instructions:         "Test",
+		ClaudePermissionMode: "plan",
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
@@ -550,19 +533,23 @@ func TestPrintDryRun_SystemPromptArgTruncated(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	role := &config.Role{
-		Name:         "test-role",
+		RoleName:     "test-role",
 		SystemPrompt: "Line 1\nLine 2\nLine 3",
 	}
 
-	rc, err := resolveAgentConfig("test-agent", role, "", nil)
+	rc, err := resolveAgentConfig("test-agent", role, "", nil, nil)
 	if err != nil {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
 
 	output := capturePrintDryRun(rc)
 
-	if !strings.Contains(output, "<system-prompt: 3 lines>") {
-		t.Errorf("Args should show truncated system-prompt placeholder, got:\n%s", output)
+	// Args section should show the full multiline content so users can copy-paste.
+	if !strings.Contains(output, "Line 1") {
+		t.Errorf("Args should show multiline content, got:\n%s", output)
+	}
+	if !strings.Contains(output, "Line 3") {
+		t.Errorf("Args should show all lines, got:\n%s", output)
 	}
 }
 
@@ -572,21 +559,21 @@ func TestPrintPodDryRun_Header(t *testing.T) {
 	agents := []*ResolvedAgentConfig{
 		{
 			Name:    "coder-1",
-			Role:    &config.Role{Name: "coder", Instructions: "Code stuff"},
+			Role:    &config.Role{RoleName: "coder", Instructions: "Code stuff"},
 			Command: "claude",
 			Pod:     "my-pod",
 			EnvVars: map[string]string{"H2_ACTOR": "coder-1", "H2_POD": "my-pod"},
 		},
 		{
 			Name:    "coder-2",
-			Role:    &config.Role{Name: "coder", Instructions: "Code stuff"},
+			Role:    &config.Role{RoleName: "coder", Instructions: "Code stuff"},
 			Command: "claude",
 			Pod:     "my-pod",
 			EnvVars: map[string]string{"H2_ACTOR": "coder-2", "H2_POD": "my-pod"},
 		},
 		{
 			Name:    "reviewer",
-			Role:    &config.Role{Name: "reviewer", Instructions: "Review stuff"},
+			Role:    &config.Role{RoleName: "reviewer", Instructions: "Review stuff"},
 			Command: "claude",
 			Pod:     "my-pod",
 			EnvVars: map[string]string{"H2_ACTOR": "reviewer", "H2_POD": "my-pod"},
@@ -625,7 +612,7 @@ func TestPrintPodDryRun_RoleScopeAndVars(t *testing.T) {
 	agents := []*ResolvedAgentConfig{
 		{
 			Name:       "worker",
-			Role:       &config.Role{Name: "coder", Instructions: "Code"},
+			Role:       &config.Role{RoleName: "coder", Instructions: "Code"},
 			Command:    "claude",
 			Pod:        "my-pod",
 			EnvVars:    map[string]string{"H2_ACTOR": "worker"},
@@ -657,7 +644,7 @@ func TestPrintPodDryRun_GlobalRoleScope(t *testing.T) {
 	agents := []*ResolvedAgentConfig{
 		{
 			Name:      "worker",
-			Role:      &config.Role{Name: "default", Instructions: "Default"},
+			Role:      &config.Role{RoleName: "default", Instructions: "Default"},
 			Command:   "claude",
 			Pod:       "my-pod",
 			EnvVars:   map[string]string{"H2_ACTOR": "worker"},
@@ -688,7 +675,7 @@ agents:
 	os.WriteFile(filepath.Join(h2Root, "pods", "templates", "simple.yaml"), []byte(tmplContent), 0o644)
 
 	// Create the default role.
-	roleContent := "name: default\ninstructions: |\n  Do work.\n"
+	roleContent := "role_name: default\ninstructions: |\n  Do work.\n"
 	os.WriteFile(filepath.Join(h2Root, "roles", "default.yaml"), []byte(roleContent), 0o644)
 
 	// Execute via the cobra command with --dry-run.
@@ -727,7 +714,7 @@ agents:
 `
 	os.WriteFile(filepath.Join(h2Root, "pods", "templates", "counted.yaml"), []byte(tmplContent), 0o644)
 
-	roleContent := "name: default\ninstructions: |\n  Do work.\n"
+	roleContent := "role_name: default\ninstructions: |\n  Do work.\n"
 	os.WriteFile(filepath.Join(h2Root, "roles", "default.yaml"), []byte(roleContent), 0o644)
 
 	output := captureStdout(func() {
@@ -766,11 +753,11 @@ agents:
 	os.WriteFile(filepath.Join(h2Root, "pods", "templates", "scoped.yaml"), []byte(tmplContent), 0o644)
 
 	// Pod-scoped role.
-	podRoleContent := "name: special\ninstructions: |\n  Pod-scoped instructions.\n"
+	podRoleContent := "role_name: special\ninstructions: |\n  Pod-scoped instructions.\n"
 	os.WriteFile(filepath.Join(h2Root, "pods", "roles", "special.yaml"), []byte(podRoleContent), 0o644)
 
 	// Global role.
-	globalRoleContent := "name: default\ninstructions: |\n  Global instructions.\n"
+	globalRoleContent := "role_name: default\ninstructions: |\n  Global instructions.\n"
 	os.WriteFile(filepath.Join(h2Root, "roles", "default.yaml"), []byte(globalRoleContent), 0o644)
 
 	output := captureStdout(func() {
@@ -811,7 +798,7 @@ agents:
 `
 	os.WriteFile(filepath.Join(h2Root, "pods", "templates", "withvars.yaml"), []byte(tmplContent), 0o644)
 
-	roleContent := "name: default\ninstructions: |\n  Do work.\n"
+	roleContent := "role_name: default\ninstructions: |\n  Do work.\n"
 	os.WriteFile(filepath.Join(h2Root, "roles", "default.yaml"), []byte(roleContent), 0o644)
 
 	output := captureStdout(func() {
@@ -841,7 +828,7 @@ func TestRunDryRun_WithVarFlags(t *testing.T) {
 	h2Root := setupPodTestEnv(t)
 
 	// Create a role with template variables in instructions.
-	roleContent := `name: configurable
+	roleContent := `role_name: configurable
 instructions: |
   You are working on the {{ .Var.project }} project.
   Environment: {{ .Var.env }}
@@ -850,7 +837,7 @@ instructions: |
 
 	output := captureStdout(func() {
 		cmd := newRunCmd()
-		cmd.SetArgs([]string{"--dry-run", "--role", "configurable", "--name", "test-agent", "--var", "project=h2", "--var", "env=staging"})
+		cmd.SetArgs([]string{"test-agent", "--dry-run", "--role", "configurable", "--var", "project=h2", "--var", "env=staging"})
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -859,8 +846,38 @@ instructions: |
 	checks := []string{
 		"Agent: test-agent",
 		"Role: configurable",
-		"h2 project",     // template var resolved in instructions
+		"h2 project",           // template var resolved in instructions
 		"Environment: staging", // template var resolved in instructions
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Errorf("output should contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestRunDryRun_WithoutNameUsesPlaceholder(t *testing.T) {
+	h2Root := setupPodTestEnv(t)
+
+	roleContent := `role_name: nameful
+agent_name: "{{ randomName }}"
+instructions: |
+  You are {{ .AgentName }}.
+`
+	os.WriteFile(filepath.Join(h2Root, "roles", "nameful.yaml.tmpl"), []byte(roleContent), 0o644)
+
+	output := captureStdout(func() {
+		cmd := newRunCmd()
+		cmd.SetArgs([]string{"--dry-run", "--role", "nameful"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	checks := []string{
+		"Agent: <agent-name>",
+		"You are <agent-name>.",
+		"H2_ACTOR=<agent-name>",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
@@ -872,12 +889,12 @@ instructions: |
 func TestRunDryRun_WithOverride(t *testing.T) {
 	h2Root := setupPodTestEnv(t)
 
-	roleContent := "name: overridable\nmodel: haiku\ninstructions: |\n  Test.\n"
+	roleContent := "role_name: overridable\nagent_model: haiku\ninstructions: |\n  Test.\n"
 	os.WriteFile(filepath.Join(h2Root, "roles", "overridable.yaml"), []byte(roleContent), 0o644)
 
 	output := captureStdout(func() {
 		cmd := newRunCmd()
-		cmd.SetArgs([]string{"--dry-run", "--role", "overridable", "--name", "test-agent", "--override", "model=opus"})
+		cmd.SetArgs([]string{"test-agent", "--dry-run", "--role", "overridable", "--override", "agent_model=opus"})
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -885,8 +902,8 @@ func TestRunDryRun_WithOverride(t *testing.T) {
 
 	checks := []string{
 		"Agent: test-agent",
-		"Model: opus",      // overridden
-		"Overrides: model=opus",
+		"Model: opus", // overridden
+		"Overrides: agent_model=opus",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
@@ -898,12 +915,12 @@ func TestRunDryRun_WithOverride(t *testing.T) {
 func TestRunDryRun_WithPodEnvVars(t *testing.T) {
 	h2Root := setupPodTestEnv(t)
 
-	roleContent := "name: default\ninstructions: |\n  Work.\n"
+	roleContent := "role_name: default\ninstructions: |\n  Work.\n"
 	os.WriteFile(filepath.Join(h2Root, "roles", "default.yaml"), []byte(roleContent), 0o644)
 
 	output := captureStdout(func() {
 		cmd := newRunCmd()
-		cmd.SetArgs([]string{"--dry-run", "--role", "default", "--name", "test-agent", "--pod", "my-pod"})
+		cmd.SetArgs([]string{"test-agent", "--dry-run", "--role", "default", "--pod", "my-pod"})
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -914,10 +931,55 @@ func TestRunDryRun_WithPodEnvVars(t *testing.T) {
 	}
 }
 
+func TestRunDryRun_CodexRoleShowsCodexHome(t *testing.T) {
+	h2Root := setupPodTestEnv(t)
+
+	roleContent := "role_name: codex-default\nagent_harness: codex\ninstructions: |\n  Work.\n"
+	os.WriteFile(filepath.Join(h2Root, "roles", "codex-default.yaml"), []byte(roleContent), 0o644)
+
+	output := captureStdout(func() {
+		cmd := newRunCmd()
+		cmd.SetArgs([]string{"codex-agent", "--dry-run", "--role", "codex-default"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	want := "CODEX_HOME=" + filepath.Join(h2Root, "codex-config", "default")
+	if !strings.Contains(output, want) {
+		t.Errorf("output should contain %q, got:\n%s", want, output)
+	}
+}
+
+func TestRunDryRun_ClaudeRoleShowsLaunchEnvVars(t *testing.T) {
+	h2Root := setupPodTestEnv(t)
+
+	roleContent := "role_name: claude-default\nagent_harness: claude_code\ninstructions: |\n  Work.\n"
+	os.WriteFile(filepath.Join(h2Root, "roles", "claude-default.yaml"), []byte(roleContent), 0o644)
+
+	output := captureStdout(func() {
+		cmd := newRunCmd()
+		cmd.SetArgs([]string{"claude-agent", "--dry-run", "--role", "claude-default"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	checks := []string{
+		"CLAUDE_CODE_ENABLE_TELEMETRY=1",
+		"OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:<PORT>",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Errorf("output should contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestRunDryRun_NoSideEffects(t *testing.T) {
 	h2Root := setupPodTestEnv(t)
 
-	roleContent := "name: default\ninstructions: |\n  Work.\n"
+	roleContent := "role_name: default\ninstructions: |\n  Work.\n"
 	os.WriteFile(filepath.Join(h2Root, "roles", "default.yaml"), []byte(roleContent), 0o644)
 
 	// Record state before dry-run.
@@ -926,7 +988,7 @@ func TestRunDryRun_NoSideEffects(t *testing.T) {
 
 	_ = captureStdout(func() {
 		cmd := newRunCmd()
-		cmd.SetArgs([]string{"--dry-run", "--role", "default", "--name", "no-side-effects"})
+		cmd.SetArgs([]string{"no-side-effects", "--dry-run", "--role", "default"})
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -966,8 +1028,8 @@ func TestRunDryRun_RequiresRole(t *testing.T) {
 func TestRunDryRun_InvalidDefaultRoleShowsValidationError(t *testing.T) {
 	h2Root := setupPodTestEnv(t)
 
-	// Create an invalid default role (missing both instructions and system_prompt).
-	roleContent := "name: default\ndescription: broken role\n"
+	// Create an invalid default role (invalid claude_permission_mode).
+	roleContent := "role_name: default\nclaude_permission_mode: invalid_mode\n"
 	os.WriteFile(filepath.Join(h2Root, "roles", "default.yaml"), []byte(roleContent), 0o644)
 
 	cmd := newRunCmd()

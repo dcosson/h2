@@ -29,6 +29,7 @@ type Context struct {
 	Index     int
 	Count     int
 	H2Dir     string
+	H2RootDir string
 	Var       map[string]string
 }
 
@@ -75,6 +76,83 @@ func ParseVarDefs(yamlText string) (map[string]VarDef, string, error) {
 	}
 
 	return defs, remaining, nil
+}
+
+// ParseInherits extracts an optional top-level "inherits" metadata key from raw
+// YAML text. It returns the inherited role name (or empty string), the YAML text
+// with the inherits section removed, and an error for invalid inherits types.
+//
+// This uses string-based section extraction so documents with template control
+// flow syntax can still be processed safely.
+func ParseInherits(yamlText string) (string, string, error) {
+	inheritsBlock, remaining := extractYAMLSection(yamlText, "inherits")
+	if inheritsBlock == "" {
+		return "", yamlText, nil
+	}
+
+	inheritsYAML := "inherits:\n" + inheritsBlock
+	var wrapper struct {
+		Inherits interface{} `yaml:"inherits"`
+	}
+	if err := yaml.Unmarshal([]byte(inheritsYAML), &wrapper); err != nil {
+		return "", "", fmt.Errorf("parse inherits section: %w", err)
+	}
+
+	switch value := wrapper.Inherits.(type) {
+	case nil:
+		return "", remaining, nil
+	case string:
+		return strings.TrimSpace(value), remaining, nil
+	default:
+		return "", "", fmt.Errorf("parse inherits section: inherits must be a string")
+	}
+}
+
+// MergeVarDefs returns a new map with child definitions overlaid on parent
+// definitions. Parent and child maps are never mutated.
+func MergeVarDefs(parent, child map[string]VarDef) map[string]VarDef {
+	merged := make(map[string]VarDef, len(parent)+len(child))
+	for name, def := range parent {
+		merged[name] = def
+	}
+	for name, def := range child {
+		merged[name] = def
+	}
+	return merged
+}
+
+// ValidateChildCoversRequired ensures child definitions include every required
+// (no-default) variable defined by the parent. Child may redefine required vars
+// as optional by adding defaults, but omission is an error.
+func ValidateChildCoversRequired(parentDefs, childDefs map[string]VarDef) error {
+	var missing []string
+	for name, def := range parentDefs {
+		if !def.Required() {
+			continue
+		}
+		if _, ok := childDefs[name]; !ok {
+			missing = append(missing, name)
+		}
+	}
+
+	if len(missing) == 0 {
+		return nil
+	}
+
+	sort.Strings(missing)
+
+	var buf strings.Builder
+	buf.WriteString("child role must define all required parent variables:\n\n")
+	for _, name := range missing {
+		desc := parentDefs[name].Description
+		if desc != "" {
+			fmt.Fprintf(&buf, "  %-16s — %s\n", name, desc)
+		} else {
+			fmt.Fprintf(&buf, "  %s\n", name)
+		}
+	}
+
+	return fmt.Errorf("%s", buf.String())
 }
 
 // extractYAMLSection finds a top-level YAML key, extracts its indented block,
@@ -157,6 +235,54 @@ func ValidateVars(defs map[string]VarDef, provided map[string]string) error {
 		}
 		fmt.Fprintf(&buf, "%s=VALUE", name)
 	}
+	return fmt.Errorf("%s", buf.String())
+}
+
+// ValidateNoUnknownVars checks that all keys in provided exist in defs.
+// Returns a descriptive error listing unknown variables and available ones.
+// If defs is nil or empty, validation is skipped (untyped templates accept any vars).
+func ValidateNoUnknownVars(defs map[string]VarDef, provided map[string]string) error {
+	if len(defs) == 0 {
+		return nil
+	}
+	var unknown []string
+	for name := range provided {
+		if _, ok := defs[name]; !ok {
+			unknown = append(unknown, name)
+		}
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+
+	sort.Strings(unknown)
+
+	var buf strings.Builder
+	fmt.Fprintf(&buf, "unknown variables provided:\n\n")
+	for _, name := range unknown {
+		fmt.Fprintf(&buf, "  %s\n", name)
+	}
+
+	var available []string
+	for name := range defs {
+		available = append(available, name)
+	}
+	sort.Strings(available)
+
+	if len(available) > 0 {
+		buf.WriteString("\nAvailable variables:\n")
+		for _, name := range available {
+			desc := defs[name].Description
+			if desc != "" {
+				fmt.Fprintf(&buf, "  %-16s — %s\n", name, desc)
+			} else {
+				fmt.Fprintf(&buf, "  %s\n", name)
+			}
+		}
+	} else {
+		buf.WriteString("\nThis template defines no variables.\n")
+	}
+
 	return fmt.Errorf("%s", buf.String())
 }
 

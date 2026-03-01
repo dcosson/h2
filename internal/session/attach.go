@@ -2,8 +2,8 @@ package session
 
 import (
 	"encoding/json"
-	"io"
 	"net"
+	"os"
 
 	"h2/internal/session/client"
 	"h2/internal/session/message"
@@ -43,6 +43,15 @@ func (d *Daemon) handleAttach(conn net.Conn, req *message.Request) {
 	// Set up per-client output for this connection.
 	vt.Mu.Lock()
 	cl.Output = &frameWriter{conn: conn}
+	if vt.OscFg == "" && req.OscFg != "" {
+		vt.OscFg = req.OscFg
+	}
+	if vt.OscBg == "" && req.OscBg != "" {
+		vt.OscBg = req.OscBg
+	}
+	if os.Getenv("COLORFGBG") == "" && req.ColorFGBG != "" {
+		_ = os.Setenv("COLORFGBG", req.ColorFGBG)
+	}
 
 	// Resize PTY to client's terminal size, but only if dimensions actually
 	// changed. Unnecessary resizes send SIGWINCH to the child, which can
@@ -139,7 +148,7 @@ func (d *Daemon) readClientInput(conn net.Conn, cl *client.Client) {
 			vt.Mu.Lock()
 			if cl.DebugKeys && len(payload) > 0 {
 				cl.AppendDebugBytes(payload)
-				cl.RenderBar()
+				cl.RenderInputBar()
 			}
 			for i := 0; i < len(payload); {
 				switch cl.Mode {
@@ -160,7 +169,7 @@ func (d *Daemon) readClientInput(conn net.Conn, cl *client.Client) {
 			if err := json.Unmarshal(payload, &ctrl); err != nil {
 				continue
 			}
-			if ctrl.Type == "resize" {
+			if ctrl.Type == "resize" && ctrl.Rows >= 3 && ctrl.Cols >= 1 {
 				vt := s.VT
 				vt.Mu.Lock()
 				cl.TermRows = ctrl.Rows
@@ -197,33 +206,4 @@ func (fw *frameWriter) Write(p []byte) (int, error) {
 		return 0, err
 	}
 	return len(p), nil
-}
-
-// frameInputReader reads data frames from the attach client. It is used
-// by the client's ReadInput goroutine when in direct (non-daemon) mode
-// where the VT reads from InputSrc directly. In attach mode, we
-// instead read frames in readClientInput, so this reader blocks forever
-// until the connection is closed.
-type frameInputReader struct {
-	conn net.Conn
-}
-
-func (fr *frameInputReader) Read(p []byte) (int, error) {
-	// Block until the connection closes. Input is handled by readClientInput.
-	buf := make([]byte, 1)
-	_, err := fr.conn.Read(buf)
-	return 0, err
-}
-
-// blockingReader blocks forever on Read. Used when no client is attached.
-type blockingReader struct {
-	ch chan struct{}
-}
-
-func (br *blockingReader) Read(p []byte) (int, error) {
-	if br.ch == nil {
-		br.ch = make(chan struct{})
-	}
-	<-br.ch // blocks forever
-	return 0, io.EOF
 }

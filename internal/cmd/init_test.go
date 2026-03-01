@@ -2,13 +2,69 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
 	"h2/internal/config"
 )
+
+func extractClaudeAllowedCommands(t *testing.T, settingsPath string) []string {
+	t.Helper()
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings.json: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("parse settings.json: %v", err)
+	}
+	perms, ok := parsed["permissions"].(map[string]any)
+	if !ok {
+		t.Fatal("settings.json missing permissions object")
+	}
+	allow, ok := perms["allow"].([]any)
+	if !ok {
+		t.Fatal("settings.json missing permissions.allow array")
+	}
+	re := regexp.MustCompile(`^Bash\(([^ )]+) \*\)$`)
+	var cmds []string
+	for _, item := range allow {
+		s, ok := item.(string)
+		if !ok {
+			t.Fatalf("permissions.allow contains non-string value: %#v", item)
+		}
+		m := re.FindStringSubmatch(s)
+		if len(m) != 2 {
+			t.Fatalf("unexpected command allow format %q", s)
+		}
+		cmds = append(cmds, m[1])
+	}
+	sort.Strings(cmds)
+	return cmds
+}
+
+func extractCodexAllowedCommands(t *testing.T, requirementsPath string) []string {
+	t.Helper()
+	data, err := os.ReadFile(requirementsPath)
+	if err != nil {
+		t.Fatalf("read requirements.toml: %v", err)
+	}
+	re := regexp.MustCompile(`"([^"]+)"`)
+	matches := re.FindAllStringSubmatch(string(data), -1)
+	var cmds []string
+	for _, m := range matches {
+		if len(m) == 2 {
+			cmds = append(cmds, m[1])
+		}
+	}
+	sort.Strings(cmds)
+	return cmds
+}
 
 // expectedDirs returns the subdirectories that h2 init should create.
 func expectedDirs() []string {
@@ -17,6 +73,8 @@ func expectedDirs() []string {
 		"sessions",
 		"sockets",
 		filepath.Join("claude-config", "default"),
+		filepath.Join("codex-config", "default"),
+		filepath.Join("account-profiles-shared", "default", "skills"),
 		"projects",
 		"worktrees",
 		filepath.Join("pods", "roles"),
@@ -79,10 +137,16 @@ func TestInitCmd_CreatesStructure(t *testing.T) {
 		t.Errorf("output = %q, want it to contain %q", buf.String(), abs)
 	}
 
-	// Default role should be created.
-	rolePath := filepath.Join(dir, "roles", "default.yaml")
-	if _, err := os.Stat(rolePath); err != nil {
-		t.Errorf("expected default role to be created at %s: %v", rolePath, err)
+	// Default role should be created (as .yaml.tmpl since it has template syntax).
+	roleFound := false
+	for _, ext := range []string{".yaml.tmpl", ".yaml"} {
+		if _, err := os.Stat(filepath.Join(dir, "roles", "default"+ext)); err == nil {
+			roleFound = true
+			break
+		}
+	}
+	if !roleFound {
+		t.Error("expected default role to be created in roles/")
 	}
 }
 
@@ -148,33 +212,20 @@ func TestInitCmd_Global(t *testing.T) {
 	}
 }
 
-func TestInitCmd_NoArgs_InitsGlobal(t *testing.T) {
-	fakeHome := setupFakeHome(t)
+func TestInitCmd_NoArgs_RequiresDirOrGlobal(t *testing.T) {
+	setupFakeHome(t)
 
 	cmd := newInitCmd()
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetArgs([]string{})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("init with no args failed: %v", err)
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when no args and no --global")
 	}
-
-	h2Dir := filepath.Join(fakeHome, ".h2")
-	if !config.IsH2Dir(h2Dir) {
-		t.Error("expected ~/.h2 to be an h2 directory")
-	}
-
-	// No args should register as "root" prefix.
-	routes, err := config.ReadRoutes(h2Dir)
-	if err != nil {
-		t.Fatalf("ReadRoutes: %v", err)
-	}
-	if len(routes) != 1 {
-		t.Fatalf("expected 1 route, got %d", len(routes))
-	}
-	if routes[0].Prefix != "root" {
-		t.Errorf("prefix = %q, want %q", routes[0].Prefix, "root")
+	if !strings.Contains(err.Error(), "--global") {
+		t.Errorf("expected error mentioning --global, got: %v", err)
 	}
 }
 
@@ -340,5 +391,918 @@ func TestInitCmd_RootInit(t *testing.T) {
 	}
 	if routes[0].Prefix != "root" {
 		t.Errorf("prefix = %q, want %q", routes[0].Prefix, "root")
+	}
+}
+
+func TestInitCmd_WritesCLAUDEMD(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := filepath.Join(fakeHome, "myh2")
+
+	cmd := newInitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{dir})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init command failed: %v", err)
+	}
+
+	// CLAUDE.md should exist.
+	claudeMDPath := filepath.Join(dir, "claude-config", "default", "CLAUDE.md")
+	data, err := os.ReadFile(claudeMDPath)
+	if err != nil {
+		t.Fatalf("expected CLAUDE.md to exist: %v", err)
+	}
+	if len(data) == 0 {
+		t.Error("CLAUDE.md should not be empty")
+	}
+	content := string(data)
+	if !strings.Contains(content, "h2 Messaging Protocol") {
+		t.Error("CLAUDE.md should contain h2 Messaging Protocol")
+	}
+}
+
+func TestInitCmd_CreatesAGENTSMDSymlink(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := filepath.Join(fakeHome, "myh2")
+
+	cmd := newInitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{dir})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init command failed: %v", err)
+	}
+
+	// AGENTS.md should be a symlink.
+	agentsMDPath := filepath.Join(dir, "codex-config", "default", "AGENTS.md")
+	target, err := os.Readlink(agentsMDPath)
+	if err != nil {
+		t.Fatalf("expected AGENTS.md to be a symlink: %v", err)
+	}
+	expectedTarget := filepath.Join("..", "..", "account-profiles-shared", "default", "CLAUDE_AND_AGENTS.md")
+	if target != expectedTarget {
+		t.Errorf("AGENTS.md symlink target = %q, want %q", target, expectedTarget)
+	}
+
+	// Symlink should resolve to valid content.
+	data, err := os.ReadFile(agentsMDPath)
+	if err != nil {
+		t.Fatalf("could not read through AGENTS.md symlink: %v", err)
+	}
+	if len(data) == 0 {
+		t.Error("AGENTS.md (via symlink) should not be empty")
+	}
+}
+
+func TestInitCmd_CreatesClaudeSettingsAndCodexRequirements(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := filepath.Join(fakeHome, "myh2")
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init command failed: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "claude-config", "default", "settings.json")); err != nil {
+		t.Fatalf("expected claude settings.json to exist: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "codex-config", "default", "config.toml")); err != nil {
+		t.Fatalf("expected codex config.toml to exist: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "codex-config", "default", "requirements.toml")); err != nil {
+		t.Fatalf("expected codex requirements.toml to exist: %v", err)
+	}
+}
+
+func TestInitCmd_CreatesCLAUDEMDSymlink(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := filepath.Join(fakeHome, "myh2")
+
+	cmd := newInitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{dir})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init command failed: %v", err)
+	}
+
+	claudeMDPath := filepath.Join(dir, "claude-config", "default", "CLAUDE.md")
+	target, err := os.Readlink(claudeMDPath)
+	if err != nil {
+		t.Fatalf("expected CLAUDE.md to be a symlink: %v", err)
+	}
+	expectedTarget := filepath.Join("..", "..", "account-profiles-shared", "default", "CLAUDE_AND_AGENTS.md")
+	if target != expectedTarget {
+		t.Errorf("CLAUDE.md symlink target = %q, want %q", target, expectedTarget)
+	}
+}
+
+func TestInitCmd_CreatesSharedSkillsSymlinks(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := filepath.Join(fakeHome, "myh2")
+
+	cmd := newInitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{dir})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init command failed: %v", err)
+	}
+
+	tests := []struct {
+		path string
+	}{
+		{path: filepath.Join(dir, "claude-config", "default", "skills")},
+		{path: filepath.Join(dir, "codex-config", "default", "skills")},
+	}
+	for _, tt := range tests {
+		target, err := os.Readlink(tt.path)
+		if err != nil {
+			t.Fatalf("expected %s to be a symlink: %v", tt.path, err)
+		}
+		expectedTarget := filepath.Join("..", "..", "account-profiles-shared", "default", "skills")
+		if target != expectedTarget {
+			t.Errorf("%s symlink target = %q, want %q", tt.path, target, expectedTarget)
+		}
+	}
+}
+
+func TestInitCmd_VerboseOutput(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := filepath.Join(fakeHome, "myh2")
+
+	cmd := newInitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{dir})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init command failed: %v", err)
+	}
+
+	output := buf.String()
+	expectedPhrases := []string{
+		"Creating h2 directory at",
+		"Created roles/",
+		"Created sessions/",
+		"Wrote config.yaml",
+		"Wrote account-profiles-shared/default/CLAUDE_AND_AGENTS.md",
+		"Symlinked claude-config/default/CLAUDE.md",
+		"Symlinked codex-config/default/AGENTS.md",
+		"Wrote roles/default.yaml", // may be default.yaml.tmpl
+		"Registered route",
+		"Initialized h2 directory at",
+	}
+	for _, phrase := range expectedPhrases {
+		if !strings.Contains(output, phrase) {
+			t.Errorf("output missing %q\nfull output:\n%s", phrase, output)
+		}
+	}
+}
+
+func TestInitCmd_FailsOnUnexpectedContent(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := filepath.Join(fakeHome, "populated")
+	os.MkdirAll(dir, 0o755)
+
+	// Create an unexpected file.
+	os.WriteFile(filepath.Join(dir, "unexpected.txt"), []byte("hello"), 0o644)
+
+	cmd := newInitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{dir})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for directory with unexpected content")
+	}
+	if !strings.Contains(err.Error(), "already has content") {
+		t.Errorf("error = %q, want it to contain 'already has content'", err.Error())
+	}
+}
+
+func TestInitCmd_AllowsRootDirFiles(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := filepath.Join(fakeHome, "myh2")
+	os.MkdirAll(dir, 0o755)
+
+	// Pre-create expected root-dir files.
+	os.WriteFile(filepath.Join(dir, "routes.jsonl"), []byte(""), 0o644)
+	os.WriteFile(filepath.Join(dir, "terminal.json"), []byte("{}"), 0o644)
+
+	cmd := newInitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{dir})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init should succeed with only root-dir files present: %v", err)
+	}
+
+	if !config.IsH2Dir(dir) {
+		t.Error("expected directory to be initialized as h2 dir")
+	}
+}
+
+func TestInitCmd_FailsOnUnexpectedSubdir(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := filepath.Join(fakeHome, "populated")
+	os.MkdirAll(filepath.Join(dir, "some-subdir"), 0o755)
+
+	cmd := newInitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{dir})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for directory with unexpected subdirectory")
+	}
+	if !strings.Contains(err.Error(), "already has content") {
+		t.Errorf("error = %q, want it to contain 'already has content'", err.Error())
+	}
+}
+
+// --- --generate tests ---
+
+// initH2Dir is a helper that runs a full h2 init and returns the abs path.
+func initH2Dir(t *testing.T, fakeHome string) string {
+	t.Helper()
+	dir := filepath.Join(fakeHome, "myh2")
+	cmd := newInitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{dir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init command failed: %v", err)
+	}
+	return dir
+}
+
+func TestInitCmd_GenerateRequiresH2Dir(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := filepath.Join(fakeHome, "notanh2dir")
+	os.MkdirAll(dir, 0o755)
+
+	cmd := newInitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{dir, "--generate", "roles"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when --generate used on non-h2 dir")
+	}
+	if !strings.Contains(err.Error(), "not an h2 directory") {
+		t.Errorf("error = %q, want it to contain 'not an h2 directory'", err.Error())
+	}
+}
+
+func TestInitCmd_GenerateInstructions(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	// Remove CLAUDE.md to test regeneration.
+	sharedPath := filepath.Join(dir, "account-profiles-shared", "default", "CLAUDE_AND_AGENTS.md")
+	os.Remove(sharedPath)
+
+	cmd := newInitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{dir, "--generate", "instructions"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("--generate instructions failed: %v", err)
+	}
+
+	// CLAUDE.md should be regenerated.
+	if _, err := os.Stat(sharedPath); err != nil {
+		t.Fatalf("expected CLAUDE_AND_AGENTS.md to be regenerated: %v", err)
+	}
+
+	if !strings.Contains(buf.String(), "Wrote account-profiles-shared/default/CLAUDE_AND_AGENTS.md") {
+		t.Errorf("output should mention writing CLAUDE_AND_AGENTS.md, got: %s", buf.String())
+	}
+}
+
+func TestInitCmd_GenerateInstructions_RequiresForceWhenSharedInstructionsExists(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	cmd := newInitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{dir, "--generate", "instructions"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected --generate instructions to require --force when shared instructions exists")
+	}
+	if !strings.Contains(err.Error(), "use --force") {
+		t.Errorf("expected force guidance error, got: %v", err)
+	}
+}
+
+func TestInitCmd_GenerateInstructionsForce(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	// Overwrite CLAUDE.md with custom content.
+	sharedPath := filepath.Join(dir, "account-profiles-shared", "default", "CLAUDE_AND_AGENTS.md")
+	os.WriteFile(sharedPath, []byte("custom content"), 0o644)
+
+	cmd := newInitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{dir, "--generate", "instructions", "--force"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("--generate instructions --force failed: %v", err)
+	}
+
+	// CLAUDE.md should be overwritten.
+	data, err := os.ReadFile(sharedPath)
+	if err != nil {
+		t.Fatalf("read CLAUDE_AND_AGENTS.md: %v", err)
+	}
+	if string(data) == "custom content" {
+		t.Error("CLAUDE_AND_AGENTS.md should have been overwritten with --force")
+	}
+	if !strings.Contains(buf.String(), "Wrote account-profiles-shared/default/CLAUDE_AND_AGENTS.md") {
+		t.Errorf("output should mention writing, got: %s", buf.String())
+	}
+}
+
+func TestInitCmd_GenerateInstructions_DoesNotWriteHarnessConfigOrSkills(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	sharedInstructions := filepath.Join(dir, "account-profiles-shared", "default", "CLAUDE_AND_AGENTS.md")
+	if err := os.Remove(sharedInstructions); err != nil {
+		t.Fatalf("remove shared instructions: %v", err)
+	}
+
+	for _, p := range []string{
+		filepath.Join(dir, "claude-config", "default", "settings.json"),
+		filepath.Join(dir, "codex-config", "default", "config.toml"),
+		filepath.Join(dir, "codex-config", "default", "requirements.toml"),
+	} {
+		if err := os.Remove(p); err != nil {
+			t.Fatalf("remove %s: %v", p, err)
+		}
+	}
+	sharedSkills := filepath.Join(dir, "account-profiles-shared", "default", "skills")
+	if err := os.RemoveAll(sharedSkills); err != nil {
+		t.Fatalf("remove shared skills: %v", err)
+	}
+	if err := os.MkdirAll(sharedSkills, 0o755); err != nil {
+		t.Fatalf("recreate shared skills dir: %v", err)
+	}
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--generate", "instructions"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("--generate instructions failed: %v", err)
+	}
+
+	for _, p := range []string{
+		filepath.Join(dir, "claude-config", "default", "settings.json"),
+		filepath.Join(dir, "codex-config", "default", "config.toml"),
+		filepath.Join(dir, "codex-config", "default", "requirements.toml"),
+	} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("expected %s to remain absent after --generate instructions, err=%v", p, err)
+		}
+	}
+	entries, err := os.ReadDir(sharedSkills)
+	if err != nil {
+		t.Fatalf("read shared skills dir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected shared skills to remain untouched by --generate instructions, got %d entries", len(entries))
+	}
+}
+
+func TestInitCmd_GenerateHarnessConfig(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	for _, p := range []string{
+		filepath.Join(dir, "claude-config", "default", "settings.json"),
+		filepath.Join(dir, "codex-config", "default", "config.toml"),
+		filepath.Join(dir, "codex-config", "default", "requirements.toml"),
+	} {
+		if err := os.Remove(p); err != nil {
+			t.Fatalf("remove %s: %v", p, err)
+		}
+	}
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--generate", "harness-config"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("--generate harness-config failed: %v", err)
+	}
+
+	for _, p := range []string{
+		filepath.Join(dir, "claude-config", "default", "settings.json"),
+		filepath.Join(dir, "codex-config", "default", "config.toml"),
+		filepath.Join(dir, "codex-config", "default", "requirements.toml"),
+	} {
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("expected harness config file %s to exist: %v", p, err)
+		}
+	}
+}
+
+func TestInitCmd_GenerateRoles(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	// Remove default role (either extension) to test regeneration.
+	for _, ext := range []string{".yaml", ".yaml.tmpl"} {
+		os.Remove(filepath.Join(dir, "roles", "default"+ext))
+	}
+
+	cmd := newInitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{dir, "--generate", "roles"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("--generate roles failed: %v", err)
+	}
+
+	// Default role should be regenerated (as either extension).
+	roleFound := false
+	for _, ext := range []string{".yaml.tmpl", ".yaml"} {
+		if _, err := os.Stat(filepath.Join(dir, "roles", "default"+ext)); err == nil {
+			roleFound = true
+			break
+		}
+	}
+	if !roleFound {
+		t.Fatal("expected default role to be regenerated")
+	}
+
+	if !strings.Contains(buf.String(), "Wrote roles/default.yaml") {
+		t.Errorf("output should mention writing role, got: %s", buf.String())
+	}
+}
+
+func TestInitCmd_GenerateRoles_RequiresForceWhenExisting(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	cmd := newInitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{dir, "--generate", "roles"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected --generate roles to require --force when role files exist")
+	}
+	if !strings.Contains(err.Error(), "use --force") {
+		t.Errorf("expected force guidance error, got: %v", err)
+	}
+}
+
+func TestInitCmd_GenerateRoles_OpinionatedIncludesConcierge(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	for _, role := range []string{"default", "concierge"} {
+		for _, ext := range []string{".yaml", ".yaml.tmpl"} {
+			_ = os.Remove(filepath.Join(dir, "roles", role+ext))
+		}
+	}
+
+	cmd := newInitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{dir, "--generate", "roles", "--style", "opinionated", "--force"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("--generate roles --style opinionated --force failed: %v", err)
+	}
+
+	for _, role := range []string{"default", "concierge"} {
+		found := false
+		for _, ext := range []string{".yaml.tmpl", ".yaml"} {
+			if _, err := os.Stat(filepath.Join(dir, "roles", role+ext)); err == nil {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected %s role to be regenerated for opinionated style", role)
+		}
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Wrote roles/default.yaml") {
+		t.Errorf("output should mention default role write, got: %s", output)
+	}
+	if !strings.Contains(output, "Wrote roles/concierge.yaml") {
+		t.Errorf("output should mention concierge role write, got: %s", output)
+	}
+}
+
+func TestInitCmd_GenerateConfig(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	// Remove config to test regeneration.
+	configPath := filepath.Join(dir, "config.yaml")
+	os.Remove(configPath)
+
+	cmd := newInitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{dir, "--generate", "config"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("--generate config failed: %v", err)
+	}
+
+	if _, err := os.Stat(configPath); err != nil {
+		t.Fatalf("expected config.yaml to be regenerated: %v", err)
+	}
+}
+
+func TestInitCmd_GenerateConfig_RequiresForceWhenExisting(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--generate", "config"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected --generate config to require --force when config.yaml exists")
+	}
+	if !strings.Contains(err.Error(), "use --force") {
+		t.Fatalf("expected force guidance error, got: %v", err)
+	}
+}
+
+func TestInitCmd_GenerateAll(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	// Remove files to test regeneration.
+	os.Remove(filepath.Join(dir, "config.yaml"))
+	os.Remove(filepath.Join(dir, "account-profiles-shared", "default", "CLAUDE_AND_AGENTS.md"))
+	os.Remove(filepath.Join(dir, "codex-config", "default", "AGENTS.md"))
+	os.Remove(filepath.Join(dir, "roles", "default.yaml"))
+	os.Remove(filepath.Join(dir, "roles", "default.yaml.tmpl"))
+	os.Remove(filepath.Join(dir, "claude-config", "default", "settings.json"))
+	os.Remove(filepath.Join(dir, "codex-config", "default", "config.toml"))
+	os.Remove(filepath.Join(dir, "codex-config", "default", "requirements.toml"))
+	os.RemoveAll(filepath.Join(dir, "account-profiles-shared", "default", "skills"))
+	os.MkdirAll(filepath.Join(dir, "account-profiles-shared", "default", "skills"), 0o755)
+
+	cmd := newInitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{dir, "--generate", "all"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("--generate all failed: %v", err)
+	}
+
+	output := buf.String()
+	for _, phrase := range []string{"config.yaml", "CLAUDE_AND_AGENTS.md", "AGENTS.md", "settings.json", "requirements.toml", "default.yaml"} {
+		if !strings.Contains(output, phrase) {
+			t.Errorf("output missing %q\nfull output:\n%s", phrase, output)
+		}
+	}
+}
+
+func TestInitCmd_StyleMinimal_GeneratesMinimalInstructions(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := filepath.Join(fakeHome, "myh2-min")
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--style", "minimal"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init --style minimal failed: %v", err)
+	}
+
+	sharedPath := filepath.Join(dir, "account-profiles-shared", "default", "CLAUDE_AND_AGENTS.md")
+	data, err := os.ReadFile(sharedPath)
+	if err != nil {
+		t.Fatalf("read shared instructions: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "Shared Agent Instructions") {
+		t.Errorf("minimal style should write minimal shared instructions, got:\n%s", content)
+	}
+}
+
+func TestInitCmd_GenerateInstructions_StyleMinimal(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--generate", "instructions", "--style", "minimal", "--force"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("--generate instructions --style minimal failed: %v", err)
+	}
+
+	sharedPath := filepath.Join(dir, "account-profiles-shared", "default", "CLAUDE_AND_AGENTS.md")
+	data, err := os.ReadFile(sharedPath)
+	if err != nil {
+		t.Fatalf("read shared instructions: %v", err)
+	}
+	if !strings.Contains(string(data), "Shared Agent Instructions") {
+		t.Errorf("expected minimal shared instructions content, got:\n%s", string(data))
+	}
+}
+
+func TestInitCmd_Opinionated_PopulatesSharedSkills(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := filepath.Join(fakeHome, "myh2-op")
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--style", "opinionated"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init --style opinionated failed: %v", err)
+	}
+
+	checks := []string{
+		filepath.Join(dir, "account-profiles-shared", "default", "skills", "shaping", "SKILL.md"),
+		filepath.Join(dir, "account-profiles-shared", "default", "skills", "stress-test", "SKILL.md"),
+	}
+	for _, p := range checks {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("expected opinionated skill file %s: %v", p, err)
+		}
+	}
+}
+
+func TestInitCmd_Minimal_LeavesSharedSkillsEmpty(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := filepath.Join(fakeHome, "myh2-min-skills")
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--style", "minimal"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init --style minimal failed: %v", err)
+	}
+
+	entries, err := os.ReadDir(filepath.Join(dir, "account-profiles-shared", "default", "skills"))
+	if err != nil {
+		t.Fatalf("read shared skills dir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("minimal style should keep shared skills empty, got %d entries", len(entries))
+	}
+}
+
+func TestInitCmd_GenerateSkills(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	sharedSkills := filepath.Join(dir, "account-profiles-shared", "default", "skills")
+	if err := os.RemoveAll(sharedSkills); err != nil {
+		t.Fatalf("remove shared skills: %v", err)
+	}
+	if err := os.MkdirAll(sharedSkills, 0o755); err != nil {
+		t.Fatalf("recreate shared skills dir: %v", err)
+	}
+
+	cmd := newInitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{dir, "--generate", "skills", "--style", "opinionated"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("--generate skills failed: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(sharedSkills, "shaping", "SKILL.md")); err != nil {
+		t.Fatalf("expected shaping skill after --generate skills: %v", err)
+	}
+}
+
+func TestInitCmd_GenerateSkills_RequiresForceWhenSharedSkillsExist(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--generate", "skills", "--style", "opinionated"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected --generate skills to require --force when shared skills already exist")
+	}
+	if !strings.Contains(err.Error(), "use --force") {
+		t.Fatalf("expected force guidance error, got: %v", err)
+	}
+}
+
+func TestInitCmd_GenerateSkills_CreatesMissingSkillSymlinks(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	sharedSkills := filepath.Join(dir, "account-profiles-shared", "default", "skills")
+	if err := os.RemoveAll(sharedSkills); err != nil {
+		t.Fatalf("clear shared skills: %v", err)
+	}
+	if err := os.MkdirAll(sharedSkills, 0o755); err != nil {
+		t.Fatalf("recreate shared skills dir: %v", err)
+	}
+
+	claudeSkills := filepath.Join(dir, "claude-config", "default", "skills")
+	codexSkills := filepath.Join(dir, "codex-config", "default", "skills")
+	if err := os.Remove(claudeSkills); err != nil {
+		t.Fatalf("remove claude skills symlink: %v", err)
+	}
+	if err := os.Remove(codexSkills); err != nil {
+		t.Fatalf("remove codex skills symlink: %v", err)
+	}
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--generate", "skills", "--style", "opinionated"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("--generate skills failed: %v", err)
+	}
+
+	want := filepath.Join("..", "..", "account-profiles-shared", "default", "skills")
+	for _, p := range []string{claudeSkills, codexSkills} {
+		target, err := os.Readlink(p)
+		if err != nil {
+			t.Fatalf("expected %s to be symlink: %v", p, err)
+		}
+		if target != want {
+			t.Fatalf("symlink %s target = %q, want %q", p, target, want)
+		}
+	}
+}
+
+func TestInitCmd_GenerateSkills_ConflictingSkillPathsFailBeforeWrite(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	sharedSkills := filepath.Join(dir, "account-profiles-shared", "default", "skills")
+	if err := os.RemoveAll(sharedSkills); err != nil {
+		t.Fatalf("remove shared skills: %v", err)
+	}
+	if err := os.MkdirAll(sharedSkills, 0o755); err != nil {
+		t.Fatalf("recreate shared skills dir: %v", err)
+	}
+
+	claudeSkills := filepath.Join(dir, "claude-config", "default", "skills")
+	if err := os.Remove(claudeSkills); err != nil {
+		t.Fatalf("remove claude skills symlink: %v", err)
+	}
+	if err := os.MkdirAll(claudeSkills, 0o755); err != nil {
+		t.Fatalf("create conflicting claude skills dir: %v", err)
+	}
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--generate", "skills", "--style", "opinionated"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected --generate skills to fail for conflicting skills path without --force")
+	}
+	if !strings.Contains(err.Error(), "use --force") {
+		t.Fatalf("expected force guidance error, got: %v", err)
+	}
+
+	entries, readErr := os.ReadDir(sharedSkills)
+	if readErr != nil {
+		t.Fatalf("read shared skills dir: %v", readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected shared skills to remain untouched on preflight failure, got %d entries", len(entries))
+	}
+}
+
+func TestInitCmd_GenerateSkills_ForceReplacesConflictingSkillPaths(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	claudeSkills := filepath.Join(dir, "claude-config", "default", "skills")
+	if err := os.Remove(claudeSkills); err != nil {
+		t.Fatalf("remove claude skills symlink: %v", err)
+	}
+	if err := os.MkdirAll(claudeSkills, 0o755); err != nil {
+		t.Fatalf("create conflicting claude skills dir: %v", err)
+	}
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--generate", "skills", "--style", "opinionated", "--force"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("--generate skills --force failed: %v", err)
+	}
+
+	want := filepath.Join("..", "..", "account-profiles-shared", "default", "skills")
+	target, err := os.Readlink(claudeSkills)
+	if err != nil {
+		t.Fatalf("expected claude skills path to be symlink after --force: %v", err)
+	}
+	if target != want {
+		t.Fatalf("claude skills symlink target = %q, want %q", target, want)
+	}
+}
+
+func TestInitCmd_GenerateHarnessConfig_RequiresForceWhenExisting(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--generate", "harness-config"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected --generate harness-config to require --force when files exist")
+	}
+	if !strings.Contains(err.Error(), "use --force") {
+		t.Fatalf("expected force guidance error, got: %v", err)
+	}
+}
+
+func TestInitCmd_GenerateHarnessConfig_ReportsAllPlannedTargetsOnFailure(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--generate", "harness-config"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected --generate harness-config to fail without --force")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"Planned targets:",
+		"claude-config/default/settings.json",
+		"codex-config/default/config.toml",
+		"codex-config/default/requirements.toml",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("expected error to contain %q, got: %v", want, err)
+		}
+	}
+}
+
+func TestInitCmd_Minimal_CommandPolicyMatchesBetweenClaudeAndCodex(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := filepath.Join(fakeHome, "myh2-min-policy")
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--style", "minimal"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init --style minimal failed: %v", err)
+	}
+
+	claude := extractClaudeAllowedCommands(t, filepath.Join(dir, "claude-config", "default", "settings.json"))
+	codex := extractCodexAllowedCommands(t, filepath.Join(dir, "codex-config", "default", "requirements.toml"))
+	if strings.Join(claude, ",") != strings.Join(codex, ",") {
+		t.Fatalf("minimal command policy mismatch: claude=%v codex=%v", claude, codex)
+	}
+}
+
+func TestInitCmd_Opinionated_CommandPolicyMatchesBetweenClaudeAndCodex(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := filepath.Join(fakeHome, "myh2-op-policy")
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--style", "opinionated"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init --style opinionated failed: %v", err)
+	}
+
+	claude := extractClaudeAllowedCommands(t, filepath.Join(dir, "claude-config", "default", "settings.json"))
+	codex := extractCodexAllowedCommands(t, filepath.Join(dir, "codex-config", "default", "requirements.toml"))
+	if strings.Join(claude, ",") != strings.Join(codex, ",") {
+		t.Fatalf("opinionated command policy mismatch: claude=%v codex=%v", claude, codex)
+	}
+}
+
+func TestInitCmd_GenerateInvalidType(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := initH2Dir(t, fakeHome)
+
+	cmd := newInitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{dir, "--generate", "invalid"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid --generate type")
+	}
+	if !strings.Contains(err.Error(), "unknown --generate type") {
+		t.Errorf("error = %q, want it to contain 'unknown --generate type'", err.Error())
 	}
 }

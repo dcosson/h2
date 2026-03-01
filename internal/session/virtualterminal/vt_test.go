@@ -85,3 +85,367 @@ func TestWritePTY_WriteError(t *testing.T) {
 		t.Fatal("expected a pipe error, not a timeout")
 	}
 }
+
+// --- Resize bounds checking ---
+
+func TestResize_IgnoresInvalidDimensions(t *testing.T) {
+	vt := &VT{Rows: 24, Cols: 80, ChildRows: 22}
+
+	// Zero rows — should be ignored.
+	vt.Resize(0, 80, -2)
+	if vt.Rows != 24 || vt.Cols != 80 || vt.ChildRows != 22 {
+		t.Fatalf("Resize(0,80,-2) should be no-op, got Rows=%d Cols=%d ChildRows=%d", vt.Rows, vt.Cols, vt.ChildRows)
+	}
+
+	// Negative childRows — should be ignored.
+	vt.Resize(1, 80, -1)
+	if vt.Rows != 24 || vt.Cols != 80 || vt.ChildRows != 22 {
+		t.Fatalf("Resize(1,80,-1) should be no-op, got Rows=%d Cols=%d ChildRows=%d", vt.Rows, vt.Cols, vt.ChildRows)
+	}
+
+	// Zero cols — should be ignored.
+	vt.Resize(24, 0, 22)
+	if vt.Rows != 24 || vt.Cols != 80 || vt.ChildRows != 22 {
+		t.Fatalf("Resize(24,0,22) should be no-op, got Rows=%d Cols=%d ChildRows=%d", vt.Rows, vt.Cols, vt.ChildRows)
+	}
+}
+
+// --- ScanPTYOutput (scroll region detection) ---
+
+func TestScanPTYOutput_DetectsScrollRegion(t *testing.T) {
+	vt := &VT{}
+	if vt.ScrollRegionUsed {
+		t.Fatal("expected ScrollRegionUsed=false initially")
+	}
+	// Send DECSTBM: CSI 1;20 r
+	vt.ScanPTYOutput([]byte("\033[1;20r"))
+	if !vt.ScrollRegionUsed {
+		t.Fatal("expected ScrollRegionUsed=true after DECSTBM")
+	}
+}
+
+func TestScanPTYOutput_NoScrollRegionForNormalApps(t *testing.T) {
+	vt := &VT{}
+	// Normal output with SGR colors, cursor positioning, but no scroll regions.
+	vt.ScanPTYOutput([]byte("\033[31mhello\033[0m\r\n\033[5;1Hworld\n"))
+	if vt.ScrollRegionUsed {
+		t.Fatal("expected ScrollRegionUsed=false without DECSTBM")
+	}
+}
+
+func TestScanPTYOutput_ContinuesScanningAfterScrollRegion(t *testing.T) {
+	vt := &VT{}
+	vt.ScanPTYOutput([]byte("\033[1;20r"))
+	if !vt.ScrollRegionUsed {
+		t.Fatal("expected ScrollRegionUsed=true")
+	}
+	// After ScrollRegionUsed is set, scanner should still detect ?1007h.
+	vt.ScanPTYOutput([]byte("\033[?1007h"))
+	if !vt.AltScrollEnabled {
+		t.Fatal("expected AltScrollEnabled=true after ?1007h")
+	}
+}
+
+func TestScanPTYOutput_SplitAcrossChunks(t *testing.T) {
+	vt := &VT{}
+	// Split ESC [ 1 ; 2 0 r across two chunks.
+	vt.ScanPTYOutput([]byte("\033[1;2"))
+	if vt.ScrollRegionUsed {
+		t.Fatal("should not detect scroll region mid-sequence")
+	}
+	vt.ScanPTYOutput([]byte("0r"))
+	if !vt.ScrollRegionUsed {
+		t.Fatal("expected ScrollRegionUsed=true after completing CSI...r across chunks")
+	}
+}
+
+func TestScanPTYOutput_IgnoresOtherCSIFinals(t *testing.T) {
+	vt := &VT{}
+	// CSI H (cursor position), CSI m (SGR), CSI J (erase display)
+	vt.ScanPTYOutput([]byte("\033[5;1H\033[31m\033[2J"))
+	if vt.ScrollRegionUsed {
+		t.Fatal("expected ScrollRegionUsed=false for non-DECSTBM sequences")
+	}
+}
+
+func TestScanPTYOutput_SkipsOSCSequences(t *testing.T) {
+	vt := &VT{}
+	// OSC with BEL terminator, then DECSTBM
+	vt.ScanPTYOutput([]byte("\033]0;window title\007\033[1;20r"))
+	if !vt.ScrollRegionUsed {
+		t.Fatal("expected ScrollRegionUsed=true after OSC then DECSTBM")
+	}
+}
+
+func TestScanPTYOutput_SkipsOSCWithSTTerminator(t *testing.T) {
+	vt := &VT{}
+	// OSC with ST (ESC \) terminator, then DECSTBM
+	vt.ScanPTYOutput([]byte("\033]0;title\033\\\033[1;20r"))
+	if !vt.ScrollRegionUsed {
+		t.Fatal("expected ScrollRegionUsed=true after OSC-ST then DECSTBM")
+	}
+}
+
+func TestScanPTYOutput_BareResetScrollRegion(t *testing.T) {
+	vt := &VT{}
+	// CSI r with no parameters (reset scroll region) — still uses 'r' final byte.
+	vt.ScanPTYOutput([]byte("\033[r"))
+	if !vt.ScrollRegionUsed {
+		t.Fatal("expected ScrollRegionUsed=true for bare CSI r")
+	}
+}
+
+// --- ScanPTYOutput (alternate scroll detection) ---
+
+func TestScanPTYOutput_DetectsAltScrollEnable(t *testing.T) {
+	vt := &VT{}
+	vt.ScanPTYOutput([]byte("\033[?1007h"))
+	if !vt.AltScrollEnabled {
+		t.Fatal("expected AltScrollEnabled=true after ?1007h")
+	}
+}
+
+func TestScanPTYOutput_DetectsAltScrollDisable(t *testing.T) {
+	vt := &VT{}
+	vt.AltScrollEnabled = true
+	vt.ScanPTYOutput([]byte("\033[?1007l"))
+	if vt.AltScrollEnabled {
+		t.Fatal("expected AltScrollEnabled=false after ?1007l")
+	}
+}
+
+func TestScanPTYOutput_AltScrollToggle(t *testing.T) {
+	vt := &VT{}
+	vt.ScanPTYOutput([]byte("\033[?1007h"))
+	if !vt.AltScrollEnabled {
+		t.Fatal("expected AltScrollEnabled=true")
+	}
+	vt.ScanPTYOutput([]byte("\033[?1007l"))
+	if vt.AltScrollEnabled {
+		t.Fatal("expected AltScrollEnabled=false after disable")
+	}
+}
+
+func TestScanPTYOutput_AltScrollSplitAcrossChunks(t *testing.T) {
+	vt := &VT{}
+	// Split ESC [ ? 1 0 0 7 h across two chunks.
+	vt.ScanPTYOutput([]byte("\033[?10"))
+	if vt.AltScrollEnabled {
+		t.Fatal("should not enable mid-sequence")
+	}
+	vt.ScanPTYOutput([]byte("07h"))
+	if !vt.AltScrollEnabled {
+		t.Fatal("expected AltScrollEnabled=true after completing ?1007h across chunks")
+	}
+}
+
+func TestScanPTYOutput_IgnoresOtherPrivateModes(t *testing.T) {
+	vt := &VT{}
+	// ?1049h (alt screen) should not affect AltScrollEnabled.
+	vt.ScanPTYOutput([]byte("\033[?1049h"))
+	if vt.AltScrollEnabled {
+		t.Fatal("expected AltScrollEnabled=false for ?1049h")
+	}
+}
+
+func TestScanPTYOutput_AltScrollAfterScrollRegion(t *testing.T) {
+	vt := &VT{}
+	// DECSTBM first, then ?1007h in the same chunk.
+	vt.ScanPTYOutput([]byte("\033[1;20r\033[?1007h"))
+	if !vt.ScrollRegionUsed {
+		t.Fatal("expected ScrollRegionUsed=true")
+	}
+	if !vt.AltScrollEnabled {
+		t.Fatal("expected AltScrollEnabled=true")
+	}
+}
+
+func TestScanPTYOutput_PrivateModeWithSemicolon(t *testing.T) {
+	vt := &VT{}
+	// Compound private mode: ?1000;1006h — semicolon should bail out.
+	vt.ScanPTYOutput([]byte("\033[?1000;1006h"))
+	if vt.AltScrollEnabled {
+		t.Fatal("compound private mode should not set AltScrollEnabled")
+	}
+}
+
+// --- ScanPTYOutput (synchronized output detection) ---
+
+func TestScanPTYOutput_DetectsSyncOutputEnable(t *testing.T) {
+	vt := &VT{}
+	vt.ScanPTYOutput([]byte("\033[?2026h"))
+	if !vt.SyncOutputActive {
+		t.Fatal("expected SyncOutputActive=true after ?2026h")
+	}
+}
+
+func TestScanPTYOutput_DetectsSyncOutputDisable(t *testing.T) {
+	vt := &VT{}
+	vt.SyncOutputActive = true
+	vt.ScanPTYOutput([]byte("\033[?2026l"))
+	if vt.SyncOutputActive {
+		t.Fatal("expected SyncOutputActive=false after ?2026l")
+	}
+}
+
+func TestScanPTYOutput_SyncOutputToggle(t *testing.T) {
+	vt := &VT{}
+	vt.ScanPTYOutput([]byte("\033[?2026h"))
+	if !vt.SyncOutputActive {
+		t.Fatal("expected SyncOutputActive=true")
+	}
+	vt.ScanPTYOutput([]byte("\033[?2026l"))
+	if vt.SyncOutputActive {
+		t.Fatal("expected SyncOutputActive=false after disable")
+	}
+}
+
+func TestScanPTYOutput_SyncOutputSplitAcrossChunks(t *testing.T) {
+	vt := &VT{}
+	// Split ESC [ ? 2 0 2 6 h across two chunks.
+	vt.ScanPTYOutput([]byte("\033[?20"))
+	if vt.SyncOutputActive {
+		t.Fatal("should not enable mid-sequence")
+	}
+	vt.ScanPTYOutput([]byte("26h"))
+	if !vt.SyncOutputActive {
+		t.Fatal("expected SyncOutputActive=true after completing ?2026h across chunks")
+	}
+}
+
+func TestScanPTYOutput_SyncOutputBothInSameChunk(t *testing.T) {
+	vt := &VT{}
+	// Both enable and disable in the same chunk — should end up disabled.
+	vt.ScanPTYOutput([]byte("\033[?2026h\033[2J\033[H\033[?2026l"))
+	if vt.SyncOutputActive {
+		t.Fatal("expected SyncOutputActive=false when both ?2026h and ?2026l are in same chunk")
+	}
+}
+
+func TestScanPTYOutput_SyncOutputDoesNotAffectOtherModes(t *testing.T) {
+	vt := &VT{}
+	vt.ScanPTYOutput([]byte("\033[?2026h"))
+	if vt.AltScrollEnabled {
+		t.Fatal("?2026h should not affect AltScrollEnabled")
+	}
+	if vt.ScrollRegionUsed {
+		t.Fatal("?2026h should not affect ScrollRegionUsed")
+	}
+}
+
+// --- RespondTerminalQueries ---
+
+func TestRespondTerminalQueries_DA2(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+
+	vt := &VT{Ptm: w}
+	vt.RespondTerminalQueries([]byte("\033[>c"))
+
+	buf := make([]byte, 256)
+	n, err := r.Read(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(buf[:n])
+	want := "\033[>65;388;1c"
+	if got != want {
+		t.Errorf("DA2 response: got %q, want %q", got, want)
+	}
+}
+
+func TestRespondTerminalQueries_DA2WithParam(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+
+	vt := &VT{Ptm: w}
+	vt.RespondTerminalQueries([]byte("\033[>0c"))
+
+	buf := make([]byte, 256)
+	n, err := r.Read(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(buf[:n])
+	want := "\033[>65;388;1c"
+	if got != want {
+		t.Errorf("DA2 response: got %q, want %q", got, want)
+	}
+}
+
+func TestRespondTerminalQueries_XTVERSION(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+
+	vt := &VT{Ptm: w}
+	vt.RespondTerminalQueries([]byte("\033[>0q"))
+
+	buf := make([]byte, 256)
+	n, err := r.Read(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(buf[:n])
+	want := "\033P>|xterm(388)\033\\"
+	if got != want {
+		t.Errorf("XTVERSION response: got %q, want %q", got, want)
+	}
+}
+
+func TestRespondTerminalQueries_NoMatch(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	vt := &VT{Ptm: w}
+	// Normal output should not trigger any response.
+	vt.RespondTerminalQueries([]byte("hello world\033[31m"))
+
+	// Set read deadline to verify nothing was written.
+	r.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+	buf := make([]byte, 256)
+	_, err = r.Read(buf)
+	r.Close()
+	if err == nil {
+		t.Error("expected no response for normal output")
+	}
+}
+
+func TestResetScanState(t *testing.T) {
+	vt := &VT{}
+	vt.ScrollRegionUsed = true
+	vt.AltScrollEnabled = true
+	vt.SyncOutputActive = true
+	vt.scanState = scanCSI
+	vt.scanCSIPrivateNum = 42
+	vt.ResetScanState()
+	if vt.ScrollRegionUsed {
+		t.Fatal("expected ScrollRegionUsed=false after reset")
+	}
+	if vt.AltScrollEnabled {
+		t.Fatal("expected AltScrollEnabled=false after reset")
+	}
+	if vt.SyncOutputActive {
+		t.Fatal("expected SyncOutputActive=false after reset")
+	}
+	if vt.scanState != scanNormal {
+		t.Fatal("expected scanState=scanNormal after reset")
+	}
+	if vt.scanCSIPrivateNum != 0 {
+		t.Fatal("expected scanCSIPrivateNum=0 after reset")
+	}
+}

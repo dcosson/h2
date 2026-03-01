@@ -44,12 +44,16 @@ func doAttach(name string) error {
 	if err != nil {
 		return fmt.Errorf("get terminal size: %w", err)
 	}
+	colorHints := detectTerminalHints()
 
 	// Send attach handshake.
 	if err := message.SendRequest(conn, &message.Request{
-		Type: "attach",
-		Cols: cols,
-		Rows: rows,
+		Type:      "attach",
+		Cols:      cols,
+		Rows:      rows,
+		OscFg:     colorHints.OscFg,
+		OscBg:     colorHints.OscBg,
+		ColorFGBG: colorHints.ColorFGBG,
 	}); err != nil {
 		return fmt.Errorf("send attach request: %w", err)
 	}
@@ -79,7 +83,7 @@ func doAttach(name string) error {
 	go func() {
 		for range sigCh {
 			cols, rows, err := term.GetSize(fd)
-			if err != nil {
+			if err != nil || rows < 3 || cols < 1 {
 				continue
 			}
 			ctrl, _ := json.Marshal(message.ResizeControl{

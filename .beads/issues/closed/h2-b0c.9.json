@@ -1,0 +1,21 @@
+{
+  "id": "h2-b0c.9",
+  "title": "Update e2e tests and docs for harness rename",
+  "description": "Mechanical rename in e2e test YAML strings: agent_type: -\u003e agent_harness: with nested harness_type. Update documentation references from AgentType to Harness. Update any remaining 'claude-code' or 'claude' name references to 'claude_code'.",
+  "status": "closed",
+  "priority": 1,
+  "type": "task",
+  "parent": "h2-b0c",
+  "dependencies": [
+    {
+      "id": "h2-b0c",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-20T12:16:33.484378-08:00",
+  "updated_at": "2026-02-20T15:41:14.972465-08:00",
+  "closed_at": "2026-02-20T15:41:14.972464-08:00",
+  "close_reason": "Closed"
+}

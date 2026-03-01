@@ -146,14 +146,6 @@ func (d *Daemon) handleStop(conn net.Conn) {
 func (d *Daemon) handleHookEvent(conn net.Conn, req *message.Request) {
 	defer conn.Close()
 
-	hc := d.Session.Agent.HookCollector()
-	if hc == nil {
-		message.SendResponse(conn, &message.Response{
-			Error: "hook collector not active for this agent",
-		})
-		return
-	}
-
 	if req.EventName == "" {
 		message.SendResponse(conn, &message.Response{
 			Error: "event_name is required",
@@ -161,6 +153,6 @@ func (d *Daemon) handleHookEvent(conn net.Conn, req *message.Request) {
 		return
 	}
 
-	hc.ProcessEvent(req.EventName, req.Payload)
+	d.Session.HandleHookEvent(req.EventName, req.Payload)
 	message.SendResponse(conn, &message.Response{OK: true})
 }

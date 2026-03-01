@@ -1,0 +1,25 @@
+{
+  "id": "h2-p8o",
+  "title": "Refactor peek to read from event store",
+  "description": "Refactor h2 peek to read from shared/eventstore/ instead of parsing Claude's native session JSONL directly. Reconstruct conversation summary from stored AgentEvents: EventAgentMessage for text, EventToolStarted/Completed for tool calls, EventTurnCompleted for token counts, EventApprovalRequested for permission prompts. Works uniformly across agent types.",
+  "status": "closed",
+  "priority": 1,
+  "type": "task",
+  "parent": "h2-meo",
+  "dependencies": [
+    {
+      "id": "h2-meo",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-af0",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "created_at": "2026-02-19T16:03:49.37307-08:00",
+  "updated_at": "2026-02-19T17:52:28.187716-08:00",
+  "closed_at": "2026-02-19T17:52:28.187716-08:00",
+  "close_reason": "Closed"
+}

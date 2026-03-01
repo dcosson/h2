@@ -44,13 +44,20 @@ func newPodLaunchCmd() *cobra.Command {
 			}
 
 			// Phase 1: Load and render pod template.
+			rootDir, _ := config.RootDir()
 			podCtx := &tmpl.Context{
-				H2Dir: config.ConfigDir(),
-				Var:   cliVars,
+				H2Dir:     config.ConfigDir(),
+				H2RootDir: rootDir,
+				Var:       cliVars,
 			}
 			pt, err := config.LoadPodTemplateRendered(templateName, podCtx)
 			if err != nil {
 				return fmt.Errorf("load template %q: %w", templateName, err)
+			}
+
+			// Reject unknown CLI variables (typo protection).
+			if err := tmpl.ValidateNoUnknownVars(pt.Variables, cliVars); err != nil {
+				return fmt.Errorf("pod template %q: %w", templateName, err)
 			}
 
 			// Use --pod flag, or template's pod_name, or template file name.
@@ -114,6 +121,7 @@ func newPodLaunchCmd() *cobra.Command {
 					Index:     agent.Index,
 					Count:     agent.Count,
 					H2Dir:     config.ConfigDir(),
+					H2RootDir: rootDir,
 					Var:       mergedVars,
 				}
 
@@ -151,6 +159,7 @@ func newPodLaunchCmd() *cobra.Command {
 
 // podDryRun resolves all agent configs in a pod and prints them without launching.
 func podDryRun(templateName string, pod string, expanded []config.ExpandedAgent, cliVars map[string]string) error {
+	rootDir, _ := config.RootDir()
 	var resolved []*ResolvedAgentConfig
 
 	for _, agent := range expanded {
@@ -176,6 +185,7 @@ func podDryRun(templateName string, pod string, expanded []config.ExpandedAgent,
 			Index:     agent.Index,
 			Count:     agent.Count,
 			H2Dir:     config.ConfigDir(),
+			H2RootDir: rootDir,
 			Var:       mergedVars,
 		}
 
@@ -184,7 +194,7 @@ func podDryRun(templateName string, pod string, expanded []config.ExpandedAgent,
 			return fmt.Errorf("load role %q for agent %q: %w", roleName, agent.Name, err)
 		}
 
-		rc, err := resolveAgentConfig(agent.Name, role, pod, nil)
+		rc, err := resolveAgentConfig(agent.Name, role, pod, nil, nil)
 		if err != nil {
 			return fmt.Errorf("resolve agent %q: %w", agent.Name, err)
 		}

@@ -3,13 +3,15 @@ package session
 import (
 	"context"
 	"io"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/vito/midterm"
 
-	"h2/internal/session/agent"
-	"h2/internal/session/agent/collector"
+	"h2/internal/config"
+	"h2/internal/session/agent/monitor"
 	"h2/internal/session/client"
 	"h2/internal/session/message"
 	"h2/internal/session/virtualterminal"
@@ -17,13 +19,13 @@ import (
 
 func setFastIdle(t *testing.T) {
 	t.Helper()
-	old := collector.IdleThreshold
-	collector.IdleThreshold = 10 * time.Millisecond
-	t.Cleanup(func() { collector.IdleThreshold = old })
+	old := monitor.IdleThreshold
+	monitor.IdleThreshold = 10 * time.Millisecond
+	t.Cleanup(func() { monitor.IdleThreshold = old })
 }
 
 // waitForState polls StateChanged until the target state is reached.
-func waitForState(t *testing.T, s *Session, target agent.State, timeout time.Duration) {
+func waitForState(t *testing.T, s *Session, target monitor.State, timeout time.Duration) {
 	t.Helper()
 	deadline := time.After(timeout)
 	for {
@@ -39,14 +41,14 @@ func waitForState(t *testing.T, s *Session, target agent.State, timeout time.Dur
 	}
 }
 
-// startWatchState starts the Agent's watchState goroutine via StartCollectors.
-// For GenericType agents (command != "claude"), this starts watchState without
-// any collectors.
-func startWatchState(t *testing.T, s *Session) {
+// startAgent sets up the agent adapter/monitor pipeline for testing.
+// For GenericType agents, this starts the output collector bridge to the monitor.
+func startAgent(t *testing.T, s *Session) {
 	t.Helper()
-	if err := s.Agent.StartCollectors(); err != nil {
-		t.Fatalf("StartCollectors: %v", err)
+	if _, err := s.harness.PrepareForLaunch(s.Name, s.SessionID, false); err != nil {
+		t.Fatalf("PrepareForLaunch: %v", err)
 	}
+	s.startAgentPipeline(context.Background())
 }
 
 func TestStateTransitions_ActiveToIdle(t *testing.T) {
@@ -54,15 +56,15 @@ func TestStateTransitions_ActiveToIdle(t *testing.T) {
 	s := New("test", "true", nil)
 	defer s.Stop()
 
-	startWatchState(t, s)
+	startAgent(t, s)
 
 	// Signal output to ensure we start Active.
-	s.NoteOutput()
+	s.HandleOutput()
 	// Wait for state to become active via channel (not sleep, which risks overshooting the threshold).
-	waitForState(t, s, agent.StateActive, 2*time.Second)
+	waitForState(t, s, monitor.StateActive, 2*time.Second)
 
 	// Wait for idle threshold to pass.
-	waitForState(t, s, agent.StateIdle, 2*time.Second)
+	waitForState(t, s, monitor.StateIdle, 2*time.Second)
 }
 
 func TestStateTransitions_IdleToActive(t *testing.T) {
@@ -70,14 +72,14 @@ func TestStateTransitions_IdleToActive(t *testing.T) {
 	s := New("test", "true", nil)
 	defer s.Stop()
 
-	startWatchState(t, s)
+	startAgent(t, s)
 
 	// Let it go idle.
-	waitForState(t, s, agent.StateIdle, 2*time.Second)
+	waitForState(t, s, monitor.StateIdle, 2*time.Second)
 
 	// Signal output — should go back to Active.
-	s.NoteOutput()
-	waitForState(t, s, agent.StateActive, 2*time.Second)
+	s.HandleOutput()
+	waitForState(t, s, monitor.StateActive, 2*time.Second)
 }
 
 func TestStateTransitions_Exited(t *testing.T) {
@@ -85,18 +87,18 @@ func TestStateTransitions_Exited(t *testing.T) {
 	s := New("test", "true", nil)
 	defer s.Stop()
 
-	startWatchState(t, s)
+	startAgent(t, s)
 
-	s.NoteExit()
+	s.SignalExit()
 	time.Sleep(50 * time.Millisecond)
-	if got, _ := s.State(); got != agent.StateExited {
+	if got, _ := s.State(); got != monitor.StateExited {
 		t.Fatalf("expected StateExited, got %v", got)
 	}
 
 	// Output after exit should NOT change state back — exited is sticky.
-	s.NoteOutput()
+	s.HandleOutput()
 	time.Sleep(50 * time.Millisecond)
-	if got, _ := s.State(); got != agent.StateExited {
+	if got, _ := s.State(); got != monitor.StateExited {
 		t.Fatalf("expected StateExited to be sticky after output, got %v", got)
 	}
 }
@@ -106,16 +108,16 @@ func TestWaitForState_ReachesTarget(t *testing.T) {
 	s := New("test", "true", nil)
 	defer s.Stop()
 
-	startWatchState(t, s)
+	startAgent(t, s)
 
 	// Signal output to keep active, then wait for idle.
-	s.NoteOutput()
+	s.HandleOutput()
 
 	done := make(chan bool, 1)
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		done <- s.WaitForState(ctx, agent.StateIdle)
+		done <- s.WaitForState(ctx, monitor.StateIdle)
 	}()
 
 	// Should eventually reach idle.
@@ -130,7 +132,7 @@ func TestWaitForState_ContextCancelled(t *testing.T) {
 	s := New("test", "true", nil)
 	defer s.Stop()
 
-	startWatchState(t, s)
+	startAgent(t, s)
 
 	// Keep sending output so it never goes idle.
 	stopOutput := make(chan struct{})
@@ -140,7 +142,7 @@ func TestWaitForState_ContextCancelled(t *testing.T) {
 		for {
 			select {
 			case <-ticker.C:
-				s.NoteOutput()
+				s.HandleOutput()
 			case <-stopOutput:
 				return
 			}
@@ -151,7 +153,7 @@ func TestWaitForState_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	result := s.WaitForState(ctx, agent.StateIdle)
+	result := s.WaitForState(ctx, monitor.StateIdle)
 	if result {
 		t.Fatal("WaitForState should have returned false when context was cancelled")
 	}
@@ -164,7 +166,7 @@ func TestStateChanged_ClosesOnTransition(t *testing.T) {
 
 	ch := s.StateChanged()
 
-	startWatchState(t, s)
+	startAgent(t, s)
 
 	// Wait for any state change (Active→Idle after threshold).
 	select {
@@ -217,15 +219,14 @@ func TestSubmitInput_Interrupt(t *testing.T) {
 	}
 }
 
-func TestNoteOutput_NonBlocking(t *testing.T) {
+func TestHandleOutput_NonBlocking(t *testing.T) {
 	s := New("test", "true", nil)
 
-	// Fill the channel.
-	s.NoteOutput()
-	// Second call should not block.
+	// HandleOutput should not block even when called repeatedly.
 	done := make(chan struct{})
 	go func() {
-		s.NoteOutput()
+		s.HandleOutput()
+		s.HandleOutput()
 		close(done)
 	}()
 
@@ -233,20 +234,20 @@ func TestNoteOutput_NonBlocking(t *testing.T) {
 	case <-done:
 		// Good.
 	case <-time.After(1 * time.Second):
-		t.Fatal("NoteOutput blocked when channel was full")
+		t.Fatal("HandleOutput blocked")
 	}
 }
 
 func TestStateString(t *testing.T) {
 	tests := []struct {
-		state agent.State
+		state monitor.State
 		want  string
 	}{
-		{agent.StateInitialized, "initialized"},
-		{agent.StateActive, "active"},
-		{agent.StateIdle, "idle"},
-		{agent.StateExited, "exited"},
-		{agent.State(99), "unknown"},
+		{monitor.StateInitialized, "initialized"},
+		{monitor.StateActive, "active"},
+		{monitor.StateIdle, "idle"},
+		{monitor.StateExited, "exited"},
+		{monitor.State(99), "unknown"},
 	}
 	for _, tt := range tests {
 		if got := tt.state.String(); got != tt.want {
@@ -447,27 +448,28 @@ func containsSubstring(s, sub string) bool {
 	return false
 }
 
-func TestChildArgs_ClaudeWithSessionID(t *testing.T) {
+func TestChildArgs_WithSessionID(t *testing.T) {
 	s := New("test", "claude", []string{"--verbose"})
 	s.SessionID = "550e8400-e29b-41d4-a716-446655440000"
 
 	args := s.childArgs()
 
+	// --verbose (base args), then --session-id, <uuid> (from BuildCommandArgs)
 	if len(args) != 3 {
 		t.Fatalf("expected 3 args, got %d: %v", len(args), args)
 	}
-	if args[0] != "--session-id" {
-		t.Fatalf("expected first arg '--session-id', got %q", args[0])
+	if args[0] != "--verbose" {
+		t.Fatalf("expected first arg '--verbose', got %q", args[0])
 	}
-	if args[1] != "550e8400-e29b-41d4-a716-446655440000" {
-		t.Fatalf("expected session ID as second arg, got %q", args[1])
+	if args[1] != "--session-id" {
+		t.Fatalf("expected '--session-id' as second arg, got %q", args[1])
 	}
-	if args[2] != "--verbose" {
-		t.Fatalf("expected '--verbose' as third arg, got %q", args[2])
+	if args[2] != "550e8400-e29b-41d4-a716-446655440000" {
+		t.Fatalf("expected session ID as third arg, got %q", args[2])
 	}
 }
 
-func TestChildArgs_ClaudeNoSessionID(t *testing.T) {
+func TestChildArgs_NoSessionID(t *testing.T) {
 	s := New("test", "claude", []string{"--verbose"})
 
 	args := s.childArgs()
@@ -480,9 +482,8 @@ func TestChildArgs_ClaudeNoSessionID(t *testing.T) {
 	}
 }
 
-func TestChildArgs_NonClaude(t *testing.T) {
+func TestChildArgs_GenericNoPrepend(t *testing.T) {
 	s := New("test", "bash", []string{"-c", "echo hi"})
-	s.SessionID = "550e8400-e29b-41d4-a716-446655440000"
 
 	args := s.childArgs()
 
@@ -513,15 +514,15 @@ func TestChildArgs_WithInstructions(t *testing.T) {
 
 	args := s.childArgs()
 
-	// Should have: --session-id, <uuid>, --verbose, --append-system-prompt, <instructions>
+	// Should have: --verbose, --session-id, <uuid>, --append-system-prompt, <instructions>
 	if len(args) != 5 {
 		t.Fatalf("expected 5 args, got %d: %v", len(args), args)
 	}
-	if args[0] != "--session-id" {
-		t.Fatalf("expected first arg '--session-id', got %q", args[0])
+	if args[0] != "--verbose" {
+		t.Fatalf("expected first arg '--verbose', got %q", args[0])
 	}
-	if args[2] != "--verbose" {
-		t.Fatalf("expected third arg '--verbose', got %q", args[2])
+	if args[1] != "--session-id" {
+		t.Fatalf("expected second arg '--session-id', got %q", args[1])
 	}
 	if args[3] != "--append-system-prompt" {
 		t.Fatalf("expected fourth arg '--append-system-prompt', got %q", args[3])
@@ -538,7 +539,7 @@ func TestChildArgs_EmptyInstructionsNoFlag(t *testing.T) {
 
 	args := s.childArgs()
 
-	// Should only have: --session-id, <uuid>, --verbose
+	// Should only have: --verbose, --session-id, <uuid>
 	if len(args) != 3 {
 		t.Fatalf("expected 3 args, got %d: %v", len(args), args)
 	}
@@ -573,18 +574,12 @@ func TestChildArgs_InstructionsNonClaude(t *testing.T) {
 
 	args := s.childArgs()
 
-	// Non-claude has no prepend args, but should still get --append-system-prompt
-	if len(args) != 4 {
-		t.Fatalf("expected 4 args, got %d: %v", len(args), args)
+	// Generic agents don't support role flags — only base args.
+	if len(args) != 2 {
+		t.Fatalf("expected 2 args (generic ignores role config), got %d: %v", len(args), args)
 	}
 	if args[0] != "-c" || args[1] != "echo hi" {
-		t.Fatalf("expected original args first, got %v", args[:2])
-	}
-	if args[2] != "--append-system-prompt" {
-		t.Fatalf("expected '--append-system-prompt', got %q", args[2])
-	}
-	if args[3] != "Some instructions" {
-		t.Fatalf("expected 'Some instructions', got %q", args[3])
+		t.Fatalf("expected original args, got %v", args)
 	}
 }
 
@@ -635,6 +630,9 @@ func TestChildArgs_SystemPrompt(t *testing.T) {
 	if len(args) != 4 {
 		t.Fatalf("expected 4 args, got %d: %v", len(args), args)
 	}
+	if args[0] != "--session-id" || args[1] != "test-uuid" {
+		t.Fatalf("expected --session-id first, got %v", args[:2])
+	}
 	if args[2] != "--system-prompt" || args[3] != "You are a custom agent." {
 		t.Fatalf("expected --system-prompt flag, got %v", args[2:])
 	}
@@ -651,6 +649,9 @@ func TestChildArgs_SystemPromptAndInstructions(t *testing.T) {
 	// --session-id, <uuid>, --system-prompt, <prompt>, --append-system-prompt, <instructions>
 	if len(args) != 6 {
 		t.Fatalf("expected 6 args, got %d: %v", len(args), args)
+	}
+	if args[0] != "--session-id" || args[1] != "test-uuid" {
+		t.Fatalf("expected --session-id first, got %v", args[:2])
 	}
 	if args[2] != "--system-prompt" || args[3] != "Custom system prompt" {
 		t.Fatalf("expected --system-prompt, got %v", args[2:4])
@@ -675,10 +676,10 @@ func TestChildArgs_Model(t *testing.T) {
 	}
 }
 
-func TestChildArgs_PermissionMode(t *testing.T) {
+func TestChildArgs_ClaudePermissionMode(t *testing.T) {
 	s := New("test", "claude", nil)
 	s.SessionID = "test-uuid"
-	s.PermissionMode = "bypassPermissions"
+	s.ClaudePermissionMode = "bypassPermissions"
 
 	args := s.childArgs()
 
@@ -690,77 +691,26 @@ func TestChildArgs_PermissionMode(t *testing.T) {
 	}
 }
 
-func TestChildArgs_AllowedTools(t *testing.T) {
-	s := New("test", "claude", nil)
-	s.SessionID = "test-uuid"
-	s.AllowedTools = []string{"Bash", "Read", "Write"}
-
-	args := s.childArgs()
-
-	if len(args) != 4 {
-		t.Fatalf("expected 4 args, got %d: %v", len(args), args)
-	}
-	if args[2] != "--allowedTools" || args[3] != "Bash,Read,Write" {
-		t.Fatalf("expected --allowedTools comma-joined, got %v", args[2:])
-	}
-}
-
-func TestChildArgs_DisallowedTools(t *testing.T) {
-	s := New("test", "claude", nil)
-	s.SessionID = "test-uuid"
-	s.DisallowedTools = []string{"Bash", "Edit"}
-
-	args := s.childArgs()
-
-	if len(args) != 4 {
-		t.Fatalf("expected 4 args, got %d: %v", len(args), args)
-	}
-	if args[2] != "--disallowedTools" || args[3] != "Bash,Edit" {
-		t.Fatalf("expected --disallowedTools comma-joined, got %v", args[2:])
-	}
-}
-
-func TestChildArgs_EmptyToolListsOmitted(t *testing.T) {
-	s := New("test", "claude", nil)
-	s.SessionID = "test-uuid"
-	s.AllowedTools = []string{}
-	s.DisallowedTools = nil
-
-	args := s.childArgs()
-
-	// Should only have --session-id, <uuid>
-	if len(args) != 2 {
-		t.Fatalf("expected 2 args, got %d: %v", len(args), args)
-	}
-	for _, arg := range args {
-		if arg == "--allowedTools" || arg == "--disallowedTools" {
-			t.Fatalf("tool flags should not be present for empty lists, found %q", arg)
-		}
-	}
-}
-
 func TestChildArgs_AllFieldsCombined(t *testing.T) {
 	s := New("test", "claude", []string{"--verbose"})
 	s.SessionID = "test-uuid"
 	s.SystemPrompt = "Custom prompt"
 	s.Instructions = "Extra instructions"
 	s.Model = "claude-opus-4-6"
-	s.PermissionMode = "plan"
-	s.AllowedTools = []string{"Bash", "Read"}
-	s.DisallowedTools = []string{"Write"}
+	s.ClaudePermissionMode = "plan"
 
 	args := s.childArgs()
 
-	// --session-id, <uuid>, --verbose, --system-prompt, <p>, --append-system-prompt, <i>,
-	// --model, <m>, --permission-mode, <pm>, --allowedTools, <at>, --disallowedTools, <dt>
+	// --verbose (base args), then all role args from BuildCommandArgs:
+	// --session-id, <uuid>, --system-prompt, <p>, --append-system-prompt, <i>,
+	// --model, <m>, --permission-mode, <pm>
 	expected := []string{
-		"--session-id", "test-uuid", "--verbose",
+		"--verbose",
+		"--session-id", "test-uuid",
 		"--system-prompt", "Custom prompt",
 		"--append-system-prompt", "Extra instructions",
 		"--model", "claude-opus-4-6",
 		"--permission-mode", "plan",
-		"--allowedTools", "Bash,Read",
-		"--disallowedTools", "Write",
 	}
 	if len(args) != len(expected) {
 		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
@@ -769,5 +719,172 @@ func TestChildArgs_AllFieldsCombined(t *testing.T) {
 		if args[i] != want {
 			t.Fatalf("args[%d] = %q, want %q\nfull args: %v", i, args[i], want, args)
 		}
+	}
+}
+
+func TestSetupAgent_LogDirUsesH2Dir(t *testing.T) {
+	// Create a custom h2 dir (not ~/.h2).
+	customH2Dir := filepath.Join(t.TempDir(), "custom-h2")
+	if err := os.MkdirAll(customH2Dir, 0o755); err != nil {
+		t.Fatalf("create custom h2 dir: %v", err)
+	}
+	if err := config.WriteMarker(customH2Dir); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	// Point H2_DIR at the custom dir and reset the resolve cache.
+	t.Setenv("H2_DIR", customH2Dir)
+	config.ResetResolveCache()
+	t.Cleanup(config.ResetResolveCache)
+
+	s := New("test-agent", "true", nil)
+	defer s.Stop()
+
+	if err := s.setupAgent(); err != nil {
+		t.Fatalf("setupAgent: %v", err)
+	}
+
+	// Activity log should have been created under the custom h2 dir.
+	logPath := filepath.Join(customH2Dir, "logs", "session-activity.jsonl")
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		t.Fatalf("activity log not created at expected path %s", logPath)
+	}
+}
+
+func TestResolveFullHarness_RoleWithRandomName(t *testing.T) {
+	// Create a custom h2 dir with a role that uses {{ randomName }}.
+	h2Dir := filepath.Join(t.TempDir(), "h2")
+	if err := os.MkdirAll(h2Dir, 0o755); err != nil {
+		t.Fatalf("create h2 dir: %v", err)
+	}
+	if err := config.WriteMarker(h2Dir); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	t.Setenv("H2_DIR", h2Dir)
+	config.ResetResolveCache()
+	t.Cleanup(config.ResetResolveCache)
+
+	// Create a role template that uses {{ randomName }} (like the default role).
+	rolesDir := filepath.Join(h2Dir, "roles")
+	if err := os.MkdirAll(rolesDir, 0o755); err != nil {
+		t.Fatalf("create roles dir: %v", err)
+	}
+	roleTmpl := `role_name: "{{ .RoleName }}"
+agent_name: "{{ randomName }}"
+agent_harness: claude_code
+`
+	if err := os.WriteFile(filepath.Join(rolesDir, "testrole.yaml.tmpl"), []byte(roleTmpl), 0o644); err != nil {
+		t.Fatalf("write role template: %v", err)
+	}
+
+	// resolveFullHarness should successfully load the role despite {{ randomName }}.
+	h, err := resolveFullHarness("claude", "testrole", nil)
+	if err != nil {
+		t.Fatalf("resolveFullHarness: %v", err)
+	}
+
+	// The harness should use the default account profile ("default"), not the role name.
+	envVars := h.BuildCommandEnvVars(h2Dir)
+	want := filepath.Join(h2Dir, "claude-config", "default")
+	if got := envVars["CLAUDE_CONFIG_DIR"]; got != want {
+		t.Errorf("CLAUDE_CONFIG_DIR = %q, want %q", got, want)
+	}
+}
+
+func TestResolveFullHarness_MissingRoleReturnsError(t *testing.T) {
+	// Create a custom h2 dir without any role files.
+	h2Dir := filepath.Join(t.TempDir(), "h2")
+	if err := os.MkdirAll(h2Dir, 0o755); err != nil {
+		t.Fatalf("create h2 dir: %v", err)
+	}
+	if err := config.WriteMarker(h2Dir); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	t.Setenv("H2_DIR", h2Dir)
+	config.ResetResolveCache()
+	t.Cleanup(config.ResetResolveCache)
+
+	// A specified role that doesn't exist should return an error, not silently fall back.
+	_, err := resolveFullHarness("claude", "nonexistent-role", nil)
+	if err == nil {
+		t.Fatal("expected error for nonexistent role, got nil")
+	}
+}
+
+func TestResolveFullHarness_NoRoleUsesDefaultProfile(t *testing.T) {
+	// When no role is specified, the command-only fallback should use "default" profile.
+	h2Dir := filepath.Join(t.TempDir(), "h2")
+	if err := os.MkdirAll(h2Dir, 0o755); err != nil {
+		t.Fatalf("create h2 dir: %v", err)
+	}
+	if err := config.WriteMarker(h2Dir); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	t.Setenv("H2_DIR", h2Dir)
+	config.ResetResolveCache()
+	t.Cleanup(config.ResetResolveCache)
+
+	h, err := resolveFullHarness("claude", "", nil)
+	if err != nil {
+		t.Fatalf("resolveFullHarness: %v", err)
+	}
+
+	envVars := h.BuildCommandEnvVars(h2Dir)
+	want := filepath.Join(h2Dir, "claude-config", "default")
+	if got := envVars["CLAUDE_CONFIG_DIR"]; got != want {
+		t.Errorf("CLAUDE_CONFIG_DIR = %q, want %q", got, want)
+	}
+}
+
+func TestResolveFullHarness_InheritedRoleUsesDefaultProfile(t *testing.T) {
+	// Create a custom h2 dir with parent and child roles.
+	h2Dir := filepath.Join(t.TempDir(), "h2")
+	if err := os.MkdirAll(h2Dir, 0o755); err != nil {
+		t.Fatalf("create h2 dir: %v", err)
+	}
+	if err := config.WriteMarker(h2Dir); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	t.Setenv("H2_DIR", h2Dir)
+	config.ResetResolveCache()
+	t.Cleanup(config.ResetResolveCache)
+
+	rolesDir := filepath.Join(h2Dir, "roles")
+	if err := os.MkdirAll(rolesDir, 0o755); err != nil {
+		t.Fatalf("create roles dir: %v", err)
+	}
+
+	// Parent role uses {{ randomName }}.
+	parentTmpl := `role_name: "{{ .RoleName }}"
+agent_name: "{{ randomName }}"
+agent_harness: claude_code
+instructions_body: "default instructions"
+`
+	if err := os.WriteFile(filepath.Join(rolesDir, "default.yaml.tmpl"), []byte(parentTmpl), 0o644); err != nil {
+		t.Fatalf("write parent role: %v", err)
+	}
+
+	// Child role inherits from default.
+	childTmpl := `inherits: default
+instructions_body: "concierge instructions"
+`
+	if err := os.WriteFile(filepath.Join(rolesDir, "concierge.yaml.tmpl"), []byte(childTmpl), 0o644); err != nil {
+		t.Fatalf("write child role: %v", err)
+	}
+
+	// resolveFullHarness with "concierge" should use default profile.
+	h, err := resolveFullHarness("claude", "concierge", nil)
+	if err != nil {
+		t.Fatalf("resolveFullHarness: %v", err)
+	}
+
+	envVars := h.BuildCommandEnvVars(h2Dir)
+	want := filepath.Join(h2Dir, "claude-config", "default")
+	if got := envVars["CLAUDE_CONFIG_DIR"]; got != want {
+		t.Errorf("CLAUDE_CONFIG_DIR = %q, want %q", got, want)
 	}
 }

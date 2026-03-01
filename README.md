@@ -19,7 +19,7 @@ Launch, monitor, and manage AI coding agents.
 ```bash
 h2 run                          # start an agent with the default role
 h2 run --role concierge         # start with a specific role
-h2 run --name coder-1 --detach  # start in background
+h2 run coder-1 --detach  # start in background
 h2 list                         # see all agents and their current state
 h2 peek coder-1                 # check what an agent is working on
 h2 attach coder-1               # take over an agent's terminal

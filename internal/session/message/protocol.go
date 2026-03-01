@@ -19,8 +19,11 @@ type Request struct {
 	Raw      bool   `json:"raw,omitempty"` // send body directly to PTY without prefix
 
 	// attach fields
-	Cols int `json:"cols,omitempty"`
-	Rows int `json:"rows,omitempty"`
+	Cols      int    `json:"cols,omitempty"`
+	Rows      int    `json:"rows,omitempty"`
+	OscFg     string `json:"osc_fg,omitempty"`    // X11 rgb:rrrr/gggg/bbbb
+	OscBg     string `json:"osc_bg,omitempty"`    // X11 rgb:rrrr/gggg/bbbb
+	ColorFGBG string `json:"colorfgbg,omitempty"` // terminal COLORFGBG hint
 
 	// show fields
 	MessageID string `json:"message_id,omitempty"`
@@ -32,12 +35,13 @@ type Request struct {
 
 // Response is the JSON response sent back over the Unix socket.
 type Response struct {
-	OK        bool         `json:"ok"`
-	Error     string       `json:"error,omitempty"`
-	MessageID string       `json:"message_id,omitempty"`
-	Message   *MessageInfo `json:"message,omitempty"`
-	Agent     *AgentInfo   `json:"agent,omitempty"`
-	Bridge    *BridgeInfo  `json:"bridge,omitempty"`
+	OK           bool         `json:"ok"`
+	Error        string       `json:"error,omitempty"`
+	MessageID    string       `json:"message_id,omitempty"`
+	OldConcierge string       `json:"old_concierge,omitempty"`
+	Message      *MessageInfo `json:"message,omitempty"`
+	Agent        *AgentInfo   `json:"agent,omitempty"`
+	Bridge       *BridgeInfo  `json:"bridge,omitempty"`
 }
 
 // BridgeInfo is the public representation of bridge status.
@@ -63,24 +67,24 @@ type MessageInfo struct {
 
 // AgentInfo is the public representation of agent status.
 type AgentInfo struct {
-	Name          string `json:"name"`
-	Command       string `json:"command"`
-	SessionID     string `json:"session_id,omitempty"`
-	RoleName      string `json:"role,omitempty"`
-	Pod           string `json:"pod,omitempty"`
-	Uptime        string `json:"uptime"`
+	Name             string `json:"name"`
+	Command          string `json:"command"`
+	SessionID        string `json:"session_id,omitempty"`
+	RoleName         string `json:"role,omitempty"`
+	Pod              string `json:"pod,omitempty"`
+	Uptime           string `json:"uptime"`
 	State            string `json:"state"`
 	SubState         string `json:"sub_state,omitempty"`
 	StateDisplayText string `json:"state_display_text"`
 	StateDuration    string `json:"state_duration"`
-	QueuedCount   int    `json:"queued_count"`
+	QueuedCount      int    `json:"queued_count"`
 
 	// Per-model cost and token breakdowns from OTEL metrics
-	ModelStats    []ModelStat `json:"model_stats,omitempty"`
-	InputTokens   int64       `json:"input_tokens,omitempty"`
-	OutputTokens  int64       `json:"output_tokens,omitempty"`
-	TotalTokens   int64       `json:"total_tokens,omitempty"`
-	TotalCostUSD  float64     `json:"total_cost_usd,omitempty"`
+	ModelStats   []ModelStat `json:"model_stats,omitempty"`
+	InputTokens  int64       `json:"input_tokens,omitempty"`
+	OutputTokens int64       `json:"output_tokens,omitempty"`
+	TotalTokens  int64       `json:"total_tokens,omitempty"`
+	TotalCostUSD float64     `json:"total_cost_usd,omitempty"`
 
 	// Cumulative session LOC from OTEL metrics
 	LinesAdded   int64 `json:"lines_added,omitempty"`

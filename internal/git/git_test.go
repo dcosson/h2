@@ -87,10 +87,10 @@ func TestCreateWorktree_DetachedHead(t *testing.T) {
 	repoDir := setupWorktreeTest(t)
 
 	cfg := &config.WorktreeConfig{
-		ProjectDir:      repoDir,
-		Name:            "detached-agent",
-		BranchFrom:      "main",
-		UseDetachedHead: true,
+		ProjectDir: repoDir,
+		Name:       "detached-agent",
+		BranchFrom: "main",
+		Branch:     "<detached_head>",
 	}
 
 	path, err := CreateWorktree(cfg)
@@ -213,7 +213,7 @@ func TestCreateWorktree_CustomBranchName(t *testing.T) {
 		ProjectDir: repoDir,
 		Name:       "my-worktree",
 		BranchFrom: "main",
-		BranchName: "feature/custom-branch",
+		Branch:     "feature/custom-branch",
 	}
 
 	path, err := CreateWorktree(cfg)
@@ -257,19 +257,19 @@ func TestWorktreeConfig_GetBranchFrom(t *testing.T) {
 	}
 }
 
-func TestWorktreeConfig_GetBranchName(t *testing.T) {
+func TestWorktreeConfig_GetBranch(t *testing.T) {
 	tests := []struct {
 		name string
 		cfg  config.WorktreeConfig
 		want string
 	}{
 		{"defaults to Name", config.WorktreeConfig{Name: "my-agent"}, "my-agent"},
-		{"custom branch name", config.WorktreeConfig{Name: "my-agent", BranchName: "feature/xyz"}, "feature/xyz"},
+		{"custom branch name", config.WorktreeConfig{Name: "my-agent", Branch: "feature/xyz"}, "feature/xyz"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.cfg.GetBranchName(); got != tt.want {
-				t.Errorf("GetBranchName() = %q, want %q", got, tt.want)
+			if got := tt.cfg.GetBranch(); got != tt.want {
+				t.Errorf("GetBranch() = %q, want %q", got, tt.want)
 			}
 		})
 	}
