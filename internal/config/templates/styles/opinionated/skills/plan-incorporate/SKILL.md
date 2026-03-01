@@ -115,6 +115,25 @@ First, rename the existing `## Review Disposition` header to `## Round 1 Review 
 
 Disposition values: `Incorporated` or `Not Incorporated`. Notes column must have rationale for every Not Incorporated finding.
 
+## Phase 4.5: Validate Disposition Tables
+
+After updating the source docs, validate that all disposition tables (including any newly added ones) are parseable:
+
+```bash
+python3 "$(dirname "$0")/validate-dispositions.py" docs/plans/$0.md
+```
+
+Also validate the test harness if it was updated:
+
+```bash
+python3 "$(dirname "$0")/validate-dispositions.py" docs/plans/$0-test-harness.md
+```
+
+If validation fails, fix the table format issues reported by the script before proceeding to commit. Common issues:
+- Column count mismatch (missing or extra `|` delimiters)
+- Unrecognized severity values (use P0/P1/P2/P3 or N/A for no-finding rows)
+- Unrecognized disposition values (use Incorporated, Not Incorporated, Deferred, or N/A)
+
 ## Phase 5: Clean Up & Commit
 
 1. Delete all current-round review files: `git rm docs/plans/$0*review*r2*.md` (adjust pattern for the round)
