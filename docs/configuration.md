@@ -94,7 +94,7 @@ A **role** is a named YAML file in `~/.h2/roles/` that defines how to launch an 
 | **Identity** | | | |
 | `role_name` | string | *(required)* | Role identifier (referenced by `h2 run --role`) |
 | `inherits` | string | | Optional parent role name (global roles only; static text, not templated) |
-| `agent_name` | string | *(auto-generated)* | Agent name when launched; empty = random name. Supports templates and name functions (see below). Overridden by `h2 run --name`. |
+| `agent_name` | string | *(auto-generated)* | Agent name when launched; empty = random name. Supports templates and name functions (see below). Overridden by `h2 run <name>`. |
 | `description` | string | | Human-readable description |
 | **Agent harness** | | | |
 | `agent_harness` | string | `claude_code` | `claude_code` \| `codex` \| `generic` |

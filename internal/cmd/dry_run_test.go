@@ -837,7 +837,7 @@ instructions: |
 
 	output := captureStdout(func() {
 		cmd := newRunCmd()
-		cmd.SetArgs([]string{"--dry-run", "--role", "configurable", "--name", "test-agent", "--var", "project=h2", "--var", "env=staging"})
+		cmd.SetArgs([]string{"test-agent", "--dry-run", "--role", "configurable", "--var", "project=h2", "--var", "env=staging"})
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -894,7 +894,7 @@ func TestRunDryRun_WithOverride(t *testing.T) {
 
 	output := captureStdout(func() {
 		cmd := newRunCmd()
-		cmd.SetArgs([]string{"--dry-run", "--role", "overridable", "--name", "test-agent", "--override", "agent_model=opus"})
+		cmd.SetArgs([]string{"test-agent", "--dry-run", "--role", "overridable", "--override", "agent_model=opus"})
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -920,7 +920,7 @@ func TestRunDryRun_WithPodEnvVars(t *testing.T) {
 
 	output := captureStdout(func() {
 		cmd := newRunCmd()
-		cmd.SetArgs([]string{"--dry-run", "--role", "default", "--name", "test-agent", "--pod", "my-pod"})
+		cmd.SetArgs([]string{"test-agent", "--dry-run", "--role", "default", "--pod", "my-pod"})
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -939,7 +939,7 @@ func TestRunDryRun_CodexRoleShowsCodexHome(t *testing.T) {
 
 	output := captureStdout(func() {
 		cmd := newRunCmd()
-		cmd.SetArgs([]string{"--dry-run", "--role", "codex-default", "--name", "codex-agent"})
+		cmd.SetArgs([]string{"codex-agent", "--dry-run", "--role", "codex-default"})
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -959,7 +959,7 @@ func TestRunDryRun_ClaudeRoleShowsLaunchEnvVars(t *testing.T) {
 
 	output := captureStdout(func() {
 		cmd := newRunCmd()
-		cmd.SetArgs([]string{"--dry-run", "--role", "claude-default", "--name", "claude-agent"})
+		cmd.SetArgs([]string{"claude-agent", "--dry-run", "--role", "claude-default"})
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -988,7 +988,7 @@ func TestRunDryRun_NoSideEffects(t *testing.T) {
 
 	_ = captureStdout(func() {
 		cmd := newRunCmd()
-		cmd.SetArgs([]string{"--dry-run", "--role", "default", "--name", "no-side-effects"})
+		cmd.SetArgs([]string{"no-side-effects", "--dry-run", "--role", "default"})
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}

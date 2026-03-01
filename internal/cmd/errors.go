@@ -12,7 +12,7 @@ import (
 func agentConnError(name string, err error) error {
 	agents, listErr := socketdir.ListByType(socketdir.TypeAgent)
 	if listErr != nil || len(agents) == 0 {
-		return fmt.Errorf("cannot connect to agent %q (no running agents)\n\nStart one with: h2 run --name <name> <command>", name)
+		return fmt.Errorf("cannot connect to agent %q (no running agents)\n\nStart one with: h2 run <name>", name)
 	}
 	names := make([]string, len(agents))
 	for i, a := range agents {

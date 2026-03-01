@@ -358,7 +358,7 @@ ALLOW, DENY, or ASK_USER.
 ## Launch Flow
 
 ```
-h2 run --role architect --name arch-1
+h2 run arch-1 --role architect
   → load ~/.h2/roles/architect.yaml
   → validate role (required fields, permission syntax)
   → create ~/.h2/sessions/arch-1/
@@ -380,17 +380,17 @@ h2 run --role architect --name arch-1
 ### `--role` flag on `h2 run`
 
 ```
-h2 run --role <role-name> [--name <agent-name>] [--detach] [-- extra-args...]
+h2 run [name] --role <role-name> [--detach]
 ```
 
 - `--role` loads the role file and sets up the session directory
-- `--name` defaults to the role name if omitted (e.g., `--role architect` → name "architect")
-- The `-- command` is optional when using `--role` — defaults to `claude`
-- Extra args after `--` are appended to the claude command
+- The positional `name` is optional; if omitted, role naming defaults apply.
+- When using `--role`, command selection comes from the role (defaults to Claude Code if unspecified in role config).
+- Extra command args are not accepted in role mode.
 
 ### Without `--role`
 
-The existing `h2 run --name foo -- claude` flow continues to work as-is.
+The existing `h2 run --command claude` flow continues to work as-is.
 No role, no session directory, no generated config. This is the escape hatch
 for manual/custom setups.
 

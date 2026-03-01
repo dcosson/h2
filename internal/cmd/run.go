@@ -26,14 +26,17 @@ func newRunCmd() *cobra.Command {
 	var varFlags []string
 
 	cmd := &cobra.Command{
-		Use:   "run [flags]",
+		Use:   "run [name] [flags]",
 		Short: "Start a new agent",
 		Long: `Start a new agent, optionally configured from a role.
 
 By default, uses the "default" role from ~/.h2/roles/default.yaml.
 
   h2 run                        Use the default role
+  h2 run coder-1                Use explicit agent name
   h2 run --role concierge       Use a specific role
+  h2 run coder-1 --role concierge
+                                Use a specific role with explicit agent name
   h2 run --agent-type claude    Run an agent type without a role
   h2 run --command "vim"        Run an explicit command`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -70,13 +73,25 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 				return fmt.Errorf("--role, --agent-type, and --command are mutually exclusive")
 			}
 
-			if cmd.Flags().Changed("agent-type") {
-				// Run agent type without a role.
-				cmdCommand = agentType
-			} else if cmd.Flags().Changed("command") {
+			// Positional name is supported for role/agent-type modes.
+			var positionalName string
+			if cmd.Flags().Changed("command") {
 				// Run explicit command without a role.
 				cmdCommand = command
 				cmdArgs = args
+			} else {
+				if len(args) > 1 {
+					return fmt.Errorf("accepts at most one positional name argument, got %d", len(args))
+				}
+				if len(args) == 1 {
+					positionalName = args[0]
+				}
+			}
+			name = positionalName
+
+			if cmd.Flags().Changed("agent-type") {
+				// Run agent type without a role.
+				cmdCommand = agentType
 			} else {
 				// Use a role (specified or default).
 				if roleName == "" {
@@ -146,7 +161,7 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 					}
 				}
 				if dryRun {
-					rc, err := resolveAgentConfig(name, role, pod, overrides, args)
+					rc, err := resolveAgentConfig(name, role, pod, overrides, nil)
 					if err != nil {
 						return err
 					}
@@ -202,7 +217,6 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 		},
 	}
 
-	cmd.Flags().StringVar(&name, "name", "", "Agent name (auto-generated if omitted)")
 	cmd.Flags().BoolVar(&detach, "detach", false, "Don't auto-attach after starting")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show resolved config without launching")
 	cmd.Flags().StringVar(&roleName, "role", "", "Role to use (defaults to 'default')")

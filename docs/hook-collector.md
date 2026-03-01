@@ -21,7 +21,7 @@ Agent (Session)
 
 ### The problem with "just a command"
 
-Today, `h2 run --name concierge -- claude` treats `claude` as an opaque executable.
+Today, `h2 run --command claude` treats `claude` as an opaque executable.
 But h2 already has significant domain knowledge about Claude Code: it injects
 `--session-id`, sets OTEL env vars, parses OTEL events with a Claude-specific
 parser, and (with this proposal) would handle Claude Code hooks. This knowledge
@@ -164,7 +164,7 @@ This replaces the current hardcoded checks:
 ### How it flows through the system
 
 ```
-h2 run --name concierge -- claude --verbose
+h2 run --command claude -- --verbose
   → ResolveAgentType("claude") → ClaudeCodeType
   → generate sessionID UUID
   → ForkDaemon(name, sessionID, agentType, userArgs=["--verbose"])
