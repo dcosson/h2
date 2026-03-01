@@ -97,7 +97,6 @@ func newProfileShowCmd() *cobra.Command {
 
 func newProfileCreateCmd() *cobra.Command {
 	var style string
-	var copyFrom string
 	var symlinkSharedFrom string
 	var harnessType string
 
@@ -112,7 +111,6 @@ to create only one harness profile:
   --agent-harness codex
   --agent-harness all
 
-Use --copy to clone from an existing profile instead of generating from templates.
 Use --symlink-shared to link shared profile content from an existing profile.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -137,41 +135,30 @@ Use --symlink-shared to link shared profile content from an existing profile.`,
 					harnessType, profileHarnessClaude, profileHarnessCodex, profileHarnessAll)
 			}
 
-			copyFrom = strings.TrimSpace(copyFrom)
 			symlinkSharedFrom = strings.TrimSpace(symlinkSharedFrom)
-			if copyFrom != "" && symlinkSharedFrom != "" {
-				return fmt.Errorf("--copy and --symlink-shared are mutually exclusive")
-			}
-			if copyFrom == name {
-				return fmt.Errorf("--copy source must be different from target profile name")
-			}
 			if symlinkSharedFrom == name {
 				return fmt.Errorf("--symlink-shared source must be different from target profile name")
-			}
-			if copyFrom != "" && strings.ContainsRune(copyFrom, os.PathSeparator) {
-				return fmt.Errorf("--copy source must not contain path separators: %q", copyFrom)
 			}
 			if symlinkSharedFrom != "" && strings.ContainsRune(symlinkSharedFrom, os.PathSeparator) {
 				return fmt.Errorf("--symlink-shared source must not contain path separators: %q", symlinkSharedFrom)
 			}
 
 			h2Dir := config.ConfigDir()
-			return createProfile(h2Dir, name, resolvedStyle, copyFrom, symlinkSharedFrom, harnessType, cmd.OutOrStdout())
+			return createProfile(h2Dir, name, resolvedStyle, symlinkSharedFrom, harnessType, cmd.OutOrStdout())
 		},
 	}
 
 	cmd.Flags().StringVar(&style, "style", initStyleOpinionated, "Profile style: minimal, opinionated")
-	cmd.Flags().StringVar(&copyFrom, "copy", "", "Copy from an existing profile name")
 	cmd.Flags().StringVar(&symlinkSharedFrom, "symlink-shared", "", "Symlink shared profile content from an existing profile name")
 	cmd.Flags().StringVar(&harnessType, "agent-harness", profileHarnessAll, "Harness profile to create: claude_code, codex, all")
 	return cmd
 }
 
-func createProfile(h2Dir, name, style, copyFrom, symlinkSharedFrom, harnessType string, out io.Writer) error {
-	return createOrUpdateProfile(h2Dir, name, style, copyFrom, symlinkSharedFrom, harnessType, true, true, out)
+func createProfile(h2Dir, name, style, symlinkSharedFrom, harnessType string, out io.Writer) error {
+	return createOrUpdateProfile(h2Dir, name, style, symlinkSharedFrom, harnessType, true, true, out)
 }
 
-func createOrUpdateProfile(h2Dir, name, style, copyFrom, symlinkSharedFrom, harnessType string, requireNew, announce bool, out io.Writer) error {
+func createOrUpdateProfile(h2Dir, name, style, symlinkSharedFrom, harnessType string, requireNew, announce bool, out io.Writer) error {
 	sharedDir := filepath.Join(h2Dir, "account-profiles-shared", name)
 	claudeDir := filepath.Join(h2Dir, "claude-config", name)
 	codexDir := filepath.Join(h2Dir, "codex-config", name)
@@ -205,9 +192,6 @@ func createOrUpdateProfile(h2Dir, name, style, copyFrom, symlinkSharedFrom, harn
 		}
 	}
 
-	if copyFrom != "" {
-		return copyProfile(h2Dir, name, copyFrom, harnessType, out)
-	}
 	if symlinkSharedFrom != "" {
 		return createProfileWithSharedSymlink(h2Dir, name, symlinkSharedFrom, harnessType, out)
 	}
@@ -247,67 +231,6 @@ func scaffoldProfile(h2Dir, name, style, harnessType string, out io.Writer, anno
 	if announce {
 		fmt.Fprintf(out, "Created profile %q\n", name)
 	}
-	return nil
-}
-
-func copyProfile(h2Dir, name, copyFrom, harnessType string, out io.Writer) error {
-	srcShared := filepath.Join(h2Dir, "account-profiles-shared", copyFrom)
-	dstShared := filepath.Join(h2Dir, "account-profiles-shared", name)
-
-	if _, err := os.Stat(srcShared); err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("copy source profile %q does not exist: missing %s", copyFrom, srcShared)
-		}
-		return fmt.Errorf("stat copy source profile %q: %w", copyFrom, err)
-	}
-	if err := copyPathFiltered(srcShared, dstShared, nil); err != nil {
-		return fmt.Errorf("copy shared profile: %w", err)
-	}
-	fmt.Fprintf(out, "  Copied account-profiles-shared/%s -> account-profiles-shared/%s\n", copyFrom, name)
-
-	if harnessType == profileHarnessAll || harnessType == profileHarnessClaude {
-		srcClaude := filepath.Join(h2Dir, "claude-config", copyFrom)
-		dstClaude := filepath.Join(h2Dir, "claude-config", name)
-		if _, err := os.Stat(srcClaude); err != nil {
-			if os.IsNotExist(err) {
-				return fmt.Errorf("copy source profile %q missing claude config: %s", copyFrom, srcClaude)
-			}
-			return fmt.Errorf("stat source claude config: %w", err)
-		}
-		if err := copyPathFiltered(srcClaude, dstClaude, func(_ string, info os.FileInfo) bool {
-			return !info.IsDir() && info.Name() == ".claude.json"
-		}); err != nil {
-			return fmt.Errorf("copy claude profile: %w", err)
-		}
-		if err := ensureClaudeProfileLinks(dstClaude, name, out); err != nil {
-			return err
-		}
-		fmt.Fprintf(out, "  Copied claude-config/%s -> claude-config/%s\n", copyFrom, name)
-		fmt.Fprintf(out, "  Skipped claude auth file: claude-config/%s/.claude.json\n", copyFrom)
-	}
-
-	if harnessType == profileHarnessAll || harnessType == profileHarnessCodex {
-		srcCodex := filepath.Join(h2Dir, "codex-config", copyFrom)
-		dstCodex := filepath.Join(h2Dir, "codex-config", name)
-		if _, err := os.Stat(srcCodex); err != nil {
-			if os.IsNotExist(err) {
-				return fmt.Errorf("copy source profile %q missing codex config: %s", copyFrom, srcCodex)
-			}
-			return fmt.Errorf("stat source codex config: %w", err)
-		}
-		if err := copyPathFiltered(srcCodex, dstCodex, func(_ string, info os.FileInfo) bool {
-			return !info.IsDir() && info.Name() == "auth.json"
-		}); err != nil {
-			return fmt.Errorf("copy codex profile: %w", err)
-		}
-		if err := ensureCodexProfileLinks(dstCodex, name, out); err != nil {
-			return err
-		}
-		fmt.Fprintf(out, "  Copied codex-config/%s -> codex-config/%s\n", copyFrom, name)
-		fmt.Fprintf(out, "  Skipped codex auth file: codex-config/%s/auth.json\n", copyFrom)
-	}
-
-	fmt.Fprintf(out, "Created profile %q from %q\n", name, copyFrom)
 	return nil
 }
 

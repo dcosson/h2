@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"h2/internal/config"
@@ -122,17 +121,16 @@ func TestProfileCreate_SymlinkShared(t *testing.T) {
 	}
 }
 
-func TestProfileCreate_CopyAndSymlinkSharedMutuallyExclusive(t *testing.T) {
+func TestProfileCreate_CopyFlagRemoved(t *testing.T) {
 	setupProfileTestH2Dir(t)
 
 	cmd := newProfileCreateCmd()
-	cmd.SetArgs([]string{"new", "--copy", "base", "--symlink-shared", "base"})
+	cmd.SetArgs([]string{"new", "--copy", "base"})
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected error for mutually exclusive flags")
+		t.Fatal("expected error for unknown --copy flag")
 	}
-	if !strings.Contains(err.Error(), "mutually exclusive") {
+	if err.Error() != "unknown flag: --copy" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
-

@@ -179,7 +179,7 @@ func runFullInit(cmd *cobra.Command, abs, prefix, style string, out io.Writer) e
 	fmt.Fprintf(out, "  Wrote config.yaml\n")
 
 	// Write CLAUDE.md and symlink AGENTS.md.
-	if err := createOrUpdateProfile(abs, "default", style, "", "", profileHarnessAll, false, false, out); err != nil {
+	if err := createOrUpdateProfile(abs, "default", style, "", profileHarnessAll, false, false, out); err != nil {
 		return fmt.Errorf("scaffold default profile: %w", err)
 	}
 
@@ -253,7 +253,7 @@ func generateDefaultProfile(abs, style string, force bool, out io.Writer) error 
 			return err
 		}
 	}
-	return createOrUpdateProfile(abs, "default", style, "", "", profileHarnessAll, false, false, out)
+	return createOrUpdateProfile(abs, "default", style, "", profileHarnessAll, false, false, out)
 }
 
 func generateDefaultRole(abs, style string, force bool, out io.Writer) error {
