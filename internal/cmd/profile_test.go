@@ -134,3 +134,164 @@ func TestProfileCreate_CopyFlagRemoved(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestProfileReset_DefaultsPreserveAuthAndCustomSkills(t *testing.T) {
+	h2Dir := setupProfileTestH2Dir(t)
+	name := "work"
+
+	sharedDir := filepath.Join(h2Dir, "account-profiles-shared", name)
+	sharedSkills := filepath.Join(sharedDir, "skills")
+	if err := os.MkdirAll(sharedSkills, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedDir, "CLAUDE_AND_AGENTS.md"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(sharedSkills, "shaping"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedSkills, "shaping", "SKILL.md"), []byte("stale managed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(sharedSkills, "custom-skill"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedSkills, "custom-skill", "SKILL.md"), []byte("custom"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	claudeDir := filepath.Join(h2Dir, "claude-config", name)
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("old-settings"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(claudeDir, ".claude.json"), []byte(`{"auth":"keep"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	codexDir := filepath.Join(h2Dir, "codex-config", name)
+	if err := os.MkdirAll(codexDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte("old-config"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codexDir, "requirements.toml"), []byte("old-reqs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codexDir, "auth.json"), []byte(`{"auth":"keep"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := newProfileResetCmd()
+	cmd.SetArgs([]string{name})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("profile reset failed: %v", err)
+	}
+
+	gotInstructions, err := os.ReadFile(filepath.Join(sharedDir, "CLAUDE_AND_AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotInstructions) != config.InstructionsTemplateWithStyle("opinionated") {
+		t.Fatalf("instructions were not reset")
+	}
+
+	wantManagedSkill, err := config.Templates.ReadFile("templates/styles/opinionated/skills/shaping/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotManagedSkill, err := os.ReadFile(filepath.Join(sharedSkills, "shaping", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotManagedSkill) != string(wantManagedSkill) {
+		t.Fatalf("managed skill was not updated")
+	}
+
+	gotCustomSkill, err := os.ReadFile(filepath.Join(sharedSkills, "custom-skill", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotCustomSkill) != "custom" {
+		t.Fatalf("custom skill was modified: %q", string(gotCustomSkill))
+	}
+
+	gotClaudeSettings, err := os.ReadFile(filepath.Join(claudeDir, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotClaudeSettings) != config.ClaudeSettingsTemplate("opinionated") {
+		t.Fatalf("claude settings were not reset")
+	}
+	gotCodexConfig, err := os.ReadFile(filepath.Join(codexDir, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotCodexConfig) != config.CodexConfigTemplate("opinionated") {
+		t.Fatalf("codex config was not reset")
+	}
+	gotCodexReqs, err := os.ReadFile(filepath.Join(codexDir, "requirements.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotCodexReqs) != config.CodexRequirementsTemplate("opinionated") {
+		t.Fatalf("codex requirements were not reset")
+	}
+
+	claudeAuth, err := os.ReadFile(filepath.Join(claudeDir, ".claude.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(claudeAuth) != `{"auth":"keep"}` {
+		t.Fatalf("claude auth changed unexpectedly")
+	}
+	codexAuth, err := os.ReadFile(filepath.Join(codexDir, "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(codexAuth) != `{"auth":"keep"}` {
+		t.Fatalf("codex auth changed unexpectedly")
+	}
+}
+
+func TestProfileReset_IncludeAuthClearsAuthFiles(t *testing.T) {
+	h2Dir := setupProfileTestH2Dir(t)
+	name := "work"
+
+	sharedDir := filepath.Join(h2Dir, "account-profiles-shared", name)
+	if err := os.MkdirAll(sharedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	claudeDir := filepath.Join(h2Dir, "claude-config", name)
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(claudeDir, ".claude.json"), []byte(`{"auth":"delete"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	codexDir := filepath.Join(h2Dir, "codex-config", name)
+	if err := os.MkdirAll(codexDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codexDir, "auth.json"), []byte(`{"auth":"delete"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := newProfileResetCmd()
+	cmd.SetArgs([]string{name, "--include-auth", "--include-skills=false", "--include-instructions=false", "--include-settings=false"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("profile reset failed: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(claudeDir, ".claude.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected .claude.json to be removed, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(codexDir, "auth.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected auth.json to be removed, err=%v", err)
+	}
+}

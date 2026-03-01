@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -25,8 +27,53 @@ func newProfileCmd() *cobra.Command {
 		Short: "Manage account profiles",
 	}
 	cmd.AddCommand(newProfileCreateCmd())
+	cmd.AddCommand(newProfileResetCmd())
 	cmd.AddCommand(newProfileListCmd())
 	cmd.AddCommand(newProfileShowCmd())
+	return cmd
+}
+
+func newProfileResetCmd() *cobra.Command {
+	var style string
+	var includeAuth bool
+	var includeSkills bool
+	var includeInstructions bool
+	var includeSettings bool
+
+	cmd := &cobra.Command{
+		Use:   "reset <name>",
+		Short: "Reset an account profile to generated defaults",
+		Long: `Reset profile content to h2-generated defaults.
+
+By default, reset updates instructions, managed skills, and settings, while
+preserving auth files.
+
+Managed skills are updated non-destructively: h2 updates only template-managed
+skill files and leaves user-added skills untouched.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := strings.TrimSpace(args[0])
+			if name == "" {
+				return fmt.Errorf("profile name is required")
+			}
+			if strings.ContainsRune(name, os.PathSeparator) {
+				return fmt.Errorf("profile name must not contain path separators: %q", name)
+			}
+
+			resolvedStyle, err := resolveInitStyle(style)
+			if err != nil {
+				return err
+			}
+			h2Dir := config.ConfigDir()
+			return resetProfile(h2Dir, name, resolvedStyle, includeAuth, includeSkills, includeInstructions, includeSettings, cmd.OutOrStdout())
+		},
+	}
+
+	cmd.Flags().StringVar(&style, "style", initStyleOpinionated, "Profile style: minimal, opinionated")
+	cmd.Flags().BoolVar(&includeAuth, "include-auth", false, "Include auth files (.claude.json, auth.json) in reset")
+	cmd.Flags().BoolVar(&includeSkills, "include-skills", true, "Reset managed shared skills")
+	cmd.Flags().BoolVar(&includeInstructions, "include-instructions", true, "Reset shared instructions file")
+	cmd.Flags().BoolVar(&includeSettings, "include-settings", true, "Reset harness settings/config files and profile symlinks")
 	return cmd
 }
 
@@ -156,6 +203,79 @@ Use --symlink-shared to link shared profile content from an existing profile.`,
 
 func createProfile(h2Dir, name, style, symlinkSharedFrom, harnessType string, out io.Writer) error {
 	return createOrUpdateProfile(h2Dir, name, style, symlinkSharedFrom, harnessType, true, true, out)
+}
+
+func resetProfile(h2Dir, name, style string, includeAuth, includeSkills, includeInstructions, includeSettings bool, out io.Writer) error {
+	sharedDir := filepath.Join(h2Dir, "account-profiles-shared", name)
+	sharedSkillsDir := filepath.Join(sharedDir, "skills")
+	claudeDir := filepath.Join(h2Dir, "claude-config", name)
+	codexDir := filepath.Join(h2Dir, "codex-config", name)
+
+	sharedExists := pathExists(sharedDir)
+	claudeExists := pathExists(claudeDir)
+	codexExists := pathExists(codexDir)
+	if !sharedExists && !claudeExists && !codexExists {
+		return fmt.Errorf("profile %q not found", name)
+	}
+
+	if includeInstructions || includeSkills {
+		if err := os.MkdirAll(sharedDir, 0o755); err != nil {
+			return fmt.Errorf("create shared profile dir: %w", err)
+		}
+	}
+
+	if includeInstructions {
+		if err := os.WriteFile(filepath.Join(sharedDir, "CLAUDE_AND_AGENTS.md"), []byte(config.InstructionsTemplateWithStyle(style)), 0o644); err != nil {
+			return fmt.Errorf("write CLAUDE_AND_AGENTS.md: %w", err)
+		}
+		fmt.Fprintf(out, "  Wrote account-profiles-shared/%s/CLAUDE_AND_AGENTS.md\n", name)
+	}
+
+	if includeSkills {
+		if err := writeManagedSkillsTemplateNonDestructive(style, sharedSkillsDir); err != nil {
+			return fmt.Errorf("write shared skills: %w", err)
+		}
+		fmt.Fprintf(out, "  Updated managed account-profiles-shared/%s/skills/\n", name)
+	}
+
+	if includeSettings {
+		if claudeExists {
+			if err := ensureClaudeProfileScaffold(claudeDir, name, style, out); err != nil {
+				return err
+			}
+		}
+		if codexExists {
+			if err := ensureCodexProfileScaffold(codexDir, name, style, out); err != nil {
+				return err
+			}
+		}
+	}
+
+	if includeAuth {
+		if claudeExists {
+			authPath := filepath.Join(claudeDir, ".claude.json")
+			if err := os.Remove(authPath); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("remove claude auth: %w", err)
+			}
+			if pathExists(authPath) {
+				return fmt.Errorf("remove claude auth: %s still exists", authPath)
+			}
+			fmt.Fprintf(out, "  Cleared claude-config/%s/.claude.json\n", name)
+		}
+		if codexExists {
+			authPath := filepath.Join(codexDir, "auth.json")
+			if err := os.Remove(authPath); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("remove codex auth: %w", err)
+			}
+			if pathExists(authPath) {
+				return fmt.Errorf("remove codex auth: %s still exists", authPath)
+			}
+			fmt.Fprintf(out, "  Cleared codex-config/%s/auth.json\n", name)
+		}
+	}
+
+	fmt.Fprintf(out, "Reset profile %q\n", name)
+	return nil
 }
 
 func createOrUpdateProfile(h2Dir, name, style, symlinkSharedFrom, harnessType string, requireNew, announce bool, out io.Writer) error {
@@ -300,6 +420,49 @@ func createProfileWithSharedSymlink(h2Dir, name, sourceProfile, harnessType stri
 
 func copyPathFiltered(src, dst string, skip func(rel string, info os.FileInfo) bool) error {
 	return copyPathFilteredRel(src, dst, "", skip)
+}
+
+func writeManagedSkillsTemplateNonDestructive(style, targetDir string) error {
+	style = strings.TrimSpace(strings.ToLower(style))
+	if style == "" {
+		style = initStyleOpinionated
+	}
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		return fmt.Errorf("create skills target dir: %w", err)
+	}
+	root := fmt.Sprintf("templates/styles/%s/skills", style)
+	err := fs.WalkDir(config.Templates, root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel := strings.TrimPrefix(path, root)
+		rel = strings.TrimPrefix(rel, "/")
+		if rel == "" {
+			return nil
+		}
+		dst := filepath.Join(targetDir, filepath.FromSlash(rel))
+		if d.IsDir() {
+			return os.MkdirAll(dst, 0o755)
+		}
+		if filepath.Base(dst) == ".gitkeep" {
+			return nil
+		}
+		data, readErr := config.Templates.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(dst, data, 0o644)
+	})
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("materialize managed skills template: %w", err)
+	}
+	return nil
 }
 
 func copyPathFilteredRel(src, dst, rel string, skip func(rel string, info os.FileInfo) bool) error {
