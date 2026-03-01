@@ -103,9 +103,9 @@ Messages from other agents or users appear in your input prefixed with:
 
 When you receive an h2 message:
 
-1. Acknowledge quickly: h2 send <sender> "Working on it..."
+1. Acknowledge quickly by running the command: h2 send <sender> "Working on it..."
 2. Do the work
-3. Reply with results: h2 send <sender> "Here's what I found: ..."
+3. Reply with results by running the command: h2 send <sender> "Here's what I found: ..."
 
 Example:
 [h2 message from: scheduler] Can you check the test coverage?
@@ -116,7 +116,7 @@ or if it was a longer message
 
 ALWAYS read a message file when you receive it, do not assume it's an older message. Older messages are not re-sent like this.
 
-You should reply:
+You should reply by running the command:
 h2 send scheduler "Checking test coverage now"
 
 # ... do the work ...
