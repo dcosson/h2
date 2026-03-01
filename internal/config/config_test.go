@@ -251,7 +251,7 @@ func TestReadMarkerVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadMarkerVersion: %v", err)
 	}
-	want := "v" + version.Version
+	want := version.DisplayVersion()
 	if got != want {
 		t.Errorf("ReadMarkerVersion = %q, want %q", got, want)
 	}
@@ -277,7 +277,7 @@ func TestWriteMarker(t *testing.T) {
 		t.Fatalf("ReadFile: %v", err)
 	}
 	content := strings.TrimSpace(string(data))
-	want := "v" + version.Version
+	want := version.DisplayVersion()
 	if content != want {
 		t.Errorf("marker content = %q, want %q", content, want)
 	}

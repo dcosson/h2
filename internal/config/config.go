@@ -55,7 +55,7 @@ func ReadMarkerVersion(dir string) (string, error) {
 
 // WriteMarker writes .h2-dir.txt with the current version.
 func WriteMarker(dir string) error {
-	return os.WriteFile(filepath.Join(dir, markerFile), []byte("v"+version.Version+"\n"), 0o644)
+	return os.WriteFile(filepath.Join(dir, markerFile), []byte(version.DisplayVersion()+"\n"), 0o644)
 }
 
 // looksLikeH2Dir returns true if dir exists and contains expected h2 subdirectories,

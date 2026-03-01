@@ -1,5 +1,13 @@
+VERSION_PKG := h2/internal/version
+GIT_REF ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+RELEASE ?= false
+LDFLAGS := -X '$(VERSION_PKG).GitRef=$(GIT_REF)' -X '$(VERSION_PKG).ReleaseBuild=$(RELEASE)'
+
 build:
-	go build -o h2 ./cmd/h2
+	go build -ldflags "$(LDFLAGS)" -o h2 ./cmd/h2
+
+build-release:
+	$(MAKE) build RELEASE=true
 
 test:
 	go test ./...
