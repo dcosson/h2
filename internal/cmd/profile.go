@@ -128,6 +128,11 @@ func newProfileShowCmd() *cobra.Command {
 			fmt.Fprintf(out, "  Shared: %s (%s)\n", sharedDir, yesNo(sharedExists))
 			fmt.Fprintf(out, "  Claude: %s (%s)\n", claudeDir, yesNo(claudeExists))
 			fmt.Fprintf(out, "  Codex:  %s (%s)\n", codexDir, yesNo(codexExists))
+			fmt.Fprintf(out, "  Symlink account-profiles-shared/%s: %s\n", name, symlinkStatus(sharedDir))
+			fmt.Fprintf(out, "  Symlink claude-config/%s/CLAUDE.md: %s\n", name, symlinkStatus(filepath.Join(claudeDir, "CLAUDE.md")))
+			fmt.Fprintf(out, "  Symlink claude-config/%s/skills: %s\n", name, symlinkStatus(filepath.Join(claudeDir, "skills")))
+			fmt.Fprintf(out, "  Symlink codex-config/%s/AGENTS.md: %s\n", name, symlinkStatus(filepath.Join(codexDir, "AGENTS.md")))
+			fmt.Fprintf(out, "  Symlink codex-config/%s/skills: %s\n", name, symlinkStatus(filepath.Join(codexDir, "skills")))
 
 			if claudeExists {
 				auth, err := config.IsClaudeConfigAuthenticated(claudeDir)
@@ -136,6 +141,15 @@ func newProfileShowCmd() *cobra.Command {
 				} else {
 					fmt.Fprintf(out, "  Claude authenticated: %s\n", yesNo(auth))
 				}
+			}
+			if err := printContentMeta(out, "account-profiles-shared/"+name, sharedDir); err != nil {
+				return err
+			}
+			if err := printContentMeta(out, "claude-config/"+name, claudeDir); err != nil {
+				return err
+			}
+			if err := printContentMeta(out, "codex-config/"+name, codexDir); err != nil {
+				return err
 			}
 			return nil
 		},
@@ -228,12 +242,24 @@ func resetProfile(h2Dir, name, style string, includeAuth, includeSkills, include
 		if err := os.WriteFile(filepath.Join(sharedDir, "CLAUDE_AND_AGENTS.md"), []byte(config.InstructionsTemplateWithStyle(style)), 0o644); err != nil {
 			return fmt.Errorf("write CLAUDE_AND_AGENTS.md: %w", err)
 		}
+		if err := config.UpsertContentMeta(sharedDir, style, []string{"CLAUDE_AND_AGENTS.md"}); err != nil {
+			return fmt.Errorf("update shared metadata: %w", err)
+		}
 		fmt.Fprintf(out, "  Wrote account-profiles-shared/%s/CLAUDE_AND_AGENTS.md\n", name)
 	}
 
 	if includeSkills {
+		skillPaths, err := managedSkillRelativePaths(style)
+		if err != nil {
+			return err
+		}
 		if err := writeManagedSkillsTemplateNonDestructive(style, sharedSkillsDir); err != nil {
 			return fmt.Errorf("write shared skills: %w", err)
+		}
+		if len(skillPaths) > 0 {
+			if err := config.UpsertContentMeta(sharedDir, style, skillPaths); err != nil {
+				return fmt.Errorf("update shared metadata: %w", err)
+			}
 		}
 		fmt.Fprintf(out, "  Updated managed account-profiles-shared/%s/skills/\n", name)
 	}
@@ -332,6 +358,18 @@ func scaffoldProfile(h2Dir, name, style, harnessType string, out io.Writer, anno
 	}
 	if err := os.WriteFile(filepath.Join(sharedDir, "CLAUDE_AND_AGENTS.md"), []byte(config.InstructionsTemplateWithStyle(style)), 0o644); err != nil {
 		return fmt.Errorf("write CLAUDE_AND_AGENTS.md: %w", err)
+	}
+	if err := config.UpsertContentMeta(sharedDir, style, []string{"CLAUDE_AND_AGENTS.md"}); err != nil {
+		return fmt.Errorf("update shared metadata: %w", err)
+	}
+	managedSkills, err := managedSkillRelativePaths(style)
+	if err != nil {
+		return err
+	}
+	if len(managedSkills) > 0 {
+		if err := config.UpsertContentMeta(sharedDir, style, managedSkills); err != nil {
+			return fmt.Errorf("update shared metadata: %w", err)
+		}
 	}
 	fmt.Fprintf(out, "  Wrote account-profiles-shared/%s/CLAUDE_AND_AGENTS.md\n", name)
 	fmt.Fprintf(out, "  Wrote account-profiles-shared/%s/skills/\n", name)
@@ -465,6 +503,38 @@ func writeManagedSkillsTemplateNonDestructive(style, targetDir string) error {
 	return nil
 }
 
+func managedSkillRelativePaths(style string) ([]string, error) {
+	style = strings.TrimSpace(strings.ToLower(style))
+	if style == "" {
+		style = initStyleOpinionated
+	}
+	root := fmt.Sprintf("templates/styles/%s/skills", style)
+	paths := []string{}
+	err := fs.WalkDir(config.Templates, root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel := strings.TrimPrefix(path, root)
+		rel = strings.TrimPrefix(rel, "/")
+		if rel == "" || filepath.Base(rel) == ".gitkeep" {
+			return nil
+		}
+		paths = append(paths, filepath.ToSlash(filepath.Join("skills", filepath.FromSlash(rel))))
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("list managed skills: %w", err)
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
 func copyPathFilteredRel(src, dst, rel string, skip func(rel string, info os.FileInfo) bool) error {
 	info, err := os.Lstat(src)
 	if err != nil {
@@ -567,6 +637,9 @@ func ensureClaudeProfileScaffold(claudeDir, profileName, style string, out io.Wr
 	if err := writeGeneratedFile(filepath.Join(claudeDir, "settings.json"), config.ClaudeSettingsTemplate(style), true, out, "claude-config/"+profileName+"/settings.json"); err != nil {
 		return err
 	}
+	if err := config.UpsertContentMeta(claudeDir, style, []string{"settings.json"}); err != nil {
+		return fmt.Errorf("update claude metadata: %w", err)
+	}
 	return nil
 }
 
@@ -583,7 +656,55 @@ func ensureCodexProfileScaffold(codexDir, profileName, style string, out io.Writ
 	if err := writeGeneratedFile(filepath.Join(codexDir, "requirements.toml"), config.CodexRequirementsTemplate(style), true, out, "codex-config/"+profileName+"/requirements.toml"); err != nil {
 		return err
 	}
+	if err := config.UpsertContentMeta(codexDir, style, []string{"config.toml", "requirements.toml"}); err != nil {
+		return fmt.Errorf("update codex metadata: %w", err)
+	}
 	return nil
+}
+
+func printContentMeta(out io.Writer, label, dir string) error {
+	metaPath := filepath.Join(dir, config.ContentMetaFileName)
+	if !pathExists(metaPath) {
+		fmt.Fprintf(out, "  Metadata %s: none\n", label)
+		return nil
+	}
+	meta, err := config.ReadContentMeta(dir)
+	if err != nil {
+		return fmt.Errorf("read metadata for %s: %w", label, err)
+	}
+	fmt.Fprintf(out, "  Metadata %s: %s\n", label, metaPath)
+	keys := make([]string, 0, len(meta.Files))
+	for k := range meta.Files {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		entry := meta.Files[k]
+		style := entry.Style
+		if style == "" {
+			style = "-"
+		}
+		fmt.Fprintf(out, "    %s | %s | %s | %s\n", k, entry.H2Version, style, entry.WrittenAt)
+	}
+	return nil
+}
+
+func symlinkStatus(path string) string {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "missing"
+		}
+		return "error: " + err.Error()
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return "no"
+	}
+	target, err := os.Readlink(path)
+	if err != nil {
+		return "yes (unreadable target)"
+	}
+	return "yes -> " + target
 }
 
 func ensureClaudeProfileLinks(claudeDir, profileName string, out io.Writer) error {

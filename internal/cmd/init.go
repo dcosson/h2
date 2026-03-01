@@ -355,6 +355,9 @@ func generateInstructions(abs, style string, force bool, out io.Writer) error {
 	if err := os.WriteFile(sharedMDPath, []byte(config.InstructionsTemplateWithStyle(style)), 0o644); err != nil {
 		return fmt.Errorf("write CLAUDE_AND_AGENTS.md: %w", err)
 	}
+	if err := config.UpsertContentMeta(sharedDir, style, []string{"CLAUDE_AND_AGENTS.md"}); err != nil {
+		return fmt.Errorf("update shared metadata: %w", err)
+	}
 	fmt.Fprintf(out, "  Wrote account-profiles-shared/default/CLAUDE_AND_AGENTS.md\n")
 
 	if err := ensureSymlink(claudeMDPath, sharedMDTarget, force, out, "claude-config/default/CLAUDE.md"); err != nil {
@@ -394,6 +397,15 @@ func generateSkills(abs, style string, force bool, out io.Writer) error {
 
 	if err := config.WriteSkillsTemplate(style, sharedSkillsDir, force); err != nil {
 		return fmt.Errorf("write shared skills: %w", err)
+	}
+	managedSkills, err := managedSkillRelativePaths(style)
+	if err != nil {
+		return err
+	}
+	if len(managedSkills) > 0 {
+		if err := config.UpsertContentMeta(filepath.Dir(sharedSkillsDir), style, managedSkills); err != nil {
+			return fmt.Errorf("update shared metadata: %w", err)
+		}
 	}
 	if err := ensureSymlink(claudeSkillsPath, sharedSkillsTarget, force, out, "claude-config/default/skills"); err != nil {
 		return err
@@ -465,11 +477,17 @@ func generateHarnessPolicyFiles(abs, style string, force bool, out io.Writer) er
 	if err := writeGeneratedFile(claudeSettingsPath, config.ClaudeSettingsTemplate(style), force, out, "claude-config/default/settings.json"); err != nil {
 		return err
 	}
+	if err := config.UpsertContentMeta(filepath.Dir(claudeSettingsPath), style, []string{"settings.json"}); err != nil {
+		return fmt.Errorf("update claude metadata: %w", err)
+	}
 	if err := writeGeneratedFile(codexConfigPath, config.CodexConfigTemplate(style), force, out, "codex-config/default/config.toml"); err != nil {
 		return err
 	}
 	if err := writeGeneratedFile(codexRequirementsPath, config.CodexRequirementsTemplate(style), force, out, "codex-config/default/requirements.toml"); err != nil {
 		return err
+	}
+	if err := config.UpsertContentMeta(filepath.Dir(codexConfigPath), style, []string{"config.toml", "requirements.toml"}); err != nil {
+		return fmt.Errorf("update codex metadata: %w", err)
 	}
 	return nil
 }

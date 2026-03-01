@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"h2/internal/config"
@@ -119,6 +120,7 @@ func TestProfileCreate_SymlinkShared(t *testing.T) {
 	if want := filepath.Join("..", "..", "account-profiles-shared", "new", "CLAUDE_AND_AGENTS.md"); codexTarget != want {
 		t.Fatalf("codex AGENTS.md target = %q, want %q", codexTarget, want)
 	}
+
 }
 
 func TestProfileCreate_CopyFlagRemoved(t *testing.T) {
@@ -255,6 +257,39 @@ func TestProfileReset_DefaultsPreserveAuthAndCustomSkills(t *testing.T) {
 	if string(codexAuth) != `{"auth":"keep"}` {
 		t.Fatalf("codex auth changed unexpectedly")
 	}
+
+	sharedMeta, err := config.ReadContentMeta(sharedDir)
+	if err != nil {
+		t.Fatalf("read shared metadata: %v", err)
+	}
+	if _, ok := sharedMeta.Files["CLAUDE_AND_AGENTS.md"]; !ok {
+		t.Fatalf("expected CLAUDE_AND_AGENTS.md metadata entry")
+	}
+	if _, ok := sharedMeta.Files["skills/shaping/SKILL.md"]; !ok {
+		t.Fatalf("expected managed skill metadata entry")
+	}
+	if _, ok := sharedMeta.Files["skills/custom-skill/SKILL.md"]; ok {
+		t.Fatalf("did not expect custom skill metadata entry")
+	}
+
+	claudeMeta, err := config.ReadContentMeta(claudeDir)
+	if err != nil {
+		t.Fatalf("read claude metadata: %v", err)
+	}
+	if _, ok := claudeMeta.Files["settings.json"]; !ok {
+		t.Fatalf("expected settings.json metadata entry")
+	}
+
+	codexMeta, err := config.ReadContentMeta(codexDir)
+	if err != nil {
+		t.Fatalf("read codex metadata: %v", err)
+	}
+	if _, ok := codexMeta.Files["config.toml"]; !ok {
+		t.Fatalf("expected config.toml metadata entry")
+	}
+	if _, ok := codexMeta.Files["requirements.toml"]; !ok {
+		t.Fatalf("expected requirements.toml metadata entry")
+	}
 }
 
 func TestProfileReset_IncludeAuthClearsAuthFiles(t *testing.T) {
@@ -293,5 +328,46 @@ func TestProfileReset_IncludeAuthClearsAuthFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(codexDir, "auth.json")); !os.IsNotExist(err) {
 		t.Fatalf("expected auth.json to be removed, err=%v", err)
+	}
+}
+
+func TestProfileShow_IncludesSymlinksAndMetadata(t *testing.T) {
+	h2Dir := setupProfileTestH2Dir(t)
+	cmd := newProfileCreateCmd()
+	cmd.SetArgs([]string{"demo"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("profile create failed: %v", err)
+	}
+
+	show := newProfileShowCmd()
+	var out bytes.Buffer
+	show.SetOut(&out)
+	show.SetErr(&out)
+	show.SetArgs([]string{"demo"})
+	if err := show.Execute(); err != nil {
+		t.Fatalf("profile show failed: %v", err)
+	}
+
+	s := out.String()
+	checks := []string{
+		"Symlink account-profiles-shared/demo: no",
+		"Symlink claude-config/demo/CLAUDE.md: yes ->",
+		"Symlink codex-config/demo/AGENTS.md: yes ->",
+		"Metadata account-profiles-shared/demo:",
+		"CLAUDE_AND_AGENTS.md | v",
+		"Metadata claude-config/demo:",
+		"settings.json | v",
+		"Metadata codex-config/demo:",
+		"config.toml | v",
+		"requirements.toml | v",
+	}
+	for _, want := range checks {
+		if !strings.Contains(s, want) {
+			t.Fatalf("profile show output missing %q:\n%s", want, s)
+		}
+	}
+
+	if _, err := os.Stat(filepath.Join(h2Dir, "account-profiles-shared", "demo", config.ContentMetaFileName)); err != nil {
+		t.Fatalf("missing shared metadata file: %v", err)
 	}
 }
