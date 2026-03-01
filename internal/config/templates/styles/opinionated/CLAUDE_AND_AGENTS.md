@@ -26,6 +26,8 @@ Before implementing new functionality check if there's a similar pattern already
 
 ALWAYS commit your changes after completing a chunk of implementation work and ensuring tests pass. Git commits can easily be ammended later if further tweaks are made, but committing ensures we won't accidentally delete or lose work. Always git push after committing in non-main branches, and follow project-local instructions for main branches.
 
+Be mindful of test run times. If a test suite is slow and you need to run it again in the future, write the output to a file so you can review it instead of piping it into a grep and then needing to run it multiple times to get all the info you need.
+
 ## Working Style
 
 ## Coding Style
