@@ -313,11 +313,18 @@ def aggregate_findings(findings):
         "by_disposition": defaultdict(int),
     }
 
+    # Severities that represent placeholder/non-finding rows
+    PLACEHOLDER_SEVERITIES = {"N/A", "Info"}
+
     for f in findings:
         rnd = f["round"]
         sev = f["severity"]
         disp = f["disposition"]
         fpath = f["file"]
+
+        # Skip placeholder rows (N/A, Info) from all totals
+        if sev in PLACEHOLDER_SEVERITIES:
+            continue
 
         per_round[rnd]["total"] += 1
         per_round[rnd]["by_severity"][sev] += 1
