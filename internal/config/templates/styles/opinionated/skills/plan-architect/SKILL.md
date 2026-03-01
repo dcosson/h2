@@ -3,7 +3,7 @@ name: plan-architect
 description: Produce a high-level architecture doc and — if the project is large enough — a plan index that lists sub-plans to be written later. Use after shaping to create the planning structure. Does NOT write sub-plans itself.
 user-invocable: true
 allowed-tools: Bash Read Write Edit Grep Glob WebSearch WebFetch Task
-argument-hint: [shaping-doc-path]
+argument-hint: "[shaping-doc-path]"
 ---
 
 # Plan Architect

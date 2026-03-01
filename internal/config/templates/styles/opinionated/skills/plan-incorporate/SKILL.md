@@ -3,7 +3,7 @@ name: plan-incorporate
 description: Incorporate review feedback into a plan doc. Reads review files, updates the source doc, adds a disposition table tracking every finding, and deletes review files. Supports multiple review rounds — detects existing disposition tables and adds the next round.
 user-invocable: true
 allowed-tools: Bash Read Write Edit Grep Glob Task
-argument-hint: [doc-name] [review-file-1] [review-file-2] ...
+argument-hint: "[doc-name] [review-file-1] [review-file-2] ..."
 ---
 
 # Plan Incorporate

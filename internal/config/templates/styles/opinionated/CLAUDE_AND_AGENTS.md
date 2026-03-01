@@ -1,10 +1,34 @@
 ## Design & Programming Philosophies
 
-Assume that we are using LLM Agents to do essentially all programming work now, not humans. Assumptions about cost/benefit and level of effort need to be radically rethought.
+Assume that we are using LLM Agents to do essentially all programming work now, not humans. Assumptions about cost/benefit, level of effort, and what is a reasonable amount of work to commit to need to be radically rethought.
 
-The Plan and the Test Harness are everything. These are more important than they've ever been. No amount of effort is too high to spend to get these absolutely possible. The code is malleable and can be written, re-written and refactored. It won't be able to be fully reviewed by humans, but as long as the test harnesses are solid, we can have confidence that it's correct.
+The Plan and the Test Harness are everything. Almost no amount of effort is too high to spend to get these absolutely rock solid. The code is malleable and can be written, re-written and refactored. It won't be able to be fully reviewed by humans, but as long as the test harnesses are solid, we can have confidence that it's correct.
 
 We are aiming as much as possible to practice Massively Parallel Programming. Individual agents will not be monitored and their code will not be manually reviewed by humans. They will work on assigned tasks, and other agents will review the code and suggest improvements before merging. Like a parallel compute job running in a large data center, individual nodes may fail or drop out and the work will be picked up and re-routed to others. The important thing is to be proactive and keep the system moving to the end.
+
+## Working & Coding Style
+
+Default to action, not permission. Prefer including other agents in the loop first and only if you are all collectively stuck or can't agree on a course of action, ask the user. Don't skip this step of messaging other agents, they may have good ideas to try.
+
+Blocked? Try 3 different approaches before escalating.
+
+Use tools creatively (web search for solutions, read docs, test alternatives)
+
+Should I X? Becomes "I tried X, Y, and Z, here's what worked"
+
+Depending on the size and scope of the task you may be working solo or in a team. Pay attention to instructions about working with a concierge, scheduler, coder, or reviewer and include them in appropriate work.
+
+When writing code, prefer the Test Driven Development (TDD) approach: write unit tests that fail first, then write the missing code, and ensure tests pass. You should also include relevant integration level tests and extend end to end test suites where needed as new functionality is built, but writing entire external test harnesses, benchmarks, smoke tests, load tests, etc. can be separated from feature development work.
+
+DO NOT create fallbacks or leave around old behavior for backwards compatibility unless explicitly instructed to do so. Make changes & additions cleanly and leave the code shiny & pristin, not layered with fallbacks. DO NOT place shims in the codebase unless specifically instructed to do so. If you are refactoring then do so fully and update all callers.
+
+ALWAYS commit your changes after completing a chunk of implementation work and ensuring tests pass. Git commits can easily be ammended later if further tweaks are made, but committing ensures we won't accidentally delete or lose work. Always git push after committing in non-main branches, and follow project-local instructions for main branches.
+
+## Working Style
+
+## Coding Style
+
+Commit often, after a block of functionality is built and tests pass.
 
 ## Planning
 
@@ -55,14 +79,6 @@ This refers to employing advanced mathematics and computer science techniques to
 ### Extreme Optimization
 
 Extreme optimization is a technique to ensure our code will run as fast and efficiently as possible. This should be extreme. For example, we should be writing code that runs in hot paths or tight loops in assembly utilizing SIMD for all major platforms (ARM64 NEON and X86_64 SSE & AVX2) as well as matrix math optimizations (offload to GPU, ARM SME, etc.) This may sometimes intersect with Alien Artifacts if there are exotic algorithms that can be used as part of this optimization, or with URP. Label all examples of Extreme Optimization in the Design Doc.
-
-## Implementation
-
-Depending on the size and scope of the task you may be working solo or in a team. Pay attention to instructions about working with a concierge, scheduler, coder, or reviewer and include them in appropriate work.
-
-When writing code, prefer the Test Driven Development (TDD) approach: write unit tests that fail first, then write the missing code, and ensure tests pass. You should also include relevant integration level tests and extend end to end test suites where needed as new functionality is built, but writing entire external test harnesses, benchmarks, smoke tests, load tests, etc. can be separated from feature development work.
-
-ALWAYS commit your changes after completing a chunk of implementation work and ensuring tests pass. Git commits can easily be ammended later if further tweaks are made, but committing ensures we won't accidentally delete or lose work.
 
 ## Language Specific Preferences
 
