@@ -108,6 +108,12 @@ When you receive an h2 message:
 Example:
 [h2 message from: scheduler] Can you check the test coverage?
 
+or if it was a longer message
+
+[h2 message from: scheduler] Read /Users/dcosson/h2home/messages/coder/20260228-221910-c7c2f4fc.md
+
+ALWAYS read a message file when you receive it, do not assume it's an older message. Older messages are not re-sent like this.
+
 You should reply:
 h2 send scheduler "Checking test coverage now"
 
@@ -145,8 +151,13 @@ depends_on (these are the default). There are other types like "tracks" and the
 syntax for the dependency always goes in this same direction, unless the
 relationship is bidirectional.
 
-DO NOT use the beads executable as that is the original version of beads that
-is slower, buggier, and not compatible with our tasks.
+When you are working on a bead ALWAYS make sure your agent name is the assignee
+on the bead. If it's not, assign yourself before you start working.
+
+Coding and plan writing task beads should normally be reviewed by a reviewer agent
+before closing them out. Comment on the bead to track this - i.e. initial work is
+done, waiting on review, incorporating changes after review, etc. until it's closed.
+Close your bead when the work is done.
 
 #### Rules for creating beads
 
