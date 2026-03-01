@@ -3,7 +3,7 @@ name: plan-summarize
 description: Generate a planning summary doc with review statistics, incorporation rates, convergence tracking, finding patterns, and document metrics across plan docs AND test harness docs. Supports multiple review rounds — each round gets its own section.
 user-invocable: true
 allowed-tools: Bash Read Write Edit Grep Glob Task
-argument-hint: [output-path] [docs-glob-pattern]
+argument-hint: "[output-path] [docs-glob-pattern]"
 ---
 
 # Plan Summarize

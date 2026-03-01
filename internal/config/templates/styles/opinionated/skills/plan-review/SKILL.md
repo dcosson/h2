@@ -3,7 +3,7 @@ name: plan-review
 description: Independently review a plan doc and its test harness. Produces a review findings doc rated P0-P3. Run multiple times with different reviewers for independent perspectives.
 user-invocable: true
 allowed-tools: Bash Read Write Edit Grep Glob WebSearch WebFetch Task
-argument-hint: [doc-name] [reviewer-id]
+argument-hint: "[doc-name] [reviewer-id]"
 ---
 
 # Plan Review

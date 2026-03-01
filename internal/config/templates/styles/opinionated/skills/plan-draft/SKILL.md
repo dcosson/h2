@@ -3,7 +3,7 @@ name: plan-draft
 description: Write a detailed plan doc and its companion test harness doc for a single component. Use after plan-architect has created the plan index.
 user-invocable: true
 allowed-tools: Bash Read Write Edit Grep Glob WebSearch WebFetch Task
-argument-hint: [doc-name] [scope-description]
+argument-hint: "[doc-name] [scope-description]"
 ---
 
 # Plan Draft
