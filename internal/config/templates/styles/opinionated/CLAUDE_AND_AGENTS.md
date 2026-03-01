@@ -22,6 +22,8 @@ When writing code, prefer the Test Driven Development (TDD) approach: write unit
 
 DO NOT create fallbacks or leave around old behavior for backwards compatibility unless explicitly instructed to do so. Make changes & additions cleanly and leave the code shiny & pristin, not layered with fallbacks. DO NOT place shims in the codebase unless specifically instructed to do so. If you are refactoring then do so fully and update all callers.
 
+Before implementing new functionality check if there's a similar pattern already being used, and if you can use the same existing helper methods rather than duplicating. Only do this if the usecase is really the same though, don't force trying to share logic for things that actually should be different.
+
 ALWAYS commit your changes after completing a chunk of implementation work and ensuring tests pass. Git commits can easily be ammended later if further tweaks are made, but committing ensures we won't accidentally delete or lose work. Always git push after committing in non-main branches, and follow project-local instructions for main branches.
 
 ## Working Style
