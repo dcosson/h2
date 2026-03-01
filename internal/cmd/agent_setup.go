@@ -86,9 +86,13 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 	}
 
 	// Resolve harness and ensure config directories exist.
-	h, err := harness.Resolve(roleHarnessConfig(role), nil)
+	roleCfg := roleHarnessConfig(role)
+	h, err := harness.Resolve(roleCfg, nil)
 	if err != nil {
 		return fmt.Errorf("resolve harness: %w", err)
+	}
+	if err := validateHarnessConfigDirExists(role, roleCfg); err != nil {
+		return err
 	}
 	if err := h.EnsureConfigDir(config.ConfigDir()); err != nil {
 		return fmt.Errorf("ensure config dir: %w", err)
@@ -143,7 +147,6 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 	colorHints := detectTerminalHints()
 
 	// Fork the daemon.
-	roleCfg := roleHarnessConfig(role)
 	if err := forkDaemonFunc(session.ForkDaemonOpts{
 		Name:                 name,
 		SessionID:            sessionID,
@@ -183,4 +186,29 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 		fmt.Fprintf(os.Stderr, "Agent %q started. Attaching...\n", name)
 	}
 	return doAttach(name)
+}
+
+func validateHarnessConfigDirExists(role *config.Role, hcfg harness.HarnessConfig) error {
+	if hcfg.ConfigDir == "" {
+		return nil
+	}
+	info, err := os.Stat(hcfg.ConfigDir)
+	if err == nil {
+		if !info.IsDir() {
+			return fmt.Errorf("harness config path is not a directory: %s", hcfg.ConfigDir)
+		}
+		return nil
+	}
+	if !os.IsNotExist(err) {
+		return fmt.Errorf("stat harness config dir %s: %w", hcfg.ConfigDir, err)
+	}
+
+	profileDerivedPath := (hcfg.HarnessType == "claude_code" && role.ClaudeCodeConfigPath == "") ||
+		(hcfg.HarnessType == "codex" && role.CodexConfigPath == "")
+	if profileDerivedPath {
+		profile := role.GetAgentAccountProfile()
+		return fmt.Errorf("account profile %q not found (missing %s); h2 does not auto-create profiles on run, use 'h2 profile create %s' or choose an existing profile via 'h2 profile list'",
+			profile, hcfg.ConfigDir, profile)
+	}
+	return fmt.Errorf("missing harness config dir: %s", hcfg.ConfigDir)
 }
