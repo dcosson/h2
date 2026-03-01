@@ -152,41 +152,47 @@ Use --copy to clone from an existing profile instead of generating from template
 }
 
 func createProfile(h2Dir, name, style, copyFrom, harnessType string, out io.Writer) error {
+	return createOrUpdateProfile(h2Dir, name, style, copyFrom, harnessType, true, true, out)
+}
+
+func createOrUpdateProfile(h2Dir, name, style, copyFrom, harnessType string, requireNew, announce bool, out io.Writer) error {
 	sharedDir := filepath.Join(h2Dir, "account-profiles-shared", name)
 	claudeDir := filepath.Join(h2Dir, "claude-config", name)
 	codexDir := filepath.Join(h2Dir, "codex-config", name)
 
-	switch harnessType {
-	case profileHarnessAll:
-		if err := ensurePathMissing(sharedDir, "account-profiles-shared/"+name); err != nil {
-			return err
-		}
-		if err := ensurePathMissing(claudeDir, "claude-config/"+name); err != nil {
-			return err
-		}
-		if err := ensurePathMissing(codexDir, "codex-config/"+name); err != nil {
-			return err
-		}
-	case profileHarnessClaude:
-		if err := ensurePathMissing(sharedDir, "account-profiles-shared/"+name); err != nil {
-			return err
-		}
-		if err := ensurePathMissing(claudeDir, "claude-config/"+name); err != nil {
-			return err
-		}
-	case profileHarnessCodex:
-		if err := ensurePathMissing(sharedDir, "account-profiles-shared/"+name); err != nil {
-			return err
-		}
-		if err := ensurePathMissing(codexDir, "codex-config/"+name); err != nil {
-			return err
+	if requireNew {
+		switch harnessType {
+		case profileHarnessAll:
+			if err := ensurePathMissing(sharedDir, "account-profiles-shared/"+name); err != nil {
+				return err
+			}
+			if err := ensurePathMissing(claudeDir, "claude-config/"+name); err != nil {
+				return err
+			}
+			if err := ensurePathMissing(codexDir, "codex-config/"+name); err != nil {
+				return err
+			}
+		case profileHarnessClaude:
+			if err := ensurePathMissing(sharedDir, "account-profiles-shared/"+name); err != nil {
+				return err
+			}
+			if err := ensurePathMissing(claudeDir, "claude-config/"+name); err != nil {
+				return err
+			}
+		case profileHarnessCodex:
+			if err := ensurePathMissing(sharedDir, "account-profiles-shared/"+name); err != nil {
+				return err
+			}
+			if err := ensurePathMissing(codexDir, "codex-config/"+name); err != nil {
+				return err
+			}
 		}
 	}
 
 	if copyFrom != "" {
 		return copyProfile(h2Dir, name, copyFrom, harnessType, out)
 	}
-	return scaffoldProfile(h2Dir, name, style, harnessType, out, true)
+	return scaffoldProfile(h2Dir, name, style, harnessType, out, announce)
 }
 
 func scaffoldProfile(h2Dir, name, style, harnessType string, out io.Writer, announce bool) error {

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -230,7 +231,7 @@ func newRoleInitCmd() *cobra.Command {
 		Short: "Create a new role file with defaults",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			path, err := createRole(config.RolesDir(), args[0])
+			path, err := createOrUpdateRole(config.RolesDir(), args[0], "", true, false, false, cmd.OutOrStdout())
 			if err != nil {
 				return err
 			}
@@ -238,33 +239,6 @@ func newRoleInitCmd() *cobra.Command {
 			return nil
 		},
 	}
-}
-
-// createRole creates a role YAML file in rolesDir. Returns the path of the
-// created file. Uses .yaml.tmpl extension when the template contains template
-// syntax, otherwise .yaml. Returns an error if the role already exists.
-func createRole(rolesDir, name string) (string, error) {
-	if err := os.MkdirAll(rolesDir, 0o755); err != nil {
-		return "", fmt.Errorf("create roles dir: %w", err)
-	}
-
-	content := config.RoleTemplate(name)
-	ext := config.RoleFileExtension(content)
-	path := filepath.Join(rolesDir, name+ext)
-
-	// Check both extensions to prevent duplicates.
-	for _, e := range []string{".yaml", ".yaml.tmpl"} {
-		p := filepath.Join(rolesDir, name+e)
-		if _, err := os.Stat(p); err == nil {
-			return "", fmt.Errorf("role %q already exists at %s", name, p)
-		}
-	}
-
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return "", fmt.Errorf("write role file: %w", err)
-	}
-
-	return path, nil
 }
 
 func newRoleCheckCmd() *cobra.Command {
@@ -301,4 +275,54 @@ func newRoleCheckCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// createOrUpdateRole writes a role template file.
+// - requireNew=true: fail if role already exists (role init semantics)
+// - requireNew=false: upsert mode; overwrite only when force=true
+// - style="": use default style template selection (RoleTemplate)
+// - style!= "": use style-specific template selection (RoleTemplateWithStyle)
+func createOrUpdateRole(rolesDir, name, style string, requireNew, force, announce bool, out io.Writer) (string, error) {
+	if err := os.MkdirAll(rolesDir, 0o755); err != nil {
+		return "", fmt.Errorf("create roles dir: %w", err)
+	}
+
+	var content string
+	if style == "" {
+		content = config.RoleTemplate(name)
+	} else {
+		content = config.RoleTemplateWithStyle(name, style)
+	}
+
+	ext := config.RoleFileExtension(content)
+	path := filepath.Join(rolesDir, name+ext)
+
+	// Check both extensions to prevent duplicates.
+	for _, existingExt := range []string{".yaml", ".yaml.tmpl"} {
+		existingPath := filepath.Join(rolesDir, name+existingExt)
+		if _, err := os.Stat(existingPath); err == nil {
+			if requireNew {
+				return "", fmt.Errorf("role %q already exists at %s", name, existingPath)
+			}
+			if !force {
+				return "", fmt.Errorf("role %q already exists at %s (use --force to overwrite)", name, existingPath)
+			}
+		} else if err != nil && !os.IsNotExist(err) {
+			return "", fmt.Errorf("check role file %s: %w", existingPath, err)
+		}
+	}
+
+	if !requireNew && force {
+		_ = os.Remove(filepath.Join(rolesDir, name+".yaml"))
+		_ = os.Remove(filepath.Join(rolesDir, name+".yaml.tmpl"))
+	}
+
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return "", fmt.Errorf("write role file: %w", err)
+	}
+
+	if announce {
+		fmt.Fprintf(out, "  Wrote roles/%s\n", filepath.Base(path))
+	}
+	return path, nil
 }
