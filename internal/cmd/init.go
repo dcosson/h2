@@ -179,7 +179,7 @@ func runFullInit(cmd *cobra.Command, abs, prefix, style string, out io.Writer) e
 	fmt.Fprintf(out, "  Wrote config.yaml\n")
 
 	// Write CLAUDE.md and symlink AGENTS.md.
-	if err := scaffoldProfile(abs, "default", style, profileHarnessAll, out, false); err != nil {
+	if err := createOrUpdateProfile(abs, "default", style, "", profileHarnessAll, false, false, out); err != nil {
 		return fmt.Errorf("scaffold default profile: %w", err)
 	}
 
@@ -190,7 +190,7 @@ func runFullInit(cmd *cobra.Command, abs, prefix, style string, out io.Writer) e
 	}
 
 	// Create the default role.
-	rolePath, err := upsertDefaultRole(abs, style, true, out)
+	rolePath, err := createOrUpdateRole(filepath.Join(abs, "roles"), "default", style, false, true, true, out)
 	if err != nil {
 		return fmt.Errorf("create default role: %w", err)
 	}
@@ -253,50 +253,12 @@ func generateDefaultProfile(abs, style string, force bool, out io.Writer) error 
 			return err
 		}
 	}
-	return scaffoldProfile(abs, "default", style, profileHarnessAll, out, false)
+	return createOrUpdateProfile(abs, "default", style, "", profileHarnessAll, false, false, out)
 }
 
 func generateDefaultRole(abs, style string, force bool, out io.Writer) error {
-	_, err := upsertDefaultRole(abs, style, force, out)
+	_, err := createOrUpdateRole(filepath.Join(abs, "roles"), "default", style, false, force, true, out)
 	return err
-}
-
-func upsertDefaultRole(abs, style string, force bool, out io.Writer) (string, error) {
-	rolesDir := filepath.Join(abs, "roles")
-	if err := os.MkdirAll(rolesDir, 0o755); err != nil {
-		return "", fmt.Errorf("create roles dir: %w", err)
-	}
-	content := config.RoleTemplateWithStyle("default", style)
-	ext := config.RoleFileExtension(content)
-	targetPath := filepath.Join(rolesDir, "default"+ext)
-	targetLabel := filepath.Join("roles", "default"+ext)
-	if !force {
-		items := []generatePreflightItem{}
-		for _, e := range []string{".yaml", ".yaml.tmpl"} {
-			path := filepath.Join(rolesDir, "default"+e)
-			label := filepath.Join("roles", "default"+e)
-			if _, err := os.Stat(path); err == nil {
-				items = append(items, generatePreflightItem{Label: label, Status: "exists", Conflict: true})
-			} else if err != nil && !os.IsNotExist(err) {
-				items = append(items, generatePreflightItem{Label: label, Status: fmt.Sprintf("error: %v", err), Conflict: true})
-			}
-		}
-		if len(items) == 0 {
-			items = append(items, checkFilePreflight(targetPath, targetLabel)[0])
-		}
-		if err := summarizePreflight("role", items); err != nil {
-			return "", err
-		}
-	}
-	if force {
-		_ = os.Remove(filepath.Join(rolesDir, "default.yaml"))
-		_ = os.Remove(filepath.Join(rolesDir, "default.yaml.tmpl"))
-	}
-	if err := os.WriteFile(targetPath, []byte(content), 0o644); err != nil {
-		return "", fmt.Errorf("write %s: %w", targetLabel, err)
-	}
-	fmt.Fprintf(out, "  Wrote %s\n", targetLabel)
-	return targetPath, nil
 }
 
 // generateRoles regenerates role files for the selected style.
@@ -648,16 +610,6 @@ func writeInstructions(abs, style string) error {
 	}
 
 	return nil
-}
-
-func createRoleWithStyle(rolesDir, name, style string) (string, error) {
-	content := config.RoleTemplateWithStyle(name, style)
-	ext := config.RoleFileExtension(content)
-	path := filepath.Join(rolesDir, name+ext)
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return "", err
-	}
-	return path, nil
 }
 
 // checkDirSafeForInit checks whether the target directory is safe for init.
