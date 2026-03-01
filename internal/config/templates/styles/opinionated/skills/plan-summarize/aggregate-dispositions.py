@@ -74,12 +74,18 @@ def parse_table_row(line):
     line = line.strip()
     if not line.startswith("|"):
         return None
+    # Protect pipes that are not column delimiters:
+    # 1. Escaped pipes (\|)
+    # 2. Pipes inside backtick code spans (`...`)
+    _PIPE_PH = "\x00PIPE\x00"
+    line = line.replace("\\|", _PIPE_PH)
+    line = re.sub(r'`[^`]+`', lambda m: m.group(0).replace("|", _PIPE_PH), line)
     parts = line.split("|")
     if parts and parts[0].strip() == "":
         parts = parts[1:]
     if parts and parts[-1].strip() == "":
         parts = parts[:-1]
-    return [p.strip() for p in parts]
+    return [p.strip().replace(_PIPE_PH, "|") for p in parts]
 
 
 def is_separator_row(cells):
@@ -166,8 +172,18 @@ def find_disposition_tables(lines):
             round_num = extract_round_number(m)
             section_start = i
             i += 1
-            while i < len(lines) and lines[i].strip() == "":
-                i += 1
+            # Skip blank lines and prose between header and table
+            while i < len(lines):
+                stripped = lines[i].strip()
+                if stripped == "":
+                    i += 1
+                    continue
+                if stripped.startswith("|"):
+                    break  # Found table start
+                if stripped.startswith("## "):
+                    break  # Hit next section header
+                i += 1  # Skip prose line
+                continue
             if i < len(lines):
                 header_cells = parse_table_row(lines[i])
                 if header_cells:
