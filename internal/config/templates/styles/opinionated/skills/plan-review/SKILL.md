@@ -16,9 +16,10 @@ Independently review a plan doc and its test harness doc. Produce a findings doc
 - `$1`: Reviewer identifier (e.g., `reviewer-1`, used in output filename)
 - Plans directory: `docs/plans/` (or the project's established plans directory)
 
-## Critical Rule
+## Critical Rules
 
-Do NOT read other reviewers' review files for the same doc. Reviews must be independent.
+1. Do NOT read other reviewers' review files for the same doc. Reviews must be independent.
+2. Do NOT use sub-agents. The reviewing agent must read and analyze all docs itself, keeping everything in its own context window. Cross-document overlap and inconsistency detection requires one agent holding the full context — sub-agents fragment this and defeat the purpose of the review.
 
 ## Phase 1: Read
 
