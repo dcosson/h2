@@ -37,9 +37,7 @@ Phase 2: Plan Writing (plan-draft × N, via beads)
     ↓
 Phase 3: Review Cycles (plan-review → plan-incorporate → plan-summarize, repeat)
     ↓
-Phase 4: Final Cross-Doc Pass
-    ↓
-Phase 5: Sign-Off
+Phase 4: Sign-Off
 ```
 
 ### Phase 0: Input Assessment
@@ -93,17 +91,32 @@ This is the core loop. Each round:
 - Convergence criteria (see below)
 - Adjust batching and rotation for next round
 
-#### Batching Strategy
+#### Review Modes
 
-The skill defines three batching tiers based on round number and corpus size:
+The orchestrator has three review modes available. These are **not** tied to specific round numbers — the orchestrator uses judgment to pick the right mode for each round based on current state, convergence trajectory, and what would be most useful.
 
-| Phase | When | Docs Per Reviewer | Rationale |
-|-------|------|-------------------|-----------|
-| **Deep Review** | Rounds 1-2 | 1 doc per assignment | Fresh plans need thorough review. One doc at a time ensures deep reading. |
-| **Batch Review** | Rounds 3+ | N docs per reviewer (N = total_docs / num_reviewers) | Plans are stabilizing. Batching speeds things up AND gives each reviewer cross-doc visibility. |
-| **Full Corpus** | Final round | All docs to one agent | One agent reads everything to catch cross-doc contradictions that batched reviews miss. |
+| Mode | Docs Per Reviewer | When to Use |
+|------|-------------------|-------------|
+| **Deep Review** | 1 doc per assignment, M reviewers per doc | Early rounds when plans are fresh and need thorough review. Also useful mid-process if a specific doc got major changes (e.g., after a P0 fix) and needs focused re-review. Multiple independent reviewers per doc (possibly on different LLM models) gives broader coverage. |
+| **Batch Review** | N docs per reviewer (N = total_docs / num_reviewers) | Plans are stabilizing. Batching speeds things up AND gives each reviewer cross-doc visibility, which helps catch inconsistencies between docs. |
+| **Full Corpus** | All docs to one agent | One agent reads everything using plan-review to catch cross-doc contradictions that batched reviews miss. Can be used at any point, not just the final round. |
 
-For very large corpora (>40 docs), the Full Corpus pass may not fit in one context window. In that case:
+**Deep review with multiple reviewers:** In deep review mode, the orchestrator can assign M reviewers per doc (default 1). Each reviewer works independently per plan-review's critical rules — they don't read each other's findings. This is especially useful for:
+- Getting diverse perspectives from agents running different LLM models
+- High-stakes docs (core storage, formal specs) that warrant extra scrutiny
+- Early rounds where more eyes catch more issues
+
+The plan-incorporate skill already handles multiple review files per doc, so no changes needed there. Beads in this mode are per-reviewer-per-doc (e.g., "R1 Review: 01a-io-subsystem (reviewer-1)", "R1 Review: 01a-io-subsystem (reviewer-2)").
+
+The orchestrator should **mix modes across rounds** rather than following a rigid progression. For example:
+- Start with deep review rounds to stabilize individual docs
+- Switch to batch review to get cross-doc visibility
+- Drop back to deep review if a batch round surfaces a P0 that requires substantial changes
+- Do a full corpus round to check for systemic issues
+- Continue with batch review if the full corpus round found things
+- Some randomness in mode selection can be beneficial — it prevents reviewers from settling into patterns and can surface unexpected issues
+
+For very large corpora (>40 docs), the Full Corpus mode may not fit in one context window. In that case:
 - Split into 2-3 overlapping batches (e.g., docs 1-25, docs 15-40) so seams are reviewed
 - Or have the agent read all docs in sequence but write findings incrementally
 
@@ -124,20 +137,9 @@ The orchestrating agent uses judgment, but guided by these rules:
 4. **Definitely done if**: 0 findings for 1 round (after at least 3 total rounds)
 5. **Consider stopping if**: Findings are all P3 cosmetic and ≤5 total
 
-After convergence is reached in batch review rounds, do one Final Cross-Doc Pass (Phase 4).
+After convergence is reached, move to Phase 4 (Sign-Off). A full corpus review round can be done at any point during Phase 3 — it doesn't need to be saved for the end.
 
-### Phase 4: Final Cross-Doc Pass
-
-One agent reads ALL plan docs and ALL test harness docs. They're not doing a normal plan-review per doc — they're looking specifically for:
-- Cross-doc contract mismatches (interface A in doc X doesn't match interface A in doc Y)
-- Inconsistent terminology or naming
-- Missing cross-references
-- Dependency assumptions that don't hold
-- Duplicated logic or ownership conflicts
-
-Output: A single findings doc covering the whole corpus. Incorporate findings into the relevant individual docs.
-
-### Phase 5: Sign-Off
+### Phase 4: Sign-Off
 
 Present final summary to the user:
 - Total rounds, total findings, incorporation rate
@@ -155,14 +157,13 @@ Epic: "Planning: Everything DB"
   ├── Task: "Draft 01a-io-subsystem" (plan-draft)
   ├── Task: "Draft 01b-wal" (plan-draft)
   ├── ...
-  ├── Task: "R1 Review: batch A" (plan-review)
-  ├── Task: "R1 Review: batch B" (plan-review)
-  ├── Task: "R1 Incorporate: batch A" (plan-incorporate)
-  ├── Task: "R1 Incorporate: batch B" (plan-incorporate)
+  ├── Task: "R1 Review: 01a, 01b-wal, 01b-tlaplus, ..." (plan-review, batch)
+  ├── Task: "R1 Review: 05a, 05b, 05c, ..." (plan-review, batch)
+  ├── Task: "R1 Incorporate: 01a, 01b-wal, ..." (plan-incorporate, batch)
+  ├── Task: "R1 Incorporate: 05a, 05b, ..." (plan-incorporate, batch)
   ├── Task: "R1 Summarize" (plan-summarize)
-  ├── Task: "R2 Review: batch A" (plan-review, rotated)
+  ├── Task: "R2 Review: 05a, 05b, ... (rotated)" (plan-review, batch)
   ├── ...
-  ├── Task: "Final Cross-Doc Pass" (plan-review variant)
   └── Task: "Planning Sign-Off"
 ```
 
@@ -178,14 +179,18 @@ The orchestrating agent makes these calls:
 1. **When to stop reviewing** — convergence criteria are guidelines, not hard rules
 2. **Whether to escalate** — if reviewers and incorporators can't agree on a P0/P1
 3. **How to handle agent failures** — reassign, skip, or wait?
-4. **Whether the final cross-doc pass is needed** — if convergence was fast and clean, maybe skip
-5. **Whether to create additional plans** — if reviews reveal a missing component
+4. **Which review mode to use each round** — deep, batch, or full corpus based on current state
+5. **Whether to create additional plans** — if reviews reveal a missing component. New plans get a focused catch-up review phase (a few reviewers do plan-review on just the new doc) before joining the regular round cycle
+
+## Resolved Questions
+
+1. **Beads per-doc or per-batch?** Per-batch in batch/full-corpus mode. Each bead lists the docs in the batch (e.g., "R1 Review: 01a, 01b-wal, 01c, ..."). In deep review mode, beads are per-doc.
+2. **Full corpus pass: separate skill?** No. Use the same plan-review skill, just assign all docs to one agent.
+3. **Convergence criteria configurable?** Defaults in the skill are sufficient. Projects can override via CLAUDE.md if needed.
+4. **New plan doc mid-review?** Orchestrator uses judgment. New docs get a focused catch-up phase (a few reviewers do plan-review on just the new doc) before it joins the regular round cycle.
 
 ## Open Questions
 
-1. Should we create review-round beads per-doc or per-batch? Per-batch is simpler but less granular tracking.
-2. Should the final cross-doc pass use the same plan-review skill or a separate skill (e.g., `plan-cross-review`)?
-3. Should convergence criteria be configurable per-project, or are the defaults sufficient?
-4. How do we handle the case where a review round surfaces a need for a new plan doc that wasn't in the original index?
+1. How should we handle multiple reviewers per doc in deep review mode? (e.g., 2-3 different agents/models reviewing the same doc independently for broader coverage)
 
 What do you think? Happy to iterate on any of this.
