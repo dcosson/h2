@@ -22,15 +22,18 @@ deps:
 
 check: fmt vet staticcheck
 
+check-nofix: fmt-nofix vet staticcheck
 check-ci: fmt-check vet staticcheck
 
 fmt:
 	@echo "==> gofmt"
 	gofmt -w .
 
-fmt-check:
-	@echo "==> gofmt (check)"
+fmt-nofix:
+	@echo "==> gofmt (nofix)"
 	@test -z "$$(gofmt -l .)" || (gofmt -l . && echo "above files are not formatted" && exit 1)
+
+fmt-check: fmt-nofix
 
 vet:
 	@echo "==> go vet"

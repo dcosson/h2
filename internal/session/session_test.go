@@ -738,6 +738,7 @@ func TestSetupAgent_LogDirUsesH2Dir(t *testing.T) {
 	t.Cleanup(config.ResetResolveCache)
 
 	s := New("test-agent", "true", nil)
+	s.HarnessType = "generic"
 	defer s.Stop()
 
 	if err := s.setupAgent(); err != nil {
