@@ -20,6 +20,9 @@ test-coverage:
 deps:
 	go install honnef.co/go/tools/cmd/staticcheck@latest
 
+loc:
+	scc --no-gen --exclude-dir .git,.beads,.claude,.github,docs,qa .
+
 check: fmt
 	@echo "==> go vet"
 	go vet ./...
