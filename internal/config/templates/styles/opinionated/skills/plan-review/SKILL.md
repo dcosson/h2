@@ -19,7 +19,7 @@ Independently review a plan doc and its test harness doc. Produce a findings doc
 ## Critical Rules
 
 1. Do NOT read other reviewers' review files for the same doc. Reviews must be independent.
-2. Do NOT use sub-agents. The reviewing agent must read and analyze all docs itself, keeping everything in its own context window. Cross-document overlap and inconsistency detection requires one agent holding the full context — sub-agents fragment this and defeat the purpose of the review.
+2. Do NOT delegate plan doc reviews to sub-agents. The reviewing agent must read and analyze all plan docs itself, keeping everything in its own context window. Cross-document overlap and inconsistency detection requires one agent holding the full context — sub-agents fragment this and defeat the purpose of the review. Explore agents may be used for targeted research (understanding codebase structure, looking up specific docs or references), but the actual review analysis and findings must be done by the reviewing agent directly.
 
 ## Phase 1: Read
 
