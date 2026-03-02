@@ -10,7 +10,10 @@ build-release:
 	$(MAKE) build RELEASE=true
 
 test:
-	go test ./...
+	go test $$(go list ./... | grep -v '^h2/e2etests$$')
+
+test-e2e:
+	go test ./e2etests
 
 test-coverage:
 	go test -coverprofile=coverage.out ./...
