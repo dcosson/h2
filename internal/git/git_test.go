@@ -19,6 +19,17 @@ func initGitRepo(t *testing.T, dir string) {
 	os.WriteFile(filepath.Join(dir, "README.md"), []byte("hello"), 0o644)
 	run(t, dir, "git", "add", ".")
 	run(t, dir, "git", "commit", "-m", "initial")
+	// Normalize initial branch for CI environments where git init defaults to "master".
+	cmd := exec.Command("git", "branch", "--show-current")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git branch --show-current failed: %v", err)
+	}
+	current := strings.TrimSpace(string(out))
+	if current != "" && current != "main" {
+		run(t, dir, "git", "branch", "-m", current, "main")
+	}
 }
 
 func run(t *testing.T, dir, name string, args ...string) {

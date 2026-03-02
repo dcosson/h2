@@ -555,6 +555,13 @@ working_dir: /workspace/project
 }
 
 func TestValidate_WorktreeUsesWorkingDirAsSourceRepo(t *testing.T) {
+	ResetResolveCache()
+	defer ResetResolveCache()
+
+	h2Dir := t.TempDir()
+	WriteMarker(h2Dir)
+	t.Setenv("H2_DIR", h2Dir)
+
 	role := &Role{
 		RoleName:        "test",
 		WorkingDir:      "projects/myapp",
