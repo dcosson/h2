@@ -153,7 +153,7 @@ func runFullInit(cmd *cobra.Command, abs, prefix, style string, out io.Writer) e
 		"sockets",
 		filepath.Join("claude-config", "default"),
 		filepath.Join("codex-config", "default"),
-		filepath.Join("profiles", "default", "skills"),
+		filepath.Join("profiles-shared", "default", "skills"),
 		"projects",
 		"worktrees",
 		filepath.Join("pods", "roles"),
@@ -239,13 +239,13 @@ func runGenerate(abs, what, style string, force bool, out io.Writer) error {
 func generateDefaultProfile(abs, style string, force bool, out io.Writer) error {
 	if !force {
 		items := []generatePreflightItem{
-			checkFilePreflight(filepath.Join(abs, "profiles", "default", "CLAUDE_AND_AGENTS.md"), "profiles/default/CLAUDE_AND_AGENTS.md")[0],
-			checkDirPreflight(filepath.Join(abs, "profiles", "default", "skills"), "profiles/default/skills"),
-			checkSymlinkPreflight(filepath.Join(abs, "claude-config", "default", "CLAUDE.md"), filepath.Join("..", "..", "profiles", "default", "CLAUDE_AND_AGENTS.md"), "claude-config/default/CLAUDE.md"),
-			checkSymlinkPreflight(filepath.Join(abs, "claude-config", "default", "skills"), filepath.Join("..", "..", "profiles", "default", "skills"), "claude-config/default/skills"),
+			checkFilePreflight(filepath.Join(abs, "profiles-shared", "default", "CLAUDE_AND_AGENTS.md"), "profiles-shared/default/CLAUDE_AND_AGENTS.md")[0],
+			checkDirPreflight(filepath.Join(abs, "profiles-shared", "default", "skills"), "profiles-shared/default/skills"),
+			checkSymlinkPreflight(filepath.Join(abs, "claude-config", "default", "CLAUDE.md"), filepath.Join("..", "..", "profiles-shared", "default", "CLAUDE_AND_AGENTS.md"), "claude-config/default/CLAUDE.md"),
+			checkSymlinkPreflight(filepath.Join(abs, "claude-config", "default", "skills"), filepath.Join("..", "..", "profiles-shared", "default", "skills"), "claude-config/default/skills"),
 			checkFilePreflight(filepath.Join(abs, "claude-config", "default", "settings.json"), "claude-config/default/settings.json")[0],
-			checkSymlinkPreflight(filepath.Join(abs, "codex-config", "default", "AGENTS.md"), filepath.Join("..", "..", "profiles", "default", "CLAUDE_AND_AGENTS.md"), "codex-config/default/AGENTS.md"),
-			checkSymlinkPreflight(filepath.Join(abs, "codex-config", "default", "skills"), filepath.Join("..", "..", "profiles", "default", "skills"), "codex-config/default/skills"),
+			checkSymlinkPreflight(filepath.Join(abs, "codex-config", "default", "AGENTS.md"), filepath.Join("..", "..", "profiles-shared", "default", "CLAUDE_AND_AGENTS.md"), "codex-config/default/AGENTS.md"),
+			checkSymlinkPreflight(filepath.Join(abs, "codex-config", "default", "skills"), filepath.Join("..", "..", "profiles-shared", "default", "skills"), "codex-config/default/skills"),
 			checkFilePreflight(filepath.Join(abs, "codex-config", "default", "config.toml"), "codex-config/default/config.toml")[0],
 			checkFilePreflight(filepath.Join(abs, "codex-config", "default", "requirements.toml"), "codex-config/default/requirements.toml")[0],
 		}
@@ -322,7 +322,7 @@ func generateRoles(abs, style string, force bool, out io.Writer) error {
 
 // generateInstructions regenerates CLAUDE.md and the AGENTS.md symlink.
 func generateInstructions(abs, style string, force bool, out io.Writer) error {
-	sharedDir := filepath.Join(abs, "profiles", "default")
+	sharedDir := filepath.Join(abs, "profiles-shared", "default")
 	sharedMDPath := filepath.Join(sharedDir, "CLAUDE_AND_AGENTS.md")
 	claudeDir := filepath.Join(abs, "claude-config", "default")
 	codexDir := filepath.Join(abs, "codex-config", "default")
@@ -340,10 +340,10 @@ func generateInstructions(abs, style string, force bool, out io.Writer) error {
 		return fmt.Errorf("create shared profile dir: %w", err)
 	}
 
-	sharedMDTarget := filepath.Join("..", "..", "profiles", "default", "CLAUDE_AND_AGENTS.md")
+	sharedMDTarget := filepath.Join("..", "..", "profiles-shared", "default", "CLAUDE_AND_AGENTS.md")
 	if !force {
 		items := []generatePreflightItem{
-			checkFilePreflight(sharedMDPath, "profiles/default/CLAUDE_AND_AGENTS.md")[0],
+			checkFilePreflight(sharedMDPath, "profiles-shared/default/CLAUDE_AND_AGENTS.md")[0],
 		}
 		items = append(items, checkSymlinkPreflight(claudeMDPath, sharedMDTarget, "claude-config/default/CLAUDE.md"))
 		items = append(items, checkSymlinkPreflight(agentsMDPath, sharedMDTarget, "codex-config/default/AGENTS.md"))
@@ -358,7 +358,7 @@ func generateInstructions(abs, style string, force bool, out io.Writer) error {
 	if err := config.UpsertContentMeta(sharedDir, style, []string{"CLAUDE_AND_AGENTS.md"}); err != nil {
 		return fmt.Errorf("update shared metadata: %w", err)
 	}
-	fmt.Fprintf(out, "  Wrote profiles/default/CLAUDE_AND_AGENTS.md\n")
+	fmt.Fprintf(out, "  Wrote profiles-shared/default/CLAUDE_AND_AGENTS.md\n")
 
 	if err := ensureSymlink(claudeMDPath, sharedMDTarget, force, out, "claude-config/default/CLAUDE.md"); err != nil {
 		return err
@@ -374,8 +374,8 @@ func generateSkills(abs, style string, force bool, out io.Writer) error {
 	codexDir := filepath.Join(abs, "codex-config", "default")
 	claudeSkillsPath := filepath.Join(claudeDir, "skills")
 	codexSkillsPath := filepath.Join(codexDir, "skills")
-	sharedSkillsDir := filepath.Join(abs, "profiles", "default", "skills")
-	sharedSkillsTarget := filepath.Join("..", "..", "profiles", "default", "skills")
+	sharedSkillsDir := filepath.Join(abs, "profiles-shared", "default", "skills")
+	sharedSkillsTarget := filepath.Join("..", "..", "profiles-shared", "default", "skills")
 
 	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
 		return fmt.Errorf("create claude-config dir: %w", err)
@@ -386,7 +386,7 @@ func generateSkills(abs, style string, force bool, out io.Writer) error {
 
 	if !force {
 		items := []generatePreflightItem{
-			checkDirPreflight(sharedSkillsDir, "profiles/default/skills"),
+			checkDirPreflight(sharedSkillsDir, "profiles-shared/default/skills"),
 		}
 		items = append(items, checkSymlinkPreflight(claudeSkillsPath, sharedSkillsTarget, "claude-config/default/skills"))
 		items = append(items, checkSymlinkPreflight(codexSkillsPath, sharedSkillsTarget, "codex-config/default/skills"))
@@ -413,7 +413,7 @@ func generateSkills(abs, style string, force bool, out io.Writer) error {
 	if err := ensureSymlink(codexSkillsPath, sharedSkillsTarget, force, out, "codex-config/default/skills"); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "  Wrote profiles/default/skills/\n")
+	fmt.Fprintf(out, "  Wrote profiles-shared/default/skills/\n")
 	return nil
 }
 

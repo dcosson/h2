@@ -18,7 +18,7 @@ func setupProfileTestH2Dir(t *testing.T) string {
 
 	h2Dir := filepath.Join(t.TempDir(), "myh2")
 	for _, sub := range []string{
-		"profiles",
+		"profiles-shared",
 		"claude-config",
 		"codex-config",
 		"roles",
@@ -40,13 +40,13 @@ func TestProfileCreate_SymlinkShared(t *testing.T) {
 	h2Dir := setupProfileTestH2Dir(t)
 
 	srcProfile := "base"
-	if err := os.MkdirAll(filepath.Join(h2Dir, "profiles", srcProfile, "skills"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(h2Dir, "profiles-shared", srcProfile, "skills"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(h2Dir, "profiles", srcProfile, "CLAUDE_AND_AGENTS.md"), []byte("shared"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(h2Dir, "profiles-shared", srcProfile, "CLAUDE_AND_AGENTS.md"), []byte("shared"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(h2Dir, "profiles", srcProfile, "skills", "SKILL.md"), []byte("skill"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(h2Dir, "profiles-shared", srcProfile, "skills", "SKILL.md"), []byte("skill"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -82,7 +82,7 @@ func TestProfileCreate_SymlinkShared(t *testing.T) {
 		t.Fatalf("profile create failed: %v", err)
 	}
 
-	sharedLink := filepath.Join(h2Dir, "profiles", "new")
+	sharedLink := filepath.Join(h2Dir, "profiles-shared", "new")
 	info, err := os.Lstat(sharedLink)
 	if err != nil {
 		t.Fatalf("lstat shared link: %v", err)
@@ -109,7 +109,7 @@ func TestProfileCreate_SymlinkShared(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readlink claude shared link: %v", err)
 	}
-	if want := filepath.Join("..", "..", "profiles", "new", "CLAUDE_AND_AGENTS.md"); claudeTarget != want {
+	if want := filepath.Join("..", "..", "profiles-shared", "new", "CLAUDE_AND_AGENTS.md"); claudeTarget != want {
 		t.Fatalf("claude CLAUDE.md target = %q, want %q", claudeTarget, want)
 	}
 
@@ -117,7 +117,7 @@ func TestProfileCreate_SymlinkShared(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readlink codex shared link: %v", err)
 	}
-	if want := filepath.Join("..", "..", "profiles", "new", "CLAUDE_AND_AGENTS.md"); codexTarget != want {
+	if want := filepath.Join("..", "..", "profiles-shared", "new", "CLAUDE_AND_AGENTS.md"); codexTarget != want {
 		t.Fatalf("codex AGENTS.md target = %q, want %q", codexTarget, want)
 	}
 
@@ -141,7 +141,7 @@ func TestProfileReset_DefaultsPreserveAuthAndCustomSkills(t *testing.T) {
 	h2Dir := setupProfileTestH2Dir(t)
 	name := "work"
 
-	sharedDir := filepath.Join(h2Dir, "profiles", name)
+	sharedDir := filepath.Join(h2Dir, "profiles-shared", name)
 	sharedSkills := filepath.Join(sharedDir, "skills")
 	if err := os.MkdirAll(sharedSkills, 0o755); err != nil {
 		t.Fatal(err)
@@ -296,7 +296,7 @@ func TestProfileReset_IncludeAuthClearsAuthFiles(t *testing.T) {
 	h2Dir := setupProfileTestH2Dir(t)
 	name := "work"
 
-	sharedDir := filepath.Join(h2Dir, "profiles", name)
+	sharedDir := filepath.Join(h2Dir, "profiles-shared", name)
 	if err := os.MkdirAll(sharedDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -350,10 +350,10 @@ func TestProfileShow_IncludesSymlinksAndMetadata(t *testing.T) {
 
 	s := out.String()
 	checks := []string{
-		"Symlink profiles/demo: no",
+		"Symlink profiles-shared/demo: no",
 		"Symlink claude-config/demo/CLAUDE.md: yes ->",
 		"Symlink codex-config/demo/AGENTS.md: yes ->",
-		"Metadata profiles/demo:",
+		"Metadata profiles-shared/demo:",
 		"CLAUDE_AND_AGENTS.md | v",
 		"Metadata claude-config/demo:",
 		"settings.json | v",
@@ -367,7 +367,7 @@ func TestProfileShow_IncludesSymlinksAndMetadata(t *testing.T) {
 		}
 	}
 
-	if _, err := os.Stat(filepath.Join(h2Dir, "profiles", "demo", config.ContentMetaFileName)); err != nil {
+	if _, err := os.Stat(filepath.Join(h2Dir, "profiles-shared", "demo", config.ContentMetaFileName)); err != nil {
 		t.Fatalf("missing shared metadata file: %v", err)
 	}
 }

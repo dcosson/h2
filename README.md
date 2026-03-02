@@ -160,7 +160,7 @@ Profiles are reusable harness configuration bundles (auth, settings, shared inst
 
 ```text
 ~/.h2/
-├── profiles/<name>/               # shared instructions + skills
+├── profiles-shared/<name>/               # shared instructions + skills
 ├── claude-config/<name>/          # Claude harness config
 └── codex-config/<name>/           # Codex harness config
 ```

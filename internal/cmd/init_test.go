@@ -74,7 +74,7 @@ func expectedDirs() []string {
 		"sockets",
 		filepath.Join("claude-config", "default"),
 		filepath.Join("codex-config", "default"),
-		filepath.Join("profiles", "default", "skills"),
+		filepath.Join("profiles-shared", "default", "skills"),
 		"projects",
 		"worktrees",
 		filepath.Join("pods", "roles"),
@@ -441,7 +441,7 @@ func TestInitCmd_CreatesAGENTSMDSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected AGENTS.md to be a symlink: %v", err)
 	}
-	expectedTarget := filepath.Join("..", "..", "profiles", "default", "CLAUDE_AND_AGENTS.md")
+	expectedTarget := filepath.Join("..", "..", "profiles-shared", "default", "CLAUDE_AND_AGENTS.md")
 	if target != expectedTarget {
 		t.Errorf("AGENTS.md symlink target = %q, want %q", target, expectedTarget)
 	}
@@ -495,7 +495,7 @@ func TestInitCmd_CreatesCLAUDEMDSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected CLAUDE.md to be a symlink: %v", err)
 	}
-	expectedTarget := filepath.Join("..", "..", "profiles", "default", "CLAUDE_AND_AGENTS.md")
+	expectedTarget := filepath.Join("..", "..", "profiles-shared", "default", "CLAUDE_AND_AGENTS.md")
 	if target != expectedTarget {
 		t.Errorf("CLAUDE.md symlink target = %q, want %q", target, expectedTarget)
 	}
@@ -525,7 +525,7 @@ func TestInitCmd_CreatesSharedSkillsSymlinks(t *testing.T) {
 		if err != nil {
 			t.Fatalf("expected %s to be a symlink: %v", tt.path, err)
 		}
-		expectedTarget := filepath.Join("..", "..", "profiles", "default", "skills")
+		expectedTarget := filepath.Join("..", "..", "profiles-shared", "default", "skills")
 		if target != expectedTarget {
 			t.Errorf("%s symlink target = %q, want %q", tt.path, target, expectedTarget)
 		}
@@ -551,7 +551,7 @@ func TestInitCmd_VerboseOutput(t *testing.T) {
 		"Created roles/",
 		"Created sessions/",
 		"Wrote config.yaml",
-		"Wrote profiles/default/CLAUDE_AND_AGENTS.md",
+		"Wrote profiles-shared/default/CLAUDE_AND_AGENTS.md",
 		"Symlinked claude-config/default/CLAUDE.md",
 		"Symlinked codex-config/default/AGENTS.md",
 		"Wrote roles/default.yaml", // may be default.yaml.tmpl
@@ -672,7 +672,7 @@ func TestInitCmd_GenerateInstructions(t *testing.T) {
 	dir := initH2Dir(t, fakeHome)
 
 	// Remove CLAUDE.md to test regeneration.
-	sharedPath := filepath.Join(dir, "profiles", "default", "CLAUDE_AND_AGENTS.md")
+	sharedPath := filepath.Join(dir, "profiles-shared", "default", "CLAUDE_AND_AGENTS.md")
 	os.Remove(sharedPath)
 
 	cmd := newInitCmd()
@@ -689,7 +689,7 @@ func TestInitCmd_GenerateInstructions(t *testing.T) {
 		t.Fatalf("expected CLAUDE_AND_AGENTS.md to be regenerated: %v", err)
 	}
 
-	if !strings.Contains(buf.String(), "Wrote profiles/default/CLAUDE_AND_AGENTS.md") {
+	if !strings.Contains(buf.String(), "Wrote profiles-shared/default/CLAUDE_AND_AGENTS.md") {
 		t.Errorf("output should mention writing CLAUDE_AND_AGENTS.md, got: %s", buf.String())
 	}
 }
@@ -718,7 +718,7 @@ func TestInitCmd_GenerateInstructionsForce(t *testing.T) {
 	dir := initH2Dir(t, fakeHome)
 
 	// Overwrite CLAUDE.md with custom content.
-	sharedPath := filepath.Join(dir, "profiles", "default", "CLAUDE_AND_AGENTS.md")
+	sharedPath := filepath.Join(dir, "profiles-shared", "default", "CLAUDE_AND_AGENTS.md")
 	os.WriteFile(sharedPath, []byte("custom content"), 0o644)
 
 	cmd := newInitCmd()
@@ -738,7 +738,7 @@ func TestInitCmd_GenerateInstructionsForce(t *testing.T) {
 	if string(data) == "custom content" {
 		t.Error("CLAUDE_AND_AGENTS.md should have been overwritten with --force")
 	}
-	if !strings.Contains(buf.String(), "Wrote profiles/default/CLAUDE_AND_AGENTS.md") {
+	if !strings.Contains(buf.String(), "Wrote profiles-shared/default/CLAUDE_AND_AGENTS.md") {
 		t.Errorf("output should mention writing, got: %s", buf.String())
 	}
 }
@@ -747,7 +747,7 @@ func TestInitCmd_GenerateInstructions_DoesNotWriteHarnessConfigOrSkills(t *testi
 	fakeHome := setupFakeHome(t)
 	dir := initH2Dir(t, fakeHome)
 
-	sharedInstructions := filepath.Join(dir, "profiles", "default", "CLAUDE_AND_AGENTS.md")
+	sharedInstructions := filepath.Join(dir, "profiles-shared", "default", "CLAUDE_AND_AGENTS.md")
 	if err := os.Remove(sharedInstructions); err != nil {
 		t.Fatalf("remove shared instructions: %v", err)
 	}
@@ -761,7 +761,7 @@ func TestInitCmd_GenerateInstructions_DoesNotWriteHarnessConfigOrSkills(t *testi
 			t.Fatalf("remove %s: %v", p, err)
 		}
 	}
-	sharedSkills := filepath.Join(dir, "profiles", "default", "skills")
+	sharedSkills := filepath.Join(dir, "profiles-shared", "default", "skills")
 	if err := os.RemoveAll(sharedSkills); err != nil {
 		t.Fatalf("remove shared skills: %v", err)
 	}
@@ -962,15 +962,15 @@ func TestInitCmd_GenerateAll(t *testing.T) {
 
 	// Remove files to test regeneration.
 	os.Remove(filepath.Join(dir, "config.yaml"))
-	os.Remove(filepath.Join(dir, "profiles", "default", "CLAUDE_AND_AGENTS.md"))
+	os.Remove(filepath.Join(dir, "profiles-shared", "default", "CLAUDE_AND_AGENTS.md"))
 	os.Remove(filepath.Join(dir, "codex-config", "default", "AGENTS.md"))
 	os.Remove(filepath.Join(dir, "roles", "default.yaml"))
 	os.Remove(filepath.Join(dir, "roles", "default.yaml.tmpl"))
 	os.Remove(filepath.Join(dir, "claude-config", "default", "settings.json"))
 	os.Remove(filepath.Join(dir, "codex-config", "default", "config.toml"))
 	os.Remove(filepath.Join(dir, "codex-config", "default", "requirements.toml"))
-	os.RemoveAll(filepath.Join(dir, "profiles", "default", "skills"))
-	os.MkdirAll(filepath.Join(dir, "profiles", "default", "skills"), 0o755)
+	os.RemoveAll(filepath.Join(dir, "profiles-shared", "default", "skills"))
+	os.MkdirAll(filepath.Join(dir, "profiles-shared", "default", "skills"), 0o755)
 
 	cmd := newInitCmd()
 	var buf bytes.Buffer
@@ -999,7 +999,7 @@ func TestInitCmd_StyleMinimal_GeneratesMinimalInstructions(t *testing.T) {
 		t.Fatalf("init --style minimal failed: %v", err)
 	}
 
-	sharedPath := filepath.Join(dir, "profiles", "default", "CLAUDE_AND_AGENTS.md")
+	sharedPath := filepath.Join(dir, "profiles-shared", "default", "CLAUDE_AND_AGENTS.md")
 	data, err := os.ReadFile(sharedPath)
 	if err != nil {
 		t.Fatalf("read shared instructions: %v", err)
@@ -1020,7 +1020,7 @@ func TestInitCmd_GenerateInstructions_StyleMinimal(t *testing.T) {
 		t.Fatalf("--generate instructions --style minimal failed: %v", err)
 	}
 
-	sharedPath := filepath.Join(dir, "profiles", "default", "CLAUDE_AND_AGENTS.md")
+	sharedPath := filepath.Join(dir, "profiles-shared", "default", "CLAUDE_AND_AGENTS.md")
 	data, err := os.ReadFile(sharedPath)
 	if err != nil {
 		t.Fatalf("read shared instructions: %v", err)
@@ -1041,8 +1041,8 @@ func TestInitCmd_Opinionated_PopulatesSharedSkills(t *testing.T) {
 	}
 
 	checks := []string{
-		filepath.Join(dir, "profiles", "default", "skills", "shaping", "SKILL.md"),
-		filepath.Join(dir, "profiles", "default", "skills", "stress-test", "SKILL.md"),
+		filepath.Join(dir, "profiles-shared", "default", "skills", "shaping", "SKILL.md"),
+		filepath.Join(dir, "profiles-shared", "default", "skills", "stress-test", "SKILL.md"),
 	}
 	for _, p := range checks {
 		if _, err := os.Stat(p); err != nil {
@@ -1061,7 +1061,7 @@ func TestInitCmd_Minimal_LeavesSharedSkillsEmpty(t *testing.T) {
 		t.Fatalf("init --style minimal failed: %v", err)
 	}
 
-	entries, err := os.ReadDir(filepath.Join(dir, "profiles", "default", "skills"))
+	entries, err := os.ReadDir(filepath.Join(dir, "profiles-shared", "default", "skills"))
 	if err != nil {
 		t.Fatalf("read shared skills dir: %v", err)
 	}
@@ -1074,7 +1074,7 @@ func TestInitCmd_GenerateSkills(t *testing.T) {
 	fakeHome := setupFakeHome(t)
 	dir := initH2Dir(t, fakeHome)
 
-	sharedSkills := filepath.Join(dir, "profiles", "default", "skills")
+	sharedSkills := filepath.Join(dir, "profiles-shared", "default", "skills")
 	if err := os.RemoveAll(sharedSkills); err != nil {
 		t.Fatalf("remove shared skills: %v", err)
 	}
@@ -1114,7 +1114,7 @@ func TestInitCmd_GenerateSkills_CreatesMissingSkillSymlinks(t *testing.T) {
 	fakeHome := setupFakeHome(t)
 	dir := initH2Dir(t, fakeHome)
 
-	sharedSkills := filepath.Join(dir, "profiles", "default", "skills")
+	sharedSkills := filepath.Join(dir, "profiles-shared", "default", "skills")
 	if err := os.RemoveAll(sharedSkills); err != nil {
 		t.Fatalf("clear shared skills: %v", err)
 	}
@@ -1137,7 +1137,7 @@ func TestInitCmd_GenerateSkills_CreatesMissingSkillSymlinks(t *testing.T) {
 		t.Fatalf("--generate skills failed: %v", err)
 	}
 
-	want := filepath.Join("..", "..", "profiles", "default", "skills")
+	want := filepath.Join("..", "..", "profiles-shared", "default", "skills")
 	for _, p := range []string{claudeSkills, codexSkills} {
 		target, err := os.Readlink(p)
 		if err != nil {
@@ -1153,7 +1153,7 @@ func TestInitCmd_GenerateSkills_ConflictingSkillPathsFailBeforeWrite(t *testing.
 	fakeHome := setupFakeHome(t)
 	dir := initH2Dir(t, fakeHome)
 
-	sharedSkills := filepath.Join(dir, "profiles", "default", "skills")
+	sharedSkills := filepath.Join(dir, "profiles-shared", "default", "skills")
 	if err := os.RemoveAll(sharedSkills); err != nil {
 		t.Fatalf("remove shared skills: %v", err)
 	}
@@ -1206,7 +1206,7 @@ func TestInitCmd_GenerateSkills_ForceReplacesConflictingSkillPaths(t *testing.T)
 		t.Fatalf("--generate skills --force failed: %v", err)
 	}
 
-	want := filepath.Join("..", "..", "profiles", "default", "skills")
+	want := filepath.Join("..", "..", "profiles-shared", "default", "skills")
 	target, err := os.Readlink(claudeSkills)
 	if err != nil {
 		t.Fatalf("expected claude skills path to be symlink after --force: %v", err)
