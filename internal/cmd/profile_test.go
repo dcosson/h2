@@ -187,10 +187,10 @@ func TestProfileReset_DefaultsPreserveAuthAndCustomSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cmd := newProfileResetCmd()
+	cmd := newProfileUpdateCmd()
 	cmd.SetArgs([]string{name})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("profile reset failed: %v", err)
+		t.Fatalf("profile update failed: %v", err)
 	}
 
 	gotInstructions, err := os.ReadFile(filepath.Join(sharedDir, "CLAUDE_AND_AGENTS.md"))
@@ -317,10 +317,10 @@ func TestProfileReset_IncludeAuthClearsAuthFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cmd := newProfileResetCmd()
+	cmd := newProfileUpdateCmd()
 	cmd.SetArgs([]string{name, "--include-auth", "--include-skills=false", "--include-instructions=false", "--include-settings=false"})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("profile reset failed: %v", err)
+		t.Fatalf("profile update failed: %v", err)
 	}
 
 	if _, err := os.Stat(filepath.Join(claudeDir, ".claude.json")); !os.IsNotExist(err) {

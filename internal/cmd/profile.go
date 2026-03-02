@@ -27,13 +27,13 @@ func newProfileCmd() *cobra.Command {
 		Short: "Manage profiles",
 	}
 	cmd.AddCommand(newProfileCreateCmd())
-	cmd.AddCommand(newProfileResetCmd())
+	cmd.AddCommand(newProfileUpdateCmd())
 	cmd.AddCommand(newProfileListCmd())
 	cmd.AddCommand(newProfileShowCmd())
 	return cmd
 }
 
-func newProfileResetCmd() *cobra.Command {
+func newProfileUpdateCmd() *cobra.Command {
 	var style string
 	var includeAuth bool
 	var includeSkills bool
@@ -41,11 +41,11 @@ func newProfileResetCmd() *cobra.Command {
 	var includeSettings bool
 
 	cmd := &cobra.Command{
-		Use:   "reset <name>",
-		Short: "Reset an profile to generated defaults",
-		Long: `Reset profile content to h2-generated defaults.
+		Use:   "update <name>",
+		Short: "Update a profile to generated defaults",
+		Long: `Update profile content to h2-generated defaults.
 
-By default, reset updates instructions, managed skills, and settings, while
+By default, update refreshes instructions, managed skills, and settings, while
 preserving auth files.
 
 Managed skills are updated non-destructively: h2 updates only template-managed
@@ -70,10 +70,10 @@ skill files and leaves user-added skills untouched.`,
 	}
 
 	cmd.Flags().StringVar(&style, "style", initStyleOpinionated, "Profile style: minimal, opinionated")
-	cmd.Flags().BoolVar(&includeAuth, "include-auth", false, "Include auth files (.claude.json, auth.json) in reset")
-	cmd.Flags().BoolVar(&includeSkills, "include-skills", true, "Reset managed shared skills")
-	cmd.Flags().BoolVar(&includeInstructions, "include-instructions", true, "Reset shared instructions file")
-	cmd.Flags().BoolVar(&includeSettings, "include-settings", true, "Reset harness settings/config files and profile symlinks")
+	cmd.Flags().BoolVar(&includeAuth, "include-auth", false, "Include auth files (.claude.json, auth.json) in update")
+	cmd.Flags().BoolVar(&includeSkills, "include-skills", true, "Update managed shared skills")
+	cmd.Flags().BoolVar(&includeInstructions, "include-instructions", true, "Update shared instructions file")
+	cmd.Flags().BoolVar(&includeSettings, "include-settings", true, "Update harness settings/config files and profile symlinks")
 	return cmd
 }
 
