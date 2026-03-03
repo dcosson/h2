@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -133,13 +134,17 @@ func (vt *VT) StartPTY(command string, args []string, childRows, cols int, extra
 // PipeOutput reads child PTY output into the virtual terminal and calls
 // onData after each write so the caller can re-render.
 func (vt *VT) PipeOutput(onData func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "panic recovered in PipeOutput: %v\n%s\n", r, debug.Stack())
+		}
+	}()
 	buf := make([]byte, 4096)
 	for {
 		n, err := vt.Ptm.Read(buf)
 		if n > 0 {
-			vt.RespondTerminalQueries(buf[:n])
-
 			vt.Mu.Lock()
+			vt.RespondTerminalQueries(buf[:n])
 			vt.LastOut = time.Now()
 			vt.Vt.Write(buf[:n])
 			if vt.Scrollback != nil {

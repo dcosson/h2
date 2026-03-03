@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -313,17 +314,36 @@ func ForkDaemon(opts ForkDaemonOpts) error {
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 
-	// Open /dev/null for stdio.
+	// Open /dev/null for stdin and stdout.
 	devNull, err := os.Open(os.DevNull)
 	if err != nil {
 		return fmt.Errorf("open /dev/null: %w", err)
 	}
 	cmd.Stdin = devNull
 	cmd.Stdout = devNull
-	cmd.Stderr = devNull
+
+	// Open a log file for stderr so panic stack traces are captured.
+	var stderrFile *os.File
+	if opts.SessionDir != "" {
+		stderrFile, err = os.OpenFile(
+			filepath.Join(opts.SessionDir, "daemon.stderr.log"),
+			os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644,
+		)
+		if err != nil {
+			stderrFile = nil // fall back to /dev/null
+		}
+	}
+	if stderrFile != nil {
+		cmd.Stderr = stderrFile
+	} else {
+		cmd.Stderr = devNull
+	}
 
 	if err := cmd.Start(); err != nil {
 		devNull.Close()
+		if stderrFile != nil {
+			stderrFile.Close()
+		}
 		return fmt.Errorf("start daemon: %w", err)
 	}
 
@@ -331,6 +351,9 @@ func ForkDaemon(opts ForkDaemonOpts) error {
 	go func() {
 		cmd.Wait()
 		devNull.Close()
+		if stderrFile != nil {
+			stderrFile.Close()
+		}
 	}()
 
 	// Wait for socket to appear.

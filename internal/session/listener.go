@@ -1,13 +1,21 @@
 package session
 
 import (
+	"fmt"
 	"net"
+	"os"
+	"runtime/debug"
 
 	"h2/internal/session/message"
 )
 
 // acceptLoop accepts connections on the Unix socket and routes requests.
 func (d *Daemon) acceptLoop() {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "panic recovered in acceptLoop: %v\n%s\n", r, debug.Stack())
+		}
+	}()
 	for {
 		conn, err := d.Listener.Accept()
 		if err != nil {
@@ -18,6 +26,12 @@ func (d *Daemon) acceptLoop() {
 }
 
 func (d *Daemon) handleConn(conn net.Conn) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "panic recovered in handleConn: %v\n%s\n", r, debug.Stack())
+			conn.Close()
+		}
+	}()
 	req, err := message.ReadRequest(conn)
 	if err != nil {
 		conn.Close()

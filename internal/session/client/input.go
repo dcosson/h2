@@ -1,6 +1,9 @@
 package client
 
 import (
+	"fmt"
+	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"syscall"
@@ -75,6 +78,11 @@ func (c *Client) StartPendingEsc() {
 		c.EscTimer.Stop()
 	}
 	c.EscTimer = time.AfterFunc(50*time.Millisecond, func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "panic recovered in EscTimer: %v\n%s\n", r, debug.Stack())
+			}
+		}()
 		c.VT.Mu.Lock()
 		defer c.VT.Mu.Unlock()
 		if !c.PendingEsc {
@@ -231,7 +239,9 @@ func (c *Client) HandleMenuBytes(buf []byte, start, n int) int {
 			}
 		case 'q', 'Q': // quit
 			c.Quit = true
-			c.VT.Cmd.Process.Signal(syscall.SIGTERM)
+			if c.VT.Cmd != nil && c.VT.Cmd.Process != nil {
+				c.VT.Cmd.Process.Signal(syscall.SIGTERM)
+			}
 			if c.OnQuit != nil {
 				c.OnQuit()
 			}
@@ -832,6 +842,11 @@ func (c *Client) ShowSelectHint() {
 	c.RenderScreen()
 	c.RenderBar()
 	c.SelectHintTimer = time.AfterFunc(3*time.Second, func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "panic recovered in SelectHintTimer: %v\n%s\n", r, debug.Stack())
+			}
+		}()
 		c.VT.Mu.Lock()
 		defer c.VT.Mu.Unlock()
 		c.SelectHint = false
