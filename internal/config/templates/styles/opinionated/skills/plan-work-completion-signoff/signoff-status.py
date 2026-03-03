@@ -37,7 +37,8 @@ STATUS_RE = re.compile(r"^\s*[-*]\s*(?:\*\*)?Status(?:\*\*)?:\s*(.+)$", re.IGNOR
 DATE_RE = re.compile(r"^\s*[-*]\s*(?:\*\*)?Date(?:\*\*)?:\s*(.+)$", re.IGNORECASE)
 BRANCH_RE = re.compile(r"^\s*[-*]\s*(?:\*\*)?Branch(?:\*\*)?:\s*(.+)$", re.IGNORECASE)
 COMMIT_RE = re.compile(r"^\s*[-*]\s*(?:\*\*)?Commit(?:\*\*)?:\s*(.+)$", re.IGNORECASE)
-VERIFIED_BY_RE = re.compile(r"^\s*[-*]\s*(?:\*\*)?Verified\s+by(?:\*\*)?:\s*(.+)$", re.IGNORECASE)
+# Accept "Verified by" or "Signed off by"
+VERIFIED_BY_RE = re.compile(r"^\s*[-*]\s*(?:\*\*)?(?:Verified|Signed\s+off)\s+by(?:\*\*)?:\s*(.+)$", re.IGNORECASE)
 
 
 def should_include(path: Path) -> bool:
@@ -141,6 +142,7 @@ def scan_directory(plans_dir: Path) -> dict:
         "total": len(all_docs),
         "complete": 0,
         "partial": 0,
+        "not_implemented": 0,
         "not_started": 0,
         "docs": [],
     }
@@ -161,13 +163,18 @@ def scan_directory(plans_dir: Path) -> dict:
             results["not_started"] += 1
         else:
             doc_info["signoff"] = signoff
-            status = (signoff.get("status") or "").lower()
+            raw_status = (signoff.get("status") or "").strip()
+            # Normalize status: strip parenthetical suffixes like "NOT IMPLEMENTED (0%)"
+            status = raw_status.lower().split("(")[0].strip()
             if status == "complete":
                 doc_info["signoff_status"] = "complete"
                 results["complete"] += 1
             elif status == "partial":
                 doc_info["signoff_status"] = "partial"
                 results["partial"] += 1
+            elif status in ("not implemented", "not_implemented"):
+                doc_info["signoff_status"] = "not_implemented"
+                results["not_implemented"] += 1
             else:
                 # Has a signoff section but status is unclear
                 doc_info["signoff_status"] = "unknown"
@@ -193,12 +200,15 @@ def format_text(results: dict) -> str:
     lines.append("")
 
     # Summary counts
+    not_implemented = results.get("not_implemented", 0)
     pct_complete = (complete / total * 100) if total > 0 else 0
-    lines.append(f"Total docs:    {total}")
-    lines.append(f"  Complete:    {complete} ({pct_complete:.0f}%)")
+    lines.append(f"Total docs:        {total}")
+    lines.append(f"  Complete:        {complete} ({pct_complete:.0f}%)")
     if partial > 0:
-        lines.append(f"  Partial:     {partial}")
-    lines.append(f"  Not started: {not_started}")
+        lines.append(f"  Partial:         {partial}")
+    if not_implemented > 0:
+        lines.append(f"  Not implemented: {not_implemented}")
+    lines.append(f"  Not started:     {not_started}")
     lines.append("")
 
     # Separate plan docs and test harness docs
@@ -224,6 +234,16 @@ def format_text(results: dict) -> str:
             signoff = d["signoff"]
             verified = signoff.get("verified_by", "unknown")
             lines.append(f"  [~] {d['path']}  (verified by {verified})")
+        lines.append("")
+
+    # Not implemented docs
+    not_impl_docs = [d for d in results["docs"] if d["signoff_status"] == "not_implemented"]
+    if not_impl_docs:
+        lines.append(f"Not implemented ({len(not_impl_docs)}):")
+        for d in not_impl_docs:
+            signoff = d["signoff"]
+            verified = signoff.get("verified_by", "unknown")
+            lines.append(f"  [-] {d['path']}  (verified by {verified})")
         lines.append("")
 
     # Not started docs
@@ -263,9 +283,12 @@ def format_markdown(results: dict) -> str:
     lines.append("| Metric | Count |")
     lines.append("|--------|-------|")
     lines.append(f"| Total docs | {total} |")
+    not_implemented = results.get("not_implemented", 0)
     lines.append(f"| Complete | {complete} ({pct_complete:.0f}%) |")
     if partial > 0:
         lines.append(f"| Partial | {partial} |")
+    if not_implemented > 0:
+        lines.append(f"| Not implemented | {not_implemented} |")
     lines.append(f"| Not started | {not_started} |")
     lines.append("")
 
@@ -275,7 +298,7 @@ def format_markdown(results: dict) -> str:
     lines.append("|-----|------|--------|------|-------------|")
 
     for d in results["docs"]:
-        status_icon = {"complete": "+", "partial": "~", "not_started": " ", "unknown": "?"}.get(d["signoff_status"], "?")
+        status_icon = {"complete": "+", "partial": "~", "not_implemented": "-", "not_started": " ", "unknown": "?"}.get(d["signoff_status"], "?")
         status_label = d["signoff_status"].replace("_", " ").title()
         date = ""
         verified = ""

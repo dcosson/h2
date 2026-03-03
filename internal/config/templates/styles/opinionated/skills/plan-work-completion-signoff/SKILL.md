@@ -48,6 +48,35 @@ Each task bead description should include:
 - The signoff section format (see Phase 3)
 - Instructions to report gaps via h2 message
 
+## Deviation Severity Classification
+
+Every deviation between plan and implementation must be classified into one of four severity levels. These levels determine the signoff status — this is not a judgment call, it's a mechanical rule.
+
+| Severity | Definition | Examples | Status Impact |
+|----------|-----------|----------|---------------|
+| **Cosmetic** | Names, file layout, import paths, or code organization differs but behavior and contracts are identical. | Struct in `types.go` instead of `foo.go`; import path uses `v0.1.0` API variant; extra helper functions added. | Complete |
+| **Structural** | Internal architecture differs but external behavior, data flow, and contracts are preserved. Consumers of this component are unaffected. | No separate `internal/envdetect` package (logic inlined elsewhere); different internal concurrency strategy; fewer files than planned but same coverage. | Complete (document deviations) |
+| **Contractual** | Specified interfaces, APIs, type signatures, or data flow contracts don't exist or differ in ways that affect how other components consume this one. The plan says component A produces output X that component B consumes, but in practice A produces Y or B never consumes X. | Plan specifies `Match(cmd ExtractedCommand) bool` but implementation uses `Match(command string) bool`; parser produces structured output but matching layer never calls the parser; specified builder DSL (`Name()`, `ArgAt()`, `Flags()`) doesn't exist. | Partial |
+| **Missing** | Entire components, features, packages, or test categories specified in the plan do not exist in the codebase. | 0 of 75 planned rules implemented; pack registration file doesn't exist; entire test category has no test functions. | Partial or Not Implemented |
+
+### Classification Rules
+
+1. **Cosmetic + Structural only → Complete.** The plan's intent is realized even if the shape differs.
+2. **Any Contractual deviation → Partial.** A contract mismatch means downstream components cannot work as the plan intended. This is true even if the component "works" in isolation — the system design assumed a contract that doesn't hold.
+3. **Significant Missing items → Partial.** If specified features don't exist, the plan is not complete.
+4. **Majority Missing → Not Implemented.** If the bulk of the plan (>70%) is unimplemented, use "Not Implemented" rather than "Partial."
+5. **When in doubt, classify up** (more severe). It's better to flag something as Contractual and have the orchestrator downgrade it than to miss a real gap.
+
+### How to Detect Contractual Deviations
+
+Contractual deviations are the hardest to spot because the code may "work" — tests pass, the feature runs. The deviation is in the *interface between components*, not in the component itself. Look for:
+
+- **Type signature mismatches**: Plan says `func Foo(x ParsedThing) Result`, code says `func Foo(x string) Result`
+- **Unused outputs**: Plan says component A produces structured data for component B, but B never imports or calls A
+- **Missing interfaces**: Plan specifies an interface with N implementations, but the interface doesn't exist and callers use a different pattern
+- **Data flow breaks**: Plan shows a sequence diagram A→B→C, but in code A→C directly (B is bypassed)
+- **Semantic mismatches**: Plan says "matcher operates on parsed AST fields", code does `strings.Contains` on raw text
+
 ## Phase 3: Agent Verification Work
 
 Each assigned agent does the following for every doc in their task:
@@ -62,20 +91,22 @@ Read the plan doc thoroughly. Build a mental checklist of:
 - Every specified error handling path
 - Every specified test category (for test harness docs)
 - Every URP/EO/AA claim
+- **Every cross-component contract** — where this component's output is consumed by another component, or where this component consumes another's output
 
 ### Step 2: Compare Against Code
 
 For each checklist item:
 1. Search the codebase for the corresponding implementation
 2. Verify the implementation matches the spec (names, signatures, behavior)
-3. Note any deviations — things implemented differently than specified
-4. Note any missing items — things specified but not implemented
-5. Note any extras — things implemented but not in the spec (these are fine, just document them)
+3. **Classify every deviation** using the four severity levels above (Cosmetic, Structural, Contractual, Missing)
+4. Note any extras — things implemented but not in the spec (these are fine, just document them)
 
 For test harness docs, additionally verify:
 - Each specified test category has corresponding test files/functions
 - Test coverage matches what was planned (e.g., "10 property-based tests" → are there actually 10?)
 - CI integration works as specified (e.g., `make test-*` commands run the right tests)
+
+**Pay special attention to cross-component contracts.** Read the plan's dependency descriptions, sequence diagrams, and interface definitions. Then verify that the actual code's imports, function calls, and data flow match. A component that "works" but doesn't connect to the rest of the system as designed has a Contractual deviation.
 
 ### Step 3: Run Verification Tests
 
@@ -89,9 +120,19 @@ For race-sensitive packages, also run:
 go test -race ./path/to/package/... -count=1
 ```
 
-### Step 4: Add Signoff or Report Gaps
+### Step 4: Determine Status and Add Signoff
 
-**If the plan is fully implemented** (possibly with minor, documented deviations), append this section at the very bottom of the doc:
+Use the highest-severity deviation to determine the status:
+
+| Highest Deviation | Status |
+|-------------------|--------|
+| None, or only Cosmetic | Complete |
+| Structural (no Contractual or Missing) | Complete |
+| Contractual | Partial |
+| Missing (minority of plan) | Partial |
+| Missing (majority of plan, >70%) | Not Implemented |
+
+**Status: Complete** — append this section at the very bottom of the doc:
 
 ```markdown
 ---
@@ -105,13 +146,13 @@ go test -race ./path/to/package/... -count=1
 - **Verified by**: {agent-name}
 - **Test verification**: `{test command}` — PASS
 - **Deviations from plan**:
-  - {List any ways the implementation differs from the spec, or "None"}
+  - [Cosmetic] {description, or "None"}
+  - [Structural] {description, or "None"}
 - **Additions beyond plan**:
   - {List any features implemented that weren't in the original spec, or "None"}
 ```
 
-**If there are significant gaps** (missing features, unimplemented test categories, broken tests), do NOT add a signoff section. Instead:
-1. Add a partial signoff noting what IS complete:
+**Status: Partial** — append this section, and report gaps to the orchestrator:
 
 ```markdown
 ---
@@ -123,15 +164,35 @@ go test -race ./path/to/package/... -count=1
 - **Branch**: {branch-name}
 - **Verified by**: {agent-name}
 - **Completed items**: {list of what's done}
+- **Deviations**:
+  - [Contractual] {description — what contract is broken and between which components}
+  - [Missing] {description — what specified feature/component doesn't exist}
+  - [Structural] {description, if any}
 - **Outstanding gaps**:
-  - {Gap 1: description, severity estimate}
-  - {Gap 2: description, severity estimate}
+  - {Gap 1: description, suggested follow-up bead}
+  - {Gap 2: description, suggested follow-up bead}
 ```
 
-2. Report the gaps to the orchestrating agent via `h2 send` with specifics:
-   - What's missing
-   - How significant it is (blocking vs nice-to-have)
-   - Suggested bead description for the follow-up work
+**Status: Not Implemented** — for docs where >70% of the plan is missing:
+
+```markdown
+---
+
+## Completion Signoff
+
+- **Status**: Not Implemented
+- **Date**: {YYYY-MM-DD}
+- **Branch**: {branch-name}
+- **Verified by**: {agent-name}
+- **Implementation coverage**: {estimated percentage}
+- **What exists**: {brief list of any implemented pieces}
+- **What's missing**: {summary of unimplemented scope}
+```
+
+Report all Contractual and Missing deviations to the orchestrating agent via `h2 send` with:
+- The deviation severity and description
+- Which components are affected
+- Suggested bead description for follow-up work
 
 ### Step 5: Commit and Report
 
@@ -146,21 +207,25 @@ go test -race ./path/to/package/... -count=1
 
 As agents report back, the orchestrating agent:
 
-1. **For complete signoffs**: Close the task bead
-2. **For gaps**: Evaluate each reported gap:
-   - Is it real missing work, or an intentional deviation / future scope?
+1. **For Complete signoffs**: Close the task bead
+2. **For Partial signoffs**: Evaluate each Contractual and Missing deviation:
+   - Is it real missing work, or intentional future scope?
    - If real: Create a new task bead for the follow-up work, assign to an available agent
-   - If intentional: Update the signoff to "Complete" with the deviation documented
-3. Track progress: how many docs signed off vs gaps remaining
-4. When all task beads are closed (signoffs done, follow-up beads created for any gaps), close the epic
+   - If intentional/deferred: Document the decision but leave status as Partial (do NOT upgrade to Complete — the contract gap still exists)
+3. **For Not Implemented signoffs**: These represent entire unbuilt components. Create implementation beads if the work is in scope, or document as out-of-scope if not.
+4. Track progress: how many docs at each status level
+5. When all task beads are closed (signoffs done, follow-up beads created for any gaps), close the epic
+
+**Important**: Do not downgrade a Contractual deviation to Structural just because tests pass. Tests passing with a contract mismatch means the tests aren't testing the contract — which is itself a gap.
 
 ## Phase 5: Report to User/Concierge
 
 Send a final summary:
 - Total plan docs verified: N
-- Fully complete: N
-- Complete with deviations: N (list deviations)
-- Gaps requiring follow-up: N (list beads created)
+- Complete: N
+- Partial: N (list Contractual/Missing deviations)
+- Not Implemented: N (list components)
+- Follow-up beads created: N (list)
 - All tests passing: yes/no
 
 ## Beads Integration
@@ -197,10 +262,12 @@ Run this after the signoff process to verify everything is covered, or in CI to 
 
 ## What Requires Judgment
 
-The orchestrating agent makes these calls:
+The deviation severity classification removes most ambiguity from status determination, but these calls still require judgment:
 
 1. **Which docs to include** — only implemented plans, not future/unstarted plans
 2. **How to group docs into tasks** — balance between parallelism and cognitive coherence
-3. **Whether a gap is real work or intentional** — not every plan deviation needs a follow-up bead
-4. **How to handle unavailable agents** — reassign to whoever is online
-5. **Whether to re-verify after gap fixes** — if follow-up beads are created, should the signoff be re-run after they're closed?
+3. **Cosmetic vs Structural** — is a file layout change purely cosmetic, or does it affect how developers find and maintain code? When in doubt, Structural is fine (it's still Complete).
+4. **Structural vs Contractual** — does the architectural difference affect cross-component contracts? The key test: would a developer implementing a downstream component based on the plan be surprised or blocked by the actual implementation? If yes, it's Contractual.
+5. **Whether a Contractual gap needs a follow-up bead** — some contract mismatches may be intentional improvements. The orchestrator decides whether to create follow-up work, but the status stays Partial regardless.
+6. **How to handle unavailable agents** — reassign to whoever is online
+7. **Whether to re-verify after gap fixes** — if follow-up beads are created, should the signoff be re-run after they're closed?
