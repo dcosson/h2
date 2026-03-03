@@ -325,6 +325,9 @@ func (c *Client) RenderInputBar() {
 	// --- Input line ---
 	prompt := c.InputPriority.String() + " > "
 	maxInput := c.VT.Cols - len(prompt)
+	if maxInput < 0 {
+		maxInput = 0
+	}
 
 	inputRunes := []rune(string(c.Input))
 	totalRunes := len(inputRunes)
