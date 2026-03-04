@@ -75,6 +75,16 @@ func (vt *VT) SetupScrollCapture() {
 		vt.scrollHistoryMax = 50000
 	}
 	vt.Vt.OnScrollback(func(line midterm.Line) {
+		// Guard against Content/Format length mismatch in midterm: wide
+		// characters or resize races can cause the two slices to diverge,
+		// leading to an index-out-of-range panic in Line.Display().
+		if len(line.Format) < len(line.Content) {
+			padded := make([]midterm.Format, len(line.Content))
+			copy(padded, line.Format)
+			line.Format = padded
+		} else if len(line.Format) > len(line.Content) {
+			line.Format = line.Format[:len(line.Content)]
+		}
 		rendered := line.Display() + "\033[0m"
 		vt.ScrollHistory = append(vt.ScrollHistory, rendered)
 		if len(vt.ScrollHistory) > vt.scrollHistoryMax {
@@ -134,31 +144,39 @@ func (vt *VT) StartPTY(command string, args []string, childRows, cols int, extra
 // PipeOutput reads child PTY output into the virtual terminal and calls
 // onData after each write so the caller can re-render.
 func (vt *VT) PipeOutput(onData func()) {
+	buf := make([]byte, 4096)
+	for {
+		n, err := vt.Ptm.Read(buf)
+		if n > 0 {
+			vt.pipeChunk(buf[:n], onData)
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+// pipeChunk processes a single chunk of PTY output. Panics are recovered
+// per-chunk so the PipeOutput loop continues reading rather than dying.
+// The mutex is released via defer so a panic mid-processing cannot deadlock
+// the session.
+func (vt *VT) pipeChunk(data []byte, onData func()) {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Fprintf(os.Stderr, "panic recovered in PipeOutput: %v\n%s\n", r, debug.Stack())
 		}
 	}()
-	buf := make([]byte, 4096)
-	for {
-		n, err := vt.Ptm.Read(buf)
-		if n > 0 {
-			vt.Mu.Lock()
-			vt.RespondTerminalQueries(buf[:n])
-			vt.LastOut = time.Now()
-			vt.Vt.Write(buf[:n])
-			if vt.Scrollback != nil {
-				vt.Scrollback.Write(buf[:n])
-			}
-			vt.ScanPTYOutput(buf[:n])
-			if !vt.SyncOutputActive {
-				onData()
-			}
-			vt.Mu.Unlock()
-		}
-		if err != nil {
-			return
-		}
+	vt.Mu.Lock()
+	defer vt.Mu.Unlock()
+	vt.RespondTerminalQueries(data)
+	vt.LastOut = time.Now()
+	vt.Vt.Write(data)
+	if vt.Scrollback != nil {
+		vt.Scrollback.Write(data)
+	}
+	vt.ScanPTYOutput(data)
+	if !vt.SyncOutputActive {
+		onData()
 	}
 }
 

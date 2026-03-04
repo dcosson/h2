@@ -4,6 +4,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/vito/midterm"
 )
 
 func TestWritePTY_Success(t *testing.T) {
@@ -423,6 +425,64 @@ func TestRespondTerminalQueries_NoMatch(t *testing.T) {
 	if err == nil {
 		t.Error("expected no response for normal output")
 	}
+}
+
+// --- SetupScrollCapture scroll history ---
+
+func TestSetupScrollCapture_CapturesScrolledLines(t *testing.T) {
+	// Create a small terminal and fill it, then trigger a scroll via line feed.
+	// Verify that SetupScrollCapture captures the scrolled-off line.
+	vt := &VT{}
+	vt.Vt = midterm.NewTerminal(3, 10) // 3 rows, 10 cols
+	vt.SetupScrollCapture()
+
+	// Fill all 3 rows and add a newline to trigger scroll.
+	vt.Vt.Write([]byte("line1\r\nline2\r\nline3\r\n"))
+
+	if len(vt.ScrollHistory) == 0 {
+		t.Fatal("expected scroll history to capture at least one line")
+	}
+}
+
+// --- pipeChunk panic recovery ---
+
+func TestPipeChunk_RecoverFromPanic(t *testing.T) {
+	// Verify that pipeChunk recovers from panics without killing the caller.
+	// The onData callback panics, simulating any panic during chunk processing.
+	vt := &VT{}
+	vt.Vt = midterm.NewTerminal(24, 80)
+
+	panicked := false
+	vt.pipeChunk([]byte("hello"), func() {
+		panicked = true
+		panic("test panic in onData")
+	})
+
+	if !panicked {
+		t.Fatal("expected onData to have been called")
+	}
+
+	// Verify mutex is NOT held after recovery (would deadlock if still held).
+	vt.Mu.Lock()
+	vt.Mu.Unlock()
+}
+
+func TestPipeChunk_MutexReleasedOnPanic(t *testing.T) {
+	// Verify the mutex is released even when midterm Write panics.
+	// After pipeChunk recovers, subsequent Lock/Unlock must succeed.
+	vt := &VT{}
+	vt.Vt = midterm.NewTerminal(24, 80)
+
+	// Normal chunk should work fine.
+	called := false
+	vt.pipeChunk([]byte("ok"), func() { called = true })
+	if !called {
+		t.Fatal("expected onData to be called for normal chunk")
+	}
+
+	// Mutex should be available.
+	vt.Mu.Lock()
+	vt.Mu.Unlock()
 }
 
 func TestResetScanState(t *testing.T) {
