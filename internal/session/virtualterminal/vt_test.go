@@ -2,6 +2,7 @@ package virtualterminal
 
 import (
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -463,8 +464,7 @@ func TestPipeChunk_RecoverFromPanic(t *testing.T) {
 	}
 
 	// Verify mutex is NOT held after recovery (would deadlock if still held).
-	vt.Mu.Lock()
-	vt.Mu.Unlock()
+	assertMutexAvailable(t, &vt.Mu)
 }
 
 func TestPipeChunk_MutexReleasedOnPanic(t *testing.T) {
@@ -481,8 +481,27 @@ func TestPipeChunk_MutexReleasedOnPanic(t *testing.T) {
 	}
 
 	// Mutex should be available.
-	vt.Mu.Lock()
-	vt.Mu.Unlock()
+	assertMutexAvailable(t, &vt.Mu)
+}
+
+func assertMutexAvailable(t *testing.T, mu *sync.Mutex) {
+	t.Helper()
+	locked := make(chan struct{})
+	go func() {
+		acquired := false
+		mu.Lock()
+		acquired = true
+		mu.Unlock()
+		if !acquired {
+			panic("unreachable")
+		}
+		close(locked)
+	}()
+	select {
+	case <-locked:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("mutex remained locked")
+	}
 }
 
 func TestResetScanState(t *testing.T) {
