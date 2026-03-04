@@ -95,6 +95,8 @@ Go has a lot of standard idioms, so use them. There's not much that we want to o
 
 One technique that comes in handy is when implementing an interface, that will have several concrete providers that all implement it. Put the interface and shared types in a minimal package like internal/something/foo. Put the various implementations of it in nested packages like internal/something/foo/bar. bar the concrete implementation imports interface foo. Then, if needed, create a fooservice package that has e.g. a factory to select the right provider to use, and any shared business logic that applies to all providers.
 
+For package structure: prefer internal/ for most of the codebase logic, exporting just the necessary things a caller needs in public and root packages (potentially by aliasing stuff from internal). Each package should either contain application code in a cohesive piece of functionality, or contain test suite logic that tests cross-cutting concerns across many packages (e.g. integration and e2e tests, performance tests, simulations or evals, benchmarks, etc.). Do not mix and match these though, in an application code package the only tests should be relatively lightweight unit tests and we should include a coverage check option for all packages with unit tests. Prefer to put the heavy, cross-cutting tests in a separate part of the file hierarchy like a top-level e2etests/ folder.
+
 ## Workflow Tooling
 
 ### h2 Messaging Protocol
