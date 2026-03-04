@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -70,23 +71,29 @@ func (h *EventHandler) OnLogs(body []byte) {
 // Cumulative metrics are handled by monitor metrics aggregation.
 func (h *EventHandler) OnMetrics(body []byte) {
 	h.debugf("received /v1/metrics payload bytes=%d", len(body))
+	h.debugf("metrics payload body=%q", truncate(body, 600))
 }
 
 func (h *EventHandler) processLogs(payload otelLogsPayload) {
 	now := time.Now()
 	recordCount := 0
 	emittedCount := 0
-	for _, rl := range payload.ResourceLogs {
-		for _, sl := range rl.ScopeLogs {
-			for _, lr := range sl.LogRecords {
+	for ri, rl := range payload.ResourceLogs {
+		for si, sl := range rl.ScopeLogs {
+			for li, lr := range sl.LogRecords {
 				recordCount++
 				eventName := getAttr(lr.Attributes, "event.name")
+				h.debugf("log_record resource=%d scope=%d index=%d event.name=%q attrs={%s}", ri, si, li, eventName, formatAttrs(lr.Attributes))
 				if eventName == "" {
-					h.debugf("log_record missing event.name")
+					h.debugf("log_record action=ignored reason=missing_event_name")
 					continue
 				}
-				if h.processLogRecord(eventName, lr, now) {
+				processed, reason := h.processLogRecord(eventName, lr, now)
+				if processed {
 					emittedCount++
+					h.debugf("log_record action=processed event.name=%q reason=%s", eventName, reason)
+				} else {
+					h.debugf("log_record action=ignored event.name=%q reason=%s", eventName, reason)
 				}
 			}
 		}
@@ -94,7 +101,7 @@ func (h *EventHandler) processLogs(payload otelLogsPayload) {
 	h.debugf("processed log_records=%d emitted=%d", recordCount, emittedCount)
 }
 
-func (h *EventHandler) processLogRecord(eventName string, lr otelLogRecord, ts time.Time) bool {
+func (h *EventHandler) processLogRecord(eventName string, lr otelLogRecord, ts time.Time) (bool, string) {
 	switch eventName {
 	case "api_request":
 		input := getIntAttr(lr.Attributes, "input_tokens")
@@ -110,9 +117,9 @@ func (h *EventHandler) processLogRecord(eventName string, lr otelLogRecord, ts t
 					CostUSD:      cost,
 				},
 			})
-			h.debugf("event=api_request input=%d output=%d cost=%f", input, output, cost)
-			return true
+			return true, "turn_completed_emitted"
 		}
+		return false, "no_usage_values"
 	case "tool_result":
 		toolName := getAttr(lr.Attributes, "tool_name")
 		if toolName != "" {
@@ -121,12 +128,11 @@ func (h *EventHandler) processLogRecord(eventName string, lr otelLogRecord, ts t
 				Timestamp: ts,
 				Data:      monitor.ToolCompletedData{ToolName: toolName, Success: true},
 			})
-			h.debugf("event=tool_result tool=%q", toolName)
-			return true
+			return true, "tool_completed_emitted"
 		}
+		return false, "missing_tool_name"
 	}
-	h.debugf("event=%q ignored", eventName)
-	return false
+	return false, "unsupported_event_name"
 }
 
 // ProcessHookEvent translates Claude hook events into AgentEvents.
@@ -430,6 +436,28 @@ func getFloatAttr(attrs []otelAttribute, key string) float64 {
 		}
 	}
 	return 0
+}
+
+func formatAttrs(attrs []otelAttribute) string {
+	if len(attrs) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(attrs))
+	for _, a := range attrs {
+		parts = append(parts, fmt.Sprintf("%s=%q", a.Key, attrValueString(a.Value)))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func attrValueString(v otelAttrValue) string {
+	if len(v.IntValue) > 0 {
+		s := string(v.IntValue)
+		if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+			s = s[1 : len(s)-1]
+		}
+		return s
+	}
+	return v.StringValue
 }
 
 func (h *EventHandler) debugf(format string, args ...any) {
