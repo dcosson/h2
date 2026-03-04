@@ -1,0 +1,22 @@
+{
+  "id": "h2-g18.1",
+  "title": "overlay.go ReadInput: defer unlock + panic recovery",
+  "description": "File: internal/session/client/overlay.go, lines 113-130\n\nReadInput() runs as a bare goroutine (go c.ReadInput(), line 238 in SetupInteractiveTerminal). It has a for loop that reads keyboard input and dispatches to mode handlers (HandlePassthroughBytes, HandleMenuBytes, HandleScrollBytes, HandleDefaultBytes). The VT mutex is locked/unlocked manually each iteration.\n\nCurrent risk: If any handler panics, the goroutine dies silently, the mutex stays locked (deadlocking the entire session), and the user can no longer type input. There is no recover and the goroutine is never relaunched.\n\nFix:\n1. Convert manual vt.Mu.Unlock() to defer-based unlock (wrap lock/unlock body in an anonymous func with defer).\n2. Add a recover() wrapping the for loop body so that a panic in any handler doesn't kill the goroutine — it should log the panic and continue reading input on the next iteration.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "h2-g18",
+  "dependencies": [
+    {
+      "id": "h2-g18",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=h2-stability"
+  ],
+  "created_at": "2026-03-04T08:34:18.392299-08:00",
+  "updated_at": "2026-03-04T08:34:18.392299-08:00"
+}

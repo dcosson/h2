@@ -1,0 +1,22 @@
+{
+  "id": "h2-g18.9",
+  "title": "session.go lifecycleLoop relaunch: defer unlock",
+  "description": "File: internal/session/session.go, lines 682-693\n\nlifecycleLoop() locks the VT mutex on relaunch to reset ChildExited/ChildHung/ExitError, reset client scroll offsets, clear screen, and re-render. The unlock is manual at line 693.\n\nSame context as the child-exit section — runs inline, no recover. A panic here would crash the daemon with a locked mutex.\n\nFix:\n1. Convert manual vt.Mu.Unlock() to defer-based unlock (wrap in anonymous func).\n2. No recover needed — inline lifecycle code, crashing is appropriate.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "h2-g18",
+  "dependencies": [
+    {
+      "id": "h2-g18",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=h2-stability"
+  ],
+  "created_at": "2026-03-04T08:35:56.427533-08:00",
+  "updated_at": "2026-03-04T08:35:56.427533-08:00"
+}

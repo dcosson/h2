@@ -1,0 +1,22 @@
+{
+  "id": "h2-g18.7",
+  "title": "session.go OnDeliver callbacks: defer unlock + panic recovery",
+  "description": "File: internal/session/session.go, lines 493-497 (RunDaemon) and lines 595-599 (RunInteractive)\n\nThe OnDeliver closure locks the VT mutex, calls ForEachClient to render status bars, and unlocks manually. This closure runs inside the delivery goroutine (go s.StartServices() -\u003e RunDelivery). RunDelivery has no recover.\n\nCurrent risk: If RenderStatusBar() panics during delivery, the delivery goroutine dies (no more messages delivered to the agent), and the mutex stays locked (deadlocking the session). Two identical sites — one in RunDaemon, one in RunInteractive.\n\nFix:\n1. Convert manual vt.Mu.Unlock() to defer-based unlock (wrap in anonymous func).\n2. Add a recover() in the OnDeliver closure so a render panic doesn't kill the delivery goroutine — it should log the panic and return, allowing delivery to continue.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "h2-g18",
+  "dependencies": [
+    {
+      "id": "h2-g18",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=h2-stability"
+  ],
+  "created_at": "2026-03-04T08:35:33.665885-08:00",
+  "updated_at": "2026-03-04T08:35:33.665885-08:00"
+}

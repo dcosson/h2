@@ -1,0 +1,22 @@
+{
+  "id": "h2-g18.6",
+  "title": "attach.go handleAttach cleanup: defer unlock",
+  "description": "File: internal/session/attach.go, lines 92-130\n\nhandleAttach() locks the VT mutex a second time for post-disconnect cleanup: disabling mouse, releasing passthrough ownership, removing the client, resizing the VT for remaining clients, and re-rendering. The unlock is manual at line 130.\n\nSame situation as the setup section — handleConn has a recover, but it won't release the mutex. Any panic in RemoveClient(), ForEachClient(), Resize(), RenderScreen(), or RenderBar() deadlocks the session.\n\nFix:\n1. Convert manual vt.Mu.Unlock() to defer-based unlock (wrap in anonymous func).\n2. No additional recover needed — handleConn's existing recover is sufficient once the mutex is properly deferred.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "h2-g18",
+  "dependencies": [
+    {
+      "id": "h2-g18",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=h2-stability"
+  ],
+  "created_at": "2026-03-04T08:35:21.644649-08:00",
+  "updated_at": "2026-03-04T08:35:21.644649-08:00"
+}

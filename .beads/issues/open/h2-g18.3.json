@@ -1,0 +1,22 @@
+{
+  "id": "h2-g18.3",
+  "title": "overlay.go WatchResize: defer unlock + panic recovery",
+  "description": "File: internal/session/client/overlay.go, lines 163-173\n\nWatchResize() runs as a bare goroutine (go c.WatchResize(sigCh), line 224). It handles SIGWINCH signals by resizing the VT and re-rendering. The VT mutex is locked/unlocked manually per signal.\n\nCurrent risk: If Resize(), RenderScreen(), or RenderBar() panics, the goroutine dies, the mutex stays locked (deadlocking the session), and future terminal resizes are not handled. No recover, not relaunched.\n\nFix:\n1. Convert manual vt.Mu.Unlock() to defer-based unlock (wrap in anonymous func).\n2. Add a recover() inside the for-range loop body so a panic on one resize doesn't kill the handler — it should log the panic and continue handling future SIGWINCH signals.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "h2-g18",
+  "dependencies": [
+    {
+      "id": "h2-g18",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=h2-stability"
+  ],
+  "created_at": "2026-03-04T08:34:43.313212-08:00",
+  "updated_at": "2026-03-04T08:34:43.313212-08:00"
+}

@@ -1,0 +1,22 @@
+{
+  "id": "h2-g18.5",
+  "title": "attach.go handleAttach setup: defer unlock",
+  "description": "File: internal/session/attach.go, lines 44-86\n\nhandleAttach() locks the VT mutex for the initial attach setup: setting up per-client output, OSC colors, resizing the PTY, re-rendering existing clients, enabling mouse reporting, and rendering the current screen. The unlock is manual at line 86.\n\nThis is called from handleConn() which has a recover() (listener.go:30). However, the recover catches the panic without releasing the VT mutex — so the goroutine survives but the mutex stays locked, deadlocking the entire session silently. This is arguably worse than crashing.\n\nCurrent risk: Long critical section calling Resize(), ForEachClient(), RenderScreen(), RenderBar(). Any panic deadlocks the session.\n\nFix:\n1. Convert manual vt.Mu.Unlock() to defer-based unlock (wrap in anonymous func).\n2. No additional recover needed — handleConn already has one. With defer unlock, the mutex will be properly released before the recover catches the panic.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "h2-g18",
+  "dependencies": [
+    {
+      "id": "h2-g18",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=h2-stability"
+  ],
+  "created_at": "2026-03-04T08:35:09.97551-08:00",
+  "updated_at": "2026-03-04T08:35:09.97551-08:00"
+}

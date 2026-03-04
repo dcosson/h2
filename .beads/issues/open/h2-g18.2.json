@@ -1,0 +1,22 @@
+{
+  "id": "h2-g18.2",
+  "title": "overlay.go client.TickStatus: defer unlock + panic recovery",
+  "description": "File: internal/session/client/overlay.go, lines 141-143\n\nclient.TickStatus() runs as a bare goroutine (go c.TickStatus(stopStatus), line 228). It ticks every 1 second to re-render the status bar. The VT mutex is locked/unlocked manually each tick.\n\nCurrent risk: If RenderStatusBar() panics, the goroutine dies, the mutex stays locked (deadlocking the session), and the status bar stops updating. No recover, not relaunched.\n\nFix:\n1. Convert manual vt.Mu.Unlock() to defer-based unlock (wrap in anonymous func).\n2. Add a recover() inside the for-loop tick case so a single bad render doesn't kill the ticker — it should log the panic and continue ticking.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "h2-g18",
+  "dependencies": [
+    {
+      "id": "h2-g18",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=h2-stability"
+  ],
+  "created_at": "2026-03-04T08:34:31.730469-08:00",
+  "updated_at": "2026-03-04T08:34:31.730469-08:00"
+}

@@ -1,0 +1,57 @@
+{
+  "id": "h2-g18",
+  "title": "VT mutex safety: defer unlocks and panic recovery",
+  "description": "Convert all manual VT mutex (vt.Mu) unlock sites to defer-based unlocks and add panic recovery where needed. Currently 10 sites use manual Unlock() which can deadlock the entire session if a panic occurs mid-critical-section. The recent fix in readClientInput (commit 3b69677) established the pattern — this epic applies it consistently across the codebase.",
+  "status": "open",
+  "priority": 2,
+  "type": "epic",
+  "dependents": [
+    {
+      "id": "h2-g18.1",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-g18.2",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-g18.3",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-g18.4",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-g18.5",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-g18.6",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-g18.7",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-g18.8",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-g18.9",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-g18.10",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=h2-stability"
+  ],
+  "created_at": "2026-03-04T08:34:01.175144-08:00",
+  "updated_at": "2026-03-04T08:34:01.175144-08:00"
+}

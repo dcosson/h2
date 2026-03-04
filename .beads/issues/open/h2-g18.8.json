@@ -1,0 +1,22 @@
+{
+  "id": "h2-g18.8",
+  "title": "session.go lifecycleLoop child exit: defer unlock",
+  "description": "File: internal/session/session.go, lines 650-657\n\nlifecycleLoop() locks the VT mutex when the child process exits to set ChildExited/ExitError and re-render all clients. The unlock is manual at line 657.\n\nThis runs inline in RunDaemon/RunInteractive (not a goroutine). No recover. A panic would crash the daemon process.\n\nCurrent risk: If ForEachClient/RenderScreen/RenderBar panics, the daemon crashes with a locked mutex. Crashing is acceptable for lifecycle failure, but defer unlock is needed for consistency and to prevent deadlock if a recover is added upstream later.\n\nFix:\n1. Convert manual vt.Mu.Unlock() to defer-based unlock (wrap in anonymous func).\n2. No recover needed — inline lifecycle code, crashing is appropriate.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "h2-g18",
+  "dependencies": [
+    {
+      "id": "h2-g18",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=h2-stability"
+  ],
+  "created_at": "2026-03-04T08:35:46.312771-08:00",
+  "updated_at": "2026-03-04T08:35:46.312771-08:00"
+}

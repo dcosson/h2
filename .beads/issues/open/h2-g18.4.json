@@ -1,0 +1,22 @@
+{
+  "id": "h2-g18.4",
+  "title": "overlay.go SetupInteractiveTerminal initial draw: defer unlock",
+  "description": "File: internal/session/client/overlay.go, lines 231-235\n\nSetupInteractiveTerminal() locks the VT mutex inline (not in a goroutine) to do the initial screen draw (Output.Write, RenderScreen, RenderBar). The unlock is manual.\n\nCurrent risk: If the initial render panics, the mutex stays locked. Since this runs inline (not in a goroutine), the panic propagates up to RunInteractive and crashes the session. The crash itself is acceptable behavior for setup failure, but the mutex should still be defer-unlocked for consistency and to prevent deadlock if a recover is added higher up the stack in the future.\n\nFix:\n1. Convert manual vt.Mu.Unlock() to defer-based unlock (wrap in anonymous func).\n2. No recover needed — crashing during setup is appropriate.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "h2-g18",
+  "dependencies": [
+    {
+      "id": "h2-g18",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=h2-stability"
+  ],
+  "created_at": "2026-03-04T08:34:57.310213-08:00",
+  "updated_at": "2026-03-04T08:34:57.310213-08:00"
+}
