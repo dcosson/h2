@@ -2,11 +2,16 @@ package claude
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"h2/internal/activitylog"
 	"h2/internal/session/agent/monitor"
+	"h2/internal/session/agent/shared/debugenv"
 )
 
 // EventHandler coalesces Claude telemetry sources (OTEL logs, hooks,
@@ -15,6 +20,9 @@ type EventHandler struct {
 	events            chan<- monitor.AgentEvent
 	activityLog       *activitylog.Logger
 	expectedSessionID string
+	debugPath         string
+	debugMu           sync.Mutex
+	debugFile         *os.File
 }
 
 // NewEventHandler creates an EventHandler that emits events on the given channel.
@@ -32,10 +40,27 @@ func (h *EventHandler) SetExpectedSessionID(sessionID string) {
 	h.expectedSessionID = sessionID
 }
 
+// ConfigureDebug sets the OTEL debug log path and eagerly initializes the file.
+func (h *EventHandler) ConfigureDebug(path string) {
+	h.debugMu.Lock()
+	defer h.debugMu.Unlock()
+	if !debugenv.OtelDebugLoggingEnabled() {
+		h.debugPath = ""
+		return
+	}
+	h.debugPath = path
+	h.ensureDebugFile()
+	if h.debugFile != nil {
+		_, _ = h.debugFile.WriteString(time.Now().Format(time.RFC3339Nano) + " " + fmt.Sprintf("startup parser=claude_otel path=%s pid=%d", path, os.Getpid()) + "\n")
+	}
+}
+
 // OnLogs is the callback for /v1/logs payloads from the OTEL server.
 func (h *EventHandler) OnLogs(body []byte) {
+	h.debugf("received /v1/logs payload bytes=%d", len(body))
 	var payload otelLogsPayload
 	if err := json.Unmarshal(body, &payload); err != nil {
+		h.debugf("invalid json logs: %v body=%q", err, truncate(body, 600))
 		return
 	}
 	h.processLogs(payload)
@@ -43,24 +68,33 @@ func (h *EventHandler) OnLogs(body []byte) {
 
 // OnMetrics is the callback for /v1/metrics payloads from the OTEL server.
 // Cumulative metrics are handled by monitor metrics aggregation.
-func (h *EventHandler) OnMetrics(body []byte) {}
+func (h *EventHandler) OnMetrics(body []byte) {
+	h.debugf("received /v1/metrics payload bytes=%d", len(body))
+}
 
 func (h *EventHandler) processLogs(payload otelLogsPayload) {
 	now := time.Now()
+	recordCount := 0
+	emittedCount := 0
 	for _, rl := range payload.ResourceLogs {
 		for _, sl := range rl.ScopeLogs {
 			for _, lr := range sl.LogRecords {
+				recordCount++
 				eventName := getAttr(lr.Attributes, "event.name")
 				if eventName == "" {
+					h.debugf("log_record missing event.name")
 					continue
 				}
-				h.processLogRecord(eventName, lr, now)
+				if h.processLogRecord(eventName, lr, now) {
+					emittedCount++
+				}
 			}
 		}
 	}
+	h.debugf("processed log_records=%d emitted=%d", recordCount, emittedCount)
 }
 
-func (h *EventHandler) processLogRecord(eventName string, lr otelLogRecord, ts time.Time) {
+func (h *EventHandler) processLogRecord(eventName string, lr otelLogRecord, ts time.Time) bool {
 	switch eventName {
 	case "api_request":
 		input := getIntAttr(lr.Attributes, "input_tokens")
@@ -76,6 +110,8 @@ func (h *EventHandler) processLogRecord(eventName string, lr otelLogRecord, ts t
 					CostUSD:      cost,
 				},
 			})
+			h.debugf("event=api_request input=%d output=%d cost=%f", input, output, cost)
+			return true
 		}
 	case "tool_result":
 		toolName := getAttr(lr.Attributes, "tool_name")
@@ -85,8 +121,12 @@ func (h *EventHandler) processLogRecord(eventName string, lr otelLogRecord, ts t
 				Timestamp: ts,
 				Data:      monitor.ToolCompletedData{ToolName: toolName, Success: true},
 			})
+			h.debugf("event=tool_result tool=%q", toolName)
+			return true
 		}
 	}
+	h.debugf("event=%q ignored", eventName)
+	return false
 }
 
 // ProcessHookEvent translates Claude hook events into AgentEvents.
@@ -390,4 +430,43 @@ func getFloatAttr(attrs []otelAttribute, key string) float64 {
 		}
 	}
 	return 0
+}
+
+func (h *EventHandler) debugf(format string, args ...any) {
+	if h.debugPath == "" {
+		return
+	}
+	if !debugenv.OtelDebugLoggingEnabled() {
+		return
+	}
+
+	h.debugMu.Lock()
+	defer h.debugMu.Unlock()
+
+	h.ensureDebugFile()
+	if h.debugFile == nil {
+		return
+	}
+
+	msg := fmt.Sprintf(format, args...)
+	_, _ = h.debugFile.WriteString(time.Now().Format(time.RFC3339Nano) + " " + msg + "\n")
+}
+
+func (h *EventHandler) ensureDebugFile() {
+	if h.debugFile != nil || h.debugPath == "" {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(h.debugPath), 0o755)
+	f, err := os.OpenFile(h.debugPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err == nil {
+		h.debugFile = f
+	}
+}
+
+func truncate(body []byte, n int) string {
+	s := string(body)
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "...(truncated)"
 }

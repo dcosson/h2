@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -113,6 +114,44 @@ func TestEventHandler_InvalidJSON_NoEmit(t *testing.T) {
 	case ev := <-events:
 		t.Errorf("unexpected event: %+v", ev)
 	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestEventHandler_ConfigureDebug_Enabled(t *testing.T) {
+	t.Setenv("H2_OTEL_DEBUG_LOGGING_ENABLED", "1")
+	t.Setenv("OTEL_DEBUG_LOGGING_ENABLED", "")
+
+	events := make(chan monitor.AgentEvent, 64)
+	h := NewEventHandler(events, nil)
+	debugPath := filepath.Join(t.TempDir(), "claude-otel-debug.log")
+	h.ConfigureDebug(debugPath)
+	h.OnMetrics([]byte(`{"resourceMetrics":[]}`))
+
+	data, err := os.ReadFile(debugPath)
+	if err != nil {
+		t.Fatalf("read debug log: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, "startup parser=claude_otel") {
+		t.Fatalf("missing startup line: %q", s)
+	}
+	if !strings.Contains(s, "received /v1/metrics payload bytes=") {
+		t.Fatalf("missing metrics line: %q", s)
+	}
+}
+
+func TestEventHandler_ConfigureDebug_Disabled(t *testing.T) {
+	t.Setenv("H2_OTEL_DEBUG_LOGGING_ENABLED", "")
+	t.Setenv("OTEL_DEBUG_LOGGING_ENABLED", "")
+
+	events := make(chan monitor.AgentEvent, 64)
+	h := NewEventHandler(events, nil)
+	debugPath := filepath.Join(t.TempDir(), "claude-otel-debug.log")
+	h.ConfigureDebug(debugPath)
+	h.OnMetrics([]byte(`{"resourceMetrics":[]}`))
+
+	if _, err := os.Stat(debugPath); !os.IsNotExist(err) {
+		t.Fatalf("expected no debug log file when disabled, got err=%v", err)
 	}
 }
 

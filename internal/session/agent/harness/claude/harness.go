@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 
 	"github.com/google/uuid"
 
@@ -134,6 +135,7 @@ func (h *ClaudeCodeHarness) PrepareForLaunch(agentName, sessionID string, dryRun
 		h.sessionID = uuid.New().String()
 	}
 	h.eventHandler.SetExpectedSessionID(h.sessionID)
+	h.eventHandler.ConfigureDebug(resolveDebugPath(agentName, h.sessionID))
 
 	endpoint := "http://127.0.0.1:<PORT>"
 	if !dryRun {
@@ -230,4 +232,23 @@ func (h *ClaudeCodeHarness) OtelPort() int {
 // for the session log tailer. Must be called before Start().
 func (h *ClaudeCodeHarness) SetSessionLogPath(path string) {
 	h.sessionLogPath = path
+}
+
+func resolveSessionDir(agentName, sessionID string) string {
+	if agentName != "" {
+		return config.SessionDir(agentName)
+	}
+	return config.FindSessionDirByID(sessionID)
+}
+
+func resolveDebugPath(agentName, sessionID string) string {
+	sessionDir := resolveSessionDir(agentName, sessionID)
+	if sessionDir != "" {
+		return filepath.Join(sessionDir, "claude-otel-debug.log")
+	}
+	name := sessionID
+	if name == "" {
+		name = "unknown"
+	}
+	return filepath.Join(config.ConfigDir(), "logs", fmt.Sprintf("claude-otel-%s.log", name))
 }

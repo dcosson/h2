@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"h2/internal/session/agent/monitor"
+	"h2/internal/session/agent/shared/debugenv"
 )
 
 // EventHandler parses Codex OTEL payloads and emits AgentEvents.
@@ -56,7 +57,7 @@ func NewEventHandler(events chan<- monitor.AgentEvent) *EventHandler {
 func (p *EventHandler) ConfigureDebug(path string) {
 	p.debugMu.Lock()
 	defer p.debugMu.Unlock()
-	if !otelDebugLoggingEnabled() {
+	if !debugenv.OtelDebugLoggingEnabled() {
 		p.debugPath = ""
 		return
 	}
@@ -564,7 +565,7 @@ func (p *EventHandler) debugf(format string, args ...any) {
 	if p.debugPath == "" {
 		return
 	}
-	if !otelDebugLoggingEnabled() {
+	if !debugenv.OtelDebugLoggingEnabled() {
 		return
 	}
 
@@ -578,11 +579,6 @@ func (p *EventHandler) debugf(format string, args ...any) {
 
 	msg := fmt.Sprintf(format, args...)
 	_, _ = p.debugFile.WriteString(time.Now().Format(time.RFC3339Nano) + " " + msg + "\n")
-}
-
-func otelDebugLoggingEnabled() bool {
-	v := strings.TrimSpace(strings.ToLower(os.Getenv("OTEL_DEBUG_LOGGING_ENABLED")))
-	return v == "1" || v == "true" || v == "yes" || v == "on"
 }
 
 func (p *EventHandler) ensureDebugFile() {
