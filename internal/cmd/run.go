@@ -70,16 +70,13 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 
 			// Handle --resume mode — it's a separate path from normal run.
 			if resume {
-				if dryRun {
-					return fmt.Errorf("--dry-run is not supported with --resume")
-				}
 				// Reject flags that don't apply to resume.
 				for _, flag := range []string{"var", "override", "pod"} {
 					if cmd.Flags().Changed(flag) {
 						return fmt.Errorf("--%s cannot be used with --resume", flag)
 					}
 				}
-				return runResume(cmd, args, detach)
+				return runResume(cmd, args, detach, dryRun)
 			}
 
 			// Validate pod name if provided.
@@ -256,7 +253,7 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 // metadata from a previous run, checks the agent isn't still alive, resolves
 // the harness (to verify resume support), and forks a new daemon that passes
 // --resume <session-id> to Claude Code instead of starting a fresh session.
-func runResume(cmd *cobra.Command, args []string, detach bool) error {
+func runResume(cmd *cobra.Command, args []string, detach bool, dryRun bool) error {
 	if len(args) == 0 {
 		return fmt.Errorf("--resume requires an agent name (e.g. h2 run <name> --resume)")
 	}
@@ -302,6 +299,31 @@ func runResume(cmd *cobra.Command, args []string, detach bool) error {
 		if err := config.EnsureClaudeConfigDir(meta.ClaudeConfigDir); err != nil {
 			return fmt.Errorf("ensure config dir: %w", err)
 		}
+	}
+
+	// Build the command args that the harness will use.
+	resumeArgs := h.BuildCommandArgs(harness.CommandArgsConfig{
+		ResumeSessionID: meta.SessionID,
+	})
+
+	if dryRun {
+		fmt.Printf("Resume Agent: %s\n", name)
+		fmt.Printf("Previous Session ID: %s\n", meta.SessionID)
+		fmt.Printf("Harness: %s\n", harnessType)
+		fmt.Printf("Working Dir: %s\n", meta.CWD)
+		if meta.Pod != "" {
+			fmt.Printf("Pod: %s\n", meta.Pod)
+		}
+		fmt.Printf("\nCommand:\n")
+		fmt.Printf("%s \\\n", meta.Command)
+		for i, arg := range resumeArgs {
+			if i < len(resumeArgs)-1 {
+				fmt.Printf("  %s \\\n", arg)
+			} else {
+				fmt.Printf("  %s\n", arg)
+			}
+		}
+		return nil
 	}
 
 	// Generate a new session ID for this h2 daemon instance.

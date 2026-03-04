@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -87,17 +88,52 @@ func TestRunResume_RejectsIncompatibleFlags(t *testing.T) {
 	}
 }
 
-func TestRunResume_RejectsDryRun(t *testing.T) {
+func TestRunResume_DryRun(t *testing.T) {
 	t.Setenv("CLAUDECODE", "")
 
+	name := "resume-test-dry-run"
+	tmpDir := t.TempDir()
+	claudeConfigDir := filepath.Join(tmpDir, "claude-config")
+	os.MkdirAll(claudeConfigDir, 0o755)
+
+	writeTestSessionMetadata(t, name, config.SessionMetadata{
+		AgentName:       name,
+		SessionID:       "dry-run-session-uuid",
+		Command:         "claude",
+		HarnessType:     "claude_code",
+		ClaudeConfigDir: claudeConfigDir,
+		CWD:             tmpDir,
+		Pod:             "test-pod",
+	})
+
+	// Capture stdout.
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
 	cmd := newRunCmd()
-	cmd.SetArgs([]string{"some-agent", "--resume", "--dry-run"})
+	cmd.SetArgs([]string{name, "--resume", "--dry-run"})
 	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected error for --resume with --dry-run")
+
+	w.Close()
+	os.Stdout = old
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "not supported with --resume") {
-		t.Errorf("error = %q, want containing 'not supported with --resume'", err.Error())
+
+	var buf strings.Builder
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	if !strings.Contains(output, "dry-run-session-uuid") {
+		t.Errorf("dry-run output should contain session ID, got:\n%s", output)
+	}
+	if !strings.Contains(output, "--resume") {
+		t.Errorf("dry-run output should contain --resume flag, got:\n%s", output)
+	}
+	if !strings.Contains(output, "claude") {
+		t.Errorf("dry-run output should contain command name, got:\n%s", output)
 	}
 }
 
