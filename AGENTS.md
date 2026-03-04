@@ -2,7 +2,7 @@
 
 ## Commit Quality Gate
 
-Before every feature commit, run `make check` and ensure it passes. Do not commit feature work with a failing `make check`.
+Before every feature commit, run `make check` and ensure it passes.
 
 When doing a production release, follow this sequence:
 
