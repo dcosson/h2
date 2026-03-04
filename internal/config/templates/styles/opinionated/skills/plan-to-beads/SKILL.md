@@ -25,6 +25,7 @@ Read reviewed plan docs and decompose them into implementation beads (epics + ta
 2. Do NOT split unit/integration tests into separate beads from their implementation. Tests go in the same bead as the code they test.
 3. Do NOT auto-assign beads to agents. All beads are created unassigned — the concierge/scheduler assigns them.
 4. Do NOT create beads for plan docs that haven't completed their review cycle. Check for a clean review round (0 findings) or "Approved" verdict before proceeding.
+5. **NEVER start implementation work when running this skill.** This skill creates beads only. The scheduler/concierge kicks off implementation as a separate step after reviewing and confirming the bead structure.
 
 ## Phase 1: Read & Catalog
 
@@ -145,11 +146,22 @@ If `--dry-run` is specified, output a markdown document with the proposed beads 
 
 Send this to the orchestrating agent for approval before proceeding to actual bead creation.
 
+### Epic Structure
+
+Each primary plan doc gets **one epic** that contains:
+- All tasks decomposed from the main plan doc
+- All tasks from the doc's addenda (e.g., `{id}.add01`, `{id}.add02`)
+- All tasks from the doc's test harness (`{id}-test-harness.md`)
+
+This keeps related work together. Addendum tasks and test harness tasks are child tasks within the same epic as their parent plan doc, with dependencies between them as needed (e.g., harness framework task depends on core implementation tasks; addendum tasks may depend on specific parent doc tasks).
+
+After all epics are created, the **orchestrator creates cross-epic dependencies** based on the plan index dependency graph (e.g., Gateway epic depends on Cache/KV engine epic).
+
 ### Creating Beads
 
 1. **Create the epic**:
    ```bash
-   bd create "{batch-or-doc-name} Implementation" --type epic --labels project={project} --description "{scope description}"
+   bd create "{component-name} Implementation" --type epic --labels project={project} --description "{scope: main doc + addenda + test harness}"
    ```
 
 2. **Create child tasks** in dependency order (so parent IDs are available):
@@ -157,10 +169,12 @@ Send this to the orchestrating agent for approval before proceeding to actual be
    bd create "{task-name}" --labels project={project},batch={N},plan-doc={doc-id} --parent {epic-id} --description "{description}"
    ```
 
-3. **Add dependencies**:
+3. **Add intra-epic dependencies** (between tasks within the same epic):
    ```bash
    bd dep add {downstream-task-id} {upstream-task-id} --type blocks
    ```
+
+4. **Report cross-epic dependencies** to the orchestrator — the orchestrator creates these after all epics exist, since task IDs across epics are needed.
 
 ### Task Description Format
 
