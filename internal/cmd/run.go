@@ -286,13 +286,14 @@ func runResume(cmd *cobra.Command, args []string, detach bool, dryRun bool) erro
 		if os.IsNotExist(rcErr) {
 			return fmt.Errorf("no session found for agent %q: %w", name, rcErr)
 		}
-		// File exists but ReadRuntimeConfig failed. Check if it's legacy
-		// format or a corrupted new-format config.
-		if config.IsRuntimeConfigFormat(sessionDir) {
-			// New format but invalid — fail loud.
+		// File exists but ReadRuntimeConfig failed. Default to fail-loud
+		// (assume RuntimeConfig format). Only fall back to legacy parse
+		// when we positively detect legacy-specific markers.
+		if !config.IsLegacySessionMetadata(sessionDir) {
+			// Not legacy — fail loud with the RuntimeConfig error.
 			return fmt.Errorf("session config for agent %q is invalid: %w", name, rcErr)
 		}
-		// Legacy format: parse as SessionMetadata and convert.
+		// Legacy format detected: parse as SessionMetadata and convert.
 		meta, metaErr := config.ReadSessionMetadata(sessionDir)
 		if metaErr != nil {
 			return fmt.Errorf("session config for agent %q is unreadable: %w", name, rcErr)

@@ -175,12 +175,13 @@ func (rc *RuntimeConfig) Validate() error {
 	return nil
 }
 
-// IsRuntimeConfigFormat checks whether session.metadata.json in the given
-// directory is in the new RuntimeConfig format (vs legacy SessionMetadata).
-// It does this by looking for keys that only exist in RuntimeConfig
-// (e.g. "instructions", "system_prompt", "harness_config_dir").
-// Returns false if the file can't be read or parsed.
-func IsRuntimeConfigFormat(sessionDir string) bool {
+// IsLegacySessionMetadata checks whether session.metadata.json in the given
+// directory is in the legacy SessionMetadata format (vs new RuntimeConfig).
+// Returns true only when a legacy-specific marker is positively detected:
+// the file has "claude_config_dir" but NOT "harness_config_dir". This avoids
+// false negatives for new RuntimeConfig files that only contain required fields.
+// Returns false (assume RuntimeConfig) if the file can't be read or parsed.
+func IsLegacySessionMetadata(sessionDir string) bool {
 	path := filepath.Join(sessionDir, runtimeConfigFilename)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -190,18 +191,10 @@ func IsRuntimeConfigFormat(sessionDir string) bool {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return false
 	}
-	// These keys only appear in RuntimeConfig, never in legacy SessionMetadata.
-	runtimeOnlyKeys := []string{
-		"harness_config_dir", "instructions", "system_prompt",
-		"heartbeat_idle_timeout", "claude_permission_mode",
-		"resume_session_id", "harness_session_id",
-	}
-	for _, key := range runtimeOnlyKeys {
-		if _, ok := raw[key]; ok {
-			return true
-		}
-	}
-	return false
+	// Legacy SessionMetadata has "claude_config_dir" but never "harness_config_dir".
+	_, hasClaudeConfigDir := raw["claude_config_dir"]
+	_, hasHarnessConfigDir := raw["harness_config_dir"]
+	return hasClaudeConfigDir && !hasHarnessConfigDir
 }
 
 // ParseHeartbeatIdleTimeout parses the HeartbeatIdleTimeout string as a Go duration.

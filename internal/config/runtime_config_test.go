@@ -391,7 +391,7 @@ func TestParseHeartbeatIdleTimeout_Invalid(t *testing.T) {
 	}
 }
 
-func TestIsRuntimeConfigFormat_NewFormat(t *testing.T) {
+func TestIsLegacySessionMetadata_NewFormat(t *testing.T) {
 	dir := t.TempDir()
 	rc := &RuntimeConfig{
 		AgentName:    "test",
@@ -404,12 +404,30 @@ func TestIsRuntimeConfigFormat_NewFormat(t *testing.T) {
 	if err := WriteRuntimeConfig(dir, rc); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if !IsRuntimeConfigFormat(dir) {
-		t.Error("expected IsRuntimeConfigFormat=true for RuntimeConfig file")
+	if IsLegacySessionMetadata(dir) {
+		t.Error("expected IsLegacySessionMetadata=false for RuntimeConfig file")
 	}
 }
 
-func TestIsRuntimeConfigFormat_LegacyFormat(t *testing.T) {
+func TestIsLegacySessionMetadata_NewFormatMinimalFields(t *testing.T) {
+	// RuntimeConfig with only required fields (no optional runtime-only keys).
+	dir := t.TempDir()
+	rc := &RuntimeConfig{
+		AgentName:   "test",
+		SessionID:   "uuid",
+		HarnessType: "generic",
+		Command:     "bash",
+		CWD:         "/tmp",
+	}
+	if err := WriteRuntimeConfig(dir, rc); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if IsLegacySessionMetadata(dir) {
+		t.Error("expected IsLegacySessionMetadata=false for minimal RuntimeConfig")
+	}
+}
+
+func TestIsLegacySessionMetadata_LegacyFormat(t *testing.T) {
 	dir := t.TempDir()
 	legacy := `{
 		"agent_name": "test",
@@ -423,15 +441,15 @@ func TestIsRuntimeConfigFormat_LegacyFormat(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, runtimeConfigFilename), []byte(legacy), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if IsRuntimeConfigFormat(dir) {
-		t.Error("expected IsRuntimeConfigFormat=false for legacy SessionMetadata file")
+	if !IsLegacySessionMetadata(dir) {
+		t.Error("expected IsLegacySessionMetadata=true for legacy SessionMetadata file")
 	}
 }
 
-func TestIsRuntimeConfigFormat_NoFile(t *testing.T) {
+func TestIsLegacySessionMetadata_NoFile(t *testing.T) {
 	dir := t.TempDir()
-	if IsRuntimeConfigFormat(dir) {
-		t.Error("expected IsRuntimeConfigFormat=false when file doesn't exist")
+	if IsLegacySessionMetadata(dir) {
+		t.Error("expected IsLegacySessionMetadata=false when file doesn't exist")
 	}
 }
 
