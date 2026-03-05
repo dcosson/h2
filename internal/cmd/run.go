@@ -275,27 +275,31 @@ func runResume(cmd *cobra.Command, args []string, detach bool, dryRun bool) erro
 	}
 	name := args[0]
 
-	// Read RuntimeConfig from the previous run. Both old (SessionMetadata) and
-	// new (RuntimeConfig) formats use session.metadata.json. ReadRuntimeConfig
-	// validates required fields — old-format files will fail validation. In that
-	// case, fall back to ReadSessionMetadata and convert. Non-legacy errors
-	// (corrupt JSON, I/O) are surfaced directly.
+	// Read RuntimeConfig from the previous run. Both old (SessionMetadata)
+	// and new (RuntimeConfig) formats use session.metadata.json. We detect
+	// the format before deciding how to handle errors: if the file contains
+	// RuntimeConfig-only keys, validation failures are surfaced directly.
+	// Otherwise, we treat it as legacy SessionMetadata.
 	sessionDir := config.SessionDir(name)
 	rc, rcErr := config.ReadRuntimeConfig(sessionDir)
 	if rcErr != nil {
 		if os.IsNotExist(rcErr) {
 			return fmt.Errorf("no session found for agent %q: %w", name, rcErr)
 		}
-		// File exists but failed — try legacy SessionMetadata parse.
+		// File exists but ReadRuntimeConfig failed. Check if it's legacy
+		// format or a corrupted new-format config.
+		if config.IsRuntimeConfigFormat(sessionDir) {
+			// New format but invalid — fail loud.
+			return fmt.Errorf("session config for agent %q is invalid: %w", name, rcErr)
+		}
+		// Legacy format: parse as SessionMetadata and convert.
 		meta, metaErr := config.ReadSessionMetadata(sessionDir)
 		if metaErr != nil {
-			// Both parsers failed — report the RuntimeConfig error.
-			return fmt.Errorf("session config for agent %q is invalid: %w", name, rcErr)
+			return fmt.Errorf("session config for agent %q is unreadable: %w", name, rcErr)
 		}
 		if meta.SessionID == "" {
 			return fmt.Errorf("session metadata for %q has no session ID", name)
 		}
-		// Convert legacy metadata to RuntimeConfig for the resume flow.
 		harnessType := meta.HarnessType
 		if harnessType == "" {
 			harnessType = inferHarnessType(meta.Command)

@@ -8,6 +8,21 @@ migration guide below.
 
 ### Breaking Changes
 
+#### Session metadata format change (RuntimeConfig)
+
+`session.metadata.json` has been replaced with a unified `RuntimeConfig` format
+that stores the fully-resolved session configuration. This affects `h2 run --resume`:
+
+- **Resume of sessions started before this change will attempt a legacy fallback.**
+  If the old metadata can be parsed, it is automatically converted to RuntimeConfig
+  format. If the old metadata is missing required fields (e.g. `harness_type`),
+  the resume will fail with a clear error naming the missing fields.
+- **The daemon CLI (`_daemon`) now accepts only `--session-dir`** instead of ~15
+  individual flags. This is an internal interface — no user action needed.
+- Session metadata now includes all resolved config fields (instructions, model,
+  permissions, heartbeat, additional dirs) so resumed sessions use the exact same
+  configuration as the original launch.
+
 #### Role config field renames and removals
 
 The role YAML schema has changed significantly. Existing role files will need

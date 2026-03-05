@@ -202,13 +202,13 @@ func TestReadRuntimeConfig_MigratesClaudeConfigDir(t *testing.T) {
 	dir := t.TempDir()
 	// Simulate old metadata with claude_config_dir but no harness_config_dir.
 	old := map[string]any{
-		"agent_name":       "old-agent",
-		"session_id":       "old-session",
-		"harness_type":     "claude_code",
-		"command":          "claude",
-		"cwd":              "/home/user/project",
+		"agent_name":        "old-agent",
+		"session_id":        "old-session",
+		"harness_type":      "claude_code",
+		"command":           "claude",
+		"cwd":               "/home/user/project",
 		"claude_config_dir": "/home/user/.h2/claude-config/default",
-		"started_at":       "2026-01-01T00:00:00Z",
+		"started_at":        "2026-01-01T00:00:00Z",
 	}
 	data, _ := json.MarshalIndent(old, "", "  ")
 	if err := os.WriteFile(filepath.Join(dir, runtimeConfigFilename), data, 0o644); err != nil {
@@ -388,6 +388,50 @@ func TestParseHeartbeatIdleTimeout_Invalid(t *testing.T) {
 	_, err := rc.ParseHeartbeatIdleTimeout()
 	if err == nil {
 		t.Fatal("expected error for invalid duration")
+	}
+}
+
+func TestIsRuntimeConfigFormat_NewFormat(t *testing.T) {
+	dir := t.TempDir()
+	rc := &RuntimeConfig{
+		AgentName:    "test",
+		SessionID:    "uuid",
+		HarnessType:  "claude_code",
+		Command:      "claude",
+		CWD:          "/tmp",
+		Instructions: "Do things",
+	}
+	if err := WriteRuntimeConfig(dir, rc); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if !IsRuntimeConfigFormat(dir) {
+		t.Error("expected IsRuntimeConfigFormat=true for RuntimeConfig file")
+	}
+}
+
+func TestIsRuntimeConfigFormat_LegacyFormat(t *testing.T) {
+	dir := t.TempDir()
+	legacy := `{
+		"agent_name": "test",
+		"session_id": "uuid",
+		"claude_config_dir": "/some/path",
+		"cwd": "/tmp",
+		"command": "claude",
+		"role": "default",
+		"started_at": "2026-01-01T00:00:00Z"
+	}`
+	if err := os.WriteFile(filepath.Join(dir, runtimeConfigFilename), []byte(legacy), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if IsRuntimeConfigFormat(dir) {
+		t.Error("expected IsRuntimeConfigFormat=false for legacy SessionMetadata file")
+	}
+}
+
+func TestIsRuntimeConfigFormat_NoFile(t *testing.T) {
+	dir := t.TempDir()
+	if IsRuntimeConfigFormat(dir) {
+		t.Error("expected IsRuntimeConfigFormat=false when file doesn't exist")
 	}
 }
 
