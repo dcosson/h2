@@ -247,14 +247,14 @@ func TestRunResume_ForksDaemonWithResumeSessionID(t *testing.T) {
 	if rc.AgentName != name {
 		t.Errorf("Name = %q, want %q", rc.AgentName, name)
 	}
+	// SessionID stays the same — it's the same logical session being resumed.
+	if rc.SessionID != "previous-session-uuid" {
+		t.Errorf("SessionID = %q, want %q (should be unchanged)", rc.SessionID, "previous-session-uuid")
+	}
+	// ResumeSessionID should equal SessionID (HarnessSessionID was empty,
+	// so it falls back to SessionID).
 	if rc.ResumeSessionID != "previous-session-uuid" {
 		t.Errorf("ResumeSessionID = %q, want %q", rc.ResumeSessionID, "previous-session-uuid")
-	}
-	if rc.SessionID == "" {
-		t.Error("SessionID should be a new UUID, got empty")
-	}
-	if rc.SessionID == "previous-session-uuid" {
-		t.Error("SessionID should be a NEW UUID, not the old one")
 	}
 	if rc.Command != "claude" {
 		t.Errorf("Command = %q, want %q", rc.Command, "claude")

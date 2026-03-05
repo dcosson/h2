@@ -310,14 +310,25 @@ func runResume(cmd *cobra.Command, args []string, detach bool, dryRun bool) erro
 		}
 	}
 
+	// Determine the harness session ID to resume. HarnessSessionID is the
+	// session as known by the harness (e.g. Claude Code). For Claude Code,
+	// h2 passes --session-id on first run so SessionID and the harness session
+	// are the same; fall back to SessionID when HarnessSessionID is unset.
+	harnessResumeID := rc.HarnessSessionID
+	if harnessResumeID == "" {
+		harnessResumeID = rc.SessionID
+	}
+
 	if dryRun {
 		// Build the command args that the harness will use.
 		resumeArgs := h.BuildCommandArgs(harness.CommandArgsConfig{
-			ResumeSessionID: rc.SessionID,
+			ResumeSessionID: harnessResumeID,
 		})
 		fmt.Printf("Resume Agent: %s\n", name)
 		fmt.Printf("Config File: %s\n", filepath.Join(sessionDir, "session.metadata.json"))
-		fmt.Printf("Previous Session ID: %s\n", rc.SessionID)
+		fmt.Printf("Session ID: %s\n", rc.SessionID)
+		fmt.Printf("Harness Session ID: %s\n", rc.HarnessSessionID)
+		fmt.Printf("Resume Harness Target: %s\n", harnessResumeID)
 		fmt.Printf("Harness: %s\n", rc.HarnessType)
 		fmt.Printf("Working Dir: %s\n", rc.CWD)
 		if rc.Pod != "" {
@@ -335,17 +346,10 @@ func runResume(cmd *cobra.Command, args []string, detach bool, dryRun bool) erro
 		return nil
 	}
 
-	// Generate a new session ID for this h2 daemon instance.
-	newSessionID := uuid.New().String()
-
-	// Save the original session ID so we can restore on fork failure.
-	origSessionID := rc.SessionID
 	origResumeSessionID := rc.ResumeSessionID
 	origStartedAt := rc.StartedAt
 
-	// Update RuntimeConfig for the resume: new session ID, set resume pointer.
-	rc.ResumeSessionID = rc.SessionID
-	rc.SessionID = newSessionID
+	rc.ResumeSessionID = harnessResumeID
 	rc.StartedAt = "" // will be set by WriteRuntimeConfig
 
 	// Write updated RuntimeConfig before forking.
@@ -365,7 +369,6 @@ func runResume(cmd *cobra.Command, args []string, detach bool, dryRun bool) erro
 		ColorTerm: colorHints.ColorTerm,
 	}); err != nil {
 		// Restore original config on fork failure.
-		rc.SessionID = origSessionID
 		rc.ResumeSessionID = origResumeSessionID
 		rc.StartedAt = origStartedAt
 		_ = config.WriteRuntimeConfig(sessionDir, rc) // best-effort restore
