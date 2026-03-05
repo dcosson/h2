@@ -52,7 +52,7 @@ func (t AgentEventType) String() string {
 
 // SessionStartedData is the payload for EventSessionStarted.
 type SessionStartedData struct {
-	ThreadID string
+	SessionID string
 	Model    string
 }
 

@@ -72,7 +72,8 @@ type RuntimeConfig struct {
 const runtimeConfigFilename = "session.metadata.json"
 
 // WriteRuntimeConfig atomically writes the RuntimeConfig to the session directory.
-// Uses write-to-temp + rename to prevent corruption from concurrent readers.
+// Uses a unique temp file + fsync + rename to prevent corruption from concurrent
+// readers or writers and to provide crash durability.
 func WriteRuntimeConfig(sessionDir string, rc *RuntimeConfig) error {
 	if sessionDir == "" {
 		return nil
@@ -86,13 +87,37 @@ func WriteRuntimeConfig(sessionDir string, rc *RuntimeConfig) error {
 	}
 	data = append(data, '\n')
 	path := filepath.Join(sessionDir, runtimeConfigFilename)
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+
+	// Use a unique temp file to avoid races between concurrent writers.
+	tmp, err := os.CreateTemp(sessionDir, runtimeConfigFilename+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("create runtime config tmp: %w", err)
+	}
+	tmpPath := tmp.Name()
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
 		return fmt.Errorf("write runtime config tmp: %w", err)
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp) // best-effort cleanup
+	// Fsync the file for crash durability before rename.
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("sync runtime config tmp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("close runtime config tmp: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
 		return fmt.Errorf("rename runtime config: %w", err)
+	}
+	// Best-effort fsync of parent directory for rename durability.
+	if dir, err := os.Open(sessionDir); err == nil {
+		dir.Sync() //nolint:errcheck
+		dir.Close()
 	}
 	return nil
 }

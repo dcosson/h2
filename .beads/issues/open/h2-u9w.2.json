@@ -2,7 +2,7 @@
   "id": "h2-u9w.2",
   "title": "Rename ThreadID to SessionID + add OnSessionStarted callback",
   "description": "Rename SessionStartedData.ThreadID to SessionStartedData.SessionID across monitor, codex event handler, claude event handler, and all tests. Add OnSessionStarted callback field to AgentMonitor that fires when EventSessionStarted is processed. Update tests.",
-  "status": "open",
+  "status": "in_progress",
   "priority": 2,
   "type": "task",
   "parent": "h2-u9w",
@@ -27,6 +27,7 @@
   "labels": [
     "project=h2"
   ],
+  "assignee": "mild-cloud",
   "created_at": "2026-03-05T11:04:42.257449-08:00",
-  "updated_at": "2026-03-05T11:04:42.257449-08:00"
+  "updated_at": "2026-03-05T11:07:24.027796-08:00"
 }

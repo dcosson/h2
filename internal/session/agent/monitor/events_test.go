@@ -43,13 +43,13 @@ func TestAgentEvent_PayloadTypes(t *testing.T) {
 	ev := AgentEvent{
 		Type:      EventSessionStarted,
 		Timestamp: now,
-		Data:      SessionStartedData{ThreadID: "t1", Model: "claude-opus-4-6"},
+		Data:      SessionStartedData{SessionID: "t1", Model: "claude-opus-4-6"},
 	}
 	data, ok := ev.Data.(SessionStartedData)
 	if !ok {
 		t.Fatal("expected SessionStartedData")
 	}
-	if data.ThreadID != "t1" || data.Model != "claude-opus-4-6" {
+	if data.SessionID != "t1" || data.Model != "claude-opus-4-6" {
 		t.Errorf("unexpected data: %+v", data)
 	}
 

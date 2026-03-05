@@ -64,8 +64,8 @@ func TestEventHandler_ConversationStarts(t *testing.T) {
 		t.Fatalf("Type = %v, want EventStateChange", got[1].Type)
 	}
 	data := got[0].Data.(monitor.SessionStartedData)
-	if data.ThreadID != "conv-123" {
-		t.Errorf("ThreadID = %q, want %q", data.ThreadID, "conv-123")
+	if data.SessionID != "conv-123" {
+		t.Errorf("SessionID = %q, want %q", data.SessionID, "conv-123")
 	}
 	if data.Model != "o3" {
 		t.Errorf("Model = %q, want %q", data.Model, "o3")

@@ -180,7 +180,7 @@ func (p *EventHandler) processEvent(name string, attrs []otelAttribute, ts time.
 			Type:      monitor.EventSessionStarted,
 			Timestamp: ts,
 			Data: monitor.SessionStartedData{
-				ThreadID: convID,
+				SessionID: convID,
 				Model:    model,
 			},
 		})

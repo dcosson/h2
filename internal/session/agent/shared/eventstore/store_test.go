@@ -47,7 +47,7 @@ func TestAppendAndRead_RoundTrip(t *testing.T) {
 		{
 			Type:      monitor.EventSessionStarted,
 			Timestamp: now,
-			Data:      monitor.SessionStartedData{ThreadID: "t1", Model: "claude-4"},
+			Data:      monitor.SessionStartedData{SessionID: "t1", Model: "claude-4"},
 		},
 		{
 			Type:      monitor.EventTurnCompleted,
@@ -107,8 +107,8 @@ func TestAppendAndRead_RoundTrip(t *testing.T) {
 
 	// Check specific payloads.
 	sess := got[0].Data.(monitor.SessionStartedData)
-	if sess.ThreadID != "t1" || sess.Model != "claude-4" {
-		t.Errorf("SessionStartedData = %+v, want ThreadID=t1, Model=claude-4", sess)
+	if sess.SessionID != "t1" || sess.Model != "claude-4" {
+		t.Errorf("SessionStartedData = %+v, want SessionID=t1, Model=claude-4", sess)
 	}
 
 	turn := got[1].Data.(monitor.TurnCompletedData)
@@ -184,7 +184,7 @@ func TestTail_StreamsNewEvents(t *testing.T) {
 	pre := monitor.AgentEvent{
 		Type:      monitor.EventSessionStarted,
 		Timestamp: time.Now().Truncate(time.Millisecond),
-		Data:      monitor.SessionStartedData{ThreadID: "pre", Model: "m"},
+		Data:      monitor.SessionStartedData{SessionID: "pre", Model: "m"},
 	}
 	if err := s.Append(pre); err != nil {
 		t.Fatalf("Append pre: %v", err)

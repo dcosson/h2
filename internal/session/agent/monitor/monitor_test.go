@@ -26,14 +26,14 @@ func TestProcessEvent_SessionStarted(t *testing.T) {
 	m.Events() <- AgentEvent{
 		Type:      EventSessionStarted,
 		Timestamp: time.Now(),
-		Data:      SessionStartedData{ThreadID: "t-123", Model: "claude-4"},
+		Data:      SessionStartedData{SessionID: "t-123", Model: "claude-4"},
 	}
 
 	// Let the event process.
 	time.Sleep(10 * time.Millisecond)
 
-	if m.ThreadID() != "t-123" {
-		t.Errorf("ThreadID = %q, want %q", m.ThreadID(), "t-123")
+	if m.SessionID() != "t-123" {
+		t.Errorf("SessionID = %q, want %q", m.SessionID(), "t-123")
 	}
 	if m.Model() != "claude-4" {
 		t.Errorf("Model = %q, want %q", m.Model(), "claude-4")
@@ -297,7 +297,7 @@ func TestWithEventWriter(t *testing.T) {
 	m.Events() <- AgentEvent{
 		Type:      EventSessionStarted,
 		Timestamp: time.Now(),
-		Data:      SessionStartedData{ThreadID: "t1", Model: "m1"},
+		Data:      SessionStartedData{SessionID: "t1", Model: "m1"},
 	}
 	m.Events() <- AgentEvent{
 		Type:      EventTurnCompleted,
@@ -315,6 +315,43 @@ func TestWithEventWriter(t *testing.T) {
 	}
 	if written[1].Type != EventTurnCompleted {
 		t.Errorf("written[1].Type = %v, want EventTurnCompleted", written[1].Type)
+	}
+}
+
+func TestOnSessionStartedCallback(t *testing.T) {
+	var callbackData SessionStartedData
+	called := false
+
+	m := New()
+	m.SetOnSessionStarted(func(data SessionStartedData) {
+		called = true
+		callbackData = data
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go m.Run(ctx)
+
+	m.Events() <- AgentEvent{
+		Type:      EventSessionStarted,
+		Timestamp: time.Now(),
+		Data:      SessionStartedData{SessionID: "harness-123", Model: "claude-4"},
+	}
+
+	time.Sleep(10 * time.Millisecond)
+
+	if !called {
+		t.Fatal("OnSessionStarted callback was not called")
+	}
+	if callbackData.SessionID != "harness-123" {
+		t.Errorf("SessionID = %q, want %q", callbackData.SessionID, "harness-123")
+	}
+	if callbackData.Model != "claude-4" {
+		t.Errorf("Model = %q, want %q", callbackData.Model, "claude-4")
+	}
+	// Verify the monitor also stored the session ID.
+	if m.SessionID() != "harness-123" {
+		t.Errorf("monitor.SessionID() = %q, want %q", m.SessionID(), "harness-123")
 	}
 }
 

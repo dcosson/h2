@@ -21,7 +21,8 @@ type AgentMonitor struct {
 	stateChangedAt time.Time
 	stateCh        chan struct{} // closed on state change
 
-	threadID string
+	sessionID          string
+	onSessionStarted   func(SessionStartedData)
 	model    string
 
 	// Accumulated metrics from events.
@@ -99,8 +100,11 @@ func (m *AgentMonitor) processEvent(ev AgentEvent) {
 	switch ev.Type {
 	case EventSessionStarted:
 		if data, ok := ev.Data.(SessionStartedData); ok {
-			m.threadID = data.ThreadID
+			m.sessionID = data.SessionID
 			m.model = data.Model
+			if m.onSessionStarted != nil {
+				m.onSessionStarted(data)
+			}
 		}
 
 	case EventUserPrompt:
@@ -219,11 +223,18 @@ func (m *AgentMonitor) StateDuration() time.Duration {
 	return time.Since(m.stateChangedAt)
 }
 
-// ThreadID returns the session thread ID (set by EventSessionStarted).
-func (m *AgentMonitor) ThreadID() string {
+// SessionID returns the harness session ID (set by EventSessionStarted).
+func (m *AgentMonitor) SessionID() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.threadID
+	return m.sessionID
+}
+
+// SetOnSessionStarted sets a callback invoked when EventSessionStarted is
+// processed. The daemon uses this to persist the harness session ID to the
+// RuntimeConfig file. Must be called before Run.
+func (m *AgentMonitor) SetOnSessionStarted(fn func(SessionStartedData)) {
+	m.onSessionStarted = fn
 }
 
 // Model returns the model name (set by EventSessionStarted).

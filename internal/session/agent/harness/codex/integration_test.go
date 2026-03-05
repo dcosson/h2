@@ -110,7 +110,7 @@ func TestIntegration_FullPipeline(t *testing.T) {
 
 	// 4. Wait for events to propagate through the pipeline.
 	waitFor(t, 2*time.Second, "session ID", func() bool {
-		return mon.ThreadID() == "conv-integration-1"
+		return mon.SessionID() == "conv-integration-1"
 	})
 
 	waitFor(t, 2*time.Second, "model", func() bool {
@@ -207,7 +207,7 @@ func TestIntegration_MultipleLogPayloads(t *testing.T) {
 	resp.Body.Close()
 
 	waitFor(t, 2*time.Second, "batch session ID", func() bool {
-		return mon.ThreadID() == "batch-conv"
+		return mon.SessionID() == "batch-conv"
 	})
 	waitFor(t, 2*time.Second, "batch tokens", func() bool {
 		m := mon.MetricsSnapshot()

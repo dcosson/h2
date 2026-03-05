@@ -250,7 +250,7 @@ func TestStartForwardsEvents(t *testing.T) {
 	h.internalCh <- monitor.AgentEvent{
 		Type:      monitor.EventSessionStarted,
 		Timestamp: time.Now(),
-		Data:      monitor.SessionStartedData{ThreadID: "t1", Model: "o3"},
+		Data:      monitor.SessionStartedData{SessionID: "t1", Model: "o3"},
 	}
 
 	events := make(chan monitor.AgentEvent, 64)
