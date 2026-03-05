@@ -45,8 +45,10 @@ type TerminalHints struct {
 // RunDaemon creates a Session and Daemon, sets up the socket, and runs
 // the session in daemon mode. This is the main entry point for the _daemon command.
 // All configuration comes from the RuntimeConfig which was written to
-// sessionDir by the launcher before forking.
-func RunDaemon(rc *config.RuntimeConfig) error {
+// sessionDir by the launcher before forking. sessionDir is the exact path
+// used by the launcher (not reconstructed from agent name) to ensure
+// consistency across symlinks, worktrees, and custom paths.
+func RunDaemon(sessionDir string, rc *config.RuntimeConfig) error {
 	s := New(rc.AgentName, rc.Command, rc.Args)
 	s.SessionID = rc.SessionID
 	s.ResumeSessionID = rc.ResumeSessionID
@@ -74,10 +76,6 @@ func RunDaemon(rc *config.RuntimeConfig) error {
 	}
 
 	s.StartTime = time.Now()
-
-	// Derive session dir from the RuntimeConfig file location.
-	// The RuntimeConfig is at <sessionDir>/session.metadata.json.
-	sessionDir := config.SessionDir(rc.AgentName)
 	s.SessionDir = sessionDir
 
 	// Wire OnSessionStarted callback to persist harness_session_id.

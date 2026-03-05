@@ -29,7 +29,7 @@ func newDaemonCmd() *cobra.Command {
 				return fmt.Errorf("read runtime config: %w", err)
 			}
 
-			err = session.RunDaemon(rc)
+			err = session.RunDaemon(sessionDir, rc)
 			if err != nil {
 				if _, ok := err.(*exec.ExitError); ok {
 					os.Exit(1)

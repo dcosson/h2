@@ -1,7 +1,7 @@
 {
   "id": "h2-u9w.3",
   "title": "Wire RuntimeConfig into launcher + ForkDaemon + daemon",
-  "description": "Core refactor: (1) agent_setup.go builds RuntimeConfig and writes it before forking. (2) ForkDaemon simplified to take sessionDir + resumeSessionID + TerminalHints. (3) newDaemonCmd simplified to --session-dir + --resume-session-id. (4) RunDaemon takes *RuntimeConfig, daemon writes updated metadata on startup (new session_id for resume, harness_session_id via OnSessionStarted). (5) Remove SessionMetadata, ForkDaemonOpts, RunDaemonOpts. Update all tests.",
+  "description": "Implementation complete in 3afe799. Sent for review.",
   "status": "in_progress",
   "priority": 2,
   "type": "task",
@@ -33,5 +33,5 @@
   ],
   "assignee": "mild-cloud",
   "created_at": "2026-03-05T11:04:49.226695-08:00",
-  "updated_at": "2026-03-05T11:12:40.094849-08:00"
+  "updated_at": "2026-03-05T11:27:26.516372-08:00"
 }

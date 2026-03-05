@@ -275,15 +275,22 @@ func runResume(cmd *cobra.Command, args []string, detach bool, dryRun bool) erro
 	}
 	name := args[0]
 
-	// Read RuntimeConfig from the previous run. Fall back to legacy
-	// SessionMetadata for older sessions.
+	// Read RuntimeConfig from the previous run. Both old (SessionMetadata) and
+	// new (RuntimeConfig) formats use session.metadata.json. ReadRuntimeConfig
+	// validates required fields — old-format files will fail validation. In that
+	// case, fall back to ReadSessionMetadata and convert. Non-legacy errors
+	// (corrupt JSON, I/O) are surfaced directly.
 	sessionDir := config.SessionDir(name)
-	rc, err := config.ReadRuntimeConfig(sessionDir)
-	if err != nil {
-		// Try legacy SessionMetadata for backward compatibility.
+	rc, rcErr := config.ReadRuntimeConfig(sessionDir)
+	if rcErr != nil {
+		if os.IsNotExist(rcErr) {
+			return fmt.Errorf("no session found for agent %q: %w", name, rcErr)
+		}
+		// File exists but failed — try legacy SessionMetadata parse.
 		meta, metaErr := config.ReadSessionMetadata(sessionDir)
 		if metaErr != nil {
-			return fmt.Errorf("no session found for agent %q: %w", name, err)
+			// Both parsers failed — report the RuntimeConfig error.
+			return fmt.Errorf("session config for agent %q is invalid: %w", name, rcErr)
 		}
 		if meta.SessionID == "" {
 			return fmt.Errorf("session metadata for %q has no session ID", name)
@@ -366,6 +373,11 @@ func runResume(cmd *cobra.Command, args []string, detach bool, dryRun bool) erro
 	// Generate a new session ID for this h2 daemon instance.
 	newSessionID := uuid.New().String()
 
+	// Save the original session ID so we can restore on fork failure.
+	origSessionID := rc.SessionID
+	origResumeSessionID := rc.ResumeSessionID
+	origStartedAt := rc.StartedAt
+
 	// Update RuntimeConfig for the resume: new session ID, set resume pointer.
 	rc.ResumeSessionID = rc.SessionID
 	rc.SessionID = newSessionID
@@ -378,7 +390,8 @@ func runResume(cmd *cobra.Command, args []string, detach bool, dryRun bool) erro
 
 	colorHints := detectTerminalHints()
 
-	// Fork daemon with resume.
+	// Fork daemon with resume. If fork fails, restore the original config
+	// so the session metadata isn't left in a corrupted state.
 	if err := forkDaemonFunc(sessionDir, session.TerminalHints{
 		OscFg:     colorHints.OscFg,
 		OscBg:     colorHints.OscBg,
@@ -386,6 +399,11 @@ func runResume(cmd *cobra.Command, args []string, detach bool, dryRun bool) erro
 		Term:      colorHints.Term,
 		ColorTerm: colorHints.ColorTerm,
 	}); err != nil {
+		// Restore original config on fork failure.
+		rc.SessionID = origSessionID
+		rc.ResumeSessionID = origResumeSessionID
+		rc.StartedAt = origStartedAt
+		_ = config.WriteRuntimeConfig(sessionDir, rc) // best-effort restore
 		return err
 	}
 
