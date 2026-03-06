@@ -369,3 +369,50 @@ func TestHandleOutput_Noop(t *testing.T) {
 	// Should not panic.
 	h.HandleOutput()
 }
+
+func TestResolveNativeSessionLogPath(t *testing.T) {
+	tests := []struct {
+		name      string
+		configDir string
+		cwd       string
+		sessionID string
+		want      string
+	}{
+		{
+			name:      "standard path",
+			configDir: "/home/user/.h2/claude-config/default",
+			cwd:       "/Users/dcosson/projects/h2",
+			sessionID: "abc-123",
+			want:      "/home/user/.h2/claude-config/default/projects/Users-dcosson-projects-h2/abc-123.jsonl",
+		},
+		{
+			name:      "empty config dir",
+			configDir: "",
+			cwd:       "/tmp",
+			sessionID: "abc",
+			want:      "",
+		},
+		{
+			name:      "empty cwd",
+			configDir: "/config",
+			cwd:       "",
+			sessionID: "abc",
+			want:      "",
+		},
+		{
+			name:      "empty session id",
+			configDir: "/config",
+			cwd:       "/tmp",
+			sessionID: "",
+			want:      "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ResolveNativeSessionLogPath(tt.configDir, tt.cwd, tt.sessionID)
+			if got != tt.want {
+				t.Errorf("ResolveNativeSessionLogPath() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

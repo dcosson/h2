@@ -59,7 +59,7 @@ func RunDaemon(sessionDir string, rc *config.RuntimeConfig, resume bool) error {
 	s.SystemPrompt = rc.SystemPrompt
 	s.Model = rc.Model
 	s.HarnessType = rc.HarnessType
-	s.HarnessConfigDir = rc.HarnessConfigDir
+	s.HarnessConfigDir = rc.HarnessConfigDir()
 	s.ClaudePermissionMode = rc.ClaudePermissionMode
 	s.CodexSandboxMode = rc.CodexSandboxMode
 	s.CodexAskForApproval = rc.CodexAskForApproval

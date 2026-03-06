@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -248,6 +249,22 @@ func resolveSessionLogPath(agentName, sessionID string) string {
 		return ""
 	}
 	return filepath.Join(sessionDir, "session.jsonl")
+}
+
+// ResolveNativeSessionLogPath returns the path to Claude Code's native session
+// JSONL log file within its config directory. Claude Code stores logs at:
+//
+//	<configDir>/projects/<sanitized-cwd>/<sessionID>.jsonl
+//
+// The CWD is sanitized by replacing path separators with dashes and stripping
+// the leading dash. Returns empty string if any parameter is empty.
+func ResolveNativeSessionLogPath(configDir, cwd, sessionID string) string {
+	if configDir == "" || cwd == "" || sessionID == "" {
+		return ""
+	}
+	sanitized := strings.ReplaceAll(cwd, string(filepath.Separator), "-")
+	sanitized = strings.TrimPrefix(sanitized, "-")
+	return filepath.Join(configDir, "projects", sanitized, sessionID+".jsonl")
 }
 
 func resolveDebugPath(agentName, sessionID string) string {

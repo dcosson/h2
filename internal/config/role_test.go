@@ -358,42 +358,44 @@ func TestRole_GetClaudeConfigDir(t *testing.T) {
 	t.Setenv("H2_ACTOR", "")
 
 	tests := []struct {
-		name             string
-		claudeConfigPath string
-		want             string
+		name    string
+		prefix  string
+		profile string
+		want    string
 	}{
 		{
-			name:             "default when not specified",
-			claudeConfigPath: "",
-			want:             filepath.Join(h2Dir, "claude-config", "default"),
+			name: "default prefix and profile",
+			want: filepath.Join(h2Dir, "claude-config", "default"),
 		},
 		{
-			name:             "absolute path",
-			claudeConfigPath: "/custom/path/to/config",
-			want:             "/custom/path/to/config",
+			name:   "custom prefix with default profile",
+			prefix: "/custom/claude-config",
+			want:   "/custom/claude-config/default",
 		},
 		{
-			name:             "tilde expansion",
-			claudeConfigPath: "~/my-claude-config",
-			want:             "/Users/testuser/my-claude-config",
+			name:    "custom prefix and profile",
+			prefix:  "/custom/claude-config",
+			profile: "staging",
+			want:    "/custom/claude-config/staging",
 		},
 		{
-			name:             "relative path within h2",
-			claudeConfigPath: "/Users/testuser/.h2/claude-config/custom",
-			want:             "/Users/testuser/.h2/claude-config/custom",
+			name:    "default prefix with custom profile",
+			profile: "alt",
+			want:    filepath.Join(h2Dir, "claude-config", "alt"),
 		},
 		{
-			name:             "tilde only means system default",
-			claudeConfigPath: "~/",
-			want:             "",
+			name:   "tilde expansion in prefix",
+			prefix: "~/my-claude-config",
+			want:   "/Users/testuser/my-claude-config/default",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			role := &Role{
-				RoleName:             "test",
-				ClaudeCodeConfigPath: tt.claudeConfigPath,
+				RoleName:                   "test",
+				ClaudeCodeConfigPathPrefix: tt.prefix,
+				Profile:                    tt.profile,
 			}
 			got := role.GetClaudeConfigDir()
 			if got != tt.want {
@@ -668,7 +670,7 @@ func TestLoadRoleFrom_QuotedTemplateValues(t *testing.T) {
 	// Quoted {{ }} values should be valid YAML and parse correctly.
 	yaml := `
 role_name: "{{ .RoleName }}"
-claude_code_config_path: "{{ .H2Dir }}/claude-config/default"
+claude_code_config_path_prefix: "{{ .H2Dir }}/claude-config"
 instructions: |
   You are a {{ .RoleName }} agent.
 `
@@ -681,8 +683,8 @@ instructions: |
 	if role.RoleName != "{{ .RoleName }}" {
 		t.Errorf("RoleName = %q, want %q", role.RoleName, "{{ .RoleName }}")
 	}
-	if role.ClaudeCodeConfigPath != "{{ .H2Dir }}/claude-config/default" {
-		t.Errorf("ClaudeCodeConfigPath = %q, want %q", role.ClaudeCodeConfigPath, "{{ .H2Dir }}/claude-config/default")
+	if role.ClaudeCodeConfigPathPrefix != "{{ .H2Dir }}/claude-config" {
+		t.Errorf("ClaudeCodeConfigPathPrefix = %q, want %q", role.ClaudeCodeConfigPathPrefix, "{{ .H2Dir }}/claude-config")
 	}
 }
 
@@ -1500,10 +1502,10 @@ func TestGetModel(t *testing.T) {
 	}
 }
 
-func TestGetClaudeConfigDir_ExplicitPath(t *testing.T) {
-	role := &Role{RoleName: "test", ClaudeCodeConfigPath: "/new/config/dir"}
-	if got := role.GetClaudeConfigDir(); got != "/new/config/dir" {
-		t.Errorf("GetClaudeConfigDir() = %q, want %q", got, "/new/config/dir")
+func TestGetClaudeConfigDir_CustomPrefix(t *testing.T) {
+	role := &Role{RoleName: "test", ClaudeCodeConfigPathPrefix: "/new/config", Profile: "myprofile"}
+	if got := role.GetClaudeConfigDir(); got != "/new/config/myprofile" {
+		t.Errorf("GetClaudeConfigDir() = %q, want %q", got, "/new/config/myprofile")
 	}
 }
 
@@ -1515,10 +1517,10 @@ func TestGetCodexConfigDir(t *testing.T) {
 		t.Errorf("GetCodexConfigDir() = %q, want %q", got, wantDefault)
 	}
 
-	// Set via explicit codex path.
-	role2 := &Role{RoleName: "test", CodexConfigPath: "/codex/config"}
-	if got := role2.GetCodexConfigDir(); got != "/codex/config" {
-		t.Errorf("GetCodexConfigDir() = %q, want %q", got, "/codex/config")
+	// Set via explicit codex prefix + profile.
+	role2 := &Role{RoleName: "test", CodexConfigPathPrefix: "/codex/config", Profile: "alt"}
+	if got := role2.GetCodexConfigDir(); got != "/codex/config/alt" {
+		t.Errorf("GetCodexConfigDir() = %q, want %q", got, "/codex/config/alt")
 	}
 }
 

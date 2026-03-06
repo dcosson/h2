@@ -1,0 +1,23 @@
+{
+  "id": "h2-u9w.6",
+  "title": "Separate harness config root and profile in role config and RuntimeConfig",
+  "description": "Remove claude_code_config_path and codex_config_path direct overrides from role config. Rename claude_code_config_path_prefix to claude_code_config_root (and same for codex). Store harness_config_root + profile separately in RuntimeConfig instead of pre-joined harness_config_dir. Add helper to resolve Claude Code session log path: \u003cconfig_root\u003e/\u003cprofile\u003e/projects/\u003csanitize(cwd)\u003e/\u003charness_session_id\u003e.jsonl. Fix resolveSessionLogPath in Claude harness to use this.",
+  "status": "in_progress",
+  "priority": 2,
+  "type": "task",
+  "parent": "h2-u9w",
+  "dependencies": [
+    {
+      "id": "h2-u9w",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=h2"
+  ],
+  "assignee": "mild-cloud",
+  "created_at": "2026-03-05T16:16:49.733059-08:00",
+  "updated_at": "2026-03-05T16:16:56.590408-08:00"
+}

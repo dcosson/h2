@@ -11,28 +11,29 @@ import (
 func TestWriteReadRuntimeConfig_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	rc := &RuntimeConfig{
-		AgentName:            "test-agent",
-		SessionID:            "uuid-123",
-		RoleName:             "coder",
-		Pod:                  "pod1",
-		HarnessType:          "claude_code",
-		HarnessConfigDir:     "/home/user/.h2/claude-config/default",
-		HarnessSessionID:     "harness-uuid-456",
-		Command:              "claude",
-		Args:                 []string{"--verbose"},
-		Model:                "claude-opus-4-6",
-		CWD:                  "/home/user/project",
-		Instructions:         "You are a helpful coder.",
-		SystemPrompt:         "Custom system prompt.",
-		ClaudePermissionMode: "plan",
-		CodexSandboxMode:     "",
-		CodexAskForApproval:  "",
-		AdditionalDirs:       []string{"/extra/dir1", "/extra/dir2"},
-		HeartbeatIdleTimeout: "30s",
-		HeartbeatMessage:     "Are you still working?",
-		HeartbeatCondition:   "test -f /tmp/check",
-		Overrides:            map[string]string{"worktree_enabled": "true"},
-		StartedAt:            "2026-03-05T10:00:00Z",
+		AgentName:               "test-agent",
+		SessionID:               "uuid-123",
+		RoleName:                "coder",
+		Pod:                     "pod1",
+		HarnessType:             "claude_code",
+		HarnessConfigPathPrefix: "/home/user/.h2/claude-config",
+		Profile:                 "default",
+		HarnessSessionID:        "harness-uuid-456",
+		Command:                 "claude",
+		Args:                    []string{"--verbose"},
+		Model:                   "claude-opus-4-6",
+		CWD:                     "/home/user/project",
+		Instructions:            "You are a helpful coder.",
+		SystemPrompt:            "Custom system prompt.",
+		ClaudePermissionMode:    "plan",
+		CodexSandboxMode:        "",
+		CodexAskForApproval:     "",
+		AdditionalDirs:          []string{"/extra/dir1", "/extra/dir2"},
+		HeartbeatIdleTimeout:    "30s",
+		HeartbeatMessage:        "Are you still working?",
+		HeartbeatCondition:      "test -f /tmp/check",
+		Overrides:               map[string]string{"worktree_enabled": "true"},
+		StartedAt:               "2026-03-05T10:00:00Z",
 	}
 
 	if err := WriteRuntimeConfig(dir, rc); err != nil {
@@ -60,8 +61,14 @@ func TestWriteReadRuntimeConfig_RoundTrip(t *testing.T) {
 	if got.HarnessType != rc.HarnessType {
 		t.Errorf("HarnessType = %q, want %q", got.HarnessType, rc.HarnessType)
 	}
-	if got.HarnessConfigDir != rc.HarnessConfigDir {
-		t.Errorf("HarnessConfigDir = %q, want %q", got.HarnessConfigDir, rc.HarnessConfigDir)
+	if got.HarnessConfigPathPrefix != rc.HarnessConfigPathPrefix {
+		t.Errorf("HarnessConfigPathPrefix = %q, want %q", got.HarnessConfigPathPrefix, rc.HarnessConfigPathPrefix)
+	}
+	if got.Profile != rc.Profile {
+		t.Errorf("Profile = %q, want %q", got.Profile, rc.Profile)
+	}
+	if got.HarnessConfigDir() != "/home/user/.h2/claude-config/default" {
+		t.Errorf("HarnessConfigDir() = %q, want %q", got.HarnessConfigDir(), "/home/user/.h2/claude-config/default")
 	}
 	if got.HarnessSessionID != rc.HarnessSessionID {
 		t.Errorf("HarnessSessionID = %q, want %q", got.HarnessSessionID, rc.HarnessSessionID)
@@ -376,5 +383,31 @@ func TestReadRuntimeConfig_UnknownFieldsIgnored(t *testing.T) {
 	}
 	if got.AgentName != "a" {
 		t.Errorf("AgentName = %q, want %q", got.AgentName, "a")
+	}
+}
+
+func TestRuntimeConfig_HarnessConfigDir(t *testing.T) {
+	tests := []struct {
+		name    string
+		prefix  string
+		profile string
+		want    string
+	}{
+		{"prefix and profile", "/home/.h2/claude-config", "default", "/home/.h2/claude-config/default"},
+		{"prefix only defaults profile", "/home/.h2/claude-config", "", "/home/.h2/claude-config/default"},
+		{"no prefix returns empty", "", "default", ""},
+		{"no prefix no profile returns empty", "", "", ""},
+		{"custom profile", "/config", "staging", "/config/staging"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rc := &RuntimeConfig{
+				HarnessConfigPathPrefix: tt.prefix,
+				Profile:                 tt.profile,
+			}
+			if got := rc.HarnessConfigDir(); got != tt.want {
+				t.Errorf("HarnessConfigDir() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

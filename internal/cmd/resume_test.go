@@ -91,15 +91,16 @@ func TestRunResume_DryRun(t *testing.T) {
 	os.MkdirAll(claudeConfigDir, 0o755)
 
 	writeTestRuntimeConfig(t, name, &config.RuntimeConfig{
-		AgentName:        name,
-		SessionID:        "dry-run-session-uuid",
-		HarnessSessionID: "dry-run-session-uuid",
-		Command:          "claude",
-		HarnessType:      "claude_code",
-		HarnessConfigDir: claudeConfigDir,
-		CWD:              tmpDir,
-		Pod:              "test-pod",
-		StartedAt:        "2024-01-01T00:00:00Z",
+		AgentName:               name,
+		SessionID:               "dry-run-session-uuid",
+		HarnessSessionID:        "dry-run-session-uuid",
+		Command:                 "claude",
+		HarnessType:             "claude_code",
+		HarnessConfigPathPrefix: tmpDir,
+		Profile:                 "claude-config",
+		CWD:                     tmpDir,
+		Pod:                     "test-pod",
+		StartedAt:               "2024-01-01T00:00:00Z",
 	})
 
 	// Capture stdout.
@@ -208,15 +209,16 @@ func TestRunResume_ForksDaemonWithResumeFlag(t *testing.T) {
 	os.MkdirAll(claudeConfigDir, 0o755)
 
 	sessionDir := writeTestRuntimeConfig(t, name, &config.RuntimeConfig{
-		AgentName:        name,
-		SessionID:        "session-uuid",
-		HarnessSessionID: "session-uuid",
-		Command:          "claude",
-		HarnessType:      "claude_code",
-		HarnessConfigDir: claudeConfigDir,
-		CWD:              tmpDir,
-		Pod:              "my-pod",
-		StartedAt:        "2024-01-01T00:00:00Z",
+		AgentName:               name,
+		SessionID:               "session-uuid",
+		HarnessSessionID:        "session-uuid",
+		Command:                 "claude",
+		HarnessType:             "claude_code",
+		HarnessConfigPathPrefix: tmpDir,
+		Profile:                 "claude-config",
+		CWD:                     tmpDir,
+		Pod:                     "my-pod",
+		StartedAt:               "2024-01-01T00:00:00Z",
 	})
 
 	// Capture ForkDaemon call.

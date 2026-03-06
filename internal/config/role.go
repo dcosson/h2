@@ -190,11 +190,9 @@ type Role struct {
 	AgentHarness               string `yaml:"agent_harness,omitempty"`                  // claude_code | codex | generic
 	AgentModel                 string `yaml:"agent_model,omitempty"`                    // explicit model; empty => agent app's own default
 	AgentHarnessCommand        string `yaml:"agent_harness_command,omitempty"`          // command override for any harness
-	Profile                    string `yaml:"profile,omitempty"`                        // default profile name ("default")
-	ClaudeCodeConfigPath       string `yaml:"claude_code_config_path,omitempty"`        // explicit path override
-	ClaudeCodeConfigPathPrefix string `yaml:"claude_code_config_path_prefix,omitempty"` // default: <H2Dir>/claude-config
-	CodexConfigPath            string `yaml:"codex_config_path,omitempty"`              // explicit path override
-	CodexConfigPathPrefix      string `yaml:"codex_config_path_prefix,omitempty"`       // default: <H2Dir>/codex-config
+	Profile                    string `yaml:"profile,omitempty"`                        // profile name (default: "default")
+	ClaudeCodeConfigPathPrefix string `yaml:"claude_code_config_path_prefix,omitempty"` // parent dir for Claude config profiles; default: <H2Dir>/claude-config
+	CodexConfigPathPrefix      string `yaml:"codex_config_path_prefix,omitempty"`       // parent dir for Codex config profiles; default: <H2Dir>/codex-config
 
 	WorkingDir              string                 `yaml:"working_dir,omitempty"`               // agent CWD (default ".")
 	AdditionalDirs          []string               `yaml:"additional_dirs,omitempty"`           // extra dirs passed via --add-dir
@@ -390,16 +388,17 @@ func (r *Role) GetModel() string {
 	return r.AgentModel
 }
 
-// GetCodexConfigDir returns the Codex config directory.
+// GetCodexConfigPathPrefix returns the Codex config path prefix, defaulting to <H2Dir>/codex-config.
+func (r *Role) GetCodexConfigPathPrefix() string {
+	if r.CodexConfigPathPrefix != "" {
+		return r.CodexConfigPathPrefix
+	}
+	return filepath.Join(ConfigDir(), "codex-config")
+}
+
+// GetCodexConfigDir returns the Codex config directory (prefix + profile).
 func (r *Role) GetCodexConfigDir() string {
-	if r.CodexConfigPath != "" {
-		return r.CodexConfigPath
-	}
-	prefix := r.CodexConfigPathPrefix
-	if prefix == "" {
-		prefix = filepath.Join(ConfigDir(), "codex-config")
-	}
-	return filepath.Join(prefix, r.GetProfile())
+	return filepath.Join(r.GetCodexConfigPathPrefix(), r.GetProfile())
 }
 
 // GetProfile returns the selected profile name.
@@ -420,18 +419,17 @@ func DefaultClaudeConfigDir() string {
 	return filepath.Join(ConfigDir(), "claude-config", "default")
 }
 
-// GetClaudeConfigDir returns the Claude config directory for this role.
-// If set to "~/" (the home directory), returns "" to indicate that
-// CLAUDE_CONFIG_DIR should not be overridden (use system default).
+// GetClaudeConfigPathPrefix returns the Claude config path prefix, defaulting to <H2Dir>/claude-config.
+func (r *Role) GetClaudeConfigPathPrefix() string {
+	if r.ClaudeCodeConfigPathPrefix != "" {
+		return r.ClaudeCodeConfigPathPrefix
+	}
+	return filepath.Join(ConfigDir(), "claude-config")
+}
+
+// GetClaudeConfigDir returns the Claude config directory (prefix + profile).
 func (r *Role) GetClaudeConfigDir() string {
-	if r.ClaudeCodeConfigPath != "" {
-		return expandClaudeConfigDir(r.ClaudeCodeConfigPath)
-	}
-	prefix := r.ClaudeCodeConfigPathPrefix
-	if prefix == "" {
-		prefix = filepath.Join(ConfigDir(), "claude-config")
-	}
-	return expandClaudeConfigDir(filepath.Join(prefix, r.GetProfile()))
+	return expandClaudeConfigDir(filepath.Join(r.GetClaudeConfigPathPrefix(), r.GetProfile()))
 }
 
 // expandClaudeConfigDir handles tilde expansion for Claude config dir paths.

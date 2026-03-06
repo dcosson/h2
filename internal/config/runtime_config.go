@@ -21,8 +21,9 @@ type RuntimeConfig struct {
 	Pod       string `json:"pod,omitempty"`
 
 	// Harness configuration.
-	HarnessType      string `json:"harness_type"`
-	HarnessConfigDir string `json:"harness_config_dir,omitempty"`
+	HarnessType             string `json:"harness_type"`
+	HarnessConfigPathPrefix string `json:"harness_config_path_prefix,omitempty"` // e.g. <H2Dir>/claude-config
+	Profile                 string `json:"profile,omitempty"`                    // profile name within prefix (default: "default")
 	// HarnessSessionID is the session ID as known by the underlying harness
 	// (e.g. Claude Code's session UUID, Codex's conversation.id). For harnesses
 	// that accept a session-id input arg (currently just Claude Code), this will
@@ -160,6 +161,19 @@ func (rc *RuntimeConfig) Validate() error {
 		return fmt.Errorf("invalid runtime config: missing required fields: %s", strings.Join(missing, ", "))
 	}
 	return nil
+}
+
+// HarnessConfigDir returns the resolved harness config directory: prefix + "/" + profile.
+// Returns empty string if no prefix is set.
+func (rc *RuntimeConfig) HarnessConfigDir() string {
+	if rc.HarnessConfigPathPrefix == "" {
+		return ""
+	}
+	profile := rc.Profile
+	if profile == "" {
+		profile = "default"
+	}
+	return filepath.Join(rc.HarnessConfigPathPrefix, profile)
 }
 
 // ParseHeartbeatIdleTimeout parses the HeartbeatIdleTimeout string as a Go duration.

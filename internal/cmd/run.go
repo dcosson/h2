@@ -218,16 +218,26 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 			if hcfg.HarnessType == "claude_code" {
 				harnessSessionID = sessionID
 			}
+			// For command-mode, derive prefix from harness type.
+			// "default" profile is always used when no role is specified.
+			var cmdConfigPrefix string
+			switch hcfg.HarnessType {
+			case "claude_code":
+				cmdConfigPrefix = filepath.Join(config.ConfigDir(), "claude-config")
+			case "codex":
+				cmdConfigPrefix = filepath.Join(config.ConfigDir(), "codex-config")
+			}
 			rc := &config.RuntimeConfig{
-				AgentName:        name,
-				SessionID:        sessionID,
-				HarnessSessionID: harnessSessionID,
-				HarnessType:      hcfg.HarnessType,
-				HarnessConfigDir: hcfg.ConfigDir,
-				Command:          cmdCommand,
-				Args:             cmdArgs,
-				CWD:              func() string { cwd, _ := os.Getwd(); return cwd }(),
-				Pod:              pod,
+				AgentName:               name,
+				SessionID:               sessionID,
+				HarnessSessionID:        harnessSessionID,
+				HarnessType:             hcfg.HarnessType,
+				HarnessConfigPathPrefix: cmdConfigPrefix,
+				Profile:                 "default",
+				Command:                 cmdCommand,
+				Args:                    cmdArgs,
+				CWD:                     func() string { cwd, _ := os.Getwd(); return cwd }(),
+				Pod:                     pod,
 			}
 			if err := config.WriteRuntimeConfig(sessionDir, rc); err != nil {
 				return fmt.Errorf("write runtime config: %w", err)
@@ -310,8 +320,8 @@ func runResume(cmd *cobra.Command, args []string, detach bool, dryRun bool) erro
 	}
 
 	// Ensure the harness config dir exists (e.g. Claude's CLAUDE_CONFIG_DIR).
-	if rc.HarnessConfigDir != "" {
-		if err := config.EnsureClaudeConfigDir(rc.HarnessConfigDir); err != nil {
+	if configDir := rc.HarnessConfigDir(); configDir != "" {
+		if err := config.EnsureClaudeConfigDir(configDir); err != nil {
 			return fmt.Errorf("ensure config dir: %w", err)
 		}
 	}

@@ -149,15 +149,25 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 	if roleCfg.HarnessType == "claude_code" {
 		harnessSessionID = sessionID
 	}
+	// Resolve harness config path prefix from role.
+	var harnessConfigPathPrefix string
+	switch roleCfg.HarnessType {
+	case "claude_code":
+		harnessConfigPathPrefix = role.GetClaudeConfigPathPrefix()
+	case "codex":
+		harnessConfigPathPrefix = role.GetCodexConfigPathPrefix()
+	}
+
 	rc := &config.RuntimeConfig{
-		AgentName:        name,
-		SessionID:        sessionID,
-		HarnessSessionID: harnessSessionID,
-		RoleName:         role.RoleName,
-		Pod:              pod,
-		HarnessType:      roleCfg.HarnessType,
-		HarnessConfigDir: roleCfg.ConfigDir,
-		Command:          h.Command(),
+		AgentName:               name,
+		SessionID:               sessionID,
+		HarnessSessionID:        harnessSessionID,
+		RoleName:                role.RoleName,
+		Pod:                     pod,
+		HarnessType:             roleCfg.HarnessType,
+		HarnessConfigPathPrefix: harnessConfigPathPrefix,
+		Profile:                 role.GetProfile(),
+		Command:                 h.Command(),
 		// Args is not set for role-based launches; the harness builds
 		// the full command args via BuildCommandArgs.
 		Model:                roleCfg.Model,
@@ -226,12 +236,8 @@ func validateHarnessConfigDirExists(role *config.Role, hcfg harness.HarnessConfi
 		return fmt.Errorf("stat harness config dir %s: %w", hcfg.ConfigDir, err)
 	}
 
-	profileDerivedPath := (hcfg.HarnessType == "claude_code" && role.ClaudeCodeConfigPath == "") ||
-		(hcfg.HarnessType == "codex" && role.CodexConfigPath == "")
-	if profileDerivedPath {
-		profile := role.GetProfile()
-		return fmt.Errorf("profile %q not found (missing %s); h2 does not auto-create profiles on run, use 'h2 profile create %s' or choose an existing profile via 'h2 profile list'",
-			profile, hcfg.ConfigDir, profile)
-	}
-	return fmt.Errorf("missing harness config dir: %s", hcfg.ConfigDir)
+	// Config dir is always derived from prefix + profile now.
+	profile := role.GetProfile()
+	return fmt.Errorf("profile %q not found (missing %s); h2 does not auto-create profiles on run, use 'h2 profile create %s' or choose an existing profile via 'h2 profile list'",
+		profile, hcfg.ConfigDir, profile)
 }
