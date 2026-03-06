@@ -333,6 +333,12 @@ On each event, the engine iterates registered triggers and checks:
 3. If a condition is set, does `sh -c <condition>` exit 0?
 4. If all pass: run the action, remove the trigger.
 
+**Failure semantics**: triggers are **consumed on attempt**, not on success. If
+the action fails (non-zero exit, timeout, or dropped due to concurrency limit),
+the trigger is still removed. The failure is logged to the session activity log.
+There is no built-in retry — if retry behavior is needed, use a recurring
+schedule with `RunOnceWhen` instead.
+
 The event channel is a fan-out from the monitor — the trigger engine gets its
 own copy so it doesn't block the harness or message delivery pipeline.
 
@@ -366,6 +372,12 @@ RRULE, sets a timer, and when it fires:
 4. If schedule should stop (StopWhen condition met, or RunOnceWhen fired, or
    RRULE exhausted), remove it.
 
+**Failure semantics for schedules**: recurring schedules (`RunIf`, `StopWhen`)
+continue on action failure — the failure is logged but does not affect the
+schedule's lifecycle. `RunOnceWhen` schedules are consumed on attempt (same as
+triggers): if the condition passes and the action is dispatched, the schedule is
+removed regardless of whether the action succeeds.
+
 ### ActionRunner
 
 Shared by both engines. Dispatches actions by type.
@@ -383,6 +395,16 @@ For `Exec` actions: run via `sh -c <action>` with the agent's working directory
 and environment (see Environment Variables below). Runs asynchronously — the
 engine does not block waiting for completion. Stdout/stderr are logged to the
 session activity log.
+
+**Execution control for exec actions:**
+- **Max concurrency**: 3 concurrent exec actions per agent (global across all
+  triggers and schedules). Enforced via a semaphore in ActionRunner.
+- **Saturation policy**: if all slots are occupied, the action is **dropped**
+  and a warning is logged: `action dropped (max concurrent exec reached): <id>`.
+- **Timeout**: each exec action has a 60-second default timeout. If exceeded,
+  the process is killed (SIGKILL). Configurable per-action in a future version.
+- **Observability**: dropped and timed-out actions are logged to the session
+  activity log with the trigger/schedule ID.
 
 For `Message` actions: call `message.PrepareMessage()` to enqueue the message
 directly into the agent's message queue. This is synchronous and fast — no
@@ -443,6 +465,29 @@ Example exec action using event vars:
 h2 send --bridge user "$H2_ACTOR entered $H2_EVENT_STATE ($H2_EVENT_SUBSTATE)"
 ```
 
+### Persistence and Lifecycle
+
+**Role-defined automations** are declared in the Role YAML under `triggers:`
+and `schedules:` keys. These are rendered through the template engine at agent
+startup (same as all other role fields) and loaded into the engines. The Role
+struct gains `Triggers []TriggerSpec` and `Schedules []ScheduleSpec` fields.
+IDs for role-defined automations are derived from their `name` field (required
+in YAML); duplicate names within a role are a validation error.
+
+**Dynamically registered automations** (via `h2 trigger add` / `h2 schedule
+add`) are **ephemeral** — they live in-memory only and are lost when the agent
+stops or restarts. The role file is the durable source of truth. The CLI
+commands print a notice: `Note: dynamically registered, will not survive agent
+restart.` If durability is needed, add the automation to the role file.
+
+IDs for dynamic registrations are auto-generated 8-char hex strings (same
+scheme as message IDs).
+
+On daemon startup, only role-defined automations are loaded. On resume
+(`--resume`), role-defined automations are re-loaded from the role file (they
+may have changed between stop and resume). Dynamic registrations from the
+previous run are not restored.
+
 ### Daemon Integration
 
 In `daemon.go`, after creating the session and starting the monitor:
@@ -453,11 +498,11 @@ actionRunner := &automation.ActionRunner{...}
 triggerEngine := automation.NewTriggerEngine(actionRunner)
 scheduleEngine := automation.NewScheduleEngine(actionRunner)
 
-// Load from role config
-for _, t := range rc.Triggers {
+// Load from rendered role config
+for _, t := range role.Triggers {
     triggerEngine.Add(t)
 }
-for _, s := range rc.Schedules {
+for _, s := range role.Schedules {
     scheduleEngine.Add(s)
 }
 
@@ -498,10 +543,14 @@ The old heartbeat had an implicit "only when idle" gate. In the new system this
 is expressed by having the action use `--priority idle` (delivered only when
 idle) or by adding a condition that checks agent state.
 
-One behavioral difference: the old heartbeat waited for the agent to be idle for
-the full timeout duration before firing. A schedule fires on the RRULE interval
-regardless of state — the idle gating is done via the message priority or a
-condition. This is simpler and more predictable.
+**Migration note — breaking change:** The old heartbeat `idle_timeout` semantic
+(wait for the agent to be continuously idle for the full duration before firing)
+is **removed**. The new schedule-based approach fires on the RRULE interval
+regardless of agent state — idle gating is done via `priority: idle` (message
+delivered only when idle) or a condition like `test "$H2_AGENT_STATE" = "idle"`.
+This is simpler and more predictable but changes the timing behavior. The old
+`heartbeat:` key in role YAML will be a validation error after this change.
+Existing roles must be updated to use `schedules:` instead.
 
 ## Package Structure
 
@@ -557,3 +606,13 @@ internal/automation/
 - Heartbeat migration: define schedule-based heartbeat in role, verify nudge delivered at idle
 - Multiple triggers on same event: verify all fire
 - Remove trigger via CLI, verify it doesn't fire on subsequent events
+
+## Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | h2-reviewer | P1 | Persistence model undefined (rc.Triggers/rc.Schedules) | Incorporated | Added "Persistence and Lifecycle" section; role-defined from Role YAML, dynamic are ephemeral |
+| 2 | h2-reviewer | P1 | Dynamic registration durability unspecified | Incorporated | Specified ephemeral semantics, CLI prints notice, role file is durable source of truth |
+| 3 | h2-reviewer | P1 | Unbounded async exec fan-out | Incorporated | Added execution control: max 3 concurrent, drop-on-saturate, 60s timeout with SIGKILL |
+| 4 | h2-reviewer | P2 | One-shot failure semantics undefined | Incorporated | Triggers and RunOnceWhen consume on attempt; failures logged, no retry |
+| 5 | h2-reviewer | P2 | Heartbeat migration behavior change | Incorporated | Added explicit migration callout noting breaking change and required role file updates |
