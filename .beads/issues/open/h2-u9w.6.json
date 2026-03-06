@@ -12,6 +12,12 @@
       "type": "parent-child"
     }
   ],
+  "dependents": [
+    {
+      "id": "h2-u9w.7",
+      "type": "blocks"
+    }
+  ],
   "created_by": "Danny Cosson",
   "owner": "dcosson@gmail.com",
   "labels": [

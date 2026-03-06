@@ -1,0 +1,26 @@
+{
+  "id": "h2-u9w.7",
+  "title": "Consolidate Role resolution and eliminate HarnessConfig",
+  "description": "Refactor the launch flow to consolidate Role to RuntimeConfig resolution and eliminate redundant intermediate structs.\n\n## Changes\n\n1. **Role.Resolve() method** - Add a Resolve(name, sessionID, cwd string) (*RuntimeConfig, error) method on Role in the config package. This performs the full resolution: template interpolation (two-pass), working dir resolution, harness config prefix/profile, instructions assembly, permissions, heartbeat config, etc. Returns a fully populated RuntimeConfig. The cmd layer handles side-effect I/O (mkdir, worktree creation, writing config, forking daemon) using the resolved values.\n\n2. **Eliminate HarnessConfig** - Delete harness.HarnessConfig struct entirely. Harness init/New takes *RuntimeConfig directly. The harness pulls what it needs (HarnessType, Command, Model, HarnessConfigDir(), CWD, etc.) from RuntimeConfig.\n\n3. **Simplify harness interface methods** - PrepareForLaunch no longer needs agentName and sessionID params (they are in RuntimeConfig). BuildCommandArgs no longer needs CommandArgsConfig - the harness already has all the config. These methods become zero-arg or minimal-arg. Delete CommandArgsConfig.\n\n4. **Session holds *RuntimeConfig reference** - Remove all the duplicated fields on the Session struct (HarnessType, HarnessConfigDir, Model, Command, WorkingDir, Instructions, SystemPrompt, ClaudePermissionMode, CodexSandboxMode, CodexAskForApproval, AdditionalDirs, etc.). Session just holds a *RuntimeConfig. RunDaemon stops copying fields one-by-one.\n\n5. **Delete roleHarnessConfig / commandHarnessConfig** - These exist only to build the now-deleted HarnessConfig. For command-mode launches (no role), build a minimal RuntimeConfig directly instead.\n\n6. **Clean up resolveFullHarness in session.go** - This re-derives harness config from role name inside the daemon. No longer needed since the daemon receives a fully resolved RuntimeConfig.\n\n7. **Set HarnessSessionID placeholder for Codex** - When building RuntimeConfig for Codex, set HarnessSessionID to a placeholder value (not empty string) so the struct is fully populated.\n\n## Files affected\n- internal/config/role.go - Add Resolve() method\n- internal/config/runtime_config.go - Possibly minor adjustments\n- internal/session/agent/harness/harness.go - Delete HarnessConfig, CommandArgsConfig, update Harness interface\n- internal/session/agent/harness/claude/harness.go - Take *RuntimeConfig\n- internal/session/agent/harness/codex/harness.go - Take *RuntimeConfig\n- internal/session/agent/harness/generic/harness.go - Take *RuntimeConfig\n- internal/session/session.go - Hold *RuntimeConfig, delete field copies, delete resolveFullHarness\n- internal/session/daemon.go - Simplify RunDaemon\n- internal/cmd/agent_setup.go - Use Role.Resolve(), delete roleHarnessConfig/commandHarnessConfig\n- internal/cmd/run.go - Use Role.Resolve() for command-mode\n- internal/cmd/dry_run.go - Use Role.Resolve()\n- All related test files",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "parent": "h2-u9w",
+  "dependencies": [
+    {
+      "id": "h2-u9w",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-u9w.6",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "Danny Cosson",
+  "owner": "dcosson@gmail.com",
+  "labels": [
+    "project=h2-u9w"
+  ],
+  "created_at": "2026-03-05T20:37:27.849897-08:00",
+  "updated_at": "2026-03-05T20:37:27.849897-08:00"
+}
