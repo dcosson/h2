@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -178,6 +179,7 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 		CodexAskForApproval:  role.CodexAskForApproval,
 		AdditionalDirs:       additionalDirs,
 		Overrides:            overrideMap,
+		StartedAt:            time.Now().UTC().Format(time.RFC3339),
 	}
 
 	// Set heartbeat config.

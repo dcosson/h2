@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -229,6 +230,7 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 				Args:                    cmdArgs,
 				CWD:                     func() string { cwd, _ := os.Getwd(); return cwd }(),
 				Pod:                     pod,
+				StartedAt:               time.Now().UTC().Format(time.RFC3339),
 			}
 			if err := config.WriteRuntimeConfig(sessionDir, rc); err != nil {
 				return fmt.Errorf("write runtime config: %w", err)
@@ -347,7 +349,7 @@ func runResume(cmd *cobra.Command, args []string, detach bool, dryRun bool) erro
 
 	// Update started_at for the new daemon instance.
 	origStartedAt := rc.StartedAt
-	rc.StartedAt = "" // will be set by WriteRuntimeConfig
+	rc.StartedAt = time.Now().UTC().Format(time.RFC3339)
 
 	if err := config.WriteRuntimeConfig(sessionDir, rc); err != nil {
 		return fmt.Errorf("write runtime config for resume: %w", err)

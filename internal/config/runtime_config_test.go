@@ -284,7 +284,7 @@ func TestWriteRuntimeConfig_EmptySessionDir(t *testing.T) {
 	}
 }
 
-func TestWriteRuntimeConfig_SetsStartedAtIfEmpty(t *testing.T) {
+func TestWriteRuntimeConfig_DoesNotAutoFillStartedAt(t *testing.T) {
 	dir := t.TempDir()
 	rc := &RuntimeConfig{
 		AgentName:   "a",
@@ -293,11 +293,12 @@ func TestWriteRuntimeConfig_SetsStartedAtIfEmpty(t *testing.T) {
 		Command:     "bash",
 		CWD:         "/tmp",
 	}
+	// WriteRuntimeConfig should not auto-fill StartedAt — callers set it.
 	if err := WriteRuntimeConfig(dir, rc); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if rc.StartedAt == "" {
-		t.Error("StartedAt should have been set")
+	if rc.StartedAt != "" {
+		t.Errorf("StartedAt should remain empty, got %q", rc.StartedAt)
 	}
 }
 

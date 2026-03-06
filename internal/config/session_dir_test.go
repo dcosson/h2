@@ -26,13 +26,13 @@ func TestFindSessionDirByID(t *testing.T) {
 
 	if err := WriteRuntimeConfig(aDir, &RuntimeConfig{
 		AgentName: "agent-a", SessionID: "sid-a", HarnessType: "claude_code",
-		Command: "claude", CWD: "/tmp",
+		Command: "claude", CWD: "/tmp", StartedAt: "2024-01-01T00:00:00Z",
 	}); err != nil {
 		t.Fatalf("write config a: %v", err)
 	}
 	if err := WriteRuntimeConfig(bDir, &RuntimeConfig{
 		AgentName: "agent-b", SessionID: "sid-b", HarnessType: "claude_code",
-		Command: "claude", CWD: "/tmp",
+		Command: "claude", CWD: "/tmp", StartedAt: "2024-01-01T00:00:00Z",
 	}); err != nil {
 		t.Fatalf("write config b: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestFindSessionDirByID_IgnoresBadMetadata(t *testing.T) {
 
 	if err := WriteRuntimeConfig(validDir, &RuntimeConfig{
 		AgentName: "valid", SessionID: "sid-ok", HarnessType: "claude_code",
-		Command: "claude", CWD: "/tmp",
+		Command: "claude", CWD: "/tmp", StartedAt: "2024-01-01T00:00:00Z",
 	}); err != nil {
 		t.Fatalf("write config valid: %v", err)
 	}

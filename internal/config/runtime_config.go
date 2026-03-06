@@ -76,9 +76,6 @@ func WriteRuntimeConfig(sessionDir string, rc *RuntimeConfig) error {
 	if sessionDir == "" {
 		return nil
 	}
-	if rc.StartedAt == "" {
-		rc.StartedAt = time.Now().UTC().Format(time.RFC3339)
-	}
 	data, err := json.MarshalIndent(rc, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal runtime config: %w", err)

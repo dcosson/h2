@@ -340,6 +340,7 @@ func TestRuntimeConfig_NewFields(t *testing.T) {
 		Pod:         "test-pod",
 		Command:     "claude",
 		CWD:         "/tmp",
+		StartedAt:   "2024-01-01T00:00:00Z",
 	}
 	if err := config.WriteRuntimeConfig(dir, rc); err != nil {
 		t.Fatalf("write: %v", err)
