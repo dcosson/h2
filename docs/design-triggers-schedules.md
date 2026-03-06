@@ -13,9 +13,11 @@ A **schedule** fires at one or more times defined by an RRULE. Each firing can
 optionally be gated by a condition. Schedules support three condition modes that
 control how the gate interacts with firings.
 
-Both primitives execute an **action**, which is a shell command string run in the
-agent's environment. Both can be defined statically in a role file or registered
-dynamically on a running agent via the CLI.
+Both primitives execute an **action**. An action is either a shell command
+(`exec`) or a message sent to the agent (`message`). The message action injects
+text directly into the agent's PTY via the message queue — no shelling out
+needed. Both can be defined statically in a role file or registered dynamically
+on a running agent via the CLI.
 
 This system supersedes the existing heartbeat nudge mechanism. Heartbeats become
 a schedule with an idle-timeout interval and an optional condition gate.
@@ -23,21 +25,22 @@ a schedule with an idle-timeout interval and an optional condition gate.
 ## Motivating Use Cases
 
 1. **Expects-response reminders** — trigger: agent goes idle, condition: pending
-   responses exist (`h2 send --check-pending`), action: inject reminder message.
+   responses exist, action: message "You have unresponded messages" (priority:
+   idle).
 
 2. **Credential rotation on rate limit** — trigger: agent enters `usage_limit`
-   substate, action: `h2 rotate <agent> <next-profile>`.
+   substate, action: exec `h2 rotate <agent> <next-profile>`.
 
 3. **Permission request escalation** — trigger: agent enters
-   `waiting_for_permission` substate, action: `h2 send --bridge user "Agent
-   needs permission approval"`.
+   `waiting_for_permission` substate, action: exec `h2 send --bridge user
+   "Agent needs permission approval"`.
 
-4. **Heartbeat nudge (replaces current system)** — schedule: every 30s while
-   idle, condition: optional bash check, action: `h2 send --priority idle <self>
-   "Are you still working?"`.
+4. **Heartbeat nudge (replaces current system)** — schedule: every 30s,
+   condition: optional bash check, action: message "Are you still working?"
+   (priority: idle).
 
-5. **Periodic status report** — schedule: every 10 minutes, action: `h2 send
-   scheduler "Still working on task X"`.
+5. **Periodic status report** — schedule: every 10 minutes, action: exec
+   `h2 send scheduler "Still working on task X"`.
 
 ## Architecture
 
@@ -145,28 +148,44 @@ type Trigger struct {
     // Condition gate (optional)
     Condition string   // shell command; trigger fires only if exit code 0
 
-    // Action
-    Action    string   // shell command to execute when triggered
+    // Action (exactly one of these is set)
+    Action Action
 }
 ```
 
 ### Schedule
 
 ```go
-// Schedule fires at times defined by an RRULE, optionally gated by a condition.
+// Schedule fires at times defined by a start time + RRULE, optionally gated
+// by a condition.
 type Schedule struct {
     ID        string   // unique identifier
     Name      string   // human-readable label (optional)
 
     // Timing
+    Start     string   // start time (RFC 3339); defaults to now if empty
     RRule     string   // RRULE string (RFC 5545), e.g. "FREQ=SECONDLY;INTERVAL=30"
 
     // Condition gate (optional)
     Condition     string        // shell command
     ConditionMode ConditionMode // how the condition interacts with firings
 
-    // Action
-    Action    string   // shell command to execute on each firing
+    // Action (exactly one of these is set)
+    Action Action
+}
+
+// Action defines what happens when a trigger fires or a schedule ticks.
+// Exactly one of Exec or Message must be set.
+type Action struct {
+    // Exec runs a shell command via sh -c in the agent's environment.
+    Exec string
+
+    // Message injects a message into the agent's PTY via the message queue.
+    // The message is delivered as if sent by the given From identity
+    // (defaults to "h2-automation") at the given Priority (defaults to "normal").
+    Message  string
+    From     string   // sender identity for the message (default: "h2-automation")
+    Priority string   // message priority: "interrupt", "normal", "idle-first", "idle"
 }
 
 type ConditionMode int
@@ -193,23 +212,30 @@ triggers:
   - name: rotate-on-rate-limit
     event: state_change
     sub_state: usage_limit
-    action: h2 rotate {{ .AgentName }} next-profile
+    exec: h2 rotate {{ .AgentName }} next-profile
 
   - name: bridge-permission-request
     event: approval_requested
-    action: h2 send --bridge user "{{ .AgentName }} needs permission approval"
+    exec: h2 send --bridge user "{{ .AgentName }} needs permission approval"
 
 schedules:
   - name: heartbeat
     rrule: "FREQ=SECONDLY;INTERVAL=30"
+    # start omitted — defaults to agent start time
     condition: "test -f /tmp/heartbeat-enabled"
     condition_mode: run_if
-    action: h2 send --priority idle {{ .AgentName }} "Are you still working?"
+    message: "Are you still working?"
+    priority: idle
 
   - name: status-report
     rrule: "FREQ=MINUTELY;INTERVAL=10"
-    action: h2 send scheduler "{{ .AgentName }} still active"
+    # start omitted — defaults to agent start time
+    exec: h2 send scheduler "{{ .AgentName }} still active"
 ```
+
+In YAML, `exec` and `message` are the two action types. Set exactly one per
+trigger or schedule. For `message`, optional `from` (default: `h2-automation`)
+and `priority` (default: `normal`) fields are available.
 
 Trigger and schedule action strings are rendered through the existing role
 template engine, giving access to `{{ .AgentName }}`, `{{ .Var.x }}`, etc.
@@ -219,11 +245,17 @@ template engine, giving access to `{{ .AgentName }}`, `{{ .Var.x }}`, etc.
 ### Triggers
 
 ```
-# Register a trigger on a running agent
+# Register a trigger with a shell action
 h2 trigger add <agent-name> \
     --event state_change \
     --sub-state usage_limit \
-    --action 'h2 rotate {{ .AgentName }} next-profile'
+    --exec 'h2 rotate <agent-name> next-profile'
+
+# Register a trigger with a message action
+h2 trigger add <agent-name> \
+    --event approval_requested \
+    --message "You have a pending permission request" \
+    --priority interrupt
 
 # List triggers
 h2 trigger list <agent-name>
@@ -235,12 +267,19 @@ h2 trigger remove <agent-name> <trigger-id>
 ### Schedules
 
 ```
-# Register a schedule on a running agent
+# Register a schedule with a shell action (start defaults to now)
 h2 schedule add <agent-name> \
     --rrule "FREQ=MINUTELY;INTERVAL=5" \
+    --exec 'h2 send scheduler "status update"'
+
+# Register a schedule with a message action and explicit start time
+h2 schedule add <agent-name> \
+    --start "2026-03-06T14:00:00Z" \
+    --rrule "FREQ=SECONDLY;INTERVAL=30" \
     --condition "test -f /tmp/check" \
     --condition-mode run_if \
-    --action 'h2 send scheduler "status update"'
+    --message "Are you still working?" \
+    --priority idle
 
 # List schedules
 h2 schedule list <agent-name>
@@ -248,6 +287,10 @@ h2 schedule list <agent-name>
 # Remove a schedule
 h2 schedule remove <agent-name> <schedule-id>
 ```
+
+The `--exec` and `--message` flags are mutually exclusive. For `--message`,
+optional `--from` (default: `h2-automation`) and `--priority` (default:
+`normal`) flags are available.
 
 ### Dynamic registration via socket
 
@@ -315,8 +358,8 @@ func (se *ScheduleEngine) Remove(id string) bool
 func (se *ScheduleEngine) List() []*Schedule
 ```
 
-For each schedule, the engine computes the next occurrence from the RRULE,
-sets a timer, and when it fires:
+For each schedule, the engine computes the next occurrence from the start time +
+RRULE, sets a timer, and when it fires:
 1. Evaluate condition + mode.
 2. If action should run, run it.
 3. If schedule should continue, compute next occurrence and reset timer.
@@ -325,21 +368,27 @@ sets a timer, and when it fires:
 
 ### ActionRunner
 
-Shared by both engines. Executes shell commands asynchronously.
+Shared by both engines. Dispatches actions by type.
 
 ```go
 type ActionRunner struct {
     agentName string
     cwd       string
-    env       []string  // inherited env + H2_AGENT_NAME, etc.
+    env       []string              // inherited env + H2_AGENT_NAME, etc.
+    queue     *message.MessageQueue // for message actions
 }
 
-func (ar *ActionRunner) Run(action string) error
+func (ar *ActionRunner) Run(action Action) error
 ```
 
-Actions are run via `sh -c <action>` with the agent's working directory and
-environment. They run asynchronously — the engine does not block waiting for
-the action to complete. Stdout/stderr are logged to the session activity log.
+For `Exec` actions: run via `sh -c <action>` with the agent's working directory
+and environment. Runs asynchronously — the engine does not block waiting for
+completion. Stdout/stderr are logged to the session activity log.
+
+For `Message` actions: call `message.PrepareMessage()` to enqueue the message
+directly into the agent's message queue. This is synchronous and fast — no
+subprocess, no socket round-trip. The message is delivered to the agent's PTY
+through the normal delivery pipeline with the specified priority.
 
 ### Daemon Integration
 
@@ -385,9 +434,11 @@ heartbeat:
 schedules:
   - name: heartbeat
     rrule: "FREQ=SECONDLY;INTERVAL=30"
+    # start omitted — defaults to agent start time
     condition: "test -f /tmp/check"
     condition_mode: run_if
-    action: h2 send --priority idle {{ .AgentName }} "Are you still working?"
+    message: "Are you still working?"
+    priority: idle
 ```
 
 The old heartbeat had an implicit "only when idle" gate. In the new system this
