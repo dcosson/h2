@@ -55,17 +55,18 @@ Every deviation between plan and implementation must be classified into one of f
 | Severity | Definition | Examples | Status Impact |
 |----------|-----------|----------|---------------|
 | **Cosmetic** | Names, file layout, import paths, or code organization differs but behavior and contracts are identical. | Struct in `types.go` instead of `foo.go`; import path uses `v0.1.0` API variant; extra helper functions added. | Complete |
-| **Structural** | Internal architecture differs but external behavior, data flow, and contracts are preserved. Consumers of this component are unaffected. | No separate `internal/envdetect` package (logic inlined elsewhere); different internal concurrency strategy; fewer files than planned but same coverage. | Complete (document deviations) |
+| **Structural** | Internal architecture differs but external behavior, data flow, and contracts are preserved. Consumers of this component are unaffected. | No separate `internal/envdetect` package (logic inlined elsewhere); different internal concurrency strategy; fewer files than planned but same coverage. | Must resolve before Complete |
 | **Contractual** | Specified interfaces, APIs, type signatures, or data flow contracts don't exist or differ in ways that affect how other components consume this one. The plan says component A produces output X that component B consumes, but in practice A produces Y or B never consumes X. | Plan specifies `Match(cmd ExtractedCommand) bool` but implementation uses `Match(command string) bool`; parser produces structured output but matching layer never calls the parser; specified builder DSL (`Name()`, `ArgAt()`, `Flags()`) doesn't exist. | Partial |
 | **Missing** | Entire components, features, packages, or test categories specified in the plan do not exist in the codebase. | 0 of 75 planned rules implemented; pack registration file doesn't exist; entire test category has no test functions. | Partial or Not Implemented |
 
 ### Classification Rules
 
-1. **Cosmetic + Structural only → Complete.** The plan's intent is realized even if the shape differs.
-2. **Any Contractual deviation → Partial.** A contract mismatch means downstream components cannot work as the plan intended. This is true even if the component "works" in isolation — the system design assumed a contract that doesn't hold.
-3. **Significant Missing items → Partial.** If specified features don't exist, the plan is not complete.
-4. **Majority Missing → Not Implemented.** If the bulk of the plan (>70%) is unimplemented, use "Not Implemented" rather than "Partial."
-5. **When in doubt, classify up** (more severe). It's better to flag something as Contractual and have the orchestrator downgrade it than to miss a real gap.
+1. **Cosmetic only → Complete.** The plan's intent is realized; names/layout differ cosmetically.
+2. **Structural → Must resolve before Complete.** The verifying agent reports the deviation to the scheduler/concierge and reviewer. The team decides: either (a) fix the code to match the plan, or (b) if the implementation is intentionally better/simpler, update the plan doc to match the code. Either way, the deviation is resolved — not just documented. Once resolved, it no longer counts as a deviation.
+3. **Any Contractual deviation → Partial.** A contract mismatch means downstream components cannot work as the plan intended. This is true even if the component "works" in isolation — the system design assumed a contract that doesn't hold.
+4. **Significant Missing items → Partial.** If specified features don't exist, the plan is not complete.
+5. **Majority Missing → Not Implemented.** If the bulk of the plan (>70%) is unimplemented, use "Not Implemented" rather than "Partial."
+6. **When in doubt, classify up** (more severe). It's better to flag something as Contractual and have the orchestrator downgrade it than to miss a real gap.
 
 ### The "Structural" Litmus Test
 
@@ -142,10 +143,12 @@ Use the highest-severity deviation to determine the status:
 | Highest Deviation | Status |
 |-------------------|--------|
 | None, or only Cosmetic | Complete |
-| Structural (no Contractual or Missing) | Complete |
+| Structural | **Blocked** — resolve before signoff (fix code or update plan) |
 | Contractual | Partial |
 | Missing (minority of plan) | Partial |
 | Missing (majority of plan, >70%) | Not Implemented |
+
+**Resolving Structural deviations**: When a structural deviation is found, the verifying agent reports it to the scheduler/concierge. The team (verifier + scheduler + reviewer) decides whether the code or the plan should change. If the implementation is intentionally better or simpler, the plan doc is updated to match — this is not "rubber-stamping," it's keeping plan and code in sync. If the plan is correct, the code is fixed. Either way, once resolved, the deviation disappears and signoff can proceed.
 
 **Status: Complete** — append this section at the very bottom of the doc:
 
@@ -162,7 +165,7 @@ Use the highest-severity deviation to determine the status:
 - **Test verification**: `{test command}` — PASS
 - **Deviations from plan**:
   - [Cosmetic] {description, or "None"}
-  - [Structural] {description, or "None"}
+- **Structural deviations resolved**: {count resolved, or "None found"}
 - **Additions beyond plan**:
   - {List any features implemented that weren't in the original spec, or "None"}
 ```
@@ -281,8 +284,9 @@ The deviation severity classification removes most ambiguity from status determi
 
 1. **Which docs to include** — only implemented plans, not future/unstarted plans
 2. **How to group docs into tasks** — balance between parallelism and cognitive coherence
-3. **Cosmetic vs Structural** — is a file layout change purely cosmetic, or does it affect how developers find and maintain code? When in doubt, Structural is fine (it's still Complete).
-4. **Structural vs Contractual** — does the architectural difference affect cross-component contracts? The key test: would a developer implementing a downstream component based on the plan be surprised or blocked by the actual implementation? If yes, it's Contractual.
-5. **Whether a Contractual gap needs a follow-up bead** — some contract mismatches may be intentional improvements. The orchestrator decides whether to create follow-up work, but the status stays Partial regardless.
-6. **How to handle unavailable agents** — reassign to whoever is online
-7. **Whether to re-verify after gap fixes** — if follow-up beads are created, should the signoff be re-run after they're closed?
+3. **Cosmetic vs Structural** — is a file layout change purely cosmetic, or does it affect how developers find and maintain code? When in doubt, classify as Structural (it must be resolved, but the resolution may be as simple as updating the plan).
+4. **Structural resolution direction** — should the code change to match the plan, or should the plan be updated to match the code? The team (verifier + scheduler + reviewer) decides. If the implementation is genuinely better/simpler, update the plan. If the plan had it right, fix the code.
+5. **Structural vs Contractual** — does the architectural difference affect cross-component contracts? The key test: would a developer implementing a downstream component based on the plan be surprised or blocked by the actual implementation? If yes, it's Contractual.
+6. **Whether a Contractual gap needs a follow-up bead** — some contract mismatches may be intentional improvements. The orchestrator decides whether to create follow-up work, but the status stays Partial regardless.
+7. **How to handle unavailable agents** — reassign to whoever is online
+8. **Whether to re-verify after gap fixes** — if follow-up beads are created, should the signoff be re-run after they're closed?
