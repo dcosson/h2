@@ -2,7 +2,7 @@
   "id": "h2-ifg.4",
   "title": "CLI commands and socket protocol for triggers/schedules",
   "description": "Implement h2 trigger and h2 schedule CLI commands and the daemon socket protocol from docs/design-triggers-schedules.md.\n\nSections: CLI Interface, Dynamic registration via socket\n\nKey deliverables:\n- h2 trigger add/list/remove commands (internal/cmd/trigger.go)\n- h2 schedule add/list/remove commands (internal/cmd/schedule.go)\n- --exec and --message flags (mutually exclusive), --from, --priority for message\n- --rrule, --start, --condition, --condition-mode for schedules\n- --event, --state, --sub-state, --condition for triggers\n- Socket request types: trigger_add, trigger_list, trigger_remove,\n  schedule_add, schedule_list, schedule_remove\n- Listener handlers in internal/session/listener.go for new request types\n- Wire protocol additions to internal/session/message/protocol.go\n- Ephemeral notice on dynamic registration\n- Unit tests for CLI flag parsing/validation and listener handlers\n\nReferences:\n- Plan: docs/design-triggers-schedules.md §CLI Interface, §Dynamic registration via socket\n- Depends on: h2-ifg.2 (TriggerEngine), h2-ifg.3 (ScheduleEngine)",
-  "status": "open",
+  "status": "in_progress",
   "priority": 2,
   "type": "task",
   "parent": "h2-ifg",
@@ -38,5 +38,5 @@
   ],
   "assignee": "mild-cloud",
   "created_at": "2026-03-06T16:09:36.142862-08:00",
-  "updated_at": "2026-03-06T16:17:28.549672-08:00"
+  "updated_at": "2026-03-06T16:31:21.805732-08:00"
 }

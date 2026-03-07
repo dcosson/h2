@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime/debug"
 
+	"h2/internal/automation"
 	"h2/internal/session/message"
 )
 
@@ -51,6 +52,18 @@ func (d *Daemon) handleConn(conn net.Conn) {
 		d.handleHookEvent(conn, req)
 	case "stop":
 		d.handleStop(conn)
+	case "trigger_add":
+		d.handleTriggerAdd(conn, req)
+	case "trigger_list":
+		d.handleTriggerList(conn)
+	case "trigger_remove":
+		d.handleTriggerRemove(conn, req)
+	case "schedule_add":
+		d.handleScheduleAdd(conn, req)
+	case "schedule_list":
+		d.handleScheduleList(conn)
+	case "schedule_remove":
+		d.handleScheduleRemove(conn, req)
 	default:
 		message.SendResponse(conn, &message.Response{
 			Error: "unknown request type: " + req.Type,
@@ -169,4 +182,189 @@ func (d *Daemon) handleHookEvent(conn net.Conn, req *message.Request) {
 
 	d.Session.HandleHookEvent(req.EventName, req.Payload)
 	message.SendResponse(conn, &message.Response{OK: true})
+}
+
+func (d *Daemon) handleTriggerAdd(conn net.Conn, req *message.Request) {
+	defer conn.Close()
+
+	if d.TriggerEngine == nil {
+		message.SendResponse(conn, &message.Response{Error: "trigger engine not initialized"})
+		return
+	}
+	if req.Trigger == nil {
+		message.SendResponse(conn, &message.Response{Error: "trigger spec is required"})
+		return
+	}
+
+	t := triggerFromSpec(req.Trigger)
+	if !d.TriggerEngine.Add(t) {
+		message.SendResponse(conn, &message.Response{
+			Error: fmt.Sprintf("trigger ID %q already exists", t.ID),
+		})
+		return
+	}
+
+	message.SendResponse(conn, &message.Response{OK: true, TriggerID: t.ID})
+}
+
+func (d *Daemon) handleTriggerList(conn net.Conn) {
+	defer conn.Close()
+
+	if d.TriggerEngine == nil {
+		message.SendResponse(conn, &message.Response{OK: true})
+		return
+	}
+
+	triggers := d.TriggerEngine.List()
+	specs := make([]*message.TriggerSpec, len(triggers))
+	for i, t := range triggers {
+		specs[i] = specFromTrigger(t)
+	}
+	message.SendResponse(conn, &message.Response{OK: true, Triggers: specs})
+}
+
+func (d *Daemon) handleTriggerRemove(conn net.Conn, req *message.Request) {
+	defer conn.Close()
+
+	if d.TriggerEngine == nil {
+		message.SendResponse(conn, &message.Response{Error: "trigger engine not initialized"})
+		return
+	}
+	if req.TriggerID == "" {
+		message.SendResponse(conn, &message.Response{Error: "trigger_id is required"})
+		return
+	}
+
+	if !d.TriggerEngine.Remove(req.TriggerID) {
+		message.SendResponse(conn, &message.Response{
+			Error: fmt.Sprintf("trigger %q not found", req.TriggerID),
+		})
+		return
+	}
+	message.SendResponse(conn, &message.Response{OK: true})
+}
+
+func (d *Daemon) handleScheduleAdd(conn net.Conn, req *message.Request) {
+	defer conn.Close()
+
+	if d.ScheduleEngine == nil {
+		message.SendResponse(conn, &message.Response{Error: "schedule engine not initialized"})
+		return
+	}
+	if req.Schedule == nil {
+		message.SendResponse(conn, &message.Response{Error: "schedule spec is required"})
+		return
+	}
+
+	s := scheduleFromSpec(req.Schedule)
+	if err := d.ScheduleEngine.Add(s); err != nil {
+		message.SendResponse(conn, &message.Response{Error: err.Error()})
+		return
+	}
+
+	message.SendResponse(conn, &message.Response{OK: true, ScheduleID: s.ID})
+}
+
+func (d *Daemon) handleScheduleList(conn net.Conn) {
+	defer conn.Close()
+
+	if d.ScheduleEngine == nil {
+		message.SendResponse(conn, &message.Response{OK: true})
+		return
+	}
+
+	schedules := d.ScheduleEngine.List()
+	specs := make([]*message.ScheduleSpec, len(schedules))
+	for i, s := range schedules {
+		specs[i] = specFromSchedule(s)
+	}
+	message.SendResponse(conn, &message.Response{OK: true, Schedules: specs})
+}
+
+func (d *Daemon) handleScheduleRemove(conn net.Conn, req *message.Request) {
+	defer conn.Close()
+
+	if d.ScheduleEngine == nil {
+		message.SendResponse(conn, &message.Response{Error: "schedule engine not initialized"})
+		return
+	}
+	if req.ScheduleID == "" {
+		message.SendResponse(conn, &message.Response{Error: "schedule_id is required"})
+		return
+	}
+
+	if !d.ScheduleEngine.Remove(req.ScheduleID) {
+		message.SendResponse(conn, &message.Response{
+			Error: fmt.Sprintf("schedule %q not found", req.ScheduleID),
+		})
+		return
+	}
+	message.SendResponse(conn, &message.Response{OK: true})
+}
+
+// Conversion helpers between wire specs and automation types.
+
+func triggerFromSpec(s *message.TriggerSpec) *automation.Trigger {
+	return &automation.Trigger{
+		ID:        s.ID,
+		Name:      s.Name,
+		Event:     s.Event,
+		State:     s.State,
+		SubState:  s.SubState,
+		Condition: s.Condition,
+		Action: automation.Action{
+			Exec:     s.Exec,
+			Message:  s.Message,
+			From:     s.From,
+			Priority: s.Priority,
+		},
+	}
+}
+
+func specFromTrigger(t *automation.Trigger) *message.TriggerSpec {
+	return &message.TriggerSpec{
+		ID:        t.ID,
+		Name:      t.Name,
+		Event:     t.Event,
+		State:     t.State,
+		SubState:  t.SubState,
+		Condition: t.Condition,
+		Exec:      t.Action.Exec,
+		Message:   t.Action.Message,
+		From:      t.Action.From,
+		Priority:  t.Action.Priority,
+	}
+}
+
+func scheduleFromSpec(s *message.ScheduleSpec) *automation.Schedule {
+	mode, _ := automation.ParseConditionMode(s.ConditionMode)
+	return &automation.Schedule{
+		ID:            s.ID,
+		Name:          s.Name,
+		Start:         s.Start,
+		RRule:         s.RRule,
+		Condition:     s.Condition,
+		ConditionMode: mode,
+		Action: automation.Action{
+			Exec:     s.Exec,
+			Message:  s.Message,
+			From:     s.From,
+			Priority: s.Priority,
+		},
+	}
+}
+
+func specFromSchedule(s *automation.Schedule) *message.ScheduleSpec {
+	return &message.ScheduleSpec{
+		ID:            s.ID,
+		Name:          s.Name,
+		Start:         s.Start,
+		RRule:         s.RRule,
+		Condition:     s.Condition,
+		ConditionMode: s.ConditionMode.String(),
+		Exec:          s.Action.Exec,
+		Message:       s.Action.Message,
+		From:          s.Action.From,
+		Priority:      s.Action.Priority,
+	}
 }

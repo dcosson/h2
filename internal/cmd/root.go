@@ -46,6 +46,8 @@ func NewRootCmd() *cobra.Command {
 		newPeekCmd(),
 		newStopCmd(),
 		newRotateCmd(),
+		newTriggerCmd(),
+		newScheduleCmd(),
 		newVersionCmd(),
 		newInitCmd(),
 		newStatsCmd(),

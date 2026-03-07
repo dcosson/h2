@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"h2/internal/automation"
 	"h2/internal/config"
 	"h2/internal/session/agent/monitor"
 	"h2/internal/session/message"
@@ -19,9 +20,11 @@ import (
 
 // Daemon manages the Unix socket listener and attach protocol for a Session.
 type Daemon struct {
-	Session   *Session
-	Listener  net.Listener
-	StartTime time.Time
+	Session        *Session
+	Listener       net.Listener
+	StartTime      time.Time
+	TriggerEngine  *automation.TriggerEngine
+	ScheduleEngine *automation.ScheduleEngine
 }
 
 // DaemonHeartbeat holds heartbeat configuration for the daemon.

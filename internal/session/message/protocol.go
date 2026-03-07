@@ -10,7 +10,7 @@ import (
 
 // Request is the JSON request sent over the Unix socket.
 type Request struct {
-	Type string `json:"type"` // "send", "attach", "show", "status", "hook_event", "stop"
+	Type string `json:"type"` // "send", "attach", "show", "status", "hook_event", "stop", "trigger_add", "trigger_list", "trigger_remove", "schedule_add", "schedule_list", "schedule_remove"
 
 	// send fields
 	Priority string `json:"priority,omitempty"`
@@ -31,6 +31,42 @@ type Request struct {
 	// hook_event fields
 	EventName string          `json:"event_name,omitempty"`
 	Payload   json.RawMessage `json:"payload,omitempty"`
+
+	// trigger fields
+	Trigger   *TriggerSpec `json:"trigger,omitempty"`
+	TriggerID string       `json:"trigger_id,omitempty"`
+
+	// schedule fields
+	Schedule   *ScheduleSpec `json:"schedule,omitempty"`
+	ScheduleID string        `json:"schedule_id,omitempty"`
+}
+
+// TriggerSpec is the wire representation of a trigger for socket requests/responses.
+type TriggerSpec struct {
+	ID        string `json:"id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Event     string `json:"event"`
+	State     string `json:"state,omitempty"`
+	SubState  string `json:"sub_state,omitempty"`
+	Condition string `json:"condition,omitempty"`
+	Exec      string `json:"exec,omitempty"`
+	Message   string `json:"message,omitempty"`
+	From      string `json:"from,omitempty"`
+	Priority  string `json:"priority,omitempty"`
+}
+
+// ScheduleSpec is the wire representation of a schedule for socket requests/responses.
+type ScheduleSpec struct {
+	ID            string `json:"id,omitempty"`
+	Name          string `json:"name,omitempty"`
+	Start         string `json:"start,omitempty"`
+	RRule         string `json:"rrule"`
+	Condition     string `json:"condition,omitempty"`
+	ConditionMode string `json:"condition_mode,omitempty"`
+	Exec          string `json:"exec,omitempty"`
+	Message       string `json:"message,omitempty"`
+	From          string `json:"from,omitempty"`
+	Priority      string `json:"priority,omitempty"`
 }
 
 // Response is the JSON response sent back over the Unix socket.
@@ -42,6 +78,12 @@ type Response struct {
 	Message      *MessageInfo `json:"message,omitempty"`
 	Agent        *AgentInfo   `json:"agent,omitempty"`
 	Bridge       *BridgeInfo  `json:"bridge,omitempty"`
+
+	// trigger/schedule responses
+	TriggerID  string          `json:"trigger_id,omitempty"`
+	Triggers   []*TriggerSpec  `json:"triggers,omitempty"`
+	ScheduleID string          `json:"schedule_id,omitempty"`
+	Schedules  []*ScheduleSpec `json:"schedules,omitempty"`
 }
 
 // BridgeInfo is the public representation of bridge status.
