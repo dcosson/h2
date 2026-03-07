@@ -30,5 +30,6 @@ require (
 	github.com/rivo/uniseg v0.4.4 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
+	github.com/teambition/rrule-go v1.8.2 // indirect
 	golang.org/x/sys v0.40.0 // indirect
 )

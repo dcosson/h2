@@ -2,11 +2,41 @@ package automation
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
 	"h2/internal/session/agent/monitor"
+	"h2/internal/session/message"
 )
+
+// mockEnqueuer records messages enqueued by the ActionRunner.
+// Shared across trigger_test.go and runner_test.go (runner_test.go references this).
+type mockEnqueuer struct {
+	mu       sync.Mutex
+	messages []enqueuedMsg
+}
+
+type enqueuedMsg struct {
+	From     string
+	Body     string
+	Priority message.Priority
+}
+
+func (m *mockEnqueuer) EnqueueMessage(from, body string, priority message.Priority) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.messages = append(m.messages, enqueuedMsg{From: from, Body: body, Priority: priority})
+	return "test-id", nil
+}
+
+func (m *mockEnqueuer) getMessages() []enqueuedMsg {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]enqueuedMsg, len(m.messages))
+	copy(cp, m.messages)
+	return cp
+}
 
 // helper to create a TriggerEngine with a mock enqueuer.
 func newTestTriggerEngine() (*TriggerEngine, *mockEnqueuer) {
@@ -59,8 +89,8 @@ func TestTriggerEngine_FiresOnMatch(t *testing.T) {
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(msgs))
 	}
-	if msgs[0].body != "you are idle" {
-		t.Errorf("expected body 'you are idle', got %q", msgs[0].body)
+	if msgs[0].Body != "you are idle" {
+		t.Errorf("expected body 'you are idle', got %q", msgs[0].Body)
 	}
 }
 
@@ -122,8 +152,8 @@ func TestTriggerEngine_SubStateMatch(t *testing.T) {
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(msgs))
 	}
-	if msgs[0].body != "usage limit hit" {
-		t.Errorf("expected 'usage limit hit', got %q", msgs[0].body)
+	if msgs[0].Body != "usage limit hit" {
+		t.Errorf("expected 'usage limit hit', got %q", msgs[0].Body)
 	}
 }
 
