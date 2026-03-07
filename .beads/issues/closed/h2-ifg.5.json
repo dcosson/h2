@@ -2,7 +2,7 @@
   "id": "h2-ifg.5",
   "title": "Daemon integration, role YAML, and heartbeat migration",
   "description": "Wire up automation engines in the daemon, load from role YAML, and remove the old heartbeat system. From docs/design-triggers-schedules.md.\n\nSections: Daemon Integration, Role YAML, Heartbeat Migration, Persistence and Lifecycle\n\nKey deliverables:\n- Role struct additions: Triggers []TriggerSpec, Schedules []ScheduleSpec\n- Role YAML parsing for triggers/schedules sections with validation\n- Template rendering of trigger/schedule action strings via existing role template engine\n- Daemon startup: create ActionRunner, TriggerEngine, ScheduleEngine, load from role, start goroutines\n- Event fan-out from monitor to TriggerEngine (separate channel, non-blocking)\n- Resume behavior: re-load role-defined automations on --resume\n- DELETE internal/session/heartbeat.go and heartbeat_test.go\n- Remove HeartbeatConfig from Role, remove RunHeartbeat goroutine from daemon\n- Make old heartbeat: YAML key a validation error\n- Integration tests: role YAML trigger fires on event, schedule fires on time,\n  heartbeat-as-schedule works at idle priority\n\nReferences:\n- Plan: docs/design-triggers-schedules.md §Daemon Integration, §Role YAML, §Heartbeat Migration, §Persistence and Lifecycle\n- Depends on: h2-ifg.4 (CLI/socket protocol — listener handlers needed)",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "parent": "h2-ifg",
@@ -24,5 +24,7 @@
   ],
   "assignee": "mild-cloud",
   "created_at": "2026-03-06T16:09:47.25605-08:00",
-  "updated_at": "2026-03-06T16:38:38.551057-08:00"
+  "updated_at": "2026-03-06T16:52:52.522965-08:00",
+  "closed_at": "2026-03-06T16:52:52.522965-08:00",
+  "close_reason": "Closed"
 }

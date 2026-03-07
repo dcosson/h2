@@ -114,7 +114,7 @@ With --responds-to <id>, the trigger is removed from your own daemon (and option
 			}
 
 			// Register idle reminder trigger on recipient.
-			triggerErr := registerExpectsResponseTrigger(name, from, triggerID)
+			finalID, triggerErr := registerExpectsResponseTrigger(name, from, triggerID)
 			if triggerErr != nil {
 				// Message was delivered but tracking failed.
 				fmt.Fprintf(os.Stderr, "warning: message delivered but response tracking not created: %v\n", triggerErr)
@@ -122,7 +122,7 @@ With --responds-to <id>, the trigger is removed from your own daemon (and option
 				os.Exit(2) // distinct from exit 1 for total failure
 			}
 
-			fmt.Println(triggerID)
+			fmt.Println(finalID)
 			return nil
 		},
 	}
@@ -138,51 +138,53 @@ With --responds-to <id>, the trigger is removed from your own daemon (and option
 }
 
 // registerExpectsResponseTrigger registers an idle reminder trigger on the
-// recipient's daemon. Retries once on ID collision.
-func registerExpectsResponseTrigger(agentName, sender, triggerID string) error {
-	reminderMsg := fmt.Sprintf(
-		"[h2 reminder about message from %s (id: %s)] Respond with: h2 send --responds-to %s %s \"your response\"",
-		sender, triggerID, triggerID, sender,
-	)
-
-	spec := &message.TriggerSpec{
-		ID:       triggerID,
-		Name:     "expects-response-" + triggerID,
-		Event:    "state_change",
-		State:    "idle",
-		Message:  reminderMsg,
-		From:     "h2-reminder",
-		Priority: "idle",
+// recipient's daemon. Retries once on ID collision. Returns the final trigger
+// ID used (which may differ from the input on collision retry).
+func registerExpectsResponseTrigger(agentName, sender, triggerID string) (string, error) {
+	buildSpec := func(id string) *message.TriggerSpec {
+		reminderMsg := fmt.Sprintf(
+			"[h2 reminder about message from %s (id: %s)] Respond with: h2 send --responds-to %s %s \"your response\"",
+			sender, id, id, sender,
+		)
+		return &message.TriggerSpec{
+			ID:       id,
+			Name:     "expects-response-" + id,
+			Event:    "state_change",
+			State:    "idle",
+			Message:  reminderMsg,
+			From:     "h2-reminder",
+			Priority: "idle",
+		}
 	}
 
+	spec := buildSpec(triggerID)
 	resp, err := sendSocketRequest(agentName, &message.Request{
 		Type:    "trigger_add",
 		Trigger: spec,
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
 	if !resp.OK {
 		// Check if collision — retry once with new ID.
 		if strings.Contains(resp.Error, "already exists") {
 			newID := genShortID()
-			spec.ID = newID
-			spec.Name = "expects-response-" + newID
+			spec = buildSpec(newID)
 			resp2, err2 := sendSocketRequest(agentName, &message.Request{
 				Type:    "trigger_add",
 				Trigger: spec,
 			})
 			if err2 != nil {
-				return err2
+				return "", err2
 			}
 			if !resp2.OK {
-				return fmt.Errorf("trigger add failed after retry: %s", resp2.Error)
+				return "", fmt.Errorf("trigger add failed after retry: %s", resp2.Error)
 			}
-			return nil
+			return newID, nil
 		}
-		return fmt.Errorf("trigger add failed: %s", resp.Error)
+		return "", fmt.Errorf("trigger add failed: %s", resp.Error)
 	}
-	return nil
+	return triggerID, nil
 }
 
 // handleRespondsTo handles the --responds-to flow: optionally send a response,
