@@ -38,11 +38,13 @@ func newBridgeDaemonCmd() *cobra.Command {
 			}
 
 			var allowedCommands []string
+			var opts bridgeservice.ServiceOpts
 			if userCfg.Bridges.Telegram != nil {
 				allowedCommands = userCfg.Bridges.Telegram.AllowedCommands
+				opts.ExpectsResponse = userCfg.Bridges.Telegram.ExpectsResponse
 			}
 
-			svc := bridgeservice.New(bridges, concierge, socketdir.Dir(), user, allowedCommands)
+			svc := bridgeservice.New(bridges, concierge, socketdir.Dir(), user, allowedCommands, opts)
 
 			ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer cancel()

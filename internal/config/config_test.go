@@ -222,6 +222,33 @@ func TestLoadFrom_NoBridges(t *testing.T) {
 	}
 }
 
+func TestLoadFrom_ExpectsResponse(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	data := `users:
+  alice:
+    bridges:
+      telegram:
+        bot_token: "tok"
+        chat_id: 1
+        expects_response: true
+`
+	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+
+	tc := cfg.Users["alice"].Bridges.Telegram
+	if !tc.ExpectsResponse {
+		t.Error("expected ExpectsResponse=true")
+	}
+}
+
 // --- Marker file tests ---
 
 func TestIsH2Dir(t *testing.T) {

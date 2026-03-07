@@ -32,6 +32,7 @@ type TelegramConfig struct {
 	BotToken        string   `yaml:"bot_token"`
 	ChatID          int64    `yaml:"chat_id"`
 	AllowedCommands []string `yaml:"allowed_commands,omitempty"`
+	ExpectsResponse bool     `yaml:"expects_response,omitempty"`
 }
 
 type MacOSNotifyConfig struct {

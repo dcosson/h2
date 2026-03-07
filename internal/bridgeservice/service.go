@@ -2,6 +2,7 @@ package bridgeservice
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"log"
 	"net"
@@ -26,6 +27,7 @@ type Service struct {
 	lastSender         string        // tracks last agent who sent outbound
 	lastRoutedAgent    string        // tracks last agent an inbound message was delivered to
 	allowedCommands    []string      // slash commands allowed on this bridge
+	expectsResponse    bool          // auto-set --expects-response on inbound messages
 	typingTickInterval time.Duration // interval between typing indicator ticks; 0 uses default
 	cancel             context.CancelFunc
 
@@ -38,9 +40,17 @@ type Service struct {
 	mu sync.Mutex
 }
 
+// ServiceOpts holds optional configuration for the bridge service.
+type ServiceOpts struct {
+	// ExpectsResponse automatically registers an expects-response trigger on
+	// the recipient agent for every inbound message from the bridge. This
+	// causes the agent to receive an idle reminder if it hasn't responded.
+	ExpectsResponse bool
+}
+
 // New creates a bridge service.
-func New(bridges []bridge.Bridge, concierge, socketDir, user string, allowedCommands []string) *Service {
-	return &Service{
+func New(bridges []bridge.Bridge, concierge, socketDir, user string, allowedCommands []string, opts ...ServiceOpts) *Service {
+	s := &Service{
 		bridges:         bridges,
 		concierge:       concierge,
 		socketDir:       socketDir,
@@ -48,6 +58,10 @@ func New(bridges []bridge.Bridge, concierge, socketDir, user string, allowedComm
 		allowedCommands: allowedCommands,
 		startTime:       time.Now(),
 	}
+	if len(opts) > 0 {
+		s.expectsResponse = opts[0].ExpectsResponse
+	}
+	return s
 }
 
 // Run starts all receiver bridges and the bridge socket listener.
@@ -305,31 +319,123 @@ func (s *Service) sendOutbound(from, body string) error {
 }
 
 // sendToAgent connects to an agent's socket and sends a message.
+// When s.expectsResponse is true, it also registers an idle reminder trigger
+// on the recipient so the agent gets nudged if it doesn't respond.
 func (s *Service) sendToAgent(name, from, body string) error {
 	sockPath := filepath.Join(s.socketDir, socketdir.Format(socketdir.TypeAgent, name))
+
+	var triggerID string
+	if s.expectsResponse {
+		triggerID = genShortID()
+		if err := s.registerExpectsResponseTrigger(sockPath, name, from, triggerID); err != nil {
+			log.Printf("bridge: expects-response trigger registration failed for %s: %v", name, err)
+			// Continue without tracking — message delivery is more important.
+			triggerID = ""
+		}
+	}
+
 	conn, err := net.Dial("unix", sockPath)
 	if err != nil {
+		s.removeTriggerBestEffort(sockPath, triggerID)
 		return fmt.Errorf("connect to %s: %w", name, err)
 	}
 	defer conn.Close()
 
-	if err := message.SendRequest(conn, &message.Request{
+	req := &message.Request{
 		Type:     "send",
 		Priority: "normal",
 		From:     from,
 		Body:     body,
-	}); err != nil {
+	}
+	if triggerID != "" {
+		req.ExpectsResponse = true
+		req.ERTriggerID = triggerID
+	}
+
+	if err := message.SendRequest(conn, req); err != nil {
+		s.removeTriggerBestEffort(sockPath, triggerID)
 		return fmt.Errorf("send request: %w", err)
 	}
 
 	resp, err := message.ReadResponse(conn)
 	if err != nil {
+		s.removeTriggerBestEffort(sockPath, triggerID)
 		return fmt.Errorf("read response: %w", err)
 	}
 	if !resp.OK {
+		s.removeTriggerBestEffort(sockPath, triggerID)
 		return fmt.Errorf("agent error: %s", resp.Error)
 	}
 	return nil
+}
+
+// registerExpectsResponseTrigger registers an idle reminder trigger on the
+// target agent's daemon. Returns an error if registration fails.
+func (s *Service) registerExpectsResponseTrigger(sockPath, agentName, sender, triggerID string) error {
+	reminderMsg := fmt.Sprintf(
+		"[h2 reminder about message from %s (id: %s)] Respond with: h2 send --responds-to %s %s \"your response\"",
+		sender, triggerID, triggerID, sender,
+	)
+	spec := &message.TriggerSpec{
+		ID:       triggerID,
+		Name:     "expects-response-" + triggerID,
+		Event:    "state_change",
+		State:    "idle",
+		Message:  reminderMsg,
+		From:     "h2-reminder",
+		Priority: "idle",
+	}
+
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		return fmt.Errorf("connect to %s: %w", agentName, err)
+	}
+	defer conn.Close()
+
+	if err := message.SendRequest(conn, &message.Request{
+		Type:    "trigger_add",
+		Trigger: spec,
+	}); err != nil {
+		return fmt.Errorf("send trigger_add: %w", err)
+	}
+
+	resp, err := message.ReadResponse(conn)
+	if err != nil {
+		return fmt.Errorf("read trigger_add response: %w", err)
+	}
+	if !resp.OK {
+		// On ID collision, retry once with a new ID.
+		if strings.Contains(resp.Error, "already exists") {
+			return s.registerExpectsResponseTrigger(sockPath, agentName, sender, genShortID())
+		}
+		return fmt.Errorf("trigger_add: %s", resp.Error)
+	}
+	return nil
+}
+
+// removeTriggerBestEffort removes a trigger from the agent's daemon.
+// Silently ignores all errors since this is compensating cleanup.
+func (s *Service) removeTriggerBestEffort(sockPath, triggerID string) {
+	if triggerID == "" {
+		return
+	}
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	_ = message.SendRequest(conn, &message.Request{
+		Type:      "trigger_remove",
+		TriggerID: triggerID,
+	})
+	_, _ = message.ReadResponse(conn)
+}
+
+// genShortID generates an 8-character hex string for trigger IDs.
+func genShortID() string {
+	b := make([]byte, 4)
+	rand.Read(b)
+	return fmt.Sprintf("%08x", b)
 }
 
 // defaultTypingTickInterval is the default interval between typing indicator

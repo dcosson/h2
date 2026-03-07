@@ -1526,3 +1526,160 @@ func TestIntegration_TypingRoutingChain(t *testing.T) {
 		t.Errorf("expected lastRoutedAgent=coder-1 after second route, got %q", got)
 	}
 }
+
+// --- Expects-response tests ---
+
+func TestHandleInbound_ExpectsResponse_RegistersTriggerAndAnnotates(t *testing.T) {
+	tmpDir := shortTempDir(t)
+	agent := newMockAgent(t, tmpDir, "myagent")
+	svc := New(nil, "concierge", tmpDir, "alice", nil, ServiceOpts{ExpectsResponse: true})
+
+	svc.handleInbound("myagent", "hello agent")
+
+	// Give the mock agent time to process both connections (trigger_add + send).
+	time.Sleep(50 * time.Millisecond)
+
+	reqs := agent.Received()
+	if len(reqs) != 2 {
+		t.Fatalf("expected 2 requests (trigger_add + send), got %d: %+v", len(reqs), reqs)
+	}
+
+	// First request should be trigger_add.
+	if reqs[0].Type != "trigger_add" {
+		t.Errorf("expected first request type=trigger_add, got %q", reqs[0].Type)
+	}
+	if reqs[0].Trigger == nil {
+		t.Fatal("trigger_add request missing trigger spec")
+	}
+	if reqs[0].Trigger.Event != "state_change" {
+		t.Errorf("trigger event = %q, want state_change", reqs[0].Trigger.Event)
+	}
+	if reqs[0].Trigger.State != "idle" {
+		t.Errorf("trigger state = %q, want idle", reqs[0].Trigger.State)
+	}
+	if reqs[0].Trigger.Priority != "idle" {
+		t.Errorf("trigger priority = %q, want idle", reqs[0].Trigger.Priority)
+	}
+	if !strings.Contains(reqs[0].Trigger.Message, "alice") {
+		t.Errorf("trigger message should reference sender 'alice': %q", reqs[0].Trigger.Message)
+	}
+	if !strings.Contains(reqs[0].Trigger.Message, "--responds-to") {
+		t.Errorf("trigger message should include --responds-to: %q", reqs[0].Trigger.Message)
+	}
+
+	// Second request should be send with expects-response annotation.
+	if reqs[1].Type != "send" {
+		t.Errorf("expected second request type=send, got %q", reqs[1].Type)
+	}
+	if !reqs[1].ExpectsResponse {
+		t.Error("send request should have ExpectsResponse=true")
+	}
+	if reqs[1].ERTriggerID == "" {
+		t.Error("send request should have ERTriggerID set")
+	}
+	if reqs[1].ERTriggerID != reqs[0].Trigger.ID {
+		t.Errorf("trigger ID mismatch: send has %q, trigger_add has %q", reqs[1].ERTriggerID, reqs[0].Trigger.ID)
+	}
+	if reqs[1].Body != "hello agent" {
+		t.Errorf("send body = %q, want 'hello agent'", reqs[1].Body)
+	}
+}
+
+func TestHandleInbound_ExpectsResponse_Disabled(t *testing.T) {
+	tmpDir := shortTempDir(t)
+	agent := newMockAgent(t, tmpDir, "myagent")
+	svc := New(nil, "concierge", tmpDir, "alice", nil) // no opts — expects-response disabled
+
+	svc.handleInbound("myagent", "hello agent")
+
+	time.Sleep(50 * time.Millisecond)
+
+	reqs := agent.Received()
+	if len(reqs) != 1 {
+		t.Fatalf("expected 1 request (send only), got %d", len(reqs))
+	}
+	if reqs[0].Type != "send" {
+		t.Errorf("expected type=send, got %q", reqs[0].Type)
+	}
+	if reqs[0].ExpectsResponse {
+		t.Error("send request should NOT have ExpectsResponse when feature is disabled")
+	}
+}
+
+func TestHandleInbound_ExpectsResponse_TriggerFailStillDelivers(t *testing.T) {
+	tmpDir := shortTempDir(t)
+
+	// Create a mock agent that rejects trigger_add but accepts send.
+	sockPath := filepath.Join(tmpDir, socketdir.Format(socketdir.TypeAgent, "myagent"))
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var received []message.Request
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer conn.Close()
+				req, err := message.ReadRequest(conn)
+				if err != nil {
+					return
+				}
+				mu.Lock()
+				received = append(received, *req)
+				mu.Unlock()
+				if req.Type == "trigger_add" {
+					message.SendResponse(conn, &message.Response{Error: "trigger engine broken"})
+				} else {
+					message.SendResponse(conn, &message.Response{OK: true, MessageID: "test-id"})
+				}
+			}()
+		}
+	}()
+	t.Cleanup(func() {
+		ln.Close()
+		wg.Wait()
+	})
+
+	svc := New(nil, "concierge", tmpDir, "alice", nil, ServiceOpts{ExpectsResponse: true})
+
+	svc.handleInbound("myagent", "hello despite trigger fail")
+
+	time.Sleep(50 * time.Millisecond)
+
+	mu.Lock()
+	reqs := append([]message.Request(nil), received...)
+	mu.Unlock()
+
+	// Should have trigger_add (failed) + send (succeeded, without annotation).
+	if len(reqs) < 2 {
+		t.Fatalf("expected at least 2 requests, got %d: %+v", len(reqs), reqs)
+	}
+
+	// Find the send request.
+	var sendReq *message.Request
+	for i := range reqs {
+		if reqs[i].Type == "send" {
+			sendReq = &reqs[i]
+			break
+		}
+	}
+	if sendReq == nil {
+		t.Fatal("no send request found")
+	}
+	if sendReq.ExpectsResponse {
+		t.Error("send should NOT have ExpectsResponse when trigger registration failed")
+	}
+	if sendReq.Body != "hello despite trigger fail" {
+		t.Errorf("send body = %q, want 'hello despite trigger fail'", sendReq.Body)
+	}
+}
