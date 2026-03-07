@@ -112,7 +112,9 @@ func (te *TriggerEngine) evalAndFire(ctx context.Context, t *Trigger, evt monito
 	condCtx, cancel := context.WithTimeout(ctx, DefaultConditionTimeout)
 	defer cancel()
 
-	if !EvalCondition(condCtx, t.Condition, env) {
+	// Merge runner's base env (H2_ACTOR, H2_ROLE, etc.) into condition env.
+	condEnv := te.runner.MergeEnv(env)
+	if !EvalCondition(condCtx, t.Condition, condEnv) {
 		te.logger.Debug("trigger condition failed, keeping",
 			"trigger_id", t.ID, "trigger_name", t.Name)
 		return

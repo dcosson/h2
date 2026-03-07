@@ -91,7 +91,7 @@ func (r *ActionRunner) runExec(action Action, extraEnv map[string]string) error 
 		return fmt.Errorf("exec dropped: max concurrent actions (%d) reached", MaxConcurrentExec)
 	}
 
-	env := r.mergeEnv(extraEnv)
+	env := r.MergeEnv(extraEnv)
 
 	r.wg.Add(1)
 	go func() {
@@ -115,8 +115,9 @@ func (r *ActionRunner) runExec(action Action, extraEnv map[string]string) error 
 	return nil
 }
 
-// mergeEnv combines base env with extra env. Extra overrides base.
-func (r *ActionRunner) mergeEnv(extra map[string]string) map[string]string {
+// MergeEnv combines base env with extra env. Extra overrides base.
+// Exported so that trigger/schedule engines can build condition env.
+func (r *ActionRunner) MergeEnv(extra map[string]string) map[string]string {
 	merged := make(map[string]string, len(r.baseEnv)+len(extra))
 	for k, v := range r.baseEnv {
 		merged[k] = v

@@ -187,7 +187,7 @@ func TestActionRunner_BaseEnvMerge(t *testing.T) {
 	baseEnv := map[string]string{"A": "base", "B": "base"}
 	r := NewActionRunner(eq, baseEnv, nil)
 
-	merged := r.mergeEnv(map[string]string{"B": "override", "C": "extra"})
+	merged := r.MergeEnv(map[string]string{"B": "override", "C": "extra"})
 	if merged["A"] != "base" {
 		t.Errorf("A = %q, want base", merged["A"])
 	}

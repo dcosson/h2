@@ -137,27 +137,15 @@ func (t *Trigger) MatchesEvent(evt monitor.AgentEvent) bool {
 
 // EvalCondition runs a condition command in a shell and returns true if it
 // exits 0. If the condition is empty, returns true. The env map provides
-// additional environment variables for the subprocess.
+// additional environment variables overlaid on top of the inherited process
+// environment.
 func EvalCondition(ctx context.Context, condition string, env map[string]string) bool {
 	if condition == "" {
 		return true
 	}
 	cmd := exec.CommandContext(ctx, "sh", "-c", condition)
-	cmd.Env = buildEnv(env)
+	cmd.Env = buildFullEnv(env)
 	return cmd.Run() == nil
-}
-
-// buildEnv constructs an environment slice from a map, inheriting the current
-// process environment and overlaying the provided vars.
-func buildEnv(extra map[string]string) []string {
-	// We intentionally do NOT inherit os.Environ() here — the caller
-	// (ActionRunner) is responsible for assembling the full env map
-	// including inherited vars. This keeps the function simple and testable.
-	env := make([]string, 0, len(extra))
-	for k, v := range extra {
-		env = append(env, k+"="+v)
-	}
-	return env
 }
 
 // DefaultConditionTimeout is the maximum time a condition command can run.
