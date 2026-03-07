@@ -283,9 +283,9 @@ func TestStateChanged_NotifiesOnChange(t *testing.T) {
 }
 
 func TestWithEventWriter(t *testing.T) {
-	var written []AgentEvent
+	writtenCh := make(chan AgentEvent, 10)
 	writer := func(ev AgentEvent) error {
-		written = append(written, ev)
+		writtenCh <- ev
 		return nil
 	}
 
@@ -305,11 +305,16 @@ func TestWithEventWriter(t *testing.T) {
 		Data:      TurnCompletedData{InputTokens: 50},
 	}
 
-	time.Sleep(10 * time.Millisecond)
-
-	if len(written) != 2 {
-		t.Fatalf("expected 2 written events, got %d", len(written))
+	var written []AgentEvent
+	for range 2 {
+		select {
+		case ev := <-writtenCh:
+			written = append(written, ev)
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for written events, got %d of 2", len(written))
+		}
 	}
+
 	if written[0].Type != EventSessionStarted {
 		t.Errorf("written[0].Type = %v, want EventSessionStarted", written[0].Type)
 	}
@@ -319,13 +324,11 @@ func TestWithEventWriter(t *testing.T) {
 }
 
 func TestOnSessionStartedCallback(t *testing.T) {
-	var callbackData SessionStartedData
-	called := false
+	doneCh := make(chan SessionStartedData, 1)
 
 	m := New()
 	m.SetOnSessionStarted(func(data SessionStartedData) {
-		called = true
-		callbackData = data
+		doneCh <- data
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -338,16 +341,16 @@ func TestOnSessionStartedCallback(t *testing.T) {
 		Data:      SessionStartedData{SessionID: "harness-123", Model: "claude-4"},
 	}
 
-	time.Sleep(10 * time.Millisecond)
-
-	if !called {
-		t.Fatal("OnSessionStarted callback was not called")
-	}
-	if callbackData.SessionID != "harness-123" {
-		t.Errorf("SessionID = %q, want %q", callbackData.SessionID, "harness-123")
-	}
-	if callbackData.Model != "claude-4" {
-		t.Errorf("Model = %q, want %q", callbackData.Model, "claude-4")
+	select {
+	case callbackData := <-doneCh:
+		if callbackData.SessionID != "harness-123" {
+			t.Errorf("SessionID = %q, want %q", callbackData.SessionID, "harness-123")
+		}
+		if callbackData.Model != "claude-4" {
+			t.Errorf("Model = %q, want %q", callbackData.Model, "claude-4")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("OnSessionStarted callback was not called within timeout")
 	}
 	// Verify the monitor also stored the session ID.
 	if m.SessionID() != "harness-123" {
