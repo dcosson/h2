@@ -10,13 +10,18 @@ import (
 	"github.com/teambition/rrule-go"
 )
 
+// StateProvider returns the current agent state and sub-state as strings.
+// Used by ScheduleEngine to inject H2_AGENT_STATE/H2_AGENT_SUBSTATE.
+type StateProvider func() (state, subState string)
+
 // ScheduleEngine evaluates RRULEs and manages timers for scheduled actions.
 // It runs as a goroutine started by the daemon.
 type ScheduleEngine struct {
-	mu        sync.Mutex
-	schedules map[string]*activeSchedule
-	runner    *ActionRunner
-	logger    *slog.Logger
+	mu            sync.Mutex
+	schedules     map[string]*activeSchedule
+	runner        *ActionRunner
+	logger        *slog.Logger
+	stateProvider StateProvider
 }
 
 // activeSchedule pairs the spec with runtime state.
@@ -28,15 +33,20 @@ type activeSchedule struct {
 }
 
 // NewScheduleEngine creates a ScheduleEngine that dispatches actions via the given runner.
-func NewScheduleEngine(runner *ActionRunner, logger *slog.Logger) *ScheduleEngine {
+// The optional stateProvider injects H2_AGENT_STATE/H2_AGENT_SUBSTATE into the env.
+func NewScheduleEngine(runner *ActionRunner, logger *slog.Logger, stateProvider ...StateProvider) *ScheduleEngine {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &ScheduleEngine{
+	se := &ScheduleEngine{
 		schedules: make(map[string]*activeSchedule),
 		runner:    runner,
 		logger:    logger,
 	}
+	if len(stateProvider) > 0 {
+		se.stateProvider = stateProvider[0]
+	}
+	return se
 }
 
 // Run blocks until ctx is cancelled, keeping all schedule timers alive.
@@ -131,6 +141,11 @@ func (se *ScheduleEngine) runSchedule(as *activeSchedule) {
 func (se *ScheduleEngine) handleFiring(as *activeSchedule) {
 	s := as.spec
 	env := map[string]string{"H2_SCHEDULE_ID": s.ID}
+	if se.stateProvider != nil {
+		state, subState := se.stateProvider()
+		env["H2_AGENT_STATE"] = state
+		env["H2_AGENT_SUBSTATE"] = subState
+	}
 
 	condCtx, cancel := context.WithTimeout(context.Background(), DefaultConditionTimeout)
 	condPass := EvalCondition(condCtx, s.Condition, env)

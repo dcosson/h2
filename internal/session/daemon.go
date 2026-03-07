@@ -96,11 +96,26 @@ func RunDaemon(sessionDir string, rc *config.RuntimeConfig, resume bool) error {
 		os.Remove(sockPath)
 	}()
 
-	// Create automation engines.
+	// Create automation engines with base env vars for conditions and actions.
+	baseEnv := map[string]string{
+		"H2_ACTOR": rc.AgentName,
+	}
+	if rc.RoleName != "" {
+		baseEnv["H2_ROLE"] = rc.RoleName
+	}
+	if sessionDir != "" {
+		baseEnv["H2_SESSION_DIR"] = sessionDir
+	}
+
+	stateProvider := func() (string, string) {
+		st, sub := s.State()
+		return st.String(), sub.String()
+	}
+
 	enqueuer := &sessionEnqueuer{queue: s.Queue, agentName: rc.AgentName}
-	runner := automation.NewActionRunner(enqueuer, nil, nil)
-	triggerEngine := automation.NewTriggerEngine(runner, nil)
-	scheduleEngine := automation.NewScheduleEngine(runner, nil)
+	runner := automation.NewActionRunner(enqueuer, baseEnv, nil)
+	triggerEngine := automation.NewTriggerEngine(runner, nil, stateProvider)
+	scheduleEngine := automation.NewScheduleEngine(runner, nil, stateProvider)
 
 	// Subscribe TriggerEngine to monitor events.
 	eventCh := s.monitor.Subscribe()
@@ -154,7 +169,9 @@ func (d *Daemon) loadRoleAutomations(rc *config.RuntimeConfig) error {
 				Priority: ts.Priority,
 			},
 		}
-		d.TriggerEngine.Add(t)
+		if !d.TriggerEngine.Add(t) {
+			return fmt.Errorf("duplicate trigger ID %q in role config", ts.ID)
+		}
 	}
 
 	for _, ss := range rc.Schedules {

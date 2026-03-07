@@ -12,22 +12,28 @@ import (
 // triggers when events match. Triggers are one-shot: consumed on attempt
 // regardless of action success.
 type TriggerEngine struct {
-	mu       sync.Mutex
-	triggers map[string]*Trigger
-	runner   *ActionRunner
-	logger   *slog.Logger
+	mu            sync.Mutex
+	triggers      map[string]*Trigger
+	runner        *ActionRunner
+	logger        *slog.Logger
+	stateProvider StateProvider
 }
 
 // NewTriggerEngine creates a TriggerEngine that dispatches actions via the given runner.
-func NewTriggerEngine(runner *ActionRunner, logger *slog.Logger) *TriggerEngine {
+// The optional stateProvider injects H2_AGENT_STATE/H2_AGENT_SUBSTATE into the env.
+func NewTriggerEngine(runner *ActionRunner, logger *slog.Logger, stateProvider ...StateProvider) *TriggerEngine {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &TriggerEngine{
+	te := &TriggerEngine{
 		triggers: make(map[string]*Trigger),
 		runner:   runner,
 		logger:   logger,
 	}
+	if len(stateProvider) > 0 {
+		te.stateProvider = stateProvider[0]
+	}
+	return te
 }
 
 // Run processes events from the channel until ctx is cancelled.
@@ -145,6 +151,14 @@ func (te *TriggerEngine) buildTriggerEnv(t *Trigger, evt monitor.AgentEvent) map
 		state, sub := extractStateChange(evt)
 		env["H2_EVENT_STATE"] = state
 		env["H2_EVENT_SUBSTATE"] = sub
+		// For state_change events, agent state IS the event state.
+		env["H2_AGENT_STATE"] = state
+		env["H2_AGENT_SUBSTATE"] = sub
+	} else if te.stateProvider != nil {
+		// For non-state-change events, query current state.
+		state, sub := te.stateProvider()
+		env["H2_AGENT_STATE"] = state
+		env["H2_AGENT_SUBSTATE"] = sub
 	}
 
 	// Identity var.
