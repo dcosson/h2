@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 // RuntimeConfig is the fully-resolved, serialized configuration for a daemon
@@ -51,10 +50,9 @@ type RuntimeConfig struct {
 	// Additional directories.
 	AdditionalDirs []string `json:"additional_dirs,omitempty"`
 
-	// Heartbeat nudge configuration.
-	HeartbeatIdleTimeout string `json:"heartbeat_idle_timeout,omitempty"` // Go duration string
-	HeartbeatMessage     string `json:"heartbeat_message,omitempty"`
-	HeartbeatCondition   string `json:"heartbeat_condition,omitempty"`
+	// Automation: role-defined triggers and schedules.
+	Triggers  []TriggerYAMLSpec  `json:"triggers,omitempty"`
+	Schedules []ScheduleYAMLSpec `json:"schedules,omitempty"`
 
 	// Overrides (recorded for display/debugging).
 	Overrides map[string]string `json:"overrides,omitempty"`
@@ -175,13 +173,4 @@ func (rc *RuntimeConfig) HarnessConfigDir() string {
 		profile = "default"
 	}
 	return filepath.Join(rc.HarnessConfigPathPrefix, profile)
-}
-
-// ParseHeartbeatIdleTimeout parses the HeartbeatIdleTimeout string as a Go duration.
-// Returns zero duration if the field is empty.
-func (rc *RuntimeConfig) ParseHeartbeatIdleTimeout() (time.Duration, error) {
-	if rc.HeartbeatIdleTimeout == "" {
-		return 0, nil
-	}
-	return time.ParseDuration(rc.HeartbeatIdleTimeout)
 }

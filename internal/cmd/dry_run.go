@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"h2/internal/config"
-	"h2/internal/session"
 	"h2/internal/session/agent/harness"
 )
 
@@ -23,7 +22,6 @@ type ResolvedAgentConfig struct {
 	SessionDir string
 	WorkingDir string
 	IsWorktree bool
-	Heartbeat  session.DaemonHeartbeat
 	Pod        string
 	Overrides  []string
 	EnvVars    map[string]string
@@ -44,19 +42,6 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 	h, err := harness.Resolve(minRC, nil)
 	if err != nil {
 		return nil, fmt.Errorf("resolve harness: %w", err)
-	}
-
-	var heartbeat session.DaemonHeartbeat
-	if role.Heartbeat != nil {
-		d, err := role.Heartbeat.ParseIdleTimeout()
-		if err != nil {
-			return nil, fmt.Errorf("invalid heartbeat idle_timeout: %w", err)
-		}
-		heartbeat = session.DaemonHeartbeat{
-			IdleTimeout: d,
-			Message:     role.Heartbeat.Message,
-			Condition:   role.Heartbeat.Condition,
-		}
 	}
 
 	// Resolve the working directory without side effects.
@@ -154,7 +139,6 @@ func resolveAgentConfig(name string, role *config.Role, pod string, overrides []
 		SessionDir: sessionDir,
 		WorkingDir: agentCWD,
 		IsWorktree: isWorktree,
-		Heartbeat:  heartbeat,
 		Pod:        pod,
 		Overrides:  overrides,
 		EnvVars:    envVars,
@@ -267,16 +251,29 @@ func printDryRun(rc *ResolvedAgentConfig) {
 		fmt.Printf("Permission Review Agent: enabled\n")
 	}
 
-	// Heartbeat.
-	if rc.Heartbeat.IdleTimeout > 0 {
+	// Triggers.
+	if len(rc.Role.Triggers) > 0 {
 		fmt.Println()
-		fmt.Println("Heartbeat:")
-		fmt.Printf("  Idle Timeout: %s\n", rc.Heartbeat.IdleTimeout)
-		if rc.Heartbeat.Message != "" {
-			fmt.Printf("  Message: %s\n", rc.Heartbeat.Message)
+		fmt.Printf("Triggers: %d\n", len(rc.Role.Triggers))
+		for _, t := range rc.Role.Triggers {
+			fmt.Printf("  - %s (event=%s)\n", t.Name, t.Event)
 		}
-		if rc.Heartbeat.Condition != "" {
-			fmt.Printf("  Condition: %s\n", rc.Heartbeat.Condition)
+	}
+
+	// Schedules (includes heartbeat if converted).
+	if role.Heartbeat != nil || len(rc.Role.Schedules) > 0 {
+		fmt.Println()
+		total := len(rc.Role.Schedules)
+		if role.Heartbeat != nil {
+			total++
+		}
+		fmt.Printf("Schedules: %d\n", total)
+		if role.Heartbeat != nil {
+			fmt.Printf("  - heartbeat (rrule=FREQ=SECONDLY;INTERVAL=%s)\n",
+				heartbeatIntervalFromDuration(role.Heartbeat.IdleTimeout))
+		}
+		for _, s := range rc.Role.Schedules {
+			fmt.Printf("  - %s (rrule=%s)\n", s.Name, s.RRule)
 		}
 	}
 

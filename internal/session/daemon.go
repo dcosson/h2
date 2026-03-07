@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -27,11 +28,14 @@ type Daemon struct {
 	ScheduleEngine *automation.ScheduleEngine
 }
 
-// DaemonHeartbeat holds heartbeat configuration for the daemon.
-type DaemonHeartbeat struct {
-	IdleTimeout time.Duration
-	Message     string
-	Condition   string
+// sessionEnqueuer adapts a Session's MessageQueue to the automation.MessageEnqueuer interface.
+type sessionEnqueuer struct {
+	queue     *message.MessageQueue
+	agentName string
+}
+
+func (e *sessionEnqueuer) EnqueueMessage(from, body string, priority message.Priority) (string, error) {
+	return message.PrepareMessage(e.queue, e.agentName, from, body, priority, message.PrepareOpts{})
 }
 
 // TerminalHints holds transient terminal color and type hints that
@@ -57,17 +61,6 @@ func RunDaemon(sessionDir string, rc *config.RuntimeConfig, resume bool) error {
 	}
 
 	s := NewFromConfig(rc)
-
-	// Parse heartbeat config.
-	if rc.HeartbeatIdleTimeout != "" {
-		d, err := rc.ParseHeartbeatIdleTimeout()
-		if err != nil {
-			return fmt.Errorf("parse heartbeat idle timeout: %w", err)
-		}
-		s.HeartbeatIdleTimeout = d
-		s.HeartbeatMessage = rc.HeartbeatMessage
-		s.HeartbeatCondition = rc.HeartbeatCondition
-	}
 
 	s.StartTime = time.Now()
 	s.SessionDir = sessionDir
@@ -103,18 +96,88 @@ func RunDaemon(sessionDir string, rc *config.RuntimeConfig, resume bool) error {
 		os.Remove(sockPath)
 	}()
 
+	// Create automation engines.
+	enqueuer := &sessionEnqueuer{queue: s.Queue, agentName: rc.AgentName}
+	runner := automation.NewActionRunner(enqueuer, nil, nil)
+	triggerEngine := automation.NewTriggerEngine(runner, nil)
+	scheduleEngine := automation.NewScheduleEngine(runner, nil)
+
+	// Subscribe TriggerEngine to monitor events.
+	eventCh := s.monitor.Subscribe()
+
 	d := &Daemon{
-		Session:   s,
-		Listener:  ln,
-		StartTime: s.StartTime,
+		Session:        s,
+		Listener:       ln,
+		StartTime:      s.StartTime,
+		TriggerEngine:  triggerEngine,
+		ScheduleEngine: scheduleEngine,
 	}
 	s.Daemon = d
+
+	// Load role-defined triggers and schedules from RuntimeConfig.
+	if err := d.loadRoleAutomations(rc); err != nil {
+		ln.Close()
+		os.Remove(sockPath)
+		return fmt.Errorf("load role automations: %w", err)
+	}
+
+	// Start automation engines.
+	automationCtx, automationCancel := context.WithCancel(context.Background())
+	go triggerEngine.Run(automationCtx, eventCh)
+	go scheduleEngine.Run(automationCtx)
 
 	// Start socket listener.
 	go d.acceptLoop()
 
 	// Run session in daemon mode (blocks until exit).
-	return s.RunDaemon()
+	err = s.RunDaemon()
+	automationCancel()
+	runner.Wait()
+	return err
+}
+
+// loadRoleAutomations registers triggers and schedules from the RuntimeConfig
+// (originally defined in the role YAML). Called during daemon startup.
+func (d *Daemon) loadRoleAutomations(rc *config.RuntimeConfig) error {
+	for _, ts := range rc.Triggers {
+		t := &automation.Trigger{
+			ID:        ts.ID,
+			Name:      ts.Name,
+			Event:     ts.Event,
+			State:     ts.State,
+			SubState:  ts.SubState,
+			Condition: ts.Condition,
+			Action: automation.Action{
+				Exec:     ts.Exec,
+				Message:  ts.Message,
+				From:     ts.From,
+				Priority: ts.Priority,
+			},
+		}
+		d.TriggerEngine.Add(t)
+	}
+
+	for _, ss := range rc.Schedules {
+		mode, _ := automation.ParseConditionMode(ss.ConditionMode)
+		s := &automation.Schedule{
+			ID:            ss.ID,
+			Name:          ss.Name,
+			Start:         ss.Start,
+			RRule:         ss.RRule,
+			Condition:     ss.Condition,
+			ConditionMode: mode,
+			Action: automation.Action{
+				Exec:     ss.Exec,
+				Message:  ss.Message,
+				From:     ss.From,
+				Priority: ss.Priority,
+			},
+		}
+		if err := d.ScheduleEngine.Add(s); err != nil {
+			return fmt.Errorf("register schedule %q: %w", ss.ID, err)
+		}
+	}
+	return nil
 }
 
 // AgentInfo returns status information about this daemon.

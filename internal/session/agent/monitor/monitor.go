@@ -38,6 +38,11 @@ type AgentMonitor struct {
 	toolUseCount        int64
 	blockedOnPermission bool
 	blockedToolName     string
+
+	// subscribers receive a copy of every event processed by the monitor.
+	// Protected by subscribersMu (separate from mu to avoid contention).
+	subscribersMu sync.Mutex
+	subscribers   []chan<- AgentEvent
 }
 
 // Option configures an AgentMonitor.
@@ -93,6 +98,16 @@ func (m *AgentMonitor) processEvent(ev AgentEvent) {
 	if m.writeEvent != nil {
 		m.writeEvent(ev) //nolint:errcheck // best-effort persistence
 	}
+
+	// Fan out to subscribers (non-blocking; drops if subscriber is slow).
+	m.subscribersMu.Lock()
+	for _, ch := range m.subscribers {
+		select {
+		case ch <- ev:
+		default:
+		}
+	}
+	m.subscribersMu.Unlock()
 
 	// Capture callback+data under lock, invoke after unlock to avoid
 	// blocking event processing or risking deadlock if callback calls
@@ -283,6 +298,17 @@ func (m *AgentMonitor) MetricsSnapshot() AgentMetrics {
 // before Run. Typically used to wire an EventStore for persistence.
 func (m *AgentMonitor) SetEventWriter(fn func(AgentEvent) error) {
 	m.writeEvent = fn
+}
+
+// Subscribe returns a channel that receives a copy of every event processed
+// by the monitor. The channel is buffered to avoid blocking event processing.
+// Must be called before Run. The caller is responsible for draining the channel.
+func (m *AgentMonitor) Subscribe() <-chan AgentEvent {
+	ch := make(chan AgentEvent, 256)
+	m.subscribersMu.Lock()
+	m.subscribers = append(m.subscribers, ch)
+	m.subscribersMu.Unlock()
+	return ch
 }
 
 // SetExited transitions to the Exited state. Called externally when

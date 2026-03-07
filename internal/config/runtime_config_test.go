@@ -29,11 +29,14 @@ func TestWriteReadRuntimeConfig_RoundTrip(t *testing.T) {
 		CodexSandboxMode:        "",
 		CodexAskForApproval:     "",
 		AdditionalDirs:          []string{"/extra/dir1", "/extra/dir2"},
-		HeartbeatIdleTimeout:    "30s",
-		HeartbeatMessage:        "Are you still working?",
-		HeartbeatCondition:      "test -f /tmp/check",
-		Overrides:               map[string]string{"worktree_enabled": "true"},
-		StartedAt:               "2026-03-05T10:00:00Z",
+		Triggers: []TriggerYAMLSpec{
+			{ID: "t1", Name: "test-trigger", Event: "state_change", State: "idle", Exec: "echo nudge"},
+		},
+		Schedules: []ScheduleYAMLSpec{
+			{ID: "s1", Name: "test-schedule", RRule: "FREQ=SECONDLY;INTERVAL=30", Exec: "echo tick"},
+		},
+		Overrides: map[string]string{"worktree_enabled": "true"},
+		StartedAt: "2026-03-05T10:00:00Z",
 	}
 
 	if err := WriteRuntimeConfig(dir, rc); err != nil {
@@ -97,14 +100,11 @@ func TestWriteReadRuntimeConfig_RoundTrip(t *testing.T) {
 	if len(got.AdditionalDirs) != 2 {
 		t.Errorf("AdditionalDirs len = %d, want 2", len(got.AdditionalDirs))
 	}
-	if got.HeartbeatIdleTimeout != rc.HeartbeatIdleTimeout {
-		t.Errorf("HeartbeatIdleTimeout = %q, want %q", got.HeartbeatIdleTimeout, rc.HeartbeatIdleTimeout)
+	if len(got.Triggers) != 1 || got.Triggers[0].ID != "t1" {
+		t.Errorf("Triggers = %v, want 1 trigger with ID t1", got.Triggers)
 	}
-	if got.HeartbeatMessage != rc.HeartbeatMessage {
-		t.Errorf("HeartbeatMessage = %q, want %q", got.HeartbeatMessage, rc.HeartbeatMessage)
-	}
-	if got.HeartbeatCondition != rc.HeartbeatCondition {
-		t.Errorf("HeartbeatCondition = %q, want %q", got.HeartbeatCondition, rc.HeartbeatCondition)
+	if len(got.Schedules) != 1 || got.Schedules[0].ID != "s1" {
+		t.Errorf("Schedules = %v, want 1 schedule with ID s1", got.Schedules)
 	}
 	if len(got.Overrides) != 1 || got.Overrides["worktree_enabled"] != "true" {
 		t.Errorf("Overrides = %v, want %v", got.Overrides, rc.Overrides)
@@ -329,36 +329,6 @@ func TestWriteRuntimeConfig_AtomicNoTmpLeftover(t *testing.T) {
 	}
 	if got.AgentName != "a" {
 		t.Errorf("AgentName = %q, want %q", got.AgentName, "a")
-	}
-}
-
-func TestParseHeartbeatIdleTimeout(t *testing.T) {
-	rc := &RuntimeConfig{HeartbeatIdleTimeout: "30s"}
-	d, err := rc.ParseHeartbeatIdleTimeout()
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if d.Seconds() != 30 {
-		t.Errorf("duration = %v, want 30s", d)
-	}
-}
-
-func TestParseHeartbeatIdleTimeout_Empty(t *testing.T) {
-	rc := &RuntimeConfig{}
-	d, err := rc.ParseHeartbeatIdleTimeout()
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if d != 0 {
-		t.Errorf("duration = %v, want 0", d)
-	}
-}
-
-func TestParseHeartbeatIdleTimeout_Invalid(t *testing.T) {
-	rc := &RuntimeConfig{HeartbeatIdleTimeout: "not-a-duration"}
-	_, err := rc.ParseHeartbeatIdleTimeout()
-	if err == nil {
-		t.Fatal("expected error for invalid duration")
 	}
 }
 

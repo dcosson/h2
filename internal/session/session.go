@@ -59,11 +59,6 @@ type Session struct {
 	// ExtraEnv holds additional environment variables to pass to the child process.
 	ExtraEnv map[string]string
 
-	// Heartbeat nudge configuration (parsed from RC at daemon startup).
-	HeartbeatIdleTimeout time.Duration
-	HeartbeatMessage     string
-	HeartbeatCondition   string
-
 	// Daemon holds the networking/attach layer (nil in interactive mode).
 	Daemon    *Daemon
 	StartTime time.Time
@@ -422,19 +417,6 @@ func (s *Session) RunDaemon() error {
 
 	// Start delivery loop.
 	go s.StartServices()
-
-	// Launch heartbeat nudge goroutine if configured.
-	if s.HeartbeatIdleTimeout > 0 {
-		go RunHeartbeat(HeartbeatConfig{
-			IdleTimeout: s.HeartbeatIdleTimeout,
-			Message:     s.HeartbeatMessage,
-			Condition:   s.HeartbeatCondition,
-			Session:     s,
-			Queue:       s.Queue,
-			AgentName:   s.RC.AgentName,
-			Stop:        s.stopCh,
-		})
-	}
 
 	// Update status bar every second.
 	stopStatus := make(chan struct{})

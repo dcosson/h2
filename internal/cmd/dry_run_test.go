@@ -207,16 +207,17 @@ func TestResolveAgentConfig_NoInstructionsNoAppendFlag(t *testing.T) {
 	}
 }
 
-func TestResolveAgentConfig_Heartbeat(t *testing.T) {
+func TestResolveAgentConfig_Triggers(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	role := &config.Role{
 		RoleName:     "test-role",
 		Instructions: "Test",
-		Heartbeat: &config.HeartbeatConfig{
-			IdleTimeout: "30s",
-			Message:     "Still there?",
-			Condition:   "idle",
+		Triggers: []config.TriggerYAMLSpec{
+			{ID: "t1", Name: "on-idle", Event: "state_change", State: "idle", Exec: "echo nudge"},
+		},
+		Schedules: []config.ScheduleYAMLSpec{
+			{ID: "s1", Name: "check-tasks", RRule: "FREQ=SECONDLY;INTERVAL=60", Exec: "bd ready"},
 		},
 	}
 
@@ -225,11 +226,11 @@ func TestResolveAgentConfig_Heartbeat(t *testing.T) {
 		t.Fatalf("resolveAgentConfig: %v", err)
 	}
 
-	if rc.Heartbeat.IdleTimeout.String() != "30s" {
-		t.Errorf("Heartbeat.IdleTimeout = %q, want %q", rc.Heartbeat.IdleTimeout.String(), "30s")
+	if len(rc.Role.Triggers) != 1 || rc.Role.Triggers[0].ID != "t1" {
+		t.Errorf("expected 1 trigger with ID t1, got %v", rc.Role.Triggers)
 	}
-	if rc.Heartbeat.Message != "Still there?" {
-		t.Errorf("Heartbeat.Message = %q, want %q", rc.Heartbeat.Message, "Still there?")
+	if len(rc.Role.Schedules) != 1 || rc.Role.Schedules[0].ID != "s1" {
+		t.Errorf("expected 1 schedule with ID s1, got %v", rc.Role.Schedules)
 	}
 }
 
@@ -335,7 +336,7 @@ func TestPrintDryRun_PermissionReviewAgent(t *testing.T) {
 	}
 }
 
-func TestPrintDryRun_Heartbeat(t *testing.T) {
+func TestPrintDryRun_HeartbeatAsSchedule(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	role := &config.Role{
@@ -356,10 +357,9 @@ func TestPrintDryRun_Heartbeat(t *testing.T) {
 	output := capturePrintDryRun(rc)
 
 	checks := []string{
-		"Heartbeat:",
-		"Idle Timeout: 1m0s",
-		"Message: ping",
-		"Condition: idle",
+		"Schedules:",
+		"heartbeat",
+		"FREQ=SECONDLY;INTERVAL=60",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {

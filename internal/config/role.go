@@ -27,6 +27,34 @@ func (k *HeartbeatConfig) ParseIdleTimeout() (time.Duration, error) {
 	return time.ParseDuration(k.IdleTimeout)
 }
 
+// TriggerYAMLSpec defines a trigger in role YAML.
+type TriggerYAMLSpec struct {
+	ID        string `yaml:"id,omitempty"`
+	Name      string `yaml:"name,omitempty"`
+	Event     string `yaml:"event"`
+	State     string `yaml:"state,omitempty"`
+	SubState  string `yaml:"sub_state,omitempty"`
+	Condition string `yaml:"condition,omitempty"`
+	Exec      string `yaml:"exec,omitempty"`
+	Message   string `yaml:"message,omitempty"`
+	From      string `yaml:"from,omitempty"`
+	Priority  string `yaml:"priority,omitempty"`
+}
+
+// ScheduleYAMLSpec defines a schedule in role YAML.
+type ScheduleYAMLSpec struct {
+	ID            string `yaml:"id,omitempty"`
+	Name          string `yaml:"name,omitempty"`
+	RRule         string `yaml:"rrule"`
+	Start         string `yaml:"start,omitempty"`
+	Condition     string `yaml:"condition,omitempty"`
+	ConditionMode string `yaml:"condition_mode,omitempty"`
+	Exec          string `yaml:"exec,omitempty"`
+	Message       string `yaml:"message,omitempty"`
+	From          string `yaml:"from,omitempty"`
+	Priority      string `yaml:"priority,omitempty"`
+}
+
 const detachedHeadBranchSentinel = "<detached_head>"
 
 // WorktreeConfig defines normalized git worktree settings for an agent.
@@ -214,6 +242,8 @@ type Role struct {
 	CodexAskForApproval     string                 `yaml:"codex_ask_for_approval,omitempty"`    // Codex --ask-for-approval flag
 	PermissionReviewAgent   *PermissionReviewAgent `yaml:"permission_review_agent,omitempty"`   // AI permission reviewer
 	Heartbeat               *HeartbeatConfig       `yaml:"heartbeat,omitempty"`
+	Triggers                []TriggerYAMLSpec      `yaml:"triggers,omitempty"`
+	Schedules               []ScheduleYAMLSpec     `yaml:"schedules,omitempty"`
 	Hooks                   yaml.Node              `yaml:"hooks,omitempty"`     // passed through as-is to settings.json
 	Settings                yaml.Node              `yaml:"settings,omitempty"`  // extra settings.json keys
 	Variables               map[string]tmpl.VarDef `yaml:"variables,omitempty"` // template variable definitions

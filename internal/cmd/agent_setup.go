@@ -182,14 +182,23 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 		StartedAt:            time.Now().UTC().Format(time.RFC3339),
 	}
 
-	// Set heartbeat config.
-	if role.Heartbeat != nil {
-		if role.Heartbeat.IdleTimeout != "" {
-			rc.HeartbeatIdleTimeout = role.Heartbeat.IdleTimeout
-		}
-		rc.HeartbeatMessage = role.Heartbeat.Message
-		rc.HeartbeatCondition = role.Heartbeat.Condition
+	// Convert heartbeat config to a schedule (backwards compatibility).
+	if role.Heartbeat != nil && role.Heartbeat.IdleTimeout != "" && role.Heartbeat.Message != "" {
+		rc.Schedules = append(rc.Schedules, config.ScheduleYAMLSpec{
+			ID:            "heartbeat",
+			Name:          "heartbeat",
+			RRule:         "FREQ=SECONDLY;INTERVAL=" + heartbeatIntervalFromDuration(role.Heartbeat.IdleTimeout),
+			Condition:     role.Heartbeat.Condition,
+			ConditionMode: "run_if",
+			Message:       role.Heartbeat.Message,
+			From:          "h2-heartbeat",
+			Priority:      "idle",
+		})
 	}
+
+	// Copy role-defined triggers and schedules.
+	rc.Triggers = append(rc.Triggers, role.Triggers...)
+	rc.Schedules = append(rc.Schedules, role.Schedules...)
 
 	// Write RuntimeConfig before forking so the daemon can read it.
 	if err := config.WriteRuntimeConfig(sessionDir, rc); err != nil {
@@ -220,6 +229,21 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 		fmt.Fprintf(os.Stderr, "Agent %q started. Attaching...\n", name)
 	}
 	return doAttach(name)
+}
+
+// heartbeatIntervalFromDuration converts a Go duration string (e.g. "30s") to
+// an RRULE INTERVAL in seconds for the backwards-compatible heartbeat→schedule
+// conversion. Falls back to "30" if parsing fails.
+func heartbeatIntervalFromDuration(durStr string) string {
+	d, err := time.ParseDuration(durStr)
+	if err != nil || d <= 0 {
+		return "30"
+	}
+	secs := int(d.Seconds())
+	if secs < 1 {
+		secs = 1
+	}
+	return fmt.Sprintf("%d", secs)
 }
 
 func validateHarnessConfigDirExists(role *config.Role, rc *config.RuntimeConfig) error {
