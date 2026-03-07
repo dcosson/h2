@@ -81,10 +81,12 @@ With --responds-to <id>, the trigger is removed from your own daemon (and option
 			// Send the message.
 			sockPath, findErr := socketdir.Find(name)
 			if findErr != nil {
+				removeTriggerBestEffort(name, triggerID)
 				return agentConnError(name, findErr)
 			}
 			conn, err := net.Dial("unix", sockPath)
 			if err != nil {
+				removeTriggerBestEffort(name, triggerID)
 				return agentConnError(name, err)
 			}
 
@@ -102,15 +104,18 @@ With --responds-to <id>, the trigger is removed from your own daemon (and option
 
 			if err := message.SendRequest(conn, req); err != nil {
 				conn.Close()
+				removeTriggerBestEffort(name, triggerID)
 				return fmt.Errorf("send request: %w", err)
 			}
 
 			resp, err := message.ReadResponse(conn)
 			conn.Close()
 			if err != nil {
+				removeTriggerBestEffort(name, triggerID)
 				return fmt.Errorf("read response: %w", err)
 			}
 			if !resp.OK {
+				removeTriggerBestEffort(name, triggerID)
 				return fmt.Errorf("send failed: %s", resp.Error)
 			}
 
@@ -182,6 +187,23 @@ func registerExpectsResponseTrigger(agentName, sender, triggerID string) (string
 		return "", fmt.Errorf("trigger add failed: %s", resp.Error)
 	}
 	return triggerID, nil
+}
+
+// removeTriggerBestEffort removes a trigger from the recipient's daemon.
+// Used to clean up orphan triggers when message send fails after trigger
+// registration. Silently ignores all errors since this is compensating cleanup.
+func removeTriggerBestEffort(agentName, triggerID string) {
+	if triggerID == "" {
+		return
+	}
+	resp, err := sendSocketRequest(agentName, &message.Request{
+		Type:      "trigger_remove",
+		TriggerID: triggerID,
+	})
+	if err != nil {
+		return
+	}
+	_ = resp
 }
 
 // handleRespondsTo handles the --responds-to flow: optionally send a response,
