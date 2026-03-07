@@ -616,3 +616,29 @@ internal/automation/
 | 3 | h2-reviewer | P1 | Unbounded async exec fan-out | Incorporated | Added execution control: max 3 concurrent, drop-on-saturate, 60s timeout with SIGKILL |
 | 4 | h2-reviewer | P2 | One-shot failure semantics undefined | Incorporated | Triggers and RunOnceWhen consume on attempt; failures logged, no retry |
 | 5 | h2-reviewer | P2 | Heartbeat migration behavior change | Incorporated | Added explicit migration callout noting breaking change and required role file updates |
+
+---
+
+## Completion Signoff
+
+- **Status**: Complete
+- **Date**: 2026-03-06
+- **Branch**: feature/expects-response-tracking
+- **Commit**: 7c141c8
+- **Verified by**: mild-cloud
+- **Test verification**: `go test ./internal/automation/... -count=1` — PASS (all 45 tests), `go test -race ./internal/automation/... -count=1` — PASS
+- **Deviations from plan**:
+  - [Cosmetic] Test names don't match plan exactly (e.g., `TestTriggerEngine_AddViaSocket` not present as named; socket registration tested in `cmd/send_test.go` and `internal/session/listener_test.go` instead)
+  - [Structural] ActionRunner uses `MessageEnqueuer` interface instead of holding `*Session` directly — better decoupling, same behavior
+  - [Structural] `TriggerEngine.Add()` returns `bool` (false on duplicate) and `ScheduleEngine.Add()` returns `error` — plan showed void returns. Daemon integration checks these for duplicate ID errors.
+  - [Structural] Heartbeat migration is backwards-compatible: old `heartbeat:` YAML key auto-converts to a schedule at agent_setup time, rather than being a validation error. Strictly better UX than plan specified.
+  - [Structural] `automation.go` also contains `EvalCondition`, `DefaultConditionTimeout`, and `buildFullEnv` — slightly broader scope than "shared types" described in plan
+  - [Structural] TriggerEngine and ScheduleEngine accept optional `StateProvider` function to inject `H2_AGENT_STATE`/`H2_AGENT_SUBSTATE` into condition and action environments — addition beyond plan's struct definitions
+  - [Structural] Integration tests are covered functionally by unit tests + daemon integration rather than as separate named integration test functions
+- **Additions beyond plan**:
+  - `StateProvider` type for injecting agent state into condition/action environments
+  - `ActionRunner.MergeEnv()` exported method for engines to build condition environments with base vars
+  - `MessageEnqueuer` interface decoupling ActionRunner from concrete MessageQueue
+  - `sessionEnqueuer` adapter in daemon.go bridging MessageQueue to MessageEnqueuer
+  - Monitor `Subscribe()` method for fan-out event delivery to TriggerEngine
+  - Pre-existing data race fixes in monitor_test.go (TestOnSessionStartedCallback, TestWithEventWriter)

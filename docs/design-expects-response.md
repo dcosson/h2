@@ -264,3 +264,24 @@ trigger. All fire at idle, delivered sequentially.
 ## Round 3 Review Disposition
 
 No new findings.
+
+---
+
+## Completion Signoff
+
+- **Status**: Complete
+- **Date**: 2026-03-06
+- **Branch**: feature/expects-response-tracking
+- **Commit**: 7c141c8
+- **Verified by**: mild-cloud
+- **Test verification**: `go test ./internal/cmd/... -count=1` — PASS, `go test ./internal/session/message/... -count=1` — PASS
+- **Deviations from plan**:
+  - [Cosmetic] Some planned test names not implemented verbatim (e.g., `TestSend_ExpectsResponse_CreatesTrigger` → `TestSend_ExpectsResponse_NeedsBody` + `TestSend_ExpectsResponse_FailsOnSocket`); equivalent coverage exists
+  - [Structural] Trigger registration happens before message send (register-first ordering), not after as shown in sequence diagram. This was an intentional fix for the trigger ID mismatch issue — ensures the trigger ID in the delivery annotation matches the confirmed ID. Orphan triggers are cleaned up on send failure via `removeTriggerBestEffort`.
+  - [Structural] Exit code 2 for "delivered without tracking" is not implemented. The register-first ordering eliminates the scenario entirely — if trigger registration fails, the message is never sent, so "delivered without tracking" cannot occur. All failures exit with standard cobra error (exit 1).
+  - [Structural] `Request` struct has `ERTriggerID` field added for passing trigger ID through to delivery layer — not in plan's wire protocol section but necessary for the annotation
+  - [Structural] `handleRespondsTo` sends message first, then removes trigger (matching plan's Round 2 disposition), with proper error handling on each step
+- **Additions beyond plan**:
+  - `cleanLLMEscapes()` / `stripBackslashPunctuation()` in send.go — strips spurious backslash escapes that LLMs insert into shell arguments
+  - `removeTriggerBestEffort()` compensating cleanup on all send failure paths after trigger registration
+  - `ERTriggerID` field on Request for trigger ID passthrough to delivery annotation
