@@ -1,109 +1,165 @@
 ---
 name: code-review
-description: Run a general code review over a body of recently implemented work. Reviewers file suggestion beads, a different coder approves/rejects and implements approved changes. Designed for scheduler/concierge agents coordinating multi-agent review.
+description: Review a code diff for a bead/feature. Produces a structured review doc with severity-rated findings. Run by reviewer agents after implementation is complete.
 user-invocable: true
 allowed-tools: Bash Read Write Edit Grep Glob Task
-argument-hint: "[scope-description] [epic-id-or-new]"
+argument-hint: "[bead-id-or-commit-range] [reviewer-id]"
 ---
 
 # Code Review
 
-Run a structured code review over a body of recently implemented work. This is distinct from plan review (which reviews design docs) — this reviews the actual code for quality, consistency, and correctness.
+Review the implementation for a bead or feature. Produce a structured review doc with severity-rated findings — the same disposition-table pattern used for plan reviews, applied to code.
 
 ## Inputs
 
-- `$0`: Scope description — what code to review (e.g., "batch3 gateway + security + catalog", "02f server entrypoint")
-- `$1` (optional): Existing epic ID to file suggestion beads under, or omit to create a new one
+- `$0`: Bead ID (e.g., `edb-d6kq.3`) or commit range (e.g., `abc123..def456`)
+- `$1`: Reviewer identifier (e.g., `reviewer-1`, used in output filename)
+- Review docs directory: `docs/reviews/` (created if it doesn't exist)
 
-## Phase 1: Setup
+## Critical Rules
 
-### Bead Organization
+1. Do NOT review code you wrote. Fresh eyes catch more issues.
+2. Do NOT read other reviewers' review files for the same bead before completing your own review. Reviews must be independent.
+3. Review the actual code diff, not just the plan. The plan says what *should* be built — the review verifies what *was* built.
 
-Use judgment on where to file suggestion beads:
-- If the reviewed code was implemented under a specific epic, file suggestions under that same epic (keeps related work together)
-- If reviewing across multiple epics or a large batch, create a new code-review epic (e.g., "batch3-code-review")
-- If reviewing a small focused area, individual beads without an epic may be sufficient
+## Phase 1: Scope the Review
 
-### Assign Reviewers
+### If given a bead ID:
 
-Split the code across available reviewers by component area. Each reviewer should review code they did NOT write — fresh eyes catch more issues. If the original authors are known, ensure no self-reviews.
+1. Look up the bead: `bd show $0`
+2. Find the associated commits: `git log --all --grep="Bead: $0"` and any commits on branches named after the bead
+3. Find the plan doc referenced by the bead or its parent epic
+4. Identify the commit range to review
 
-## Phase 2: Review
+### If given a commit range:
 
-Each reviewer reads through their assigned code thoroughly, looking for the issues described in the Code Review Checklist below.
+1. Use the range directly
+2. Check commit messages for `Plan-Ref:` or `Bead:` trailers to find the associated plan doc
 
-For each issue found, the reviewer files a **suggestion bead** with:
-- Clear title describing the suggestion
-- Description with file paths, line references, and the specific change proposed
-- Severity context (bug fix, pattern inconsistency, structural improvement, cleanup)
+### Gather context:
 
-### Code Review Checklist
+1. Read the plan doc (if found) to understand intent
+2. Run `git diff <range>` to see the full code diff
+3. Read the changed files in full (not just the diff) to understand surrounding context
+4. Read any test changes to understand test coverage
 
-#### Bugs and Correctness
+## Phase 2: Analyze
+
+Evaluate the implementation for:
+
+### Correctness
+- Does the code match what the plan specifies?
 - Race conditions, deadlocks, or unsafe concurrent access
 - Off-by-one errors, nil/zero-value handling, error swallowing
 - Resource leaks (unclosed handles, goroutine leaks, missing defers)
-- Security issues (injection, privilege escalation, missing validation at boundaries)
+- Crash recovery and restart safety
 
-#### Duplication and Consolidation
-- **New concepts that make old ones redundant**: When new structs, interfaces, or types were added that overlap with existing ones, suggest consolidating into one. If they represent the same concept, keep the better-designed one and migrate callers.
-- **Rule of Three**: Two copies of similar logic is acceptable if they appear to be genuinely different special cases rather than the same thing. Err on the side of keeping two copies rather than prematurely abstracting. But on the **third copy**, it's time to refactor and create a proper abstraction. Flag any cases where three or more copies exist.
-- **Duplicated helper functions**: Utility functions that do the same thing in different packages should be consolidated into a shared internal package.
+### Security
+- Input validation at system boundaries
+- Injection vectors, privilege escalation paths
+- Missing auth checks, credential handling issues
 
-#### Pattern Consistency
-- **Divergent patterns for similar code**: When two components solve the same type of problem differently (e.g., different error handling patterns, different config loading approaches, different test setup patterns), flag it. The reviewer and coder should agree on which pattern is better and standardize.
-- **Naming conventions**: Inconsistent naming for similar concepts across packages (e.g., `Manager` vs `Controller` vs `Coordinator` for the same role pattern).
-- **Interface compliance**: Components that should implement a shared interface but use ad-hoc signatures instead.
+### Testing
+- Are critical paths covered by tests?
+- Are edge cases and error paths tested?
+- Do tests actually verify behavior (not just exercise code)?
+- Any missing test categories (unit, integration, property-based)?
 
-#### Code Structure and Organization
-- **Misplaced code**: Logic that belongs in a different package based on dependency direction or domain boundaries.
-- **Test organization**: Expensive tests (simulation, stress, soak, property-based) should live in separate test packages (e.g., `internal/e2etest/`), not alongside unit tests in implementation packages. Unit tests in code packages should be lightweight and fast.
-- **File organization**: Very large files that should be split, or many tiny files that should be consolidated.
-- **Dead code**: Unreachable code, unused exports, stale TODO comments.
+### Duplication and Consistency
+- New concepts that make old ones redundant — suggest consolidating
+- Divergent patterns for similar code across the codebase
+- Naming inconsistencies
 
-#### API and Interface Quality
-- **Leaky abstractions**: Internal implementation details exposed through public interfaces.
-- **Missing error context**: Errors returned without wrapping or additional context about what operation failed.
-- **Overly broad interfaces**: Interfaces with many methods that could be split into smaller, composable interfaces.
-
-#### Performance (obvious issues only)
+### Performance (obvious issues)
 - Unnecessary allocations in hot paths
-- O(n^2) or worse algorithms where O(n log n) or O(n) alternatives exist
+- Algorithmic complexity issues
 - Missing caching for repeated expensive operations
 
-## Phase 3: Approve/Reject Suggestions
+### Plan Compliance
+- Features specified in the plan but missing from implementation
+- Implementation details that deviate from the plan without justification
+- Test harness coverage gaps vs what the plan's test harness doc specifies
 
-For each suggestion bead, assign a **different coder** (not the reviewer who filed it, and preferably not the original author) to evaluate:
+## Phase 3: Write Review Doc
 
-1. **Read the suggestion** and the referenced code
-2. **Decide**: approve or reject
-3. **If rejecting**: Comment on the bead with the reason (e.g., "intentional design — trust boundary separation requires separate types", "would cause import cycle", "already handled by X"). Close the bead.
-4. **If approving**: Implement the suggested change, commit, and send to the reviewer for final check. Close the bead after reviewer confirms.
+Determine the round number:
+- Check for existing review docs: `ls docs/reviews/$0-r*.md`
+- If none exist, this is R1. If R1 exists, this is R2, etc.
 
-### Rejection Criteria
+Write `docs/reviews/$0-r{N}-review-$1.md`:
 
-Valid reasons to reject:
-- The current code is intentional and the suggestion misunderstands the design
-- The change would introduce import cycles or architectural violations
-- The suggested refactor would require broader changes beyond the current scope (create a follow-up bead instead)
-- The duplication is under the Rule of Three threshold and the cases are genuinely different
+```markdown
+# Code Review: $0 (R{N}, $1)
 
-Invalid reasons to reject:
-- "Too much work" (effort is not a factor — see URP)
-- "Works fine as-is" (if it violates a pattern or creates maintenance burden, fix it)
+- Bead: $0
+- Commit range: {first_sha}..{last_sha}
+- Plan doc: {path or "N/A"}
+- Reviewer: $1
+- Review commit: {current HEAD hash}
 
-## Phase 4: Report
+## Findings
 
-When all suggestion beads are resolved (approved+implemented or rejected), report summary:
-- Total suggestions filed
-- Approved and implemented (with commit hashes)
-- Rejected (with brief reasons)
-- Any follow-up beads created for larger refactors
+### P{0-3} - {Short descriptive title}
 
-## What Requires Judgment
+**Location:** `{file_path}:{line_range}`
 
-1. **Where to file beads** — existing epic vs new epic vs no epic
-2. **How to split review scope** — by package, by component, by feature area
-3. **Rule of Three calls** — whether two similar pieces are genuinely different special cases or should already be consolidated
-4. **Pattern arbitration** — when two divergent patterns are both reasonable, which one wins (usually: the one that's more idiomatic, more testable, or already more prevalent)
-5. **Scope of fixes** — whether to fix in-place or create a follow-up bead for a larger refactor
+**Problem**
+{Description of the issue with specific code references}
+
+**Suggested fix**
+{Concrete description of what should change}
+
+---
+
+(repeat for each finding)
+
+## Summary
+
+{X} findings: {n} P0, {n} P1, {n} P2, {n} P3
+
+**Verdict**: Approved / Approved with revisions / Not approved
+```
+
+### Severity Guide
+
+- **P0 (Blocking)**: Correctness bug, data loss risk, security vulnerability. Must fix before merge.
+- **P1 (High)**: Significant quality issue, missing test coverage for critical path, plan deviation. Should fix.
+- **P2 (Medium)**: Improvement that strengthens the implementation. Should address but not blocking.
+- **P3 (Low)**: Nit, style, or minor enhancement. Address if convenient.
+
+## Phase 4: Commit & Report
+
+1. `mkdir -p docs/reviews` (if needed)
+2. Commit the review doc with trailers:
+
+```
+docs: add R{N} review for {bead-id}
+
+Bead: {bead-id}
+Review-Round: {N}
+Review-Verdict: {approved/revisions/not-approved}
+```
+
+3. Comment on the bead with status: `bd comment $0 "R{N} review complete — {verdict}. {X} findings ({n} P0, {n} P1). See docs/reviews/$0-r{N}-review-$1.md"`
+4. Report the commit hash and finding summary to the scheduler/concierge
+
+## Discussion Capture
+
+When discussing findings with the implementer (during the incorporate phase or informally via h2 messages), capture key decision-relevant excerpts in the review doc or the incorporate disposition. Specifically:
+
+- **Rejected suggestions**: Include the h2 message exchange showing why both parties agreed on rejection
+- **Design alternatives discussed**: Show the reasoning that led to the chosen approach
+- **Disputed findings**: Show the discussion thread that led to consensus
+
+The goal is that anyone reading the review doc later can understand not just *what* was decided but *why*, with evidence of agreement.
+
+## Orchestration Note
+
+A concierge or scheduler typically assigns code reviews after implementation beads are complete. The flow:
+
+1. Reviewer runs `/code-review {bead-id} {reviewer-id}` → produces review doc
+2. Implementer (or different coder) runs `/code-review-incorporate {review-doc-path}` → makes fixes, updates dispositions
+3. If findings remain unresolved, reviewer runs another round → R2 review doc
+4. Repeat until clean or all findings dispositioned
+
+After final sign-off, the bead can be closed. The review docs in `docs/reviews/` form the permanent audit trail.
