@@ -221,6 +221,20 @@ After plans are approved (Phase 4) but before decomposing into beads (Phase 5), 
 
 This phase catches integration mismatches before implementation begins — far cheaper than discovering them during coding.
 
+## Phase 4.75: Implementation Guide
+
+After seam review completes, generate or update `docs/plans/00-implementation-guide.md`. This is a living doc that sits alongside `00-architecture.md` and `00-plan-index.md` — every agent reads it before starting implementation work.
+
+Assign an agent to synthesize the guide from: seam review findings, review round themes/pitfalls, architecture doc key decisions, and critical interface contracts. The guide contains these sections:
+
+1. **Interface Contracts** — Tricky cross-component interfaces with exact signatures, type definitions, and semantic expectations. Sourced from seam review compatibility matrices and P1+ seam findings.
+2. **Lifecycle Ordering Invariants** — Initialization, startup, shutdown, and health-check ordering constraints that span multiple components.
+3. **Config Contract** — How configuration flows from YAML through the config system to individual components. Shared keys, required vs optional, default values.
+4. **Common Pitfalls** — Recurring themes from review rounds (P0/P1 patterns that appeared across multiple docs or rounds). Each pitfall includes a concrete example and the fix.
+5. **Seam Reference Table** — Connected component pairs with their interface names and the plan doc section where each side is defined.
+
+The guide is a living document — update it incrementally as new invariants are discovered during implementation. When review rounds, seam reviews, or completion signoffs surface new cross-cutting concerns, add them to the appropriate section.
+
 ### Plan Doc Status State Machine
 
 For reference, the full lifecycle of a plan doc status:
@@ -235,6 +249,7 @@ Draft → In Review → Approved → Seam Reviewed → Implementation → Implem
 | **In Review** | `plan-orchestrate` Phase 3 | Review cycle in progress (may include round info, e.g., "In Review (R2)") |
 | **Approved** | `plan-orchestrate` Phase 4 | Review converged, all open questions resolved, `## Plan Review Signoff` appended |
 | **Seam Reviewed** | `plan-orchestrate` Phase 4.5 | Cross-plan interface compatibility verified via `plan-seam-review` |
+| **Implementation Guide** | `plan-orchestrate` Phase 4.75 | `00-implementation-guide.md` generated/updated with cross-cutting contracts and pitfalls |
 | **Implementation** | `plan-to-beads` | Implementation beads created, work in progress |
 | **Implementation Complete** | `plan-work-completion-signoff` | Code verified against plan, `## Completion Signoff` appended |
 
@@ -255,7 +270,8 @@ Epic: "Planning: {project-name}"
   ├── Task: "R2 Review: 05a, 05b, ... (rotated)" (plan-review, batch)
   ├── ...
   ├── Task: "Planning Sign-Off"
-  └── Task: "Seam Review: {batch}" (plan-seam-review)
+  ├── Task: "Seam Review: {batch}" (plan-seam-review)
+  └── Task: "Implementation Guide: {batch}" (Phase 4.75)
 ```
 
 Bead granularity:

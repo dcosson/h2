@@ -41,6 +41,7 @@ Evaluate the plan for:
 - **Performance**: Are performance claims substantiated? Any obvious bottlenecks or scalability concerns?
 - **Security**: Any injection vectors, privilege escalation paths, or missing validation?
 - **URP/EO/AA claims**: Are these sections substantive or hand-waving? Are claimed techniques actually applicable?
+- **Implementation Guide candidates**: Flag findings that are "implementation guide worthy" — non-obvious cross-cutting concerns that span multiple plan docs and that every implementor should know about, not just the teams working on this specific component. Mark these with `[IG]` in the finding title.
 
 ## Phase 3: Write Findings
 

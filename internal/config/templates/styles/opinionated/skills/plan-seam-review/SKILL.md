@@ -223,6 +223,15 @@ Seam review findings feed back into the individual plan docs via the same `/plan
 
 After incorporation, a quick re-check of affected seams confirms the fixes are consistent. This does not require a full re-review — just re-read the specific sections that changed and verify the mismatch is resolved.
 
+### Feeding the Implementation Guide
+
+Seam review findings feed into the Implementation Guide (`docs/plans/00-implementation-guide.md`). Specifically:
+- The seam compatibility matrix becomes the basis for the guide's Seam Reference Table
+- P1+ findings become entries in the guide's Interface Contracts and Common Pitfalls sections
+- Lifecycle ordering findings feed the guide's Lifecycle Ordering Invariants section
+
+When writing findings, the reviewer should flag which ones are **implementation guide worthy** — non-obvious cross-cutting invariants that every implementor should know about, not just the teams working on the two components at the seam boundary. Mark these in the finding with `[IG]` before the title (e.g., `### P1 [IG] - Lifecycle init order between WAL and PageCache`).
+
 ## Beads Integration
 
 ```

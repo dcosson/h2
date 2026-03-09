@@ -109,6 +109,17 @@ Read the plan doc thoroughly. Build a mental checklist of:
 - Every URP/EO/AA claim
 - **Every cross-component contract** — where this component's output is consumed by another component, or where this component consumes another's output
 
+### Step 1.5: Check the Implementation Guide
+
+Read `docs/plans/00-implementation-guide.md` (if it exists). Cross-reference the component being verified against:
+- **Interface Contracts**: Does the implementation respect the exact signatures and semantics listed?
+- **Lifecycle Ordering Invariants**: Does the component's init/shutdown follow the required ordering?
+- **Common Pitfalls**: Has the implementation avoided the known pitfalls relevant to this component?
+
+Violations of Implementation Guide invariants are Contractual-severity deviations — they affect cross-component compatibility even if the component works in isolation.
+
+If signoff discovers new cross-cutting invariants or pitfalls not already in the guide, update the Implementation Guide as part of the signoff process. Add new entries to the appropriate section with a note like "(Discovered during signoff of {component}, {date})".
+
 ### Step 2: Compare Against Code
 
 For each checklist item:

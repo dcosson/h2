@@ -202,6 +202,13 @@ References:
 - Depends on: {what this builds on}
 ```
 
+Every bead description must include a reference to the Implementation Guide as required reading:
+```
+Required reading: docs/plans/00-implementation-guide.md
+```
+
+When creating beads, check the Implementation Guide's Interface Contracts and Common Pitfalls sections for anything relevant to the specific bead. If a bead touches a seam listed in the guide's Seam Reference Table, or involves a pattern flagged in Common Pitfalls, note it explicitly in the bead description (e.g., "See Implementation Guide §Common Pitfalls: page cache init must complete before WAL recovery").
+
 Descriptions should be detailed enough that an agent unfamiliar with the project can read the plan doc sections and implement the task, but should not duplicate the plan doc content — reference sections instead.
 
 ## Phase 5: Report
