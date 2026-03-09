@@ -233,14 +233,15 @@ Report all Contractual and Missing deviations to the orchestrating agent via `h2
 
 As agents report back, the orchestrating agent:
 
-1. **For Complete signoffs**: Close the task bead
+1. **For Complete signoffs**: The signoff task bead stays open until the code is verified working in production (merged, CI green, no regressions). Only close signoff beads when the implementation is fully done and merged — a Complete signoff means the verification passed, but the bead tracks the full lifecycle.
 2. **For Partial signoffs**: Evaluate each Contractual and Missing deviation:
    - Is it real missing work, or intentional future scope?
    - If real: Create a new task bead for the follow-up work, assign to an available agent
    - If intentional/deferred: Document the decision but leave status as Partial (do NOT upgrade to Complete — the contract gap still exists)
-3. **For Not Implemented signoffs**: These represent entire unbuilt components. Create implementation beads if the work is in scope, or document as out-of-scope if not.
+   - **HARD RULE: Do NOT close Partial signoff beads or their parent epic.** The signoff bead and epic stay open until ALL gaps are resolved (follow-up beads completed, code fixed, re-verified) and the signoff status is upgraded to Complete. A Partial signoff with open gaps means the work is not done.
+3. **For Not Implemented signoffs**: These represent entire unbuilt components. Create implementation beads if the work is in scope, or document as out-of-scope if not. Like Partial, do NOT close the signoff bead until the work is done.
 4. Track progress: how many docs at each status level
-5. When all task beads are closed (signoffs done, follow-up beads created for any gaps), close the epic
+5. The epic will auto-close when all child beads are closed, so getting the child bead lifecycle right is what matters.
 
 **Important**: Do not downgrade a Contractual deviation to Structural just because tests pass. Tests passing with a contract mismatch means the tests aren't testing the contract — which is itself a gap.
 
