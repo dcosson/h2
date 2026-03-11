@@ -159,7 +159,9 @@ func (se *ScheduleEngine) handleFiring(as *activeSchedule) {
 		se.logger.Info("schedule fired",
 			"schedule_id", s.ID, "schedule_name", s.Name,
 			"condition_mode", s.ConditionMode.String())
-		if err := se.runner.Run(s.Action, env); err != nil {
+		action := s.Action
+		action.Header = s.ScheduleHeader()
+		if err := se.runner.Run(action, env); err != nil {
 			se.logger.Warn("schedule action failed",
 				"schedule_id", s.ID, "error", err)
 		}

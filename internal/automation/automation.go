@@ -20,6 +20,7 @@ type Action struct {
 	Message  string // message injected into agent's PTY via message queue
 	From     string // sender identity for message (default: h2-trigger or h2-schedule)
 	Priority string // message priority: interrupt, normal, idle-first, idle
+	Header   string // custom header for message delivery (set by engine before firing)
 }
 
 // Validate returns an error if the action is misconfigured.
@@ -65,6 +66,30 @@ type Trigger struct {
 	// Runtime tracking (internal, not user-configured).
 	FireCount   int       // number of times this trigger has fired
 	LastFiredAt time.Time // timestamp of last firing (for cooldown enforcement)
+}
+
+// TriggerHeader builds the PTY header for a trigger firing.
+// Examples:
+//
+//	"h2 trigger (on state_change, firing 1 of 5)"
+//	"h2 trigger (on state_change, running until 2026-03-12T15:00:00Z)"
+//	"h2 trigger (on state_change)"  // one-shot, no expiry
+func (t *Trigger) TriggerHeader(event string) string {
+	parts := []string{fmt.Sprintf("on %s", event)}
+
+	maxF := t.effectiveMaxFirings()
+	switch {
+	case maxF < 0:
+		parts = append(parts, fmt.Sprintf("running, fired %d", t.FireCount))
+	case maxF > 1:
+		parts = append(parts, fmt.Sprintf("firing %d of %d", t.FireCount, maxF))
+	}
+
+	if !t.ExpiresAt.IsZero() {
+		parts = append(parts, fmt.Sprintf("until %s", t.ExpiresAt.Format(time.RFC3339)))
+	}
+
+	return fmt.Sprintf("h2 trigger (%s)", strings.Join(parts, ", "))
 }
 
 // effectiveMaxFirings returns the actual max firings, treating 0 (unset) as 1 (one-shot).
@@ -155,6 +180,22 @@ type Schedule struct {
 	ConditionMode ConditionMode // how the condition interacts with firings
 
 	Action Action
+}
+
+// ScheduleHeader builds the PTY header for a schedule firing.
+// Examples:
+//
+//	"h2 schedule (daily-check)"
+//	"h2 schedule (nightly-backup, FREQ=DAILY)"
+func (s *Schedule) ScheduleHeader() string {
+	label := s.ID
+	if s.Name != "" {
+		label = s.Name
+	}
+	if s.RRule != "" {
+		return fmt.Sprintf("h2 schedule (%s, %s)", label, s.RRule)
+	}
+	return fmt.Sprintf("h2 schedule (%s)", label)
 }
 
 // MatchesEvent returns true if the trigger's event filter matches the given event.

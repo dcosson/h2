@@ -90,6 +90,7 @@ func TestDeliver_InterAgentMessage(t *testing.T) {
 		Priority:  PriorityNormal,
 		Body:      "do something",
 		FilePath:  "/tmp/test-msg.md",
+		Header:    "h2 message from: agent-a",
 		Status:    StatusQueued,
 		CreatedAt: time.Now(),
 	}
@@ -134,6 +135,7 @@ func TestDeliver_InterAgentMessage_LongBody(t *testing.T) {
 		Priority:  PriorityNormal,
 		Body:      longBody,
 		FilePath:  "/tmp/test-long.md",
+		Header:    "h2 message from: agent-a",
 		Status:    StatusQueued,
 		CreatedAt: time.Now(),
 	}
@@ -180,6 +182,7 @@ func TestDeliver_InterAgentMessage_Interrupt(t *testing.T) {
 		Priority:  PriorityInterrupt,
 		Body:      "urgent task",
 		FilePath:  "/tmp/test-urgent.md",
+		Header:    "URGENT h2 message from: agent-a",
 		Status:    StatusQueued,
 		CreatedAt: time.Now(),
 	}
@@ -522,6 +525,7 @@ func TestDeliver_ExpectsResponse_Format(t *testing.T) {
 		Priority:        PriorityNormal,
 		Body:            "check coverage",
 		FilePath:        "/tmp/test-er.md",
+		Header:          "h2 message from: agent-a (response expected, id: a1b2c3d4)",
 		ExpectsResponse: true,
 		TriggerID:       "a1b2c3d4",
 		Status:          StatusQueued,
@@ -568,6 +572,7 @@ func TestDeliver_NormalMessage_NoAnnotation(t *testing.T) {
 		Priority:  PriorityNormal,
 		Body:      "just a message",
 		FilePath:  "/tmp/test-no-er.md",
+		Header:    "h2 message from: agent-a",
 		Status:    StatusQueued,
 		CreatedAt: time.Now(),
 	}

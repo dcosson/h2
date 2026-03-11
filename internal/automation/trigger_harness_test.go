@@ -215,7 +215,7 @@ type failingEnqueuer struct {
 	messages  []enqueuedMsg
 }
 
-func (f *failingEnqueuer) EnqueueMessage(from, body string, priority message.Priority) (string, error) {
+func (f *failingEnqueuer) EnqueueMessage(from, body, header string, priority message.Priority) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.callCount++

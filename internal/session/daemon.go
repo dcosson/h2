@@ -34,8 +34,10 @@ type sessionEnqueuer struct {
 	agentName string
 }
 
-func (e *sessionEnqueuer) EnqueueMessage(from, body string, priority message.Priority) (string, error) {
-	return message.PrepareMessage(e.queue, e.agentName, from, body, priority, message.PrepareOpts{})
+func (e *sessionEnqueuer) EnqueueMessage(from, body, header string, priority message.Priority) (string, error) {
+	return message.PrepareMessage(e.queue, e.agentName, from, body, priority, message.PrepareOpts{
+		Header: header,
+	})
 }
 
 // TerminalHints holds transient terminal color and type hints that

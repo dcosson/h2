@@ -58,6 +58,7 @@ func EnqueueRaw(q *MessageQueue, body string) string {
 
 // PrepareOpts holds optional parameters for PrepareMessage.
 type PrepareOpts struct {
+	Header          string // custom header text inside [...]; if empty, MessageHeader builds the default
 	ExpectsResponse bool
 	TriggerID       string
 }
@@ -91,6 +92,10 @@ func PrepareMessage(q *MessageQueue, agentName, from, body string, priority Prio
 	if len(opts) > 0 {
 		msg.ExpectsResponse = opts[0].ExpectsResponse
 		msg.TriggerID = opts[0].TriggerID
+		msg.Header = opts[0].Header
+	}
+	if msg.Header == "" {
+		msg.Header = MessageHeader(from, priority, msg.ExpectsResponse, msg.TriggerID)
 	}
 	q.Enqueue(msg)
 	return id, nil
@@ -158,23 +163,12 @@ func deliver(cfg DeliveryConfig, msg *Message) {
 		// Raw user input — send body directly.
 		cfg.PtyWriter.Write([]byte(msg.Body))
 	} else {
-		// Inter-agent message — inline short messages, reference long ones.
-		prefix := "h2 message"
-		if msg.Priority == PriorityInterrupt {
-			prefix = "URGENT h2 message"
-		}
-		// Add expects-response annotation if set.
-		annotation := ""
-		if msg.ExpectsResponse && msg.TriggerID != "" {
-			annotation = fmt.Sprintf(" (response expected, id: %s)", msg.TriggerID)
-		}
+		// Structured message — inline short messages, reference long ones.
 		var line string
 		if len(msg.Body) <= maxInlineBodyLen {
-			line = fmt.Sprintf("[%s from: %s%s] %s",
-				prefix, msg.From, annotation, msg.Body)
+			line = fmt.Sprintf("[%s] %s", msg.Header, msg.Body)
 		} else {
-			line = fmt.Sprintf("[%s from: %s%s] Read %s",
-				prefix, msg.From, annotation, msg.FilePath)
+			line = fmt.Sprintf("[%s] Read %s", msg.Header, msg.FilePath)
 		}
 		cfg.PtyWriter.Write([]byte(line))
 	}

@@ -15,7 +15,7 @@ import (
 // failEnqueuer always returns an error.
 type failEnqueuer struct{}
 
-func (f *failEnqueuer) EnqueueMessage(string, string, message.Priority) (string, error) {
+func (f *failEnqueuer) EnqueueMessage(string, string, string, message.Priority) (string, error) {
 	return "", fmt.Errorf("enqueue failed")
 }
 

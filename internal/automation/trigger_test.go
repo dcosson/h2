@@ -24,7 +24,7 @@ type enqueuedMsg struct {
 	Priority message.Priority
 }
 
-func (m *mockEnqueuer) EnqueueMessage(from, body string, priority message.Priority) (string, error) {
+func (m *mockEnqueuer) EnqueueMessage(from, body, header string, priority message.Priority) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.messages = append(m.messages, enqueuedMsg{From: from, Body: body, Priority: priority})

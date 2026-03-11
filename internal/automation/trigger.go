@@ -195,7 +195,11 @@ func (te *TriggerEngine) evalAndFire(ctx context.Context, t *Trigger, evt monito
 		"fire_count", t.FireCount, "exhausted", exhausted,
 		"event", evt.Type.String())
 
-	if err := te.runner.Run(t.Action, env); err != nil {
+	// Build header with current fire count for message delivery.
+	action := t.Action
+	action.Header = t.TriggerHeader(evt.Type.String())
+
+	if err := te.runner.Run(action, env); err != nil {
 		te.logger.Warn("trigger action failed",
 			"trigger_id", t.ID, "error", err)
 	}

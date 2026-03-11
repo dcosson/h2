@@ -1,6 +1,7 @@
 package message
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -61,7 +62,8 @@ type Message struct {
 	Priority    Priority
 	Body        string
 	FilePath    string
-	Raw         bool // send body directly to PTY, skip Ctrl+C interrupt loop
+	Header      string // text inside [...] when delivered to PTY (e.g. "h2 message from: agent-a")
+	Raw         bool   // send body directly to PTY, skip Ctrl+C interrupt loop
 	Status      MessageStatus
 	CreatedAt   time.Time
 	DeliveredAt *time.Time
@@ -69,4 +71,18 @@ type Message struct {
 	// Expects-response tracking.
 	ExpectsResponse bool   // sender requested a response
 	TriggerID       string // 8-char trigger ID for the idle reminder
+}
+
+// MessageHeader builds the default header for an inter-agent message.
+// Format: "h2 message from: <from>" with optional URGENT prefix and annotations.
+func MessageHeader(from string, priority Priority, expectsResponse bool, triggerID string) string {
+	prefix := "h2 message"
+	if priority == PriorityInterrupt {
+		prefix = "URGENT h2 message"
+	}
+	header := fmt.Sprintf("%s from: %s", prefix, from)
+	if expectsResponse && triggerID != "" {
+		header += fmt.Sprintf(" (response expected, id: %s)", triggerID)
+	}
+	return header
 }

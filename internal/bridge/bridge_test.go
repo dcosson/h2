@@ -119,6 +119,14 @@ func TestStripH2Envelope(t *testing.T) {
 			"[h2 message from: agent]   extra whitespace  ",
 			"extra whitespace",
 		},
+		{
+			"[h2 trigger (on state_change, firing 2 of 5)] check status",
+			"check status",
+		},
+		{
+			"[h2 schedule (daily-check)] run diagnostics",
+			"run diagnostics",
+		},
 	}
 
 	for _, tt := range tests {

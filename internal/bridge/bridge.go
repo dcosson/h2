@@ -90,10 +90,10 @@ func ParseSlashCommand(text string, allowed []string) (command, args string) {
 	return "", ""
 }
 
-var envelopeRe = regexp.MustCompile(`^\[(URGENT )?h2 message from: [^\]]+\]\s*`)
+var envelopeRe = regexp.MustCompile(`^\[[^\]]+\]\s*`)
 
-// StripH2Envelope strips "[h2 message from: X]" or "[URGENT h2 message from: X]"
-// prefix from text. Returns the body unchanged if no envelope is present.
+// StripH2Envelope strips a leading "[...]" header (e.g. "[h2 message from: X]",
+// "[h2 trigger (...)]") from text. Returns the body unchanged if no envelope is present.
 func StripH2Envelope(text string) string {
 	loc := envelopeRe.FindStringIndex(text)
 	if loc == nil {

@@ -22,7 +22,7 @@ var ExecTimeout = 60 * time.Second
 // This avoids importing the full MessageQueue into this package — callers
 // provide a concrete implementation backed by message.PrepareMessage.
 type MessageEnqueuer interface {
-	EnqueueMessage(from, body string, priority message.Priority) (string, error)
+	EnqueueMessage(from, body, header string, priority message.Priority) (string, error)
 }
 
 // ActionRunner dispatches actions (exec or message) with concurrency control.
@@ -77,7 +77,7 @@ func (r *ActionRunner) runMessage(action Action) error {
 		}
 		pri = p
 	}
-	_, err := r.enqueuer.EnqueueMessage(from, action.Message, pri)
+	_, err := r.enqueuer.EnqueueMessage(from, action.Message, action.Header, pri)
 	return err
 }
 

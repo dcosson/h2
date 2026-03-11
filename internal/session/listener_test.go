@@ -73,7 +73,7 @@ func newTestDaemonWithEngines(t *testing.T) *Daemon {
 
 type noopEnqueuer struct{}
 
-func (n *noopEnqueuer) EnqueueMessage(string, string, message.Priority) (string, error) {
+func (n *noopEnqueuer) EnqueueMessage(string, string, string, message.Priority) (string, error) {
 	return "noop-id", nil
 }
 
