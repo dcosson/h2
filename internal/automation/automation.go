@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	"h2/internal/session/agent/monitor"
@@ -39,7 +40,9 @@ func (a *Action) Validate() error {
 	return nil
 }
 
-// Trigger fires once when an event matches and the optional condition passes.
+// Trigger fires when an event matches and the optional condition passes.
+// By default triggers are one-shot (MaxFirings=1). Set MaxFirings=-1 for
+// unlimited firings, or MaxFirings=N>0 for a fixed count.
 type Trigger struct {
 	ID   string // unique identifier (8-char hex or user-provided)
 	Name string // human-readable label (optional)
@@ -53,6 +56,50 @@ type Trigger struct {
 	Condition string // shell command; trigger fires only if exit code 0
 
 	Action Action
+
+	// Lifecycle control.
+	MaxFirings int           // -1 = unlimited, 0 = default (one-shot), N > 0 = fire N times
+	ExpiresAt  time.Time     // zero value = no expiry
+	Cooldown   time.Duration // zero value = no cooldown; eligible again at exactly Cooldown elapsed (>= not >)
+
+	// Runtime tracking (internal, not user-configured).
+	FireCount   int       // number of times this trigger has fired
+	LastFiredAt time.Time // timestamp of last firing (for cooldown enforcement)
+}
+
+// effectiveMaxFirings returns the actual max firings, treating 0 (unset) as 1 (one-shot).
+func (t *Trigger) effectiveMaxFirings() int {
+	if t.MaxFirings == 0 {
+		return 1 // default: one-shot
+	}
+	return t.MaxFirings
+}
+
+// Clock abstracts time for deterministic testing. Default: realClock (time.Now).
+type Clock interface {
+	Now() time.Time
+}
+
+// realClock is the default Clock using time.Now.
+type realClock struct{}
+
+func (realClock) Now() time.Time { return time.Now() }
+
+// ResolveExpiresAt parses an ExpiresAt string. Accepts RFC 3339 absolute
+// timestamps or relative durations like "+1h". The now parameter is the base
+// for relative timestamps (pass clock.Now() for consistency with injectable clock).
+func ResolveExpiresAt(raw string, now time.Time) (time.Time, error) {
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	if strings.HasPrefix(raw, "+") {
+		dur, err := time.ParseDuration(raw[1:])
+		if err != nil {
+			return time.Time{}, fmt.Errorf("parse relative expires_at %q: %w", raw, err)
+		}
+		return now.Add(dur), nil
+	}
+	return time.Parse(time.RFC3339, raw)
 }
 
 // ConditionMode controls how a schedule's condition gate interacts with firings.

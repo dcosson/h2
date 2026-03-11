@@ -222,8 +222,8 @@ func (d *Daemon) handleTriggerList(conn net.Conn) {
 
 	triggers := d.TriggerEngine.List()
 	specs := make([]*message.TriggerSpec, len(triggers))
-	for i, t := range triggers {
-		specs[i] = specFromTrigger(t)
+	for i := range triggers {
+		specs[i] = specFromTrigger(&triggers[i])
 	}
 	message.SendResponse(conn, &message.Response{OK: true, Triggers: specs})
 }

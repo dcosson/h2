@@ -9,18 +9,21 @@ import (
 )
 
 // TriggerEngine subscribes to the agent's event stream and fires registered
-// triggers when events match. Triggers are one-shot: consumed on attempt
-// regardless of action success.
+// triggers when events match. By default triggers are one-shot (consumed after
+// first firing). Repeating triggers use MaxFirings, ExpiresAt, and Cooldown
+// to control lifecycle.
 type TriggerEngine struct {
 	mu            sync.Mutex
 	triggers      map[string]*Trigger
 	runner        *ActionRunner
 	logger        *slog.Logger
+	clock         Clock
 	stateProvider StateProvider
 }
 
 // NewTriggerEngine creates a TriggerEngine that dispatches actions via the given runner.
 // The optional stateProvider injects H2_AGENT_STATE/H2_AGENT_SUBSTATE into the env.
+// Pass a Clock to override time source (nil defaults to realClock/time.Now).
 func NewTriggerEngine(runner *ActionRunner, logger *slog.Logger, stateProvider ...StateProvider) *TriggerEngine {
 	if logger == nil {
 		logger = slog.Default()
@@ -29,11 +32,17 @@ func NewTriggerEngine(runner *ActionRunner, logger *slog.Logger, stateProvider .
 		triggers: make(map[string]*Trigger),
 		runner:   runner,
 		logger:   logger,
+		clock:    realClock{},
 	}
 	if len(stateProvider) > 0 {
 		te.stateProvider = stateProvider[0]
 	}
 	return te
+}
+
+// SetClock overrides the time source for testing.
+func (te *TriggerEngine) SetClock(c Clock) {
+	te.clock = c
 }
 
 // Run processes events from the channel until ctx is cancelled.
@@ -74,25 +83,33 @@ func (te *TriggerEngine) Remove(id string) bool {
 	return true
 }
 
-// List returns a copy of all registered triggers.
-func (te *TriggerEngine) List() []*Trigger {
+// List returns a snapshot copy of all registered triggers. Returns value copies
+// (not pointers to live structs) so callers can safely read FireCount/LastFiredAt
+// without holding the engine's lock.
+func (te *TriggerEngine) List() []Trigger {
 	te.mu.Lock()
 	defer te.mu.Unlock()
-	result := make([]*Trigger, 0, len(te.triggers))
+	result := make([]Trigger, 0, len(te.triggers))
 	for _, t := range te.triggers {
-		result = append(result, t)
+		result = append(result, *t)
 	}
 	return result
 }
 
-// processEvent checks all registered triggers against the event. Matching
-// triggers whose conditions pass are fired and removed (one-shot).
+// processEvent checks all registered triggers against the event. Expired
+// triggers are reaped opportunistically. Matching triggers are evaluated
+// and fired according to their lifecycle settings.
 func (te *TriggerEngine) processEvent(ctx context.Context, evt monitor.AgentEvent) {
+	now := te.clock.Now()
 	te.mu.Lock()
-	// Snapshot matching triggers under lock to avoid holding lock during
-	// condition evaluation and action dispatch.
 	var matched []*Trigger
-	for _, t := range te.triggers {
+	for id, t := range te.triggers {
+		// Reap expired triggers opportunistically.
+		if !t.ExpiresAt.IsZero() && now.After(t.ExpiresAt) {
+			delete(te.triggers, id)
+			te.logger.Info("trigger expired (reap)", "trigger_id", id)
+			continue
+		}
 		if t.MatchesEvent(evt) {
 			matched = append(matched, t)
 		}
@@ -105,14 +122,45 @@ func (te *TriggerEngine) processEvent(ctx context.Context, evt monitor.AgentEven
 }
 
 // evalAndFire evaluates the trigger's condition and, if it passes, fires the
-// action and removes the trigger. If the condition fails, the trigger stays.
+// action. Lifecycle control (cooldown, expiry, fire count) determines whether
+// the trigger is kept or removed after firing.
 func (te *TriggerEngine) evalAndFire(ctx context.Context, t *Trigger, evt monitor.AgentEvent) {
+	now := te.clock.Now()
+
+	// Pre-check: acquire lock to read mutable fields (LastFiredAt) and check
+	// expiry/cooldown atomically. This prevents a data race where concurrent
+	// evalAndFire calls both read LastFiredAt before either writes it.
+	te.mu.Lock()
+	_, existed := te.triggers[t.ID]
+	if !existed {
+		te.mu.Unlock()
+		return // trigger was already consumed by concurrent evalAndFire or reaped by processEvent
+	}
+
+	// Check expiry under lock.
+	if !t.ExpiresAt.IsZero() && now.After(t.ExpiresAt) {
+		delete(te.triggers, t.ID)
+		te.mu.Unlock()
+		te.logger.Info("trigger expired", "trigger_id", t.ID)
+		return
+	}
+
+	// Check cooldown under lock (reads LastFiredAt which is written under lock).
+	if t.Cooldown > 0 && !t.LastFiredAt.IsZero() {
+		if now.Sub(t.LastFiredAt) < t.Cooldown {
+			te.mu.Unlock()
+			te.logger.Debug("trigger in cooldown", "trigger_id", t.ID,
+				"remaining", t.Cooldown-now.Sub(t.LastFiredAt))
+			return
+		}
+	}
+	te.mu.Unlock()
+
+	// Condition evaluation happens outside the lock (may be slow/blocking).
 	env := te.buildTriggerEnv(t, evt)
 
 	condCtx, cancel := context.WithTimeout(ctx, DefaultConditionTimeout)
 	defer cancel()
-
-	// Merge runner's base env (H2_ACTOR, H2_ROLE, etc.) into condition env.
 	condEnv := te.runner.MergeEnv(env)
 	if !EvalCondition(condCtx, t.Condition, condEnv) {
 		te.logger.Debug("trigger condition failed, keeping",
@@ -120,20 +168,29 @@ func (te *TriggerEngine) evalAndFire(ctx context.Context, t *Trigger, evt monito
 		return
 	}
 
-	// Consume on attempt: remove before running action.
+	// Re-acquire lock to update tracking and determine removal.
+	// Must re-check existence since trigger may have been consumed/reaped
+	// while condition was evaluating.
 	te.mu.Lock()
-	_, existed := te.triggers[t.ID]
-	delete(te.triggers, t.ID)
-	te.mu.Unlock()
-
+	_, existed = te.triggers[t.ID]
 	if !existed {
-		// Another goroutine already consumed this trigger (race between
-		// concurrent events). Skip silently.
-		return
+		te.mu.Unlock()
+		return // consumed/reaped during condition evaluation
 	}
+
+	t.FireCount++
+	t.LastFiredAt = now
+
+	maxFirings := t.effectiveMaxFirings()
+	exhausted := maxFirings > 0 && t.FireCount >= maxFirings
+	if exhausted {
+		delete(te.triggers, t.ID)
+	}
+	te.mu.Unlock()
 
 	te.logger.Info("trigger fired",
 		"trigger_id", t.ID, "trigger_name", t.Name,
+		"fire_count", t.FireCount, "exhausted", exhausted,
 		"event", evt.Type.String())
 
 	if err := te.runner.Run(t.Action, env); err != nil {

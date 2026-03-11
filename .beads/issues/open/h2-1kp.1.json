@@ -2,7 +2,7 @@
   "id": "h2-1kp.1",
   "title": "Trigger data model, Clock interface, and engine lifecycle",
   "description": "Implement the core repeating trigger functionality from docs/plan-repeating-triggers.md.\n\nSections: Data Model, evalAndFire Changes, processEvent Expiry Reaping, List() Returns Value Copies\n\nKey deliverables:\n- Add MaxFirings, ExpiresAt, Cooldown, FireCount, LastFiredAt fields to Trigger struct (automation.go)\n- Clock interface + realClock default implementation (trigger.go)\n- effectiveMaxFirings() method\n- resolveExpiresAt(raw string, now time.Time) utility (automation.go)\n- Rewrite evalAndFire with lock-safe cooldown/expiry checks and fire-count tracking (trigger.go)\n- Update processEvent with expiry reaping (trigger.go)\n- List() returns value copies instead of live pointers (trigger.go)\n- NewTriggerEngine constructor accepting optional Clock\n- Unit tests: RepeatingFiresMultipleTimes, UnlimitedFirings, DefaultOneShotPreserved, CooldownSkipsRapidEvents, CooldownAllowsAfterDuration, ExpiresAtRemovesTrigger, ExpiresAtAllowsBeforeDeadline, ExpiryReapingOnUnrelatedEvent, CooldownAndMaxFirings, CooldownAndCondition, FireCountTracking, LastFiredAtTracking, ConcurrentAddDuringProcessEvent\n\nReferences:\n- Plan: docs/plan-repeating-triggers.md §Data Model, §Implementation Details\n- Test harness: docs/plan-repeating-triggers-test-harness.md §Property-Based Tests",
-  "status": "open",
+  "status": "in_progress",
   "priority": 2,
   "type": "task",
   "parent": "h2-1kp",
@@ -24,6 +24,7 @@
     "project=repeating-triggers",
     "plan-doc=plan-repeating-triggers"
   ],
+  "assignee": "h2-coder-1",
   "created_at": "2026-03-11T12:56:50.432072-07:00",
-  "updated_at": "2026-03-11T12:56:50.432072-07:00"
+  "updated_at": "2026-03-11T12:57:42.550167-07:00"
 }

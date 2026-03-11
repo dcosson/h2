@@ -2,6 +2,7 @@ package automation
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -374,6 +375,43 @@ func TestTriggerEngine_EnvVarsSet(t *testing.T) {
 	}
 }
 
+// mockClock is a controllable clock for deterministic testing.
+type mockClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func newMockClock(t time.Time) *mockClock {
+	return &mockClock{now: t}
+}
+
+func (c *mockClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *mockClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+}
+
+func (c *mockClock) Set(t time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = t
+}
+
+// newTestTriggerEngineWithClock creates a TriggerEngine with a mock clock.
+func newTestTriggerEngineWithClock(clock Clock) (*TriggerEngine, *mockEnqueuer) {
+	enq := &mockEnqueuer{}
+	runner := NewActionRunner(enq, nil, nil)
+	te := NewTriggerEngine(runner, nil)
+	te.SetClock(clock)
+	return te, enq
+}
+
 func TestTriggerEngine_NonStateChangeEvent(t *testing.T) {
 	te, enq := newTestTriggerEngine()
 	te.Add(&Trigger{
@@ -393,5 +431,458 @@ func TestTriggerEngine_NonStateChangeEvent(t *testing.T) {
 
 	if len(enq.getMessages()) != 1 {
 		t.Fatal("trigger should fire on non-state-change event type match")
+	}
+}
+
+// --- Repeating Trigger Tests ---
+
+func TestTriggerEngine_RepeatingFiresMultipleTimes(t *testing.T) {
+	clock := newMockClock(time.Now())
+	te, enq := newTestTriggerEngineWithClock(clock)
+	te.Add(&Trigger{
+		ID:         "t1",
+		Event:      "state_change",
+		State:      "idle",
+		MaxFirings: 3,
+		Action:     Action{Message: "nudge"},
+	})
+
+	for i := 0; i < 5; i++ {
+		sendEvent(te, stateChangeEvent(monitor.StateIdle, monitor.SubStateNone))
+	}
+
+	msgs := enq.getMessages()
+	if len(msgs) != 3 {
+		t.Fatalf("expected 3 firings, got %d", len(msgs))
+	}
+	if len(te.List()) != 0 {
+		t.Fatal("trigger should be removed after exhausting MaxFirings")
+	}
+}
+
+func TestTriggerEngine_UnlimitedFirings(t *testing.T) {
+	clock := newMockClock(time.Now())
+	te, enq := newTestTriggerEngineWithClock(clock)
+	te.Add(&Trigger{
+		ID:         "t1",
+		Event:      "state_change",
+		State:      "idle",
+		MaxFirings: -1, // unlimited
+		Action:     Action{Message: "nudge"},
+	})
+
+	for i := 0; i < 10; i++ {
+		sendEvent(te, stateChangeEvent(monitor.StateIdle, monitor.SubStateNone))
+	}
+
+	msgs := enq.getMessages()
+	if len(msgs) != 10 {
+		t.Fatalf("expected 10 firings, got %d", len(msgs))
+	}
+	triggers := te.List()
+	if len(triggers) != 1 {
+		t.Fatal("unlimited trigger should still be registered")
+	}
+	if triggers[0].FireCount != 10 {
+		t.Fatalf("expected FireCount=10, got %d", triggers[0].FireCount)
+	}
+}
+
+func TestTriggerEngine_DefaultOneShotPreserved(t *testing.T) {
+	clock := newMockClock(time.Now())
+	te, enq := newTestTriggerEngineWithClock(clock)
+	te.Add(&Trigger{
+		ID:    "t1",
+		Event: "state_change",
+		State: "idle",
+		// MaxFirings=0 (unset) = default one-shot
+		Action: Action{Message: "once"},
+	})
+
+	sendEvent(te, stateChangeEvent(monitor.StateIdle, monitor.SubStateNone))
+	if len(enq.getMessages()) != 1 {
+		t.Fatal("should fire once")
+	}
+	if len(te.List()) != 0 {
+		t.Fatal("should be removed after one firing (default one-shot)")
+	}
+
+	sendEvent(te, stateChangeEvent(monitor.StateIdle, monitor.SubStateNone))
+	if len(enq.getMessages()) != 1 {
+		t.Fatal("should not fire again")
+	}
+}
+
+func TestTriggerEngine_CooldownSkipsRapidEvents(t *testing.T) {
+	clock := newMockClock(time.Now())
+	te, enq := newTestTriggerEngineWithClock(clock)
+	te.Add(&Trigger{
+		ID:         "t1",
+		Event:      "state_change",
+		State:      "idle",
+		MaxFirings: -1,
+		Cooldown:   5 * time.Minute,
+		Action:     Action{Message: "nudge"},
+	})
+
+	// First event fires.
+	sendEvent(te, stateChangeEvent(monitor.StateIdle, monitor.SubStateNone))
+	if len(enq.getMessages()) != 1 {
+		t.Fatal("first event should fire")
+	}
+
+	// Second event 1 second later — should be blocked by cooldown.
+	clock.Advance(1 * time.Second)
+	sendEvent(te, stateChangeEvent(monitor.StateIdle, monitor.SubStateNone))
+	if len(enq.getMessages()) != 1 {
+		t.Fatal("second event within cooldown should not fire")
+	}
+}
+
+func TestTriggerEngine_CooldownAllowsAfterDuration(t *testing.T) {
+	clock := newMockClock(time.Now())
+	te, enq := newTestTriggerEngineWithClock(clock)
+	te.Add(&Trigger{
+		ID:         "t1",
+		Event:      "state_change",
+		State:      "idle",
+		MaxFirings: -1,
+		Cooldown:   5 * time.Minute,
+		Action:     Action{Message: "nudge"},
+	})
+
+	// First event fires.
+	sendEvent(te, stateChangeEvent(monitor.StateIdle, monitor.SubStateNone))
+	if len(enq.getMessages()) != 1 {
+		t.Fatal("first event should fire")
+	}
+
+	// Advance past cooldown and fire again.
+	clock.Advance(5*time.Minute + 1*time.Millisecond)
+	sendEvent(te, stateChangeEvent(monitor.StateIdle, monitor.SubStateNone))
+	if len(enq.getMessages()) != 2 {
+		t.Fatalf("expected 2 firings after cooldown, got %d", len(enq.getMessages()))
+	}
+}
+
+func TestTriggerEngine_CooldownExactBoundary(t *testing.T) {
+	clock := newMockClock(time.Now())
+	te, enq := newTestTriggerEngineWithClock(clock)
+	te.Add(&Trigger{
+		ID:         "t1",
+		Event:      "state_change",
+		State:      "idle",
+		MaxFirings: -1,
+		Cooldown:   5 * time.Minute,
+		Action:     Action{Message: "nudge"},
+	})
+
+	sendEvent(te, stateChangeEvent(monitor.StateIdle, monitor.SubStateNone))
+	if len(enq.getMessages()) != 1 {
+		t.Fatal("first event should fire")
+	}
+
+	// At exactly cooldown duration — should fire (>= boundary).
+	clock.Advance(5 * time.Minute)
+	sendEvent(te, stateChangeEvent(monitor.StateIdle, monitor.SubStateNone))
+	if len(enq.getMessages()) != 2 {
+		t.Fatalf("expected 2 firings at exact cooldown boundary, got %d", len(enq.getMessages()))
+	}
+}
+
+func TestTriggerEngine_ExpiresAtRemovesTrigger(t *testing.T) {
+	clock := newMockClock(time.Now())
+	te, enq := newTestTriggerEngineWithClock(clock)
+
+	// Trigger that expired in the past.
+	te.Add(&Trigger{
+		ID:         "t1",
+		Event:      "state_change",
+		State:      "idle",
+		MaxFirings: -1,
+		ExpiresAt:  clock.Now().Add(-1 * time.Second),
+		Action:     Action{Message: "should not fire"},
+	})
+
+	sendEvent(te, stateChangeEvent(monitor.StateIdle, monitor.SubStateNone))
+	if len(enq.getMessages()) != 0 {
+		t.Fatal("expired trigger should not fire")
+	}
+	if len(te.List()) != 0 {
+		t.Fatal("expired trigger should be removed")
+	}
+}
+
+func TestTriggerEngine_ExpiresAtAllowsBeforeDeadline(t *testing.T) {
+	clock := newMockClock(time.Now())
+	te, enq := newTestTriggerEngineWithClock(clock)
+
+	te.Add(&Trigger{
+		ID:         "t1",
+		Event:      "state_change",
+		State:      "idle",
+		MaxFirings: -1,
+		ExpiresAt:  clock.Now().Add(10 * time.Minute),
+		Action:     Action{Message: "watching"},
+	})
+
+	sendEvent(te, stateChangeEvent(monitor.StateIdle, monitor.SubStateNone))
+	if len(enq.getMessages()) != 1 {
+		t.Fatal("trigger before deadline should fire")
+	}
+	if len(te.List()) != 1 {
+		t.Fatal("trigger should still be registered before expiry")
+	}
+}
+
+func TestTriggerEngine_ExpiryReapingOnUnrelatedEvent(t *testing.T) {
+	clock := newMockClock(time.Now())
+	te, _ := newTestTriggerEngineWithClock(clock)
+
+	te.Add(&Trigger{
+		ID:         "t1",
+		Event:      "state_change",
+		State:      "idle",
+		MaxFirings: -1,
+		ExpiresAt:  clock.Now().Add(1 * time.Minute),
+		Action:     Action{Message: "should be reaped"},
+	})
+
+	// Advance past expiry.
+	clock.Advance(2 * time.Minute)
+
+	// Send an unrelated event (active, not idle) — should still reap the expired trigger.
+	sendEvent(te, stateChangeEvent(monitor.StateActive, monitor.SubStateNone))
+	if len(te.List()) != 0 {
+		t.Fatal("expired trigger should be reaped even on unrelated event")
+	}
+}
+
+func TestTriggerEngine_CooldownAndMaxFirings(t *testing.T) {
+	clock := newMockClock(time.Now())
+	te, enq := newTestTriggerEngineWithClock(clock)
+	te.Add(&Trigger{
+		ID:         "t1",
+		Event:      "state_change",
+		State:      "idle",
+		MaxFirings: 3,
+		Cooldown:   1 * time.Minute,
+		Action:     Action{Message: "nudge"},
+	})
+
+	// Send 6 events with enough spacing to pass cooldown.
+	for i := 0; i < 6; i++ {
+		sendEvent(te, stateChangeEvent(monitor.StateIdle, monitor.SubStateNone))
+		clock.Advance(2 * time.Minute)
+	}
+
+	msgs := enq.getMessages()
+	if len(msgs) != 3 {
+		t.Fatalf("expected 3 firings (MaxFirings limit), got %d", len(msgs))
+	}
+	if len(te.List()) != 0 {
+		t.Fatal("trigger should be removed after MaxFirings exhausted")
+	}
+}
+
+func TestTriggerEngine_CooldownAndCondition(t *testing.T) {
+	clock := newMockClock(time.Now())
+	te, enq := newTestTriggerEngineWithClock(clock)
+	te.Add(&Trigger{
+		ID:         "t1",
+		Event:      "state_change",
+		MaxFirings: -1,
+		Cooldown:   1 * time.Minute,
+		Condition:  `test "$H2_EVENT_STATE" = "idle"`,
+		Action:     Action{Message: "nudge"},
+	})
+
+	// First: active state — condition fails, but cooldown should not start.
+	sendEvent(te, stateChangeEvent(monitor.StateActive, monitor.SubStateNone))
+	if len(enq.getMessages()) != 0 {
+		t.Fatal("condition should fail for active state")
+	}
+
+	// Second: idle state — fires.
+	sendEvent(te, stateChangeEvent(monitor.StateIdle, monitor.SubStateNone))
+	if len(enq.getMessages()) != 1 {
+		t.Fatal("should fire on idle")
+	}
+
+	// Third: idle again immediately — blocked by cooldown.
+	sendEvent(te, stateChangeEvent(monitor.StateIdle, monitor.SubStateNone))
+	if len(enq.getMessages()) != 1 {
+		t.Fatal("should be blocked by cooldown")
+	}
+
+	// Fourth: advance past cooldown, idle again — fires.
+	clock.Advance(2 * time.Minute)
+	sendEvent(te, stateChangeEvent(monitor.StateIdle, monitor.SubStateNone))
+	if len(enq.getMessages()) != 2 {
+		t.Fatalf("expected 2 firings after cooldown, got %d", len(enq.getMessages()))
+	}
+}
+
+func TestTriggerEngine_FireCountTracking(t *testing.T) {
+	clock := newMockClock(time.Now())
+	te, _ := newTestTriggerEngineWithClock(clock)
+	te.Add(&Trigger{
+		ID:         "t1",
+		Event:      "state_change",
+		State:      "idle",
+		MaxFirings: 5,
+		Action:     Action{Message: "nudge"},
+	})
+
+	for i := 1; i <= 3; i++ {
+		sendEvent(te, stateChangeEvent(monitor.StateIdle, monitor.SubStateNone))
+		triggers := te.List()
+		if len(triggers) != 1 {
+			t.Fatalf("trigger should still exist after %d firings", i)
+		}
+		if triggers[0].FireCount != i {
+			t.Fatalf("expected FireCount=%d, got %d", i, triggers[0].FireCount)
+		}
+	}
+}
+
+func TestTriggerEngine_LastFiredAtTracking(t *testing.T) {
+	baseTime := time.Date(2026, 3, 11, 12, 0, 0, 0, time.UTC)
+	clock := newMockClock(baseTime)
+	te, _ := newTestTriggerEngineWithClock(clock)
+	te.Add(&Trigger{
+		ID:         "t1",
+		Event:      "state_change",
+		State:      "idle",
+		MaxFirings: -1,
+		Action:     Action{Message: "nudge"},
+	})
+
+	sendEvent(te, stateChangeEvent(monitor.StateIdle, monitor.SubStateNone))
+	triggers := te.List()
+	if triggers[0].LastFiredAt != baseTime {
+		t.Fatalf("expected LastFiredAt=%v, got %v", baseTime, triggers[0].LastFiredAt)
+	}
+
+	clock.Advance(5 * time.Minute)
+	sendEvent(te, stateChangeEvent(monitor.StateIdle, monitor.SubStateNone))
+	triggers = te.List()
+	expected := baseTime.Add(5 * time.Minute)
+	if triggers[0].LastFiredAt != expected {
+		t.Fatalf("expected LastFiredAt=%v, got %v", expected, triggers[0].LastFiredAt)
+	}
+}
+
+func TestTriggerEngine_ConcurrentAddDuringProcessEvent(t *testing.T) {
+	clock := newMockClock(time.Now())
+	te, _ := newTestTriggerEngineWithClock(clock)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ch := make(chan monitor.AgentEvent, 100)
+	go te.Run(ctx, ch)
+
+	// Concurrently add triggers while sending events.
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			te.Add(&Trigger{
+				ID:         fmt.Sprintf("t%d", i),
+				Event:      "state_change",
+				State:      "idle",
+				MaxFirings: -1,
+				Action:     Action{Message: fmt.Sprintf("msg-%d", i)},
+			})
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			ch <- stateChangeEvent(monitor.StateIdle, monitor.SubStateNone)
+			time.Sleep(1 * time.Millisecond)
+		}
+	}()
+
+	wg.Wait()
+	time.Sleep(100 * time.Millisecond) // let remaining events process
+	cancel()
+
+	// The test passes if no race condition panic occurs.
+	// Run with -race to verify.
+}
+
+func TestTriggerEngine_EffectiveMaxFirings(t *testing.T) {
+	tests := []struct {
+		maxFirings int
+		expected   int
+	}{
+		{0, 1},   // default one-shot
+		{1, 1},   // explicit one-shot
+		{3, 3},   // fixed count
+		{-1, -1}, // unlimited
+	}
+	for _, tt := range tests {
+		trig := &Trigger{MaxFirings: tt.maxFirings}
+		got := trig.effectiveMaxFirings()
+		if got != tt.expected {
+			t.Errorf("effectiveMaxFirings(%d) = %d, want %d", tt.maxFirings, got, tt.expected)
+		}
+	}
+}
+
+func TestResolveExpiresAt(t *testing.T) {
+	now := time.Date(2026, 3, 11, 12, 0, 0, 0, time.UTC)
+
+	// Empty string.
+	result, err := ResolveExpiresAt("", now)
+	if err != nil || !result.IsZero() {
+		t.Fatalf("empty string should return zero time, got %v, err %v", result, err)
+	}
+
+	// Relative "+1h".
+	result, err = ResolveExpiresAt("+1h", now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := now.Add(1 * time.Hour)
+	if !result.Equal(expected) {
+		t.Fatalf("expected %v, got %v", expected, result)
+	}
+
+	// Relative "+30m".
+	result, err = ResolveExpiresAt("+30m", now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected = now.Add(30 * time.Minute)
+	if !result.Equal(expected) {
+		t.Fatalf("expected %v, got %v", expected, result)
+	}
+
+	// Absolute RFC 3339.
+	result, err = ResolveExpiresAt("2026-03-11T15:00:00Z", now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected = time.Date(2026, 3, 11, 15, 0, 0, 0, time.UTC)
+	if !result.Equal(expected) {
+		t.Fatalf("expected %v, got %v", expected, result)
+	}
+
+	// Invalid relative.
+	_, err = ResolveExpiresAt("+badvalue", now)
+	if err == nil {
+		t.Fatal("expected error for invalid relative duration")
+	}
+
+	// Invalid absolute.
+	_, err = ResolveExpiresAt("not-a-timestamp", now)
+	if err == nil {
+		t.Fatal("expected error for invalid absolute timestamp")
 	}
 }
