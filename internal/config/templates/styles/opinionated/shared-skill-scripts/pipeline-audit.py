@@ -95,10 +95,23 @@ def git_log_beads(history_count=None, cwd=None):
 def extract_trailers(body):
     """
     Extract git trailers from a commit body.
+    Trailers appear after the last blank line in the body, so we skip
+    the message text (including conventional commit subjects like
+    "fix: something" that would false-match the Key: Value pattern).
     Returns {trailer_key_lower: [values]}.
     """
     trailers = defaultdict(list)
-    for line in body.splitlines():
+    lines = body.splitlines()
+
+    # Find the last blank line — trailers come after it
+    last_blank = -1
+    for i, line in enumerate(lines):
+        if line.strip() == "":
+            last_blank = i
+
+    # Only parse lines after the last blank line (the trailer block)
+    trailer_lines = lines[last_blank + 1:] if last_blank >= 0 else lines
+    for line in trailer_lines:
         line = line.strip()
         # Trailer format: Key: Value (or Key-Name: Value)
         m = re.match(r"^([A-Za-z][\w-]*)\s*:\s*(.+)$", line)

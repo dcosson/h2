@@ -249,7 +249,8 @@ func WriteSharedSkillScriptsTemplate(style, targetDir string, force bool) error 
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return err
 		}
-		return os.WriteFile(dst, data, 0o644)
+		// Shared-skill-scripts are executable scripts by definition.
+		return os.WriteFile(dst, data, 0o755)
 	})
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
