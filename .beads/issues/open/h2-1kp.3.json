@@ -2,7 +2,7 @@
   "id": "h2-1kp.3",
   "title": "Test harness: property-based, fault injection, simulation, and benchmarks",
   "description": "Implement the extended test harness from docs/plan-repeating-triggers-test-harness.md.\n\nSections: Property-Based Tests, Fault Injection / Chaos Tests, Deterministic Simulation Tests, Benchmarks and Performance Tests\n\nKey deliverables:\n- Property-based invariant tests (Invariants 1-5: max firings bound, cooldown gap, no post-expiry firings, default behavior preserved, monotonic fire count)\n- Fault injection tests: action failure on repeating trigger, concurrent events during cooldown, expiry during condition evaluation, clock jump forward\n- Comparison oracle: before/after behavior equivalence for existing one-shot tests\n- Deterministic simulation with seeded event generator and controllable clock\n- Cooldown boundary simulation (Cooldown-1ms, Cooldown, Cooldown+1ms)\n- Benchmarks: processEvent with N triggers, cooldown check overhead, expiry reaping\n- All tests run with -race flag\n\nReferences:\n- Test harness: docs/plan-repeating-triggers-test-harness.md (all sections)\n- Plan: docs/plan-repeating-triggers.md §URP (Clock interface)\n- Depends on: h2-1kp.2 (full implementation must exist before harness tests)",
-  "status": "open",
+  "status": "in_progress",
   "priority": 2,
   "type": "task",
   "parent": "h2-1kp",
@@ -22,6 +22,7 @@
     "project=repeating-triggers",
     "plan-doc=plan-repeating-triggers"
   ],
+  "assignee": "h2-coder-1",
   "created_at": "2026-03-11T12:57:18.958112-07:00",
-  "updated_at": "2026-03-11T12:57:18.958112-07:00"
+  "updated_at": "2026-03-11T13:08:22.216104-07:00"
 }

@@ -2,7 +2,7 @@
   "id": "h2-1kp.2",
   "title": "Wire format, conversion, validation, and CLI surface",
   "description": "Implement wire format, conversion functions, and CLI for repeating triggers from docs/plan-repeating-triggers.md.\n\nSections: Wire Format Changes, Conversion Functions and Call Site, Relative ExpiresAt Resolution, CLI Changes, Expects-Response Compatibility\n\nKey deliverables:\n- Add MaxFirings, ExpiresAt, Cooldown, FireCount, LastFiredAt to TriggerSpec (message/protocol.go)\n- Add max_firings, expires_at, cooldown to TriggerYAMLSpec (config/role.go)\n- Update triggerFromSpec to return (*automation.Trigger, error) with validation (listener.go)\n- Update specFromTrigger to include runtime fields (listener.go)\n- Update handleTriggerAdd to handle triggerFromSpec error return (listener.go)\n- Update loadRoleAutomations to map new fields + call resolveExpiresAt (daemon.go)\n- Add --max-firings, --expires-at, --cooldown flags to trigger add CLI (cmd/trigger.go)\n- Update trigger list output with MAX_FIRINGS, FIRE_COUNT, COOLDOWN columns (cmd/trigger.go)\n- Integration tests: TriggerSpec_NewFields, TriggerFromSpec_ParsesNewFields, SpecFromTrigger_IncludesRuntime, LoadRoleAutomations_RepeatingTrigger, LoadRoleAutomations_RelativeExpiresAt\n- CLI tests: TriggerAdd_MaxFiringsFlag, TriggerAdd_CooldownFlag, TriggerAdd_ExpiresAtFlag, TriggerList_ShowsNewColumns\n- Verify expects-response unchanged (no MaxFirings set = one-shot default)\n\nReferences:\n- Plan: docs/plan-repeating-triggers.md §Wire Format Changes, §Conversion Functions, §CLI Changes\n- Depends on: h2-1kp.1 (Trigger struct fields and engine must exist first)",
-  "status": "in_progress",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "parent": "h2-1kp",
@@ -30,5 +30,7 @@
   ],
   "assignee": "h2-coder-1",
   "created_at": "2026-03-11T12:57:05.127326-07:00",
-  "updated_at": "2026-03-11T13:03:34.447519-07:00"
+  "updated_at": "2026-03-11T13:08:22.206034-07:00",
+  "closed_at": "2026-03-11T13:08:22.206033-07:00",
+  "close_reason": "Closed"
 }
