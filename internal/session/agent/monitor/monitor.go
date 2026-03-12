@@ -319,6 +319,16 @@ func (m *AgentMonitor) SetExited() {
 	m.setStateLocked(StateExited, SubStateNone)
 }
 
+// ResetForRelaunch resets the monitor state back to Initialized so a
+// relaunched child process can drive state transitions normally.
+func (m *AgentMonitor) ResetForRelaunch() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.setStateLocked(StateInitialized, SubStateNone)
+	m.blockedOnPermission = false
+	m.blockedToolName = ""
+}
+
 // AgentMetrics is a point-in-time copy of accumulated metrics.
 type AgentMetrics struct {
 	InputTokens     int64

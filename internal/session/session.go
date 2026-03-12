@@ -594,6 +594,7 @@ func (s *Session) lifecycleLoop(stopStatus chan struct{}, interactive bool) erro
 				})
 			}()
 
+			s.monitor.ResetForRelaunch()
 			go s.VT.PipeOutput(s.pipeOutputCallback())
 
 			s.Queue.Unpause()

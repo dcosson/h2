@@ -209,6 +209,51 @@ func TestSetExited(t *testing.T) {
 	}
 }
 
+func TestResetForRelaunch(t *testing.T) {
+	m := New()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go m.Run(ctx)
+
+	// Drive to Active then Exited.
+	m.Events() <- AgentEvent{Type: EventStateChange, Data: StateChangeData{State: StateActive, SubState: SubStateThinking}}
+	time.Sleep(20 * time.Millisecond)
+	m.SetExited()
+	state, _ := m.State()
+	if state != StateExited {
+		t.Fatalf("expected StateExited, got %v", state)
+	}
+
+	// State changes should be ignored while exited.
+	m.Events() <- AgentEvent{Type: EventStateChange, Data: StateChangeData{State: StateActive, SubState: SubStateToolUse}}
+	time.Sleep(20 * time.Millisecond)
+	state, _ = m.State()
+	if state != StateExited {
+		t.Fatalf("expected StateExited to be sticky, got %v", state)
+	}
+
+	// Reset for relaunch.
+	m.ResetForRelaunch()
+	state, sub := m.State()
+	if state != StateInitialized {
+		t.Fatalf("expected StateInitialized after reset, got %v", state)
+	}
+	if sub != SubStateNone {
+		t.Fatalf("expected SubStateNone after reset, got %v", sub)
+	}
+
+	// State changes should work again after reset.
+	m.Events() <- AgentEvent{Type: EventStateChange, Data: StateChangeData{State: StateActive, SubState: SubStateThinking}}
+	time.Sleep(20 * time.Millisecond)
+	state, sub = m.State()
+	if state != StateActive {
+		t.Fatalf("expected StateActive after reset+event, got %v", state)
+	}
+	if sub != SubStateThinking {
+		t.Fatalf("expected SubStateThinking after reset+event, got %v", sub)
+	}
+}
+
 func TestWaitForState(t *testing.T) {
 	m := New()
 	ctx, cancel := context.WithCancel(context.Background())
