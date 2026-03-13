@@ -82,6 +82,66 @@ func TestEventHandler_ToolResult(t *testing.T) {
 	}
 }
 
+func TestEventHandler_APIError_429_UsageLimit(t *testing.T) {
+	events := make(chan monitor.AgentEvent, 64)
+	h := NewEventHandler(events, nil)
+
+	payload := otelLogsPayload{
+		ResourceLogs: []otelResourceLogs{{
+			ScopeLogs: []otelScopeLogs{{
+				LogRecords: []otelLogRecord{{
+					Attributes: []otelAttribute{
+						{Key: "event.name", Value: otelAttrValue{StringValue: "api_error"}},
+						{Key: "status_code", Value: otelAttrValue{StringValue: "429"}},
+						{Key: "error", Value: otelAttrValue{StringValue: "usage limit reached"}},
+					},
+				}},
+			}},
+		}},
+	}
+	body, _ := json.Marshal(payload)
+	h.OnLogs(body)
+
+	got := drainEvents(events, 1)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(got))
+	}
+	if got[0].Type != monitor.EventStateChange {
+		t.Fatalf("Type = %v, want EventStateChange", got[0].Type)
+	}
+	state := got[0].Data.(monitor.StateChangeData)
+	if state.State != monitor.StateIdle || state.SubState != monitor.SubStateUsageLimit {
+		t.Errorf("state = (%v,%v), want (Idle,UsageLimit)", state.State, state.SubState)
+	}
+}
+
+func TestEventHandler_APIError_Non429_NoEmit(t *testing.T) {
+	events := make(chan monitor.AgentEvent, 64)
+	h := NewEventHandler(events, nil)
+
+	payload := otelLogsPayload{
+		ResourceLogs: []otelResourceLogs{{
+			ScopeLogs: []otelScopeLogs{{
+				LogRecords: []otelLogRecord{{
+					Attributes: []otelAttribute{
+						{Key: "event.name", Value: otelAttrValue{StringValue: "api_error"}},
+						{Key: "status_code", Value: otelAttrValue{StringValue: "500"}},
+						{Key: "error", Value: otelAttrValue{StringValue: "internal server error"}},
+					},
+				}},
+			}},
+		}},
+	}
+	body, _ := json.Marshal(payload)
+	h.OnLogs(body)
+
+	select {
+	case ev := <-events:
+		t.Errorf("unexpected event for non-429 api_error: %+v", ev)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
 func TestEventHandler_UnknownEvent_NoEmit(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
 	h := NewEventHandler(events, nil)
