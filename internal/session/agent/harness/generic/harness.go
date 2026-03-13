@@ -46,9 +46,6 @@ func (g *GenericHarness) DisplayCommand() string { return g.rc.Command }
 
 func (g *GenericHarness) SupportsResume() bool { return false }
 
-// NativeSessionLogPath returns "" — generic agents have no native session logs.
-func (g *GenericHarness) NativeSessionLogPath(configDir, cwd, sessionID string) string { return "" }
-
 // --- Config (no-ops for generic) ---
 
 func (g *GenericHarness) BuildCommandArgs(prependArgs, extraArgs []string) []string {

@@ -39,6 +39,10 @@ type EventHandler struct {
 
 	interruptMu             sync.Mutex
 	suppressActiveUntilTime time.Time
+
+	// onConversationStarted is called when conversation.id is discovered.
+	// The harness uses this to discover the native session log path.
+	onConversationStarted func(conversationID string)
 }
 
 var codexIdleDebounceDelay = 200 * time.Millisecond
@@ -51,6 +55,12 @@ func NewEventHandler(events chan<- monitor.AgentEvent) *EventHandler {
 		currentState:    monitor.StateInitialized,
 		currentSubState: monitor.SubStateNone,
 	}
+}
+
+// SetOnConversationStarted registers a callback invoked when the Codex
+// conversation.id is first discovered from OTEL events.
+func (p *EventHandler) SetOnConversationStarted(fn func(conversationID string)) {
+	p.onConversationStarted = fn
 }
 
 // ConfigureDebug sets the debug log path and eagerly initializes the file.
@@ -185,6 +195,9 @@ func (p *EventHandler) processEvent(name string, attrs []otelAttribute, ts time.
 			},
 		})
 		p.emitStateChange(ts, monitor.StateIdle, monitor.SubStateNone)
+		if p.onConversationStarted != nil && convID != "" {
+			p.onConversationStarted(convID)
+		}
 		p.debugf("span=codex.conversation_starts conversation.id=%q model=%q", convID, model)
 		return spanProcessResult{recognized: true, emitted: 2}
 

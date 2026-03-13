@@ -30,10 +30,17 @@ type RuntimeConfig struct {
 	// other harnesses (Codex, future), this is reported async after launch and
 	// will differ from SessionID. Use HarnessSessionID to look up session logs
 	// in the harness's own config directory.
-	HarnessSessionID string   `json:"harness_session_id,omitempty"`
-	Command          string   `json:"command"`
-	Args             []string `json:"args,omitempty"`
-	Model            string   `json:"model,omitempty"`
+	HarnessSessionID string `json:"harness_session_id,omitempty"`
+	// NativeLogPathSuffix is the path to the harness's native session log
+	// file, relative to HarnessConfigDir(). For example:
+	//   Claude: "projects/-Users-foo-myproject/abc-123.jsonl"
+	//   Codex:  "sessions/2026/03/09/rollout-...-<id>.jsonl"
+	// This may be set at launch time (Claude, deterministic) or discovered
+	// asynchronously after launch (Codex, via glob on conversation.id).
+	NativeLogPathSuffix string   `json:"native_log_path_suffix,omitempty"`
+	Command             string   `json:"command"`
+	Args                []string `json:"args,omitempty"`
+	Model               string   `json:"model,omitempty"`
 
 	// Working directory.
 	CWD string `json:"cwd"`
@@ -173,4 +180,27 @@ func (rc *RuntimeConfig) HarnessConfigDir() string {
 		profile = "default"
 	}
 	return filepath.Join(rc.HarnessConfigPathPrefix, profile)
+}
+
+// NativeSessionLogPath returns the full path to the harness's native session
+// log file. Returns "" if no suffix is set or no config dir is available.
+func (rc *RuntimeConfig) NativeSessionLogPath() string {
+	if rc.NativeLogPathSuffix == "" {
+		return ""
+	}
+	configDir := rc.HarnessConfigDir()
+	if configDir == "" {
+		return ""
+	}
+	return filepath.Join(configDir, rc.NativeLogPathSuffix)
+}
+
+// NativeSessionLogPathWithConfigDir returns the full native log path using a
+// custom config directory (e.g. for profile rotation where the profile differs
+// from the current one). Returns "" if no suffix is set.
+func (rc *RuntimeConfig) NativeSessionLogPathWithConfigDir(configDir string) string {
+	if rc.NativeLogPathSuffix == "" || configDir == "" {
+		return ""
+	}
+	return filepath.Join(configDir, rc.NativeLogPathSuffix)
 }

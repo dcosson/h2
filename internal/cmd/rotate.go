@@ -11,7 +11,6 @@ import (
 
 	"h2/internal/config"
 	"h2/internal/session"
-	"h2/internal/session/agent/harness"
 	"h2/internal/session/message"
 	"h2/internal/socketdir"
 )
@@ -178,27 +177,21 @@ func waitForAgentStop(name string, timeout time.Duration) {
 }
 
 // moveSessionLog moves the harness's native session log from the old profile
-// directory to the new one. Uses the harness resolver to compute the correct
-// path for each harness type. Returns nil if the harness has no native logs.
+// directory to the new one. Uses the RuntimeConfig's NativeLogPathSuffix to
+// compute the correct path. Returns nil if the harness has no native logs.
 func moveSessionLog(rc *config.RuntimeConfig, oldProfile, newProfile string) error {
-	if rc.HarnessConfigPathPrefix == "" {
-		return nil
-	}
-
-	h, err := harness.Resolve(rc, nil)
-	if err != nil {
+	if rc.HarnessConfigPathPrefix == "" || rc.NativeLogPathSuffix == "" {
 		return nil
 	}
 
 	oldConfigDir := filepath.Join(rc.HarnessConfigPathPrefix, oldProfile)
 	newConfigDir := filepath.Join(rc.HarnessConfigPathPrefix, newProfile)
-	sessionID := rc.HarnessSessionID
 
-	oldLogPath := h.NativeSessionLogPath(oldConfigDir, rc.CWD, sessionID)
+	oldLogPath := rc.NativeSessionLogPathWithConfigDir(oldConfigDir)
 	if oldLogPath == "" {
-		return nil // harness has no native session logs
+		return nil
 	}
-	newLogPath := h.NativeSessionLogPath(newConfigDir, rc.CWD, sessionID)
+	newLogPath := rc.NativeSessionLogPathWithConfigDir(newConfigDir)
 
 	// Check if the old log exists.
 	if _, err := os.Stat(oldLogPath); err != nil {

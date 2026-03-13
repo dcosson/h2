@@ -434,43 +434,27 @@ func TestHandleOutput_Noop(t *testing.T) {
 	h.HandleOutput()
 }
 
-func TestNativeSessionLogPath(t *testing.T) {
+func TestNativeLogPathSuffix(t *testing.T) {
 	tests := []struct {
 		name      string
-		prefix    string
-		profile   string
 		cwd       string
 		sessionID string
 		want      string
 	}{
 		{
 			name:      "standard path",
-			prefix:    "/home/user/.h2/claude-config",
-			profile:   "default",
 			cwd:       "/Users/dcosson/projects/h2",
 			sessionID: "abc-123",
-			want:      "/home/user/.h2/claude-config/default/projects/-Users-dcosson-projects-h2/abc-123.jsonl",
-		},
-		{
-			name:      "empty config prefix",
-			prefix:    "",
-			profile:   "default",
-			cwd:       "/tmp",
-			sessionID: "abc",
-			want:      "",
+			want:      "projects/-Users-dcosson-projects-h2/abc-123.jsonl",
 		},
 		{
 			name:      "empty cwd",
-			prefix:    "/config",
-			profile:   "default",
 			cwd:       "",
 			sessionID: "abc",
 			want:      "",
 		},
 		{
 			name:      "empty session id",
-			prefix:    "/config",
-			profile:   "default",
 			cwd:       "/tmp",
 			sessionID: "",
 			want:      "",
@@ -478,18 +462,26 @@ func TestNativeSessionLogPath(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rc := &config.RuntimeConfig{
-				HarnessConfigPathPrefix: tt.prefix,
-				Profile:                 tt.profile,
-				CWD:                     tt.cwd,
-				SessionID:               tt.sessionID,
-			}
-			h := New(rc, nil)
-			configDir := rc.HarnessConfigDir()
-			got := h.NativeSessionLogPath(configDir, tt.cwd, tt.sessionID)
+			got := NativeLogPathSuffix(tt.cwd, tt.sessionID)
 			if got != tt.want {
-				t.Errorf("NativeSessionLogPath() = %q, want %q", got, tt.want)
+				t.Errorf("NativeLogPathSuffix() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestNativeLogPathSuffix_FullPath(t *testing.T) {
+	// Verify that the suffix combined with HarnessConfigDir produces the expected full path.
+	rc := &config.RuntimeConfig{
+		HarnessConfigPathPrefix: "/home/user/.h2/claude-config",
+		Profile:                 "default",
+		CWD:                     "/Users/dcosson/projects/h2",
+		SessionID:               "abc-123",
+		NativeLogPathSuffix:     NativeLogPathSuffix("/Users/dcosson/projects/h2", "abc-123"),
+	}
+	got := rc.NativeSessionLogPath()
+	want := "/home/user/.h2/claude-config/default/projects/-Users-dcosson-projects-h2/abc-123.jsonl"
+	if got != want {
+		t.Errorf("NativeSessionLogPath() = %q, want %q", got, want)
 	}
 }

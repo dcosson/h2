@@ -64,9 +64,6 @@ func (h *CodexHarness) DisplayCommand() string { return "codex" }
 
 func (h *CodexHarness) SupportsResume() bool { return false }
 
-// NativeSessionLogPath returns "" — Codex has no native session logs.
-func (h *CodexHarness) NativeSessionLogPath(configDir, cwd, sessionID string) string { return "" }
-
 // --- Config (called before launch) ---
 
 // BuildCommandArgs maps RuntimeConfig to Codex CLI flags, combined with
@@ -136,6 +133,28 @@ func (h *CodexHarness) PrepareForLaunch(dryRun bool) (harness.LaunchConfig, erro
 	sessionID := h.rc.SessionID
 	debugPath := resolveDebugPath(agentName, sessionID)
 	h.eventHandler.ConfigureDebug(debugPath)
+
+	// Register callback to discover native session log path when the
+	// conversation ID arrives. Codex log files are at:
+	//   $CODEX_HOME/sessions/YYYY/MM/DD/rollout-<timestamp>-<convID>.jsonl
+	// We glob for the file by conversation ID suffix.
+	h.eventHandler.SetOnConversationStarted(func(convID string) {
+		configDir := h.rc.HarnessConfigDir()
+		if configDir == "" || convID == "" {
+			return
+		}
+		pattern := filepath.Join(configDir, "sessions", "*", "*", "*", "*-"+convID+".jsonl")
+		matches, err := filepath.Glob(pattern)
+		if err != nil || len(matches) == 0 {
+			return
+		}
+		// Use the first match. Compute suffix relative to configDir.
+		rel, err := filepath.Rel(configDir, matches[0])
+		if err != nil {
+			return
+		}
+		h.rc.NativeLogPathSuffix = rel
+	})
 
 	s, err := otelserver.New(otelserver.Callbacks{
 		OnLogs:    h.eventHandler.OnLogs,

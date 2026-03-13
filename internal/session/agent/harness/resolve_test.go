@@ -64,13 +64,12 @@ func TestResolve_Generic_NoCommand(t *testing.T) {
 	}
 }
 
-func TestResolveNativeSessionLogPath_Claude(t *testing.T) {
+func TestResolveNativeSessionLogPath_WithSuffix(t *testing.T) {
 	rc := &config.RuntimeConfig{
 		HarnessType:             "claude_code",
 		HarnessConfigPathPrefix: "/home/user/.h2/claude-config",
 		Profile:                 "default",
-		CWD:                     "/Users/dcosson/projects/h2",
-		HarnessSessionID:        "abc-123",
+		NativeLogPathSuffix:     "projects/-Users-dcosson-projects-h2/abc-123.jsonl",
 	}
 	got := harness.ResolveNativeSessionLogPath(rc)
 	want := "/home/user/.h2/claude-config/default/projects/-Users-dcosson-projects-h2/abc-123.jsonl"
@@ -79,40 +78,27 @@ func TestResolveNativeSessionLogPath_Claude(t *testing.T) {
 	}
 }
 
-func TestResolveNativeSessionLogPath_Codex(t *testing.T) {
+func TestResolveNativeSessionLogPath_NoSuffix(t *testing.T) {
 	rc := &config.RuntimeConfig{
 		HarnessType:             "codex",
 		HarnessConfigPathPrefix: "/home/user/.h2/codex-config",
 		Profile:                 "default",
-		CWD:                     "/tmp",
-		HarnessSessionID:        "abc-123",
 	}
 	got := harness.ResolveNativeSessionLogPath(rc)
 	if got != "" {
-		t.Errorf("ResolveNativeSessionLogPath() for codex = %q, want empty", got)
+		t.Errorf("ResolveNativeSessionLogPath() = %q, want empty", got)
 	}
 }
 
-func TestResolveNativeSessionLogPath_Generic(t *testing.T) {
+func TestResolveNativeSessionLogPath_NoConfigPrefix(t *testing.T) {
 	rc := &config.RuntimeConfig{
-		HarnessType: "generic",
-		Command:     "vim",
-		CWD:         "/tmp",
+		HarnessType:         "generic",
+		Command:             "vim",
+		NativeLogPathSuffix: "some/path.jsonl",
 	}
 	got := harness.ResolveNativeSessionLogPath(rc)
 	if got != "" {
-		t.Errorf("ResolveNativeSessionLogPath() for generic = %q, want empty", got)
-	}
-}
-
-func TestResolveNativeSessionLogPath_UnknownHarness(t *testing.T) {
-	rc := &config.RuntimeConfig{
-		HarnessType: "unknown_harness",
-		CWD:         "/tmp",
-	}
-	got := harness.ResolveNativeSessionLogPath(rc)
-	if got != "" {
-		t.Errorf("ResolveNativeSessionLogPath() for unknown = %q, want empty", got)
+		t.Errorf("ResolveNativeSessionLogPath() = %q, want empty (no config prefix)", got)
 	}
 }
 

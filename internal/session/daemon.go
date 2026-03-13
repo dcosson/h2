@@ -67,12 +67,15 @@ func RunDaemon(sessionDir string, rc *config.RuntimeConfig, resume bool) error {
 	s.StartTime = time.Now()
 	s.SessionDir = sessionDir
 
-	// Wire OnSessionStarted callback to persist harness_session_id.
+	// Wire OnSessionStarted callback to persist harness_session_id and
+	// native_log_path_suffix. The harness may have set NativeLogPathSuffix
+	// on the RC in its onConversationStarted callback (e.g. Codex discovers
+	// the log file via glob), so we always re-write when the session ID changes.
 	s.monitor.SetOnSessionStarted(func(data monitor.SessionStartedData) {
 		if data.SessionID != "" && data.SessionID != rc.HarnessSessionID {
 			rc.HarnessSessionID = data.SessionID
 			if err := config.WriteRuntimeConfig(sessionDir, rc); err != nil {
-				log.Printf("warning: update harness_session_id in runtime config: %v", err)
+				log.Printf("warning: update runtime config: %v", err)
 			}
 		}
 	})
