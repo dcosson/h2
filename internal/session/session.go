@@ -740,7 +740,7 @@ func (s *Session) StartServices() {
 		},
 		IsBlocked: func() bool {
 			st, sub := s.State()
-			return st == monitor.StateActive && sub == monitor.SubStateWaitingForPermission
+			return st == monitor.StateActive && (sub == monitor.SubStatePermissionReview || sub == monitor.SubStateBlockedOnPermission)
 		},
 		WaitForIdle: func(ctx context.Context) bool {
 			return s.WaitForState(ctx, monitor.StateIdle)

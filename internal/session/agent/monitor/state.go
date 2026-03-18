@@ -36,12 +36,13 @@ func (s State) String() string {
 type SubState int
 
 const (
-	SubStateNone                 SubState = iota // no sub-state (non-Active, or unknown)
-	SubStateThinking                             // waiting for model response
-	SubStateToolUse                              // executing a tool
-	SubStateWaitingForPermission                 // blocked on user permission approval
-	SubStateCompacting                           // context compaction in progress
-	SubStateUsageLimit                           // API usage limit reached, waiting for reset
+	SubStateNone                SubState = iota // no sub-state (non-Active, or unknown)
+	SubStateThinking                            // waiting for model response
+	SubStateToolUse                             // executing a tool
+	SubStatePermissionReview                    // permission hook is evaluating (transient)
+	SubStateCompacting                          // context compaction in progress
+	SubStateUsageLimit                          // API usage limit reached, waiting for reset
+	SubStateBlockedOnPermission                 // human must approve a permission request
 )
 
 // String returns a human-readable name for the sub-state.
@@ -53,12 +54,14 @@ func (ss SubState) String() string {
 		return "thinking"
 	case SubStateToolUse:
 		return "tool_use"
-	case SubStateWaitingForPermission:
-		return "waiting_for_permission"
+	case SubStatePermissionReview:
+		return "permission_review"
 	case SubStateCompacting:
 		return "compacting"
 	case SubStateUsageLimit:
 		return "usage_limit"
+	case SubStateBlockedOnPermission:
+		return "blocked_on_permission"
 	default:
 		return ""
 	}
@@ -101,8 +104,10 @@ func FormatStateLabel(state, subState string, toolName ...string) string {
 		if len(toolName) > 0 && toolName[0] != "" {
 			pretty += ": " + toolName[0]
 		}
-	case "waiting_for_permission":
-		pretty = "permission"
+	case "permission_review":
+		pretty = "permission review"
+	case "blocked_on_permission":
+		pretty = "blocked on permission"
 	case "compacting":
 		pretty = "compacting"
 	case "usage_limit":

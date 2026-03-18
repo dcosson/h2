@@ -423,6 +423,78 @@ func TestRunBlocksUntilCancelled(t *testing.T) {
 	}
 }
 
+func TestProcessEvent_PermissionReview_NotBlocked(t *testing.T) {
+	m := New()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go m.Run(ctx)
+
+	// PermissionReview (hook evaluating) should NOT set blockedOnPermission.
+	m.Events() <- AgentEvent{
+		Type:      EventStateChange,
+		Timestamp: time.Now(),
+		Data:      StateChangeData{State: StateActive, SubState: SubStatePermissionReview},
+	}
+	time.Sleep(20 * time.Millisecond)
+
+	activity := m.Activity()
+	if activity.BlockedOnPermission {
+		t.Error("PermissionReview should not set BlockedOnPermission")
+	}
+}
+
+func TestProcessEvent_BlockedOnPermission_SetsBlocked(t *testing.T) {
+	m := New()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go m.Run(ctx)
+
+	// ApprovalRequested captures the tool name but doesn't set blocked.
+	m.Events() <- AgentEvent{
+		Type:      EventApprovalRequested,
+		Timestamp: time.Now(),
+		Data:      ApprovalRequestedData{ToolName: "Bash"},
+	}
+	time.Sleep(20 * time.Millisecond)
+
+	activity := m.Activity()
+	if activity.BlockedOnPermission {
+		t.Error("ApprovalRequested alone should not set BlockedOnPermission")
+	}
+	if activity.BlockedToolName != "Bash" {
+		t.Errorf("BlockedToolName = %q, want Bash", activity.BlockedToolName)
+	}
+
+	// BlockedOnPermission (ask_user) SHOULD set blockedOnPermission.
+	m.Events() <- AgentEvent{
+		Type:      EventStateChange,
+		Timestamp: time.Now(),
+		Data:      StateChangeData{State: StateActive, SubState: SubStateBlockedOnPermission},
+	}
+	time.Sleep(20 * time.Millisecond)
+
+	activity = m.Activity()
+	if !activity.BlockedOnPermission {
+		t.Error("BlockedOnPermission sub-state should set BlockedOnPermission flag")
+	}
+
+	// Transitioning away should clear it.
+	m.Events() <- AgentEvent{
+		Type:      EventStateChange,
+		Timestamp: time.Now(),
+		Data:      StateChangeData{State: StateActive, SubState: SubStateToolUse},
+	}
+	time.Sleep(20 * time.Millisecond)
+
+	activity = m.Activity()
+	if activity.BlockedOnPermission {
+		t.Error("BlockedOnPermission should be cleared after leaving blocked state")
+	}
+	if activity.BlockedToolName != "" {
+		t.Errorf("BlockedToolName should be cleared, got %q", activity.BlockedToolName)
+	}
+}
+
 func TestProcessEvent_UsageLimitInfo(t *testing.T) {
 	m := New()
 	ctx, cancel := context.WithCancel(context.Background())

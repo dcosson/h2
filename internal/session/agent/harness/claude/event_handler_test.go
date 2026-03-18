@@ -245,8 +245,8 @@ func TestEventHandler_PermissionRequest(t *testing.T) {
 		t.Fatalf("event[0].Type = %v, want EventApprovalRequested", got[0].Type)
 	}
 	sc := got[1].Data.(monitor.StateChangeData)
-	if sc.SubState != monitor.SubStateWaitingForPermission {
-		t.Fatalf("SubState = %v, want WaitingForPermission", sc.SubState)
+	if sc.SubState != monitor.SubStatePermissionReview {
+		t.Fatalf("SubState = %v, want PermissionReview", sc.SubState)
 	}
 }
 
@@ -273,8 +273,8 @@ func TestEventHandler_PermissionDecisionAskUser(t *testing.T) {
 
 	got := drainEvents(events, 1)
 	sc := got[0].Data.(monitor.StateChangeData)
-	if sc.SubState != monitor.SubStateWaitingForPermission {
-		t.Fatalf("SubState = %v, want WaitingForPermission", sc.SubState)
+	if sc.SubState != monitor.SubStateBlockedOnPermission {
+		t.Fatalf("SubState = %v, want BlockedOnPermission", sc.SubState)
 	}
 }
 

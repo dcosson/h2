@@ -176,9 +176,11 @@ var stringToSubState = map[string]monitor.SubState{
 	"":                       monitor.SubStateNone,
 	"thinking":               monitor.SubStateThinking,
 	"tool_use":               monitor.SubStateToolUse,
-	"waiting_for_permission": monitor.SubStateWaitingForPermission,
+	"permission_review":      monitor.SubStatePermissionReview,
+	"waiting_for_permission": monitor.SubStatePermissionReview, // legacy compat
 	"compacting":             monitor.SubStateCompacting,
 	"usage_limit":            monitor.SubStateUsageLimit,
+	"blocked_on_permission":  monitor.SubStateBlockedOnPermission,
 }
 
 type stateChangeLogData struct {

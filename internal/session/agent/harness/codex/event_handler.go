@@ -333,7 +333,7 @@ func (p *EventHandler) processEvent(name string, attrs []otelAttribute, ts time.
 					CallID:   callID,
 				},
 			})
-			p.emitStateChange(ts, monitor.StateActive, monitor.SubStateWaitingForPermission)
+			p.emitStateChange(ts, monitor.StateActive, monitor.SubStateBlockedOnPermission)
 			p.debugf("span=codex.tool_decision decision=ask_user tool=%q call_id=%q", toolName, callID)
 			return spanProcessResult{recognized: true, emitted: 2}
 		}

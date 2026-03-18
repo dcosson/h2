@@ -197,13 +197,13 @@ func (h *EventHandler) ProcessHookEvent(eventName string, payload json.RawMessag
 			Timestamp: now,
 			Data:      monitor.ApprovalRequestedData{ToolName: toolName},
 		})
-		h.emitStateChange(now, monitor.StateActive, monitor.SubStateWaitingForPermission)
+		h.emitStateChange(now, monitor.StateActive, monitor.SubStatePermissionReview)
 
 	case "permission_decision":
 		decision := extractDecision(payload)
 		switch decision {
 		case "ask_user":
-			h.emitStateChange(now, monitor.StateActive, monitor.SubStateWaitingForPermission)
+			h.emitStateChange(now, monitor.StateActive, monitor.SubStateBlockedOnPermission)
 		case "allow":
 			h.emitStateChange(now, monitor.StateActive, monitor.SubStateToolUse)
 		default:

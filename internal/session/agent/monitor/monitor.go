@@ -163,7 +163,6 @@ func (m *AgentMonitor) processEvent(ev AgentEvent) {
 
 	case EventApprovalRequested:
 		if data, ok := ev.Data.(ApprovalRequestedData); ok {
-			m.blockedOnPermission = true
 			m.blockedToolName = data.ToolName
 			if data.ToolName != "" {
 				m.lastToolName = data.ToolName
@@ -176,9 +175,9 @@ func (m *AgentMonitor) processEvent(ev AgentEvent) {
 			if m.state != StateExited {
 				m.setStateLocked(data.State, data.SubState)
 			}
-			if data.SubState == SubStateWaitingForPermission {
+			if data.SubState == SubStateBlockedOnPermission {
 				m.blockedOnPermission = true
-			} else if data.State != StateActive || data.SubState != SubStateWaitingForPermission {
+			} else if data.SubState != SubStateBlockedOnPermission {
 				m.blockedOnPermission = false
 				m.blockedToolName = ""
 			}

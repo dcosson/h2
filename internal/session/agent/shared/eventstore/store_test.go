@@ -155,6 +155,81 @@ func TestAppendAndRead_NoData(t *testing.T) {
 	}
 }
 
+func TestRoundTrip_PermissionSubStates(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	now := time.Now().Truncate(time.Millisecond)
+	events := []monitor.AgentEvent{
+		{
+			Type:      monitor.EventStateChange,
+			Timestamp: now,
+			Data:      monitor.StateChangeData{State: monitor.StateActive, SubState: monitor.SubStatePermissionReview},
+		},
+		{
+			Type:      monitor.EventStateChange,
+			Timestamp: now.Add(time.Second),
+			Data:      monitor.StateChangeData{State: monitor.StateActive, SubState: monitor.SubStateBlockedOnPermission},
+		},
+	}
+
+	for _, ev := range events {
+		if err := s.Append(ev); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+
+	got, err := s.Read()
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(got))
+	}
+
+	sc0 := got[0].Data.(monitor.StateChangeData)
+	if sc0.SubState != monitor.SubStatePermissionReview {
+		t.Errorf("event 0: SubState = %v, want PermissionReview", sc0.SubState)
+	}
+
+	sc1 := got[1].Data.(monitor.StateChangeData)
+	if sc1.SubState != monitor.SubStateBlockedOnPermission {
+		t.Errorf("event 1: SubState = %v, want BlockedOnPermission", sc1.SubState)
+	}
+}
+
+func TestRoundTrip_LegacyWaitingForPermission(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	// Simulate a legacy events.jsonl line with "waiting_for_permission".
+	legacyLine := []byte(`{"type":"state_change","timestamp":"2026-03-12T18:00:00Z","data":{"state":"active","sub_state":"waiting_for_permission"}}` + "\n")
+	if _, err := s.file.Write(legacyLine); err != nil {
+		t.Fatalf("write legacy line: %v", err)
+	}
+
+	got, err := s.Read()
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(got))
+	}
+
+	sc := got[0].Data.(monitor.StateChangeData)
+	if sc.SubState != monitor.SubStatePermissionReview {
+		t.Errorf("legacy waiting_for_permission should map to PermissionReview, got %v", sc.SubState)
+	}
+}
+
 func TestReadEmpty(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(dir)

@@ -148,7 +148,7 @@ func sendPermissionDecision(agentName, sessionID, toolName, decision, reason str
 
 // handlePermissionRequest processes a PermissionRequest hook event.
 // The PermissionRequest event has already been forwarded to the agent
-// (setting WaitingForPermission state). This function optionally runs
+// (setting PermissionReview state). This function optionally runs
 // the AI reviewer and returns a decision to Claude Code.
 func handlePermissionRequest(cmd *cobra.Command, agentName string, data []byte, forcedResult string) error {
 	var request permissionInput

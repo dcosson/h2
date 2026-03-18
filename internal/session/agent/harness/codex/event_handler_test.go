@@ -352,8 +352,8 @@ func TestEventHandler_ToolDecision_AskUser(t *testing.T) {
 		t.Errorf("CallID = %q, want %q", data.CallID, "call-xyz")
 	}
 	state := got[1].Data.(monitor.StateChangeData)
-	if state.State != monitor.StateActive || state.SubState != monitor.SubStateWaitingForPermission {
-		t.Errorf("state = (%v,%v), want (Active,WaitingForPermission)", state.State, state.SubState)
+	if state.State != monitor.StateActive || state.SubState != monitor.SubStateBlockedOnPermission {
+		t.Errorf("state = (%v,%v), want (Active,BlockedOnPermission)", state.State, state.SubState)
 	}
 }
 
