@@ -223,6 +223,10 @@ On pod load, validate:
 
 Move bridge credentials from per-user config to a top-level named map.
 
+#### Security model
+
+`config.yaml` is a single-operator file — whoever owns the h2 directory has access to all bridge configs in it. h2 is not a multi-tenant system. All pods and agents in an h2 instance can reference any named bridge config. There is no per-user or per-pod authorization boundary for bridge credentials. If credential isolation is needed, use separate h2 directories.
+
 **Before:**
 ```go
 type Config struct {
@@ -266,9 +270,22 @@ When `h2 pod launch` encounters `bridges:` in the pod YAML:
 
 1. Load the global config to resolve each bridge name → `BridgesConfig`
 2. For each `PodBridge`:
-   a. Stop any existing bridge daemon for the same bridge name (idempotent restart)
+   a. Check if a bridge daemon with this name is already running. If so, query its `BridgeInfo.Pod`:
+      - **Same pod or no pod (standalone):** Stop the existing bridge and re-launch (idempotent restart)
+      - **Different pod:** Reject with error: `bridge "personal" is already owned by pod "frontend"; stop it first or remove from this pod`
    b. Call `bridgeservice.ForkBridge(bridgeName, concierge)` with the resolved config
 3. Bridge launch happens **after** all agents are started (so concierge socket exists)
+
+#### Failure semantics
+
+Pod launch does **not** roll back on partial failure. Already-started agents stay running regardless of bridge failures. This is intentional — agents are useful on their own and can be reached via `h2 send` even without a bridge.
+
+Behavior on bridge fork failure:
+- The failing bridge is skipped with a warning on stderr
+- Remaining bridges are still attempted
+- After all bridges are attempted, if any failed, print a partial-failure summary to stderr listing which bridges failed and which succeeded
+- **Exit code:** 0 if all agents and all bridges started successfully. Non-zero if any bridge fork failed (even though agents are up). This gives automation a machine-detectable signal for degraded pod state
+- Retry: `h2 pod launch <pod>` is idempotent — it skips already-running agents and already-running bridges (same-pod), so re-running after a partial failure only retries the failed components
 
 When `h2 pod stop <pod>` is called:
 - Stop all agents in the pod (existing behavior)
@@ -388,7 +405,24 @@ func (s *Service) resolveDefaultTarget() string {
 }
 ```
 
-The `set-concierge` and `remove-concierge` socket commands continue to work as before — they update `s.concierge` directly. `remove-concierge` sets it to empty, which disables auto-reassociation (intentional).
+#### Manual concierge state transitions
+
+The `set-concierge` and `remove-concierge` socket commands interact with `conciergeAlive` as follows:
+
+**`set-concierge <name>`:**
+1. Set `s.concierge = name`
+2. Synchronously probe the agent socket (existing probe logic in `handleSetConcierge`)
+3. Set `s.conciergeAlive = true` if probe succeeds, `false` if probe fails
+4. If alive: send "Concierge set to X" status. If not alive: send "Concierge set to X (not yet running, will auto-connect when available)" status
+5. The typing loop will pick up liveness changes on the next tick (~4s)
+
+**`remove-concierge`:**
+1. Set `s.concierge = ""`
+2. Set `s.conciergeAlive = false`
+3. Send "Concierge removed" status
+4. Auto-reassociation is disabled since `concierge` is empty — the typing loop skips the liveness check
+
+**Routing during transitions:** Between a `set-concierge` call and the next typing loop tick, routing uses the synchronously-probed `conciergeAlive` value. There is no transition window where routing state is stale.
 
 #### Why this works for both pod and standalone bridges
 
@@ -442,10 +476,14 @@ No new packages. Changes are confined to:
 - **Concierge down + back up**: Mock agent socket, stop it, verify `conciergeAlive=false` and status message. Restart socket, verify `conciergeAlive=true` and "is back" status message.
 - **Routing while concierge down**: Verify `resolveDefaultTarget` falls back to lastSender/firstAgent when `conciergeAlive=false` but `concierge` is still set.
 - **remove-concierge clears name**: Verify `remove-concierge` sets `concierge=""` so no auto-reassociation.
+- **set-concierge probes synchronously**: Set concierge to a running agent, verify `conciergeAlive=true` immediately. Set to non-existent agent, verify `conciergeAlive=false` and status message says "not yet running".
+- **set-concierge then agent starts**: Set concierge to non-existent agent (`conciergeAlive=false`), then start the agent. Verify typing loop sets `conciergeAlive=true` and sends "is back" status.
 
 #### `internal/cmd/pod_test.go`
 - **Launch with overrides**: Pod template with overrides, verify `ApplyOverrides` called and RuntimeConfig reflects overridden values
 - **Launch with bridges**: Pod template with bridges, verify bridge fork called with correct config name and concierge
+- **Launch bridge conflict**: Bridge already running under different pod, verify launch rejects with clear error
+- **Launch bridge same pod**: Bridge already running under same pod, verify restart (stop + re-fork)
 - **Stop with bridges**: Verify `pod stop` also stops pod-associated bridges
 - **Dry-run with overrides**: Verify dry-run output shows overrides
 
@@ -453,3 +491,13 @@ No new packages. Changes are confined to:
 
 - **Full pod lifecycle**: Launch pod with bridge + agents, verify bridge status, stop concierge, verify bridge detects down, restart concierge (via pod launch), verify bridge auto-reassociates
 - **Override precedence**: Pod YAML overrides vs role defaults, verify overrides win
+- **Partial bridge failure**: Pod with 2 bridges, second fork fails. Verify: agents still running, first bridge still running, non-zero exit code, stderr shows partial-failure summary. Re-run `pod launch` and verify only the failed bridge is retried.
+
+## Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+|---|----------|----------|---------|-------------|-------|
+| 1 | h2-reviewer | P1 | Global bridge credential map removes user-level isolation | Incorporated | Added security model note to §3: config.yaml is single-operator, no multi-tenant isolation |
+| 2 | h2-reviewer | P1 | Bridge restart semantics can terminate unrelated bridge daemons | Incorporated | §4 now specifies pod-ownership check: same-pod restarts, different-pod rejects with error |
+| 3 | h2-reviewer | P1 | Missing failure/rollback semantics for partial pod launch | Incorporated | §4 adds explicit no-rollback policy, non-zero exit on bridge failure, partial-failure summary, idempotent retry. Integration test added. |
+| 4 | h2-reviewer | P2 | Concierge liveness state transitions underspecified for manual changes | Incorporated | §5 adds state transition rules for set/remove-concierge with synchronous probe. Unit tests added. |
