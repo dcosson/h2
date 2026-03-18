@@ -213,8 +213,10 @@ func podLaunchBridges(bridges []config.PodBridge, pod string) error {
 					if resp.Bridge.Pod != "" && resp.Bridge.Pod != pod {
 						return fmt.Errorf("bridge %q is already owned by pod %q; stop it first or remove from this pod", pb.Bridge, resp.Bridge.Pod)
 					}
-					// Same pod or standalone — stop and re-launch.
-					stopBridgeByName(pb.Bridge)
+					// Same pod or standalone — stop and wait for socket cleanup before re-launch.
+					if _, err := stopExistingBridgeIfRunning(pb.Bridge); err != nil {
+						return fmt.Errorf("stop bridge %q before relaunch: %w", pb.Bridge, err)
+					}
 				} else {
 					conn.Close()
 				}
@@ -244,18 +246,6 @@ func podLaunchBridges(bridges []config.PodBridge, pod string) error {
 	}
 
 	return nil
-}
-
-// stopBridgeByName stops a running bridge daemon by its config name.
-func stopBridgeByName(name string) {
-	sockPath := socketdir.Path(socketdir.TypeBridge, name)
-	conn, err := net.Dial("unix", sockPath)
-	if err != nil {
-		return
-	}
-	defer conn.Close()
-	_ = message.SendRequest(conn, &message.Request{Type: "stop"})
-	_, _ = message.ReadResponse(conn)
 }
 
 // podDryRun resolves all agent configs in a pod and prints them without launching.
