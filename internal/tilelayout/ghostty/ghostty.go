@@ -27,6 +27,12 @@ type Driver struct{}
 // NewDriver creates a Ghostty tiling driver.
 func NewDriver() *Driver { return &Driver{} }
 
+// Script returns the bash script that would create the tiled layout
+// without executing it. Used for dry-run output.
+func (d *Driver) Script(layout tilelayout.TileLayout) string {
+	return generateScript(layout)
+}
+
 // Tile creates Ghostty splits, types `h2 attach` in each pane, then
 // execs into the first agent's attach session in the current pane.
 func (d *Driver) Tile(layout tilelayout.TileLayout, h2Binary string) error {
@@ -34,15 +40,10 @@ func (d *Driver) Tile(layout tilelayout.TileLayout, h2Binary string) error {
 		return fmt.Errorf("empty layout")
 	}
 
-	totalPanes := 0
-	for _, tab := range layout.Tabs {
-		totalPanes += len(tab.Panes)
-	}
-
 	firstAgent := layout.Tabs[0].Panes[0].AgentName
 
 	// Single pane: no splits needed, just exec directly.
-	if totalPanes == 1 {
+	if layout.TotalPanes() == 1 {
 		return syscall.Exec(h2Binary, []string{"h2", "attach", firstAgent}, os.Environ())
 	}
 

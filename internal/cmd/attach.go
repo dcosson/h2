@@ -18,6 +18,7 @@ import (
 
 func newAttachCmd() *cobra.Command {
 	var tile bool
+	var dryRun bool
 
 	cmd := &cobra.Command{
 		Use:   "attach <name>",
@@ -26,17 +27,24 @@ func newAttachCmd() *cobra.Command {
 
 With --tile, open Ghostty splits for multiple agents at once.
 Name can be a pod name, a single agent name, or a comma-separated list.
-If a pod and agent share the same name, the pod takes priority.`,
+If a pod and agent share the same name, the pod takes priority.
+
+With --dry-run (requires --tile), show the computed layout and script
+without executing anything.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if dryRun && !tile {
+				return fmt.Errorf("--dry-run requires --tile")
+			}
 			if tile {
-				return doTileAttach(args[0])
+				return doTileAttach(args[0], dryRun)
 			}
 			return doAttach(args[0])
 		},
 	}
 
 	cmd.Flags().BoolVar(&tile, "tile", false, "Tile agents in Ghostty splits")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show layout and script without executing (requires --tile)")
 	return cmd
 }
 

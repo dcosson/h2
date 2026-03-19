@@ -15,7 +15,7 @@ import (
 
 // doTileAttach resolves agents from name, computes a tiled layout, and
 // opens Ghostty splits with h2 attach in each pane.
-func doTileAttach(name string) error {
+func doTileAttach(name string, dryRun bool) error {
 	agents, err := resolveTileAgents(name)
 	if err != nil {
 		return err
@@ -24,8 +24,8 @@ func doTileAttach(name string) error {
 		return fmt.Errorf("no running agents found for %q", name)
 	}
 
-	// Single agent: just do a normal attach.
-	if len(agents) == 1 {
+	// Single agent without dry-run: just do a normal attach.
+	if len(agents) == 1 && !dryRun {
 		return doAttach(agents[0])
 	}
 
@@ -36,13 +36,20 @@ func doTileAttach(name string) error {
 	}
 
 	layout := tilelayout.ComputeLayout(agents, cols, rows, tilelayout.DefaultConfig())
+	driver := ghostty.NewDriver()
+
+	if dryRun {
+		tilelayout.PrintDryRun(layout, os.Stdout)
+		fmt.Println("\nScript that would run:")
+		fmt.Println(driver.Script(layout))
+		return nil
+	}
 
 	h2Binary, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve h2 binary path: %w", err)
 	}
 
-	driver := ghostty.NewDriver()
 	return driver.Tile(layout, h2Binary)
 }
 
