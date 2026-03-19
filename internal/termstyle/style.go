@@ -42,6 +42,9 @@ func Green(s string) string { return wrap("\033[32m", s) }
 // Yellow renders text in yellow.
 func Yellow(s string) string { return wrap("\033[33m", s) }
 
+// Blue renders text in blue.
+func Blue(s string) string { return wrap("\033[34m", s) }
+
 // Magenta renders text in magenta.
 func Magenta(s string) string { return wrap("\033[35m", s) }
 

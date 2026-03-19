@@ -114,9 +114,10 @@ func ComputeLayout(agents []string, currentSize, overflowSize ScreenSize, cfg La
 		batch := remaining[:n]
 		remaining = remaining[n:]
 
-		// Determine grid dimensions.
-		rows := min(len(batch), maxRows)
-		cols := (len(batch) + rows - 1) / rows
+		// Determine grid dimensions: fill columns (horizontal) first,
+		// then add rows. This keeps panes wider on wide monitors.
+		cols := min(len(batch), maxCols)
+		rows := (len(batch) + cols - 1) / cols
 
 		// Compute pane dimensions. Last column/row absorbs remainder
 		// so the total adds up to the screen size exactly.

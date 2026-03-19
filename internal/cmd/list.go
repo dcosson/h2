@@ -613,7 +613,7 @@ func printBridgeLine(info *message.BridgeInfo) {
 	}
 
 	fmt.Printf("  %s %s %s%s — up %s%s%s\n",
-		s.GreenDot(), info.Name, s.Green("(bridge)"), channels, info.Uptime, activity, msgs)
+		s.GreenDot(), info.Name, s.Blue("(bridge)"), channels, info.Uptime, activity, msgs)
 }
 
 // queryBridge connects to a bridge socket and queries its status.

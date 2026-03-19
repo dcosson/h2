@@ -61,7 +61,7 @@ func TestColors_Enabled(t *testing.T) {
 func TestColors_Disabled(t *testing.T) {
 	SetEnabled(false)
 
-	fns := []func(string) string{Bold, Dim, Red, Green, Yellow, Magenta, Cyan, Gray}
+	fns := []func(string) string{Bold, Dim, Red, Green, Yellow, Blue, Magenta, Cyan, Gray}
 	for _, fn := range fns {
 		got := fn("text")
 		if got != "text" {

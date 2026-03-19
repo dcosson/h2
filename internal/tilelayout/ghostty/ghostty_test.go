@@ -11,12 +11,12 @@ func TestGenerateScript_TwoAgents(t *testing.T) {
 	layout := tilelayout.ComputeLayout([]string{"a1", "a2"}, tilelayout.ScreenSize{Cols: 240, Rows: 60}, tilelayout.ScreenSize{}, tilelayout.DefaultConfig())
 	script := generateScript(layout)
 
-	// Should have 1 down split and no right splits.
-	if !strings.Contains(script, "new_split:down") {
-		t.Error("expected new_split:down")
+	// Cols-first: 2 agents → 2 columns, 1 right split, no down splits.
+	if !strings.Contains(script, "new_split:right") {
+		t.Error("expected new_split:right")
 	}
-	if strings.Contains(script, "new_split:right") {
-		t.Error("unexpected new_split:right for 2 agents in 1 column")
+	if strings.Contains(script, "new_split:down") {
+		t.Error("unexpected new_split:down for 2 agents in 2 columns")
 	}
 
 	// Should type attach for a2 but not a1 (a1 gets exec'd).
