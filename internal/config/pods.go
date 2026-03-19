@@ -111,9 +111,11 @@ func ExpandPodAgents(pt *PodTemplate) ([]ExpandedAgent, error) {
 
 		// count >= 1 with template, or count > 1: expand and render names.
 		for i := 1; i <= count; i++ {
+			expandCtx := &tmpl.Context{Index: i, Count: count}
+
 			var name string
 			if hasTemplate {
-				rendered, err := tmpl.Render(a.Name, &tmpl.Context{Index: i, Count: count})
+				rendered, err := tmpl.Render(a.Name, expandCtx)
 				if err != nil {
 					return nil, fmt.Errorf("render agent name %q (index %d): %w", a.Name, i, err)
 				}
@@ -123,9 +125,19 @@ func ExpandPodAgents(pt *PodTemplate) ([]ExpandedAgent, error) {
 				name = fmt.Sprintf("%s-%d", a.Name, i)
 			}
 
+			// Render role if it contains template expressions.
+			role := a.Role
+			if strings.Contains(role, "{{") {
+				rendered, err := tmpl.Render(role, expandCtx)
+				if err != nil {
+					return nil, fmt.Errorf("render agent role %q (index %d): %w", a.Role, i, err)
+				}
+				role = rendered
+			}
+
 			agents = append(agents, ExpandedAgent{
 				Name:      name,
-				Role:      a.Role,
+				Role:      role,
 				Index:     i,
 				Count:     count,
 				Vars:      a.Vars,
