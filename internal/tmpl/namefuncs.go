@@ -82,6 +82,16 @@ func NameFuncs(generateName func() string, existingNames []string) template.Func
 	}
 }
 
+// FixedNameFuncs returns name template functions that always return the given
+// agent name. Use this when the agent name is already known (e.g. pod launches)
+// but the role template may reference {{ randomName }} or {{ autoIncrement }}.
+func FixedNameFuncs(agentName string) template.FuncMap {
+	return template.FuncMap{
+		"randomName":    func() (string, error) { return agentName, nil },
+		"autoIncrement": func(prefix string) (string, error) { return agentName, nil },
+	}
+}
+
 // RenderWithExtraFuncs renders a template with additional functions merged into
 // the standard function map. Extra functions override builtins if names collide.
 func RenderWithExtraFuncs(templateText string, ctx *Context, extraFuncs template.FuncMap) (string, error) {

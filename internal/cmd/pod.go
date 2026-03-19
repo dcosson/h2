@@ -126,7 +126,7 @@ func newPodLaunchCmd() *cobra.Command {
 					Var:       mergedVars,
 				}
 
-				role, err := config.LoadRoleRendered(roleName, roleCtx)
+				role, err := config.LoadRoleRenderedWithFuncs(roleName, roleCtx, tmpl.FixedNameFuncs(agent.Name))
 				if err != nil {
 					return fmt.Errorf("load role %q for agent %q: %w", roleName, agent.Name, err)
 				}
@@ -280,7 +280,7 @@ func podDryRun(templateName string, pod string, expanded []config.ExpandedAgent,
 			Var:       mergedVars,
 		}
 
-		role, err := config.LoadRoleRendered(roleName, roleCtx)
+		role, err := config.LoadRoleRenderedWithFuncs(roleName, roleCtx, tmpl.FixedNameFuncs(agent.Name))
 		if err != nil {
 			return fmt.Errorf("load role %q for agent %q: %w", roleName, agent.Name, err)
 		}

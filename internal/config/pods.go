@@ -248,12 +248,19 @@ func ParsePodTemplateRendered(yamlText string, name string, ctx *tmpl.Context) (
 	}
 
 	// Render template with cloned vars.
+	// Preserve {{ .Index }} and {{ .Count }} for count expansion by replacing
+	// them with placeholders before rendering, then restoring after.
+	remaining = preserveCountPlaceholders(remaining)
 	renderCtx := *ctx
 	renderCtx.Var = vars
 	rendered, err := tmpl.Render(remaining, &renderCtx)
 	if err != nil {
 		return nil, fmt.Errorf("pod template %q: %w", name, err)
 	}
+
+	// Restore count placeholders so they survive into agent name fields
+	// for ExpandPodAgents to render later.
+	rendered = restoreCountPlaceholders(rendered)
 
 	// Parse rendered YAML.
 	var pt PodTemplate
@@ -263,6 +270,31 @@ func ParsePodTemplateRendered(yamlText string, name string, ctx *tmpl.Context) (
 	pt.Variables = varDefs
 
 	return &pt, nil
+}
+
+// countPlaceholders maps Go template expressions for .Index and .Count to
+// unique placeholder strings that won't be touched by tmpl.Render. This lets
+// pod-level template rendering resolve {{ .Var.x }} while preserving
+// {{ .Index }} and {{ .Count }} for count expansion in ExpandPodAgents.
+var countPlaceholders = [][2]string{
+	{"{{ .Index }}", "\x00__POD_INDEX__\x00"},
+	{"{{.Index}}", "\x00__POD_INDEX__\x00"},
+	{"{{ .Count }}", "\x00__POD_COUNT__\x00"},
+	{"{{.Count}}", "\x00__POD_COUNT__\x00"},
+}
+
+func preserveCountPlaceholders(s string) string {
+	for _, p := range countPlaceholders {
+		s = strings.ReplaceAll(s, p[0], p[1])
+	}
+	return s
+}
+
+func restoreCountPlaceholders(s string) string {
+	// Restore to canonical form with spaces.
+	s = strings.ReplaceAll(s, "\x00__POD_INDEX__\x00", "{{ .Index }}")
+	s = strings.ReplaceAll(s, "\x00__POD_COUNT__\x00", "{{ .Count }}")
+	return s
 }
 
 // loadPodTemplateForDisplay loads a pod template with rendering using only
@@ -289,11 +321,14 @@ func loadPodTemplateForDisplay(name string) (*PodTemplate, error) {
 	}
 
 	// Render with defaults only (no required-var validation).
+	// Preserve {{ .Index }}/{{ .Count }} for count expansion.
+	remaining = preserveCountPlaceholders(remaining)
 	ctx := &tmpl.Context{Var: vars}
 	rendered, err := tmpl.Render(remaining, ctx)
 	if err != nil {
 		return nil, fmt.Errorf("pod template %q: %w", name, err)
 	}
+	rendered = restoreCountPlaceholders(rendered)
 
 	var pt PodTemplate
 	if err := yaml.Unmarshal([]byte(rendered), &pt); err != nil {

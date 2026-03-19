@@ -152,7 +152,7 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 					}
 					ctx.AgentName = agentName
 					name = agentName
-					role, err = config.LoadRoleRendered(roleName, ctx)
+					role, err = config.LoadRoleRenderedWithFuncs(roleName, ctx, tmpl.FixedNameFuncs(agentName))
 				} else {
 					rolePath := config.ResolveRolePath(roleName)
 					resolvedCLIName := name
