@@ -135,13 +135,23 @@ func ExpandPodAgents(pt *PodTemplate) ([]ExpandedAgent, error) {
 				role = rendered
 			}
 
+			// Render vars/overrides if they contain template expressions.
+			vars, err := renderStringMap(a.Vars, expandCtx)
+			if err != nil {
+				return nil, fmt.Errorf("render agent vars (index %d): %w", i, err)
+			}
+			overrides, err := renderStringMap(a.Overrides, expandCtx)
+			if err != nil {
+				return nil, fmt.Errorf("render agent overrides (index %d): %w", i, err)
+			}
+
 			agents = append(agents, ExpandedAgent{
 				Name:      name,
 				Role:      role,
 				Index:     i,
 				Count:     count,
-				Vars:      a.Vars,
-				Overrides: a.Overrides,
+				Vars:      vars,
+				Overrides: overrides,
 			})
 		}
 	}
@@ -152,6 +162,37 @@ func ExpandPodAgents(pt *PodTemplate) ([]ExpandedAgent, error) {
 	}
 
 	return agents, nil
+}
+
+// renderStringMap renders template expressions in map values. Returns a new map
+// (or the original if no values contain templates).
+func renderStringMap(m map[string]string, ctx *tmpl.Context) (map[string]string, error) {
+	if len(m) == 0 {
+		return m, nil
+	}
+	hasTemplate := false
+	for _, v := range m {
+		if strings.Contains(v, "{{") {
+			hasTemplate = true
+			break
+		}
+	}
+	if !hasTemplate {
+		return m, nil
+	}
+	result := make(map[string]string, len(m))
+	for k, v := range m {
+		if strings.Contains(v, "{{") {
+			rendered, err := tmpl.Render(v, ctx)
+			if err != nil {
+				return nil, fmt.Errorf("render %q: %w", k, err)
+			}
+			result[k] = rendered
+		} else {
+			result[k] = v
+		}
+	}
+	return result, nil
 }
 
 // checkNameCollisions detects duplicate agent names after expansion.
@@ -259,55 +300,83 @@ func ParsePodTemplateRendered(yamlText string, name string, ctx *tmpl.Context) (
 		return nil, fmt.Errorf("pod template %q: %w", name, err)
 	}
 
-	// Render template with cloned vars.
-	// Preserve {{ .Index }} and {{ .Count }} for count expansion by replacing
-	// them with placeholders before rendering, then restoring after.
-	remaining = preserveCountPlaceholders(remaining)
+	// Defer template blocks referencing .Index/.Count so they survive
+	// pod-level rendering for count expansion in ExpandPodAgents.
+	remaining, deferred := deferCountExpressions(remaining)
 	renderCtx := *ctx
 	renderCtx.Var = vars
 	rendered, err := tmpl.Render(remaining, &renderCtx)
 	if err != nil {
 		return nil, fmt.Errorf("pod template %q: %w", name, err)
 	}
-
-	// Restore count placeholders so they survive into agent name fields
-	// for ExpandPodAgents to render later.
-	rendered = restoreCountPlaceholders(rendered)
-
-	// Parse rendered YAML.
+	// Parse rendered YAML (placeholders are null-byte strings safe for YAML).
 	var pt PodTemplate
 	if err := yaml.Unmarshal([]byte(rendered), &pt); err != nil {
 		return nil, fmt.Errorf("pod template %q produced invalid YAML after rendering: %w", name, err)
 	}
 	pt.Variables = varDefs
 
+	// Restore deferred expressions in agent fields after YAML parsing,
+	// so {{ ... }} expressions don't break YAML syntax.
+	restoreDeferredInAgents(pt.Agents, deferred)
+
 	return &pt, nil
 }
 
-// countPlaceholders maps Go template expressions for .Index and .Count to
-// unique placeholder strings that won't be touched by tmpl.Render. This lets
-// pod-level template rendering resolve {{ .Var.x }} while preserving
-// {{ .Index }} and {{ .Count }} for count expansion in ExpandPodAgents.
-var countPlaceholders = [][2]string{
-	{"{{ .Index }}", "\x00__POD_INDEX__\x00"},
-	{"{{.Index}}", "\x00__POD_INDEX__\x00"},
-	{"{{ .Count }}", "\x00__POD_COUNT__\x00"},
-	{"{{.Count}}", "\x00__POD_COUNT__\x00"},
+// deferCountExpressions scans a Go template string for {{ ... }} blocks that
+// reference .Index or .Count, and replaces each entire block with a unique
+// placeholder. This allows pod-level rendering to resolve {{ .Var.x }} while
+// deferring any expression involving .Index/.Count to count expansion.
+// Returns the modified string and a map of placeholder → original expression.
+func deferCountExpressions(s string) (string, map[string]string) {
+	deferred := make(map[string]string)
+	n := 0
+	result := countExprRe.ReplaceAllStringFunc(s, func(match string) string {
+		// Only defer blocks that reference .Index or .Count.
+		if !countFieldRe.MatchString(match) {
+			return match
+		}
+		placeholder := fmt.Sprintf("__H2_DEFER_%d__", n)
+		n++
+		deferred[placeholder] = match
+		return placeholder
+	})
+	return result, deferred
 }
 
-func preserveCountPlaceholders(s string) string {
-	for _, p := range countPlaceholders {
-		s = strings.ReplaceAll(s, p[0], p[1])
+// restoreDeferredInString replaces placeholders back to their original
+// template expressions within a single string.
+func restoreDeferredInString(s string, deferred map[string]string) string {
+	for placeholder, original := range deferred {
+		s = strings.ReplaceAll(s, placeholder, original)
 	}
 	return s
 }
 
-func restoreCountPlaceholders(s string) string {
-	// Restore to canonical form with spaces.
-	s = strings.ReplaceAll(s, "\x00__POD_INDEX__\x00", "{{ .Index }}")
-	s = strings.ReplaceAll(s, "\x00__POD_COUNT__\x00", "{{ .Count }}")
-	return s
+// restoreDeferredInAgents restores deferred template expressions in all
+// template-able agent fields after YAML parsing.
+func restoreDeferredInAgents(agents []PodTemplateAgent, deferred map[string]string) {
+	if len(deferred) == 0 {
+		return
+	}
+	for i := range agents {
+		agents[i].Name = restoreDeferredInString(agents[i].Name, deferred)
+		agents[i].Role = restoreDeferredInString(agents[i].Role, deferred)
+		for k, v := range agents[i].Vars {
+			agents[i].Vars[k] = restoreDeferredInString(v, deferred)
+		}
+		for k, v := range agents[i].Overrides {
+			agents[i].Overrides[k] = restoreDeferredInString(v, deferred)
+		}
+	}
 }
+
+// countExprRe matches Go template blocks: {{ ... }}.
+// Uses non-greedy match to handle multiple blocks on one line.
+var countExprRe = regexp.MustCompile(`\{\{.*?\}\}`)
+
+// countFieldRe matches .Index or .Count as a word boundary within a template block.
+var countFieldRe = regexp.MustCompile(`\.Index\b|\.Count\b`)
 
 // loadPodTemplateForDisplay loads a pod template with rendering using only
 // default variable values. Unlike LoadPodTemplateRendered, it skips
@@ -333,20 +402,19 @@ func loadPodTemplateForDisplay(name string) (*PodTemplate, error) {
 	}
 
 	// Render with defaults only (no required-var validation).
-	// Preserve {{ .Index }}/{{ .Count }} for count expansion.
-	remaining = preserveCountPlaceholders(remaining)
+	// Defer .Index/.Count expressions for count expansion.
+	remaining, deferred := deferCountExpressions(remaining)
 	ctx := &tmpl.Context{Var: vars}
 	rendered, err := tmpl.Render(remaining, ctx)
 	if err != nil {
 		return nil, fmt.Errorf("pod template %q: %w", name, err)
 	}
-	rendered = restoreCountPlaceholders(rendered)
-
 	var pt PodTemplate
 	if err := yaml.Unmarshal([]byte(rendered), &pt); err != nil {
 		return nil, fmt.Errorf("pod template %q produced invalid YAML after rendering: %w", name, err)
 	}
 	pt.Variables = varDefs
+	restoreDeferredInAgents(pt.Agents, deferred)
 
 	return &pt, nil
 }

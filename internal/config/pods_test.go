@@ -604,6 +604,56 @@ agents:
 	}
 }
 
+func TestParsePodTemplateRendered_CompoundIndexExpression(t *testing.T) {
+	// Compound expressions like {{ add 1 .Index }} and {{ mod .Index 3 }}
+	// must survive pod-level rendering and be resolved during count expansion.
+	yamlText := `variables:
+  codename:
+    default: fog
+
+pod_name: test
+agents:
+  - name: "coder-{{ add 1 .Index }}-{{ .Var.codename }}"
+    role: "{{ index (split "codex,claude,codex" ",") (mod .Index 3) }}"
+    count: 3
+`
+	ctx := &tmpl.Context{}
+	pt, err := ParsePodTemplateRendered(yamlText, "test", ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(pt.Agents) != 1 {
+		t.Fatalf("expected 1 agent template, got %d", len(pt.Agents))
+	}
+	a := pt.Agents[0]
+	// .Var.codename should be resolved, but .Index expressions should be deferred.
+	if !strings.Contains(a.Name, "fog") {
+		t.Errorf("expected name to contain resolved 'fog', got %q", a.Name)
+	}
+	if !strings.Contains(a.Name, ".Index") {
+		t.Errorf("expected name to still contain deferred .Index, got %q", a.Name)
+	}
+
+	// Now expand and verify names resolve correctly.
+	expanded, err := ExpandPodAgents(pt)
+	if err != nil {
+		t.Fatalf("expand error: %v", err)
+	}
+	if len(expanded) != 3 {
+		t.Fatalf("expected 3 agents, got %d", len(expanded))
+	}
+	expectedNames := []string{"coder-1-fog", "coder-2-fog", "coder-3-fog"}
+	expectedRoles := []string{"codex", "claude", "codex"}
+	for i, a := range expanded {
+		if a.Name != expectedNames[i] {
+			t.Errorf("agent %d: name = %q, want %q", i, a.Name, expectedNames[i])
+		}
+		if a.Role != expectedRoles[i] {
+			t.Errorf("agent %d: role = %q, want %q", i, a.Role, expectedRoles[i])
+		}
+	}
+}
+
 func TestLoadPodTemplateRendered_FromFile(t *testing.T) {
 	h2Dir := setupTestH2Dir(t)
 	podDir := filepath.Join(h2Dir, "pods")
