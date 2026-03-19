@@ -204,11 +204,26 @@ func printPodGroups(groups []podGroup, unresponsive []string) {
 		}
 
 		// Print group header.
+		hasBridges := len(g.Bridges) > 0
 		if hasPods || len(groups) > 1 {
 			if g.Pod != "" {
-				fmt.Printf("%s\n", s.Bold(fmt.Sprintf("pod: %s", g.Pod)))
+				if hasBridges {
+					fmt.Printf("%s\n", s.Bold(fmt.Sprintf("Agents & Bridges (pod: %s)", g.Pod)))
+				} else {
+					fmt.Printf("%s\n", s.Bold(fmt.Sprintf("Agents (pod: %s)", g.Pod)))
+				}
 			} else {
-				fmt.Printf("%s\n", s.Bold("(no pod)"))
+				if hasBridges {
+					fmt.Printf("%s\n", s.Bold("Agents & Bridges (no pod)"))
+				} else {
+					fmt.Printf("%s\n", s.Bold("Agents (no pod)"))
+				}
+			}
+		} else {
+			if hasBridges {
+				fmt.Printf("%s\n", s.Bold("Agents & Bridges"))
+			} else {
+				fmt.Printf("%s\n", s.Bold("Agents"))
 			}
 		}
 
@@ -533,11 +548,20 @@ func printPodGroupsIndented(groups []podGroup, unresponsive []string) {
 			fmt.Println()
 		}
 
+		hasBridges := len(g.Bridges) > 0
 		if hasPods || len(groups) > 1 {
 			if g.Pod != "" {
-				fmt.Printf("  %s\n", s.Bold(fmt.Sprintf("pod: %s", g.Pod)))
+				if hasBridges {
+					fmt.Printf("  %s\n", s.Bold(fmt.Sprintf("Agents & Bridges (pod: %s)", g.Pod)))
+				} else {
+					fmt.Printf("  %s\n", s.Bold(fmt.Sprintf("Agents (pod: %s)", g.Pod)))
+				}
 			} else {
-				fmt.Printf("  %s\n", s.Bold("(no pod)"))
+				if hasBridges {
+					fmt.Printf("  %s\n", s.Bold("Agents & Bridges (no pod)"))
+				} else {
+					fmt.Printf("  %s\n", s.Bold("Agents (no pod)"))
+				}
 			}
 		}
 
@@ -589,7 +613,7 @@ func printBridgeLine(info *message.BridgeInfo) {
 	}
 
 	fmt.Printf("  %s %s %s%s — up %s%s%s\n",
-		s.GreenDot(), info.Name, s.Magenta("(bridge)"), channels, info.Uptime, activity, msgs)
+		s.GreenDot(), info.Name, s.Green("(bridge)"), channels, info.Uptime, activity, msgs)
 }
 
 // queryBridge connects to a bridge socket and queries its status.
