@@ -1,15 +1,18 @@
 // Package ghostty implements tiled pane layout for the Ghostty terminal.
 //
-// It uses the `ghostty +action` CLI for all operations: splits, navigation,
-// tabs, and writing text to panes (via the text: action). No macOS
-// Accessibility permissions are required.
+// It uses Ghostty's native AppleScript support (Ghostty 1.3+) for all
+// operations: splits, navigation, tabs, and writing text to panes.
+// No macOS Accessibility permissions are required — this uses
+// `tell application "Ghostty"`, not `tell application "System Events"`.
 //
-// Ghostty action names used (verify with `ghostty +list-actions`):
+// Ghostty AppleScript operations used:
 //
-//	new_split:right, new_split:down
-//	goto_split:up, goto_split:down, goto_split:left, goto_split:right
-//	new_tab, previous_tab
-//	text:<string>  (writes to focused pane's PTY)
+//	new tab in front window
+//	split <term> direction right/down
+//	input text "<string>" to <term>
+//	perform action "<action>" on <term>
+//	close tab (selected tab of front window)
+//	focused terminal of selected tab of front window
 package ghostty
 
 import (
@@ -41,10 +44,6 @@ func (d *Driver) Script(layout tilelayout.TileLayout) string {
 // closes the tab. This gives the full window size even when invoked
 // from within an existing split.
 func (d *Driver) DetectFullWindowSize() (tilelayout.ScreenSize, error) {
-	if _, err := exec.LookPath("ghostty"); err != nil {
-		return tilelayout.ScreenSize{}, fmt.Errorf("ghostty CLI not found")
-	}
-
 	// Create a temp file for the new tab's shell to write its size into.
 	tmpFile, err := os.CreateTemp("", "h2-winsize-*.txt")
 	if err != nil {
@@ -54,8 +53,8 @@ func (d *Driver) DetectFullWindowSize() (tilelayout.ScreenSize, error) {
 	tmpFile.Close()
 	defer os.Remove(tmpPath)
 
-	// Open a temp tab.
-	if err := exec.Command("ghostty", "+action", "new_tab").Run(); err != nil {
+	// Open a temp tab via AppleScript.
+	if err := osascript(`tell application "Ghostty" to new tab in front window`); err != nil {
 		return tilelayout.ScreenSize{}, fmt.Errorf("open temp tab: %w", err)
 	}
 	time.Sleep(500 * time.Millisecond)
@@ -63,10 +62,9 @@ func (d *Driver) DetectFullWindowSize() (tilelayout.ScreenSize, error) {
 	// Type a command into the new tab that writes cols/rows to the temp file,
 	// then immediately closes the tab via exit.
 	sizeCmd := fmt.Sprintf(`echo "$(tput cols) $(tput lines)" > %s; exit`, tmpPath)
-	escaped := strings.ReplaceAll(sizeCmd, `\`, `\\`)
-	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
-	action := fmt.Sprintf("text:%s\\x0a", escaped)
-	exec.Command("ghostty", "+action", action).Run()
+	escaped := strings.ReplaceAll(sizeCmd, `"`, `\"`)
+	script := fmt.Sprintf(`tell application "Ghostty" to input text "%s\n" to (focused terminal of selected tab of front window)`, escaped)
+	osascript(script)
 
 	// Wait for the command to execute and the tab to close.
 	var size tilelayout.ScreenSize
@@ -88,8 +86,8 @@ func (d *Driver) DetectFullWindowSize() (tilelayout.ScreenSize, error) {
 	}
 
 	// Navigate back to the original tab (exit should have closed the temp tab,
-	// but previous_tab is a safe no-op if it already closed).
-	exec.Command("ghostty", "+action", "previous_tab").Run()
+	// but previous_tab is safe if it already closed).
+	osascript(`tell application "Ghostty" to perform action "previous_tab" on (focused terminal of selected tab of front window)`)
 	time.Sleep(100 * time.Millisecond)
 
 	if size.Cols == 0 {
@@ -110,11 +108,6 @@ func (d *Driver) Tile(layout tilelayout.TileLayout, h2Binary string) error {
 	// Single pane: no splits needed, just exec directly.
 	if layout.TotalPanes() == 1 {
 		return syscall.Exec(h2Binary, []string{"h2", "attach", firstAgent}, os.Environ())
-	}
-
-	// Verify ghostty CLI is available.
-	if _, err := exec.LookPath("ghostty"); err != nil {
-		return fmt.Errorf("ghostty CLI not found in PATH; ensure Ghostty CLI integration is enabled")
 	}
 
 	script := generateScript(layout)
@@ -148,27 +141,40 @@ func (d *Driver) Tile(layout tilelayout.TileLayout, h2Binary string) error {
 	return syscall.Exec(h2Binary, []string{"h2", "attach", firstAgent}, os.Environ())
 }
 
+// osascript runs an AppleScript snippet via the osascript CLI.
+func osascript(script string) error {
+	return exec.Command("osascript", "-e", script).Run()
+}
+
+// ghosttyTerm is the AppleScript expression for the focused terminal.
+const ghosttyTerm = "focused terminal of selected tab of front window"
+
 // generateScript produces a bash script that creates the tiled layout.
 //
+// Uses Ghostty's native AppleScript support (Ghostty 1.3+) for all
+// operations. No Accessibility permissions required.
+//
 // Grid build strategy (per tab):
-//  1. Create columns by splitting right (C-1 times). Focus ends on rightmost.
+//  1. Create columns by splitting right (C-1 times).
 //  2. Build rows right-to-left: in each column, split down (R-1 times),
-//     then goto_split:left to the next column.
+//     then navigate left to the next column.
 //  3. Navigate to top-left pane.
 //  4. Walk column-major through the grid, typing `h2 attach <name>` in
 //     each pane (except (0,0) of the first tab, which gets exec'd later).
-//
-// Note: binary splitting means columns won't be perfectly even for non-power-
-// of-2 counts. This is a Ghostty limitation; use equalize if available.
 func generateScript(layout tilelayout.TileLayout) string {
 	var b strings.Builder
 	b.WriteString("#!/bin/bash\n")
-	b.WriteString("# Generated by h2 attach --tile\n\n")
+	b.WriteString("# Generated by h2 attach --tile\n")
+	b.WriteString("# Uses Ghostty AppleScript (1.3+), no Accessibility permissions needed\n\n")
+
+	b.WriteString("TERM=$(osascript -e 'tell application \"Ghostty\" to " + ghosttyTerm + "')\n\n")
 
 	for tabIdx, tab := range layout.Tabs {
 		if tabIdx > 0 {
-			writeAction(&b, "new_tab")
+			writeOsascript(&b, `tell application "Ghostty" to new tab in front window`)
 			writeSleep(&b, 500)
+			// Re-acquire terminal reference for new tab.
+			b.WriteString("TERM=$(osascript -e 'tell application \"Ghostty\" to " + ghosttyTerm + "')\n")
 		}
 
 		writeBuildPhase(&b, tab)
@@ -183,24 +189,23 @@ func generateScript(layout tilelayout.TileLayout) string {
 	if len(layout.Tabs) > 1 {
 		b.WriteString("\n# Return to first tab\n")
 		for i := 1; i < len(layout.Tabs); i++ {
-			writeAction(&b, "previous_tab")
+			writePerformAction(&b, "previous_tab")
 			writeSleep(&b, 100)
 		}
 	}
 
 	// Navigate to (0,0) in the first tab for the exec.
-	// Extra up/left from the boundary are no-ops.
 	if len(layout.Tabs) > 0 {
 		tab := layout.Tabs[0]
 		b.WriteString("\n# Focus top-left pane for exec\n")
 		for r := 1; r < tab.Rows; r++ {
-			writeAction(&b, "goto_split:up")
+			writePerformAction(&b, "goto_split:up")
 		}
 		if tab.Rows > 1 {
 			writeSleep(&b, 50)
 		}
 		for c := 1; c < tab.Cols; c++ {
-			writeAction(&b, "goto_split:left")
+			writePerformAction(&b, "goto_split:left")
 		}
 		if tab.Cols > 1 {
 			writeSleep(&b, 50)
@@ -220,7 +225,7 @@ func writeBuildPhase(b *strings.Builder, tab tilelayout.TabLayout) {
 
 	// Create columns by splitting right.
 	for c := 1; c < tab.Cols; c++ {
-		writeAction(b, "new_split:right")
+		writeSplit(b, "right")
 		writeSleep(b, 300)
 	}
 
@@ -228,12 +233,12 @@ func writeBuildPhase(b *strings.Builder, tab tilelayout.TabLayout) {
 	// After column splits, focus is on the rightmost column.
 	for c := tab.Cols - 1; c >= 0; c-- {
 		if c < tab.Cols-1 {
-			writeAction(b, "goto_split:left")
+			writePerformAction(b, "goto_split:left")
 			writeSleep(b, 100)
 		}
 		colRows := tab.RowsInCol(c)
 		for r := 1; r < colRows; r++ {
-			writeAction(b, "new_split:down")
+			writeSplit(b, "down")
 			writeSleep(b, 300)
 		}
 	}
@@ -252,7 +257,7 @@ func writeTypePhase(b *strings.Builder, tab tilelayout.TabLayout, isFirstTab boo
 	// Navigate up to (0,0).
 	col0Rows := tab.RowsInCol(0)
 	for r := 1; r < col0Rows; r++ {
-		writeAction(b, "goto_split:up")
+		writePerformAction(b, "goto_split:up")
 		writeSleep(b, 50)
 	}
 
@@ -261,10 +266,10 @@ func writeTypePhase(b *strings.Builder, tab tilelayout.TabLayout, isFirstTab boo
 			// Return to top of previous column, then move right.
 			prevColRows := tab.RowsInCol(c - 1)
 			for r := 1; r < prevColRows; r++ {
-				writeAction(b, "goto_split:up")
+				writePerformAction(b, "goto_split:up")
 				writeSleep(b, 50)
 			}
-			writeAction(b, "goto_split:right")
+			writePerformAction(b, "goto_split:right")
 			writeSleep(b, 50)
 		}
 
@@ -273,7 +278,7 @@ func writeTypePhase(b *strings.Builder, tab tilelayout.TabLayout, isFirstTab boo
 			if isFirstTab && c == 0 && r == 0 {
 				// Skip (0,0) of first tab — will exec there later.
 				if colRows > 1 {
-					writeAction(b, "goto_split:down")
+					writePerformAction(b, "goto_split:down")
 					writeSleep(b, 50)
 				}
 				continue
@@ -285,7 +290,7 @@ func writeTypePhase(b *strings.Builder, tab tilelayout.TabLayout, isFirstTab boo
 			}
 
 			if r < colRows-1 {
-				writeAction(b, "goto_split:down")
+				writePerformAction(b, "goto_split:down")
 				writeSleep(b, 50)
 			}
 		}
@@ -293,8 +298,16 @@ func writeTypePhase(b *strings.Builder, tab tilelayout.TabLayout, isFirstTab boo
 	b.WriteByte('\n')
 }
 
-func writeAction(b *strings.Builder, action string) {
-	fmt.Fprintf(b, "ghostty +action %s\n", action)
+func writeOsascript(b *strings.Builder, script string) {
+	fmt.Fprintf(b, "osascript -e '%s'\n", script)
+}
+
+func writePerformAction(b *strings.Builder, action string) {
+	fmt.Fprintf(b, "osascript -e 'tell application \"Ghostty\" to perform action \"%s\" on (%s)'\n", action, ghosttyTerm)
+}
+
+func writeSplit(b *strings.Builder, direction string) {
+	fmt.Fprintf(b, "osascript -e 'tell application \"Ghostty\" to split (%s) direction %s'\n", ghosttyTerm, direction)
 }
 
 func writeSleep(b *strings.Builder, ms int) {
@@ -302,11 +315,10 @@ func writeSleep(b *strings.Builder, ms int) {
 }
 
 func writeTypeAttach(b *strings.Builder, agentName string) {
-	// Use Ghostty's text: action to write directly to the focused pane's PTY.
-	// No macOS Accessibility permissions required (unlike osascript keystroke).
-	// \x0a is a newline (Enter) in Ghostty's text action escape syntax.
+	// Use Ghostty's AppleScript input text to write directly to the focused pane.
+	// \n triggers Enter. No Accessibility permissions required.
 	escaped := strings.ReplaceAll(agentName, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
-	fmt.Fprintf(b, "ghostty +action \"text:h2 attach %s\\x0a\"\n", escaped)
+	fmt.Fprintf(b, "osascript -e 'tell application \"Ghostty\" to input text \"h2 attach %s\\n\" to (%s)'\n", escaped, ghosttyTerm)
 	writeSleep(b, 300)
 }
