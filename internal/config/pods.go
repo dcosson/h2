@@ -185,9 +185,18 @@ func OverridesToSlice(overrides map[string]string) []string {
 	return result
 }
 
-// LoadPodTemplate loads a template from <h2-dir>/pods/<name>.yaml.
+// resolvePodPath finds the pod file for the given name, trying .yaml.tmpl first, then .yaml.
+func resolvePodPath(dir, name string) string {
+	tmplPath := filepath.Join(dir, name+".yaml.tmpl")
+	if _, err := os.Stat(tmplPath); err == nil {
+		return tmplPath
+	}
+	return filepath.Join(dir, name+".yaml")
+}
+
+// LoadPodTemplate loads a template from <h2-dir>/pods/<name>.yaml or <name>.yaml.tmpl.
 func LoadPodTemplate(name string) (*PodTemplate, error) {
-	path := filepath.Join(PodDir(), name+".yaml")
+	path := resolvePodPath(PodDir(), name)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read pod template: %w", err)
@@ -201,9 +210,10 @@ func LoadPodTemplate(name string) (*PodTemplate, error) {
 }
 
 // LoadPodTemplateRendered loads a pod template with template rendering.
+// Tries <name>.yaml.tmpl first, then <name>.yaml.
 // It extracts variables, validates them, renders the template, then parses.
 func LoadPodTemplateRendered(name string, ctx *tmpl.Context) (*PodTemplate, error) {
-	path := filepath.Join(PodDir(), name+".yaml")
+	path := resolvePodPath(PodDir(), name)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read pod template: %w", err)
@@ -266,12 +276,26 @@ func ListPodTemplates() ([]*PodTemplate, error) {
 		return nil, fmt.Errorf("read pods dir: %w", err)
 	}
 
+	seen := make(map[string]bool) // deduplicate foo.yaml vs foo.yaml.tmpl
 	var templates []*PodTemplate
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+		if entry.IsDir() {
 			continue
 		}
-		tmpl, err := LoadPodTemplate(strings.TrimSuffix(entry.Name(), ".yaml"))
+		var name string
+		switch {
+		case strings.HasSuffix(entry.Name(), ".yaml.tmpl"):
+			name = strings.TrimSuffix(entry.Name(), ".yaml.tmpl")
+		case strings.HasSuffix(entry.Name(), ".yaml"):
+			name = strings.TrimSuffix(entry.Name(), ".yaml")
+		default:
+			continue
+		}
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		tmpl, err := LoadPodTemplate(name)
 		if err != nil {
 			continue
 		}

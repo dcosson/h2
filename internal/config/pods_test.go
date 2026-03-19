@@ -633,6 +633,115 @@ agents:
 	}
 }
 
+func TestLoadPodTemplate_YAMLTmplExtension(t *testing.T) {
+	h2Dir := setupTestH2Dir(t)
+	podDir := filepath.Join(h2Dir, "pods")
+	os.MkdirAll(podDir, 0o755)
+
+	content := `pod_name: tmpltest
+agents:
+  - name: worker
+    role: coding
+`
+	// Write as .yaml.tmpl, not .yaml
+	os.WriteFile(filepath.Join(podDir, "tmpltest.yaml.tmpl"), []byte(content), 0o644)
+
+	pt, err := LoadPodTemplate("tmpltest")
+	if err != nil {
+		t.Fatalf("LoadPodTemplate failed for .yaml.tmpl file: %v", err)
+	}
+	if pt.PodName != "tmpltest" {
+		t.Errorf("PodName = %q, want tmpltest", pt.PodName)
+	}
+}
+
+func TestLoadPodTemplateRendered_YAMLTmplExtension(t *testing.T) {
+	h2Dir := setupTestH2Dir(t)
+	podDir := filepath.Join(h2Dir, "pods")
+	os.MkdirAll(podDir, 0o755)
+
+	content := `variables:
+  team:
+    default: backend
+
+pod_name: tmpltest
+agents:
+  - name: worker
+    role: coding
+    vars:
+      team: {{ .Var.team }}
+`
+	os.WriteFile(filepath.Join(podDir, "tmpltest.yaml.tmpl"), []byte(content), 0o644)
+
+	ctx := &tmpl.Context{PodName: "tmpltest"}
+	pt, err := LoadPodTemplateRendered("tmpltest", ctx)
+	if err != nil {
+		t.Fatalf("LoadPodTemplateRendered failed for .yaml.tmpl file: %v", err)
+	}
+	if pt.Agents[0].Vars["team"] != "backend" {
+		t.Errorf("vars[team] = %q, want backend", pt.Agents[0].Vars["team"])
+	}
+}
+
+func TestLoadPodTemplate_YAMLTmplPreferredOverYAML(t *testing.T) {
+	h2Dir := setupTestH2Dir(t)
+	podDir := filepath.Join(h2Dir, "pods")
+	os.MkdirAll(podDir, 0o755)
+
+	// Both exist; .yaml.tmpl should win
+	os.WriteFile(filepath.Join(podDir, "both.yaml.tmpl"), []byte("pod_name: from-tmpl\nagents: []\n"), 0o644)
+	os.WriteFile(filepath.Join(podDir, "both.yaml"), []byte("pod_name: from-yaml\nagents: []\n"), 0o644)
+
+	pt, err := LoadPodTemplate("both")
+	if err != nil {
+		t.Fatalf("LoadPodTemplate failed: %v", err)
+	}
+	if pt.PodName != "from-tmpl" {
+		t.Errorf("PodName = %q, want from-tmpl (.yaml.tmpl should take precedence)", pt.PodName)
+	}
+}
+
+func TestListPodTemplates_IncludesYAMLTmpl(t *testing.T) {
+	h2Dir := setupTestH2Dir(t)
+	podDir := filepath.Join(h2Dir, "pods")
+	os.MkdirAll(podDir, 0o755)
+
+	os.WriteFile(filepath.Join(podDir, "plain.yaml"), []byte("pod_name: plain\nagents: []\n"), 0o644)
+	os.WriteFile(filepath.Join(podDir, "tmpl.yaml.tmpl"), []byte("pod_name: tmpl\nagents: []\n"), 0o644)
+
+	templates, err := ListPodTemplates()
+	if err != nil {
+		t.Fatalf("ListPodTemplates failed: %v", err)
+	}
+	names := make(map[string]bool)
+	for _, pt := range templates {
+		names[pt.PodName] = true
+	}
+	if !names["plain"] {
+		t.Error("ListPodTemplates missing plain.yaml pod")
+	}
+	if !names["tmpl"] {
+		t.Error("ListPodTemplates missing tmpl.yaml.tmpl pod")
+	}
+}
+
+func TestListPodTemplates_DeduplicatesYAMLAndTmpl(t *testing.T) {
+	h2Dir := setupTestH2Dir(t)
+	podDir := filepath.Join(h2Dir, "pods")
+	os.MkdirAll(podDir, 0o755)
+
+	os.WriteFile(filepath.Join(podDir, "dup.yaml.tmpl"), []byte("pod_name: dup-tmpl\nagents: []\n"), 0o644)
+	os.WriteFile(filepath.Join(podDir, "dup.yaml"), []byte("pod_name: dup-yaml\nagents: []\n"), 0o644)
+
+	templates, err := ListPodTemplates()
+	if err != nil {
+		t.Fatalf("ListPodTemplates failed: %v", err)
+	}
+	if len(templates) != 1 {
+		t.Fatalf("expected 1 template (deduplicated), got %d", len(templates))
+	}
+}
+
 // --- Section 5.1 gap: nil agents list ---
 
 func TestExpandPodAgents_NilAgents(t *testing.T) {
