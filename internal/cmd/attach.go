@@ -17,14 +17,27 @@ import (
 )
 
 func newAttachCmd() *cobra.Command {
-	return &cobra.Command{
+	var tile bool
+
+	cmd := &cobra.Command{
 		Use:   "attach <name>",
 		Short: "Attach to a running agent",
-		Args:  cobra.ExactArgs(1),
+		Long: `Attach to a running agent's terminal session.
+
+With --tile, open Ghostty splits for multiple agents at once.
+Name can be a pod name, a single agent name, or a comma-separated list.
+If a pod and agent share the same name, the pod takes priority.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if tile {
+				return doTileAttach(args[0])
+			}
 			return doAttach(args[0])
 		},
 	}
+
+	cmd.Flags().BoolVar(&tile, "tile", false, "Tile agents in Ghostty splits")
+	return cmd
 }
 
 // doAttach connects to a running daemon and proxies terminal I/O.
