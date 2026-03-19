@@ -43,14 +43,20 @@ func newLsCmd() *cobra.Command {
 				return nil
 			}
 
-			// Collect bridge entries and query agent info.
-			var bridges []socketdir.Entry
+			// Collect agent and bridge info.
+			var bridgeInfos []*message.BridgeInfo
+			var bridgeUnnamed []socketdir.Entry
 			var agentInfos []*message.AgentInfo
 			var unresponsive []string
 			for _, e := range entries {
 				switch e.Type {
 				case socketdir.TypeBridge:
-					bridges = append(bridges, e)
+					info := queryBridge(e.Path)
+					if info != nil {
+						bridgeInfos = append(bridgeInfos, info)
+					} else {
+						bridgeUnnamed = append(bridgeUnnamed, e)
+					}
 				case socketdir.TypeAgent:
 					info := queryAgent(e.Path)
 					if info != nil {
@@ -67,15 +73,12 @@ func newLsCmd() *cobra.Command {
 				podFilter = os.Getenv("H2_POD")
 			}
 
-			groups := groupAgentsByPod(agentInfos, podFilter)
+			groups := groupByPod(agentInfos, bridgeInfos, podFilter)
 			printPodGroups(groups, unresponsive)
 
-			// Bridges are always shown.
-			if len(bridges) > 0 {
-				fmt.Printf("\n%s\n", s.Bold("Bridges"))
-				for _, e := range bridges {
-					printBridgeEntry(e)
-				}
+			// Show bridges that didn't respond to status query.
+			for _, e := range bridgeUnnamed {
+				fmt.Printf("  %s %s %s\n", s.GreenDot(), e.Name, s.Dim("(bridge, not responding)"))
 			}
 
 			return nil
@@ -88,39 +91,55 @@ func newLsCmd() *cobra.Command {
 	return cmd
 }
 
-// podGroup represents a group of agents with the same pod name.
+// podGroup represents a group of agents and bridges with the same pod name.
 type podGroup struct {
-	Pod    string // empty string means "no pod"
-	Agents []*message.AgentInfo
+	Pod     string // empty string means "no pod"
+	Agents  []*message.AgentInfo
+	Bridges []*message.BridgeInfo
 }
 
-// groupAgentsByPod groups agents according to the pod filter logic.
+// groupByPod groups agents and bridges according to the pod filter logic.
 //
 // podFilter semantics:
-//   - "*": show all agents, grouped by pod
-//   - "<name>": show only agents in that pod
-//   - "": show all agents, grouped by pod if any pods exist
-func groupAgentsByPod(agents []*message.AgentInfo, podFilter string) []podGroup {
-	if len(agents) == 0 {
+//   - "*": show all, grouped by pod
+//   - "<name>": show only items in that pod
+//   - "": show all, grouped by pod if any pods exist
+func groupByPod(agents []*message.AgentInfo, bridges []*message.BridgeInfo, podFilter string) []podGroup {
+	if len(agents) == 0 && len(bridges) == 0 {
 		return nil
 	}
 
-	// Collect agents into pod buckets.
-	podMap := make(map[string][]*message.AgentInfo) // pod name -> agents ("" for no pod)
+	// Collect into pod buckets.
+	type bucket struct {
+		agents  []*message.AgentInfo
+		bridges []*message.BridgeInfo
+	}
+	podMap := make(map[string]*bucket)
+	ensureBucket := func(pod string) *bucket {
+		if b, ok := podMap[pod]; ok {
+			return b
+		}
+		b := &bucket{}
+		podMap[pod] = b
+		return b
+	}
 	for _, a := range agents {
-		podMap[a.Pod] = append(podMap[a.Pod], a)
+		ensureBucket(a.Pod).agents = append(ensureBucket(a.Pod).agents, a)
+	}
+	for _, b := range bridges {
+		ensureBucket(b.Pod).bridges = append(ensureBucket(b.Pod).bridges, b)
 	}
 
 	// Filter by specific pod name.
 	if podFilter != "" && podFilter != "*" {
-		filtered := podMap[podFilter]
-		if len(filtered) == 0 {
+		b := podMap[podFilter]
+		if b == nil {
 			return nil
 		}
-		return []podGroup{{Pod: podFilter, Agents: filtered}}
+		return []podGroup{{Pod: podFilter, Agents: b.agents, Bridges: b.bridges}}
 	}
 
-	// Check if any agents have pod membership.
+	// Check if any items have pod membership.
 	hasPods := false
 	for pod := range podMap {
 		if pod != "" {
@@ -129,9 +148,13 @@ func groupAgentsByPod(agents []*message.AgentInfo, podFilter string) []podGroup 
 		}
 	}
 
-	// If showing all and no pods exist, return a single flat group.
+	// If no pods exist, return a single flat group.
 	if !hasPods && podFilter != "*" {
-		return []podGroup{{Pod: "", Agents: agents}}
+		b := podMap[""]
+		if b == nil {
+			return nil
+		}
+		return []podGroup{{Pod: "", Agents: b.agents, Bridges: b.bridges}}
 	}
 
 	// Build sorted groups: named pods first (alphabetical), then no-pod.
@@ -145,16 +168,17 @@ func groupAgentsByPod(agents []*message.AgentInfo, podFilter string) []podGroup 
 
 	var groups []podGroup
 	for _, pod := range podNames {
-		groups = append(groups, podGroup{Pod: pod, Agents: podMap[pod]})
+		b := podMap[pod]
+		groups = append(groups, podGroup{Pod: pod, Agents: b.agents, Bridges: b.bridges})
 	}
-	if noPod := podMap[""]; len(noPod) > 0 {
-		groups = append(groups, podGroup{Pod: "", Agents: noPod})
+	if b := podMap[""]; b != nil {
+		groups = append(groups, podGroup{Pod: "", Agents: b.agents, Bridges: b.bridges})
 	}
 
 	return groups
 }
 
-// printPodGroups renders grouped agent output.
+// printPodGroups renders grouped agent and bridge output.
 func printPodGroups(groups []podGroup, unresponsive []string) {
 	if len(groups) == 0 && len(unresponsive) == 0 {
 		fmt.Println("No matching agents.")
@@ -177,16 +201,17 @@ func printPodGroups(groups []podGroup, unresponsive []string) {
 		// Print group header.
 		if hasPods || len(groups) > 1 {
 			if g.Pod != "" {
-				fmt.Printf("%s\n", s.Bold(fmt.Sprintf("Agents (pod: %s)", g.Pod)))
+				fmt.Printf("%s\n", s.Bold(fmt.Sprintf("pod: %s", g.Pod)))
 			} else {
-				fmt.Printf("%s\n", s.Bold("Agents (no pod)"))
+				fmt.Printf("%s\n", s.Bold("(no pod)"))
 			}
-		} else {
-			fmt.Printf("%s\n", s.Bold("Agents"))
 		}
 
 		for _, info := range g.Agents {
 			printAgentLine(info)
+		}
+		for _, info := range g.Bridges {
+			printBridgeLine(info)
 		}
 	}
 
@@ -412,13 +437,19 @@ func listDirAgents(h2Dir string, agentPrefix string) {
 		return
 	}
 
-	var bridges []socketdir.Entry
+	var bridgeInfos []*message.BridgeInfo
+	var bridgeUnnamed []socketdir.Entry
 	var agentInfos []*message.AgentInfo
 	var unresponsive []string
 	for _, e := range entries {
 		switch e.Type {
 		case socketdir.TypeBridge:
-			bridges = append(bridges, e)
+			info := queryBridge(e.Path)
+			if info != nil {
+				bridgeInfos = append(bridgeInfos, info)
+			} else {
+				bridgeUnnamed = append(bridgeUnnamed, e)
+			}
 		case socketdir.TypeAgent:
 			info := queryAgent(e.Path)
 			if info != nil {
@@ -433,21 +464,17 @@ func listDirAgents(h2Dir string, agentPrefix string) {
 		}
 	}
 
-	groups := groupAgentsByPod(agentInfos, "*")
+	groups := groupByPod(agentInfos, bridgeInfos, "*")
 	if len(groups) > 0 || len(unresponsive) > 0 {
 		printPodGroupsIndented(groups, unresponsive)
 	}
 
-	if len(bridges) > 0 {
-		fmt.Printf("  %s\n", s.Bold("Bridges"))
-		for _, e := range bridges {
-			fmt.Print("  ")
-			printBridgeEntry(e)
-		}
+	for _, e := range bridgeUnnamed {
+		fmt.Printf("    %s %s %s\n", s.GreenDot(), e.Name, s.Dim("(bridge, not responding)"))
 	}
 }
 
-// printPodGroupsIndented renders grouped agent output with extra indent for --all mode.
+// printPodGroupsIndented renders grouped agent/bridge output with extra indent for --all mode.
 func printPodGroupsIndented(groups []podGroup, unresponsive []string) {
 	if len(groups) == 0 && len(unresponsive) == 0 {
 		return
@@ -468,17 +495,19 @@ func printPodGroupsIndented(groups []podGroup, unresponsive []string) {
 
 		if hasPods || len(groups) > 1 {
 			if g.Pod != "" {
-				fmt.Printf("  %s\n", s.Bold(fmt.Sprintf("Agents (pod: %s)", g.Pod)))
+				fmt.Printf("  %s\n", s.Bold(fmt.Sprintf("pod: %s", g.Pod)))
 			} else {
-				fmt.Printf("  %s\n", s.Bold("Agents (no pod)"))
+				fmt.Printf("  %s\n", s.Bold("(no pod)"))
 			}
-		} else {
-			fmt.Printf("  %s\n", s.Bold("Agents"))
 		}
 
 		for _, info := range g.Agents {
 			fmt.Print("  ")
 			printAgentLine(info)
+		}
+		for _, info := range g.Bridges {
+			fmt.Print("  ")
+			printBridgeLine(info)
 		}
 	}
 
@@ -502,17 +531,6 @@ func shortenHome(path string) string {
 	return path
 }
 
-// printBridgeEntry queries a bridge socket for status and prints a rich line,
-// falling back to a simple name-only line if the bridge doesn't respond.
-func printBridgeEntry(e socketdir.Entry) {
-	info := queryBridge(e.Path)
-	if info != nil {
-		printBridgeLine(info)
-	} else {
-		fmt.Printf("  %s %s\n", s.GreenDot(), e.Name)
-	}
-}
-
 func printBridgeLine(info *message.BridgeInfo) {
 	channels := ""
 	if len(info.Channels) > 0 {
@@ -530,8 +548,8 @@ func printBridgeLine(info *message.BridgeInfo) {
 		msgs = fmt.Sprintf(", %d msgs", total)
 	}
 
-	fmt.Printf("  %s %s%s — up %s%s%s\n",
-		s.GreenDot(), info.Name, channels, info.Uptime, activity, msgs)
+	fmt.Printf("  %s %s %s%s — up %s%s%s\n",
+		s.GreenDot(), info.Name, s.Magenta("(bridge)"), channels, info.Uptime, activity, msgs)
 }
 
 // queryBridge connects to a bridge socket and queries its status.

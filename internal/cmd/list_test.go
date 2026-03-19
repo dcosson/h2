@@ -21,7 +21,7 @@ func TestGroupAgentsByPod_NoPods(t *testing.T) {
 		makeAgent("a1", ""),
 		makeAgent("a2", ""),
 	}
-	groups := groupAgentsByPod(agents, "")
+	groups := groupByPod(agents, nil, "")
 	if len(groups) != 1 {
 		t.Fatalf("expected 1 group, got %d", len(groups))
 	}
@@ -40,7 +40,7 @@ func TestGroupAgentsByPod_MixedPods(t *testing.T) {
 		makeAgent("a3", ""),
 		makeAgent("a4", "backend"),
 	}
-	groups := groupAgentsByPod(agents, "")
+	groups := groupByPod(agents, nil, "")
 
 	// Should have 3 groups: backend, frontend, no-pod (alphabetical order for named pods).
 	if len(groups) != 3 {
@@ -73,7 +73,7 @@ func TestGroupAgentsByPod_FilterByName(t *testing.T) {
 		makeAgent("a3", "backend"),
 		makeAgent("a4", ""),
 	}
-	groups := groupAgentsByPod(agents, "backend")
+	groups := groupByPod(agents, nil, "backend")
 
 	if len(groups) != 1 {
 		t.Fatalf("expected 1 group, got %d", len(groups))
@@ -91,7 +91,7 @@ func TestGroupAgentsByPod_FilterByNameNoMatch(t *testing.T) {
 		makeAgent("a1", "backend"),
 		makeAgent("a2", ""),
 	}
-	groups := groupAgentsByPod(agents, "nonexistent")
+	groups := groupByPod(agents, nil, "nonexistent")
 
 	if len(groups) != 0 {
 		t.Fatalf("expected 0 groups, got %d", len(groups))
@@ -103,7 +103,7 @@ func TestGroupAgentsByPod_StarShowsAll(t *testing.T) {
 		makeAgent("a1", "backend"),
 		makeAgent("a2", ""),
 	}
-	groups := groupAgentsByPod(agents, "*")
+	groups := groupByPod(agents, nil, "*")
 
 	// Star should show all grouped even if some have no pod.
 	if len(groups) != 2 {
@@ -122,7 +122,7 @@ func TestGroupAgentsByPod_StarAllNoPod(t *testing.T) {
 		makeAgent("a1", ""),
 		makeAgent("a2", ""),
 	}
-	groups := groupAgentsByPod(agents, "*")
+	groups := groupByPod(agents, nil, "*")
 
 	// Star with no pods still groups them.
 	if len(groups) != 1 {
@@ -134,7 +134,7 @@ func TestGroupAgentsByPod_StarAllNoPod(t *testing.T) {
 }
 
 func TestGroupAgentsByPod_Empty(t *testing.T) {
-	groups := groupAgentsByPod(nil, "")
+	groups := groupByPod(nil, nil, "")
 	if groups != nil {
 		t.Errorf("expected nil, got %v", groups)
 	}
@@ -145,7 +145,7 @@ func TestGroupAgentsByPod_OnlyPoddedAgents(t *testing.T) {
 		makeAgent("a1", "backend"),
 		makeAgent("a2", "frontend"),
 	}
-	groups := groupAgentsByPod(agents, "")
+	groups := groupByPod(agents, nil, "")
 
 	// All agents have pods, so should be grouped.
 	if len(groups) != 2 {
@@ -156,6 +156,68 @@ func TestGroupAgentsByPod_OnlyPoddedAgents(t *testing.T) {
 	}
 	if groups[1].Pod != "frontend" {
 		t.Errorf("group[1] pod = %q, want %q", groups[1].Pod, "frontend")
+	}
+}
+
+func makeBridge(name, pod string) *message.BridgeInfo {
+	return &message.BridgeInfo{
+		Name:   name,
+		Pod:    pod,
+		Uptime: "1m",
+	}
+}
+
+func TestGroupByPod_BridgesGroupedWithAgents(t *testing.T) {
+	agents := []*message.AgentInfo{
+		makeAgent("a1", "backend"),
+		makeAgent("a2", ""),
+	}
+	bridges := []*message.BridgeInfo{
+		makeBridge("b1", "backend"),
+		makeBridge("b2", ""),
+	}
+	groups := groupByPod(agents, bridges, "")
+
+	if len(groups) != 2 {
+		t.Fatalf("expected 2 groups, got %d", len(groups))
+	}
+	// backend pod should have 1 agent + 1 bridge.
+	if groups[0].Pod != "backend" {
+		t.Errorf("group[0] pod = %q, want %q", groups[0].Pod, "backend")
+	}
+	if len(groups[0].Agents) != 1 {
+		t.Errorf("group[0] agents = %d, want 1", len(groups[0].Agents))
+	}
+	if len(groups[0].Bridges) != 1 {
+		t.Errorf("group[0] bridges = %d, want 1", len(groups[0].Bridges))
+	}
+	// no-pod group should have 1 agent + 1 bridge.
+	if groups[1].Pod != "" {
+		t.Errorf("group[1] pod = %q, want empty", groups[1].Pod)
+	}
+	if len(groups[1].Agents) != 1 {
+		t.Errorf("group[1] agents = %d, want 1", len(groups[1].Agents))
+	}
+	if len(groups[1].Bridges) != 1 {
+		t.Errorf("group[1] bridges = %d, want 1", len(groups[1].Bridges))
+	}
+}
+
+func TestGroupByPod_BridgesOnlyPod(t *testing.T) {
+	// A pod with only bridges and no agents should still appear.
+	bridges := []*message.BridgeInfo{
+		makeBridge("b1", "infra"),
+	}
+	groups := groupByPod(nil, bridges, "")
+
+	if len(groups) != 1 {
+		t.Fatalf("expected 1 group, got %d", len(groups))
+	}
+	if groups[0].Pod != "infra" {
+		t.Errorf("group[0] pod = %q, want %q", groups[0].Pod, "infra")
+	}
+	if len(groups[0].Bridges) != 1 {
+		t.Errorf("group[0] bridges = %d, want 1", len(groups[0].Bridges))
 	}
 }
 
