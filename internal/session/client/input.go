@@ -46,6 +46,29 @@ func (c *Client) writePTYOrHang(p []byte) bool {
 	return true
 }
 
+// ResetModeOnExit transitions the client out of passthrough or scroll mode
+// into ModeNormal when the child process exits. Called by Session when the
+// child exits so the "relaunch / quit" UI is immediately usable.
+func (c *Client) ResetModeOnExit() {
+	switch c.Mode {
+	case ModePassthrough:
+		c.CancelPendingEsc()
+		c.PassthroughEsc = c.PassthroughEsc[:0]
+		if c.ReleasePassthrough != nil {
+			c.ReleasePassthrough()
+		}
+		c.setMode(ModeNormal)
+	case ModeScroll, ModePassthroughScroll:
+		c.CancelPendingEsc()
+		c.ScrollOffset = 0
+		c.ScrollAnchorY = 0
+		c.ScrollHistoryAnchor = 0
+		c.setMode(ModeNormal)
+	case ModeMenu:
+		c.setMode(ModeNormal)
+	}
+}
+
 // HandleExitedBytes processes input when the child has exited or is hung.
 // Enter relaunches, q quits. ESC sequences are processed for mouse scroll.
 func (c *Client) HandleExitedBytes(buf []byte, start, n int) int {
@@ -110,7 +133,14 @@ func (c *Client) CancelPendingEsc() {
 func (c *Client) HandlePassthroughBytes(buf []byte, start, n int) int {
 	for i := start; i < n; {
 		if c.VT.ChildExited || c.VT.ChildHung {
-			return n
+			c.CancelPendingEsc()
+			c.PassthroughEsc = c.PassthroughEsc[:0]
+			if c.ReleasePassthrough != nil {
+				c.ReleasePassthrough()
+			}
+			c.setMode(ModeNormal)
+			c.RenderBar()
+			return c.HandleExitedBytes(buf, i, n)
 		}
 		b := buf[i]
 		if c.PendingEsc {
@@ -591,6 +621,11 @@ func (c *Client) CyclePriority() {
 // Esc or q exits scroll mode. Arrow keys scroll. All other input is ignored.
 func (c *Client) HandleScrollBytes(buf []byte, start, n int) int {
 	for i := start; i < n; {
+		if c.VT.ChildExited || c.VT.ChildHung {
+			c.CancelPendingEsc()
+			c.ExitScrollMode()
+			return c.HandleExitedBytes(buf, i, n)
+		}
 		b := buf[i]
 
 		// Handle continuation of a pending ESC from a previous read.

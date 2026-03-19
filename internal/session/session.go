@@ -551,6 +551,9 @@ func (s *Session) lifecycleLoop(stopStatus chan struct{}, interactive bool) erro
 			s.VT.ChildExited = true
 			s.VT.ExitError = err
 			s.ForEachClient(func(cl *client.Client) {
+				// Force clients out of passthrough/scroll into normal
+				// so the "relaunch / quit" UI is immediately usable.
+				cl.ResetModeOnExit()
 				cl.RenderScreen()
 				cl.RenderBar()
 			})

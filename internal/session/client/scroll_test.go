@@ -805,6 +805,137 @@ func TestExitedScrollMode_ScrollDownToBottomExits(t *testing.T) {
 	}
 }
 
+func TestResetModeOnExit_FromPassthrough(t *testing.T) {
+	o := newTestClient(10, 80)
+	released := false
+	o.ReleasePassthrough = func() { released = true }
+	o.Mode = ModePassthrough
+	o.ResetModeOnExit()
+	if o.Mode != ModeNormal {
+		t.Fatalf("expected ModeNormal, got %d", o.Mode)
+	}
+	if !released {
+		t.Fatal("expected ReleasePassthrough to be called")
+	}
+}
+
+func TestResetModeOnExit_FromScroll(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.EnterScrollMode()
+	o.ScrollUp(3)
+	if o.Mode != ModeScroll {
+		t.Fatalf("expected ModeScroll, got %d", o.Mode)
+	}
+	o.ResetModeOnExit()
+	if o.Mode != ModeNormal {
+		t.Fatalf("expected ModeNormal, got %d", o.Mode)
+	}
+	if o.ScrollOffset != 0 {
+		t.Fatalf("expected ScrollOffset 0, got %d", o.ScrollOffset)
+	}
+}
+
+func TestResetModeOnExit_FromPassthroughScroll(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.Mode = ModePassthrough
+	o.EnterScrollMode()
+	if o.Mode != ModePassthroughScroll {
+		t.Fatalf("expected ModePassthroughScroll, got %d", o.Mode)
+	}
+	o.ResetModeOnExit()
+	if o.Mode != ModeNormal {
+		t.Fatalf("expected ModeNormal, got %d", o.Mode)
+	}
+}
+
+func TestResetModeOnExit_FromMenu(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.Mode = ModeMenu
+	o.ResetModeOnExit()
+	if o.Mode != ModeNormal {
+		t.Fatalf("expected ModeNormal, got %d", o.Mode)
+	}
+}
+
+func TestResetModeOnExit_NormalIsNoop(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.Mode = ModeNormal
+	o.ResetModeOnExit()
+	if o.Mode != ModeNormal {
+		t.Fatalf("expected ModeNormal, got %d", o.Mode)
+	}
+}
+
+func TestPassthrough_ChildExited_TransitionsToExited(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.Mode = ModePassthrough
+	o.VT.ChildExited = true
+	relaunched := false
+	o.OnRelaunch = func() { relaunched = true }
+
+	// Press Enter — should exit passthrough and trigger relaunch.
+	buf := []byte{'\r'}
+	o.HandlePassthroughBytes(buf, 0, len(buf))
+	if o.Mode != ModeNormal {
+		t.Fatalf("expected ModeNormal, got %d", o.Mode)
+	}
+	if !relaunched {
+		t.Fatal("expected OnRelaunch to be called")
+	}
+}
+
+func TestPassthrough_ChildExited_QuitWorks(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.Mode = ModePassthrough
+	o.VT.ChildExited = true
+	quit := false
+	o.OnQuit = func() { quit = true }
+
+	buf := []byte{'q'}
+	o.HandlePassthroughBytes(buf, 0, len(buf))
+	if o.Mode != ModeNormal {
+		t.Fatalf("expected ModeNormal, got %d", o.Mode)
+	}
+	if !quit {
+		t.Fatal("expected OnQuit to be called")
+	}
+}
+
+func TestScroll_ChildExited_TransitionsToExited(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.EnterScrollMode()
+	o.VT.ChildExited = true
+	relaunched := false
+	o.OnRelaunch = func() { relaunched = true }
+
+	// Press Enter — should exit scroll and trigger relaunch.
+	buf := []byte{'\r'}
+	o.HandleScrollBytes(buf, 0, len(buf))
+	if o.Mode != ModeNormal {
+		t.Fatalf("expected ModeNormal, got %d", o.Mode)
+	}
+	if !relaunched {
+		t.Fatal("expected OnRelaunch to be called")
+	}
+}
+
+func TestScroll_ChildExited_QuitWorks(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.EnterScrollMode()
+	o.VT.ChildExited = true
+	quit := false
+	o.OnQuit = func() { quit = true }
+
+	buf := []byte{'q'}
+	o.HandleScrollBytes(buf, 0, len(buf))
+	if o.Mode != ModeNormal {
+		t.Fatalf("expected ModeNormal, got %d", o.Mode)
+	}
+	if !quit {
+		t.Fatal("expected OnQuit to be called")
+	}
+}
+
 func TestHandleScrollBytes_CtrlPassthrough(t *testing.T) {
 	// We can't easily test PTY writes without a real PTY, but we can
 	// verify that ctrl chars don't exit scroll mode and don't panic.
