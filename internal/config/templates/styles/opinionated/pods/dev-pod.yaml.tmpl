@@ -22,6 +22,9 @@ bridges:
 agents:
   - name: "concierge-{{ .Var.codename }}"
     role: concierge
+    vars:
+      profile: {{ .Var.profile }}
+      agent_harness: claude_code
 
   - name: misc-{{ .Var.codename }}
     role: default
@@ -32,10 +35,12 @@ agents:
     role: default
     count: {{ .Var.num_coders }}
     vars: # passed to role template rendering
+      profile: {{ .Var.profile }}
       agent_harness: "{{ index (split "codex,claude_code,codex" ",") (mod .Index 3)}}"
       working_dir: "{{ .Var.working_dir }}"
 
   - name: "reviewer-{{ .Var.codename }}"
     role: default
     vars:
+      profile: {{ .Var.profile }}
       agent_harness: codex
