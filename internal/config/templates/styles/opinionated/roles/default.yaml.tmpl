@@ -48,7 +48,7 @@ profile: "{{ .Var.profile }}"
 
 {{- else if eq .Var.agent_harness "claude_code" -}}
 # Claude Code model
-agent_model: "{{ if eq .Var.agent_model "<harness-default>" -}}opus{{- else -}}{{ .Var.agent_model }}{{- end }}"
+agent_model: "{{ if eq .Var.agent_model "<harness-default>" -}}{{- else -}}{{ .Var.agent_model }}{{- end }}"
 
 # Permission mode for Claude Code
 # Valid: default, delegate, acceptEdits, plan, dontAsk, bypassPermissions
