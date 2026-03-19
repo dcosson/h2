@@ -2,8 +2,11 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -23,6 +26,9 @@ func newPodCmd() *cobra.Command {
 	cmd.AddCommand(newPodLaunchCmd())
 	cmd.AddCommand(newPodStopCmd())
 	cmd.AddCommand(newPodListCmd())
+	cmd.AddCommand(newPodCreateCmd())
+	cmd.AddCommand(newPodUpdateCmd())
+	cmd.AddCommand(newPodListTemplatesCmd())
 	return cmd
 }
 
@@ -468,4 +474,183 @@ func newPodListCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func newPodCreateCmd() *cobra.Command {
+	var style string
+	var templateName string
+
+	cmd := &cobra.Command{
+		Use:   "create <name>",
+		Short: "Create a new pod template file from built-in defaults",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := strings.TrimSpace(args[0])
+			if name == "" {
+				return fmt.Errorf("pod template name is required")
+			}
+			resolvedStyle, err := resolveInitStyle(style)
+			if err != nil {
+				return err
+			}
+			resolvedTemplate, err := resolvePodTemplateName(templateName, resolvedStyle)
+			if err != nil {
+				return err
+			}
+			path, err := createOrUpdatePod(config.PodDir(), name, resolvedTemplate, resolvedStyle, true, false, false, cmd.OutOrStdout())
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Created %s\n", path)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&style, "style", initStyleOpinionated, "Pod style: minimal, opinionated")
+	cmd.Flags().StringVar(&templateName, "template", "", "Built-in pod template name (e.g. dev-pod)")
+	return cmd
+}
+
+func newPodUpdateCmd() *cobra.Command {
+	var style string
+	var templateName string
+
+	cmd := &cobra.Command{
+		Use:   "update <name>",
+		Short: "Update a pod template file with built-in defaults",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := strings.TrimSpace(args[0])
+			if name == "" {
+				return fmt.Errorf("pod template name is required")
+			}
+			if _, ok := resolvePodPathForDir(config.PodDir(), name); !ok {
+				return fmt.Errorf("pod template %q not found", name)
+			}
+
+			resolvedStyle, err := resolveInitStyle(style)
+			if err != nil {
+				return err
+			}
+			resolvedTemplate, err := resolvePodTemplateName(templateName, resolvedStyle)
+			if err != nil {
+				return err
+			}
+
+			path, err := createOrUpdatePod(config.PodDir(), name, resolvedTemplate, resolvedStyle, false, true, false, cmd.OutOrStdout())
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Updated %s\n", path)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&style, "style", initStyleOpinionated, "Pod style: minimal, opinionated")
+	cmd.Flags().StringVar(&templateName, "template", "", "Built-in pod template name (e.g. dev-pod)")
+	return cmd
+}
+
+func newPodListTemplatesCmd() *cobra.Command {
+	var style string
+
+	cmd := &cobra.Command{
+		Use:   "list-templates",
+		Short: "List available built-in pod templates",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			resolvedStyle, err := resolveInitStyle(style)
+			if err != nil {
+				return err
+			}
+			names := config.EmbeddedPodTemplateNamesWithStyle(resolvedStyle)
+			if len(names) == 0 {
+				fmt.Println("No built-in pod templates available")
+				return nil
+			}
+			fmt.Println("Available built-in pod templates:")
+			for _, name := range names {
+				fmt.Printf("  %s\n", name)
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&style, "style", initStyleOpinionated, "Pod style: minimal, opinionated")
+	return cmd
+}
+
+func resolvePodTemplateName(templateName, style string) (string, error) {
+	name := strings.TrimSpace(templateName)
+	if name == "" {
+		// Unlike roles, pods don't have a meaningful default template name.
+		// Return empty to signal "use the pod name as template name".
+		return "", nil
+	}
+	available := config.EmbeddedPodTemplateNamesWithStyle(style)
+	for _, candidate := range available {
+		if candidate == name {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("unknown --template %q for style %q; valid: %s", name, style, strings.Join(available, ", "))
+}
+
+func resolvePodPathForDir(dir, name string) (string, bool) {
+	for _, ext := range []string{".yaml.tmpl", ".yaml"} {
+		path := filepath.Join(dir, name+ext)
+		if _, err := os.Stat(path); err == nil {
+			return path, true
+		}
+	}
+	return "", false
+}
+
+// createOrUpdatePod writes a pod template file from built-in embedded templates.
+// - requireNew=true: fail if pod already exists (pod create semantics)
+// - requireNew=false: upsert mode; overwrite only when force=true
+func createOrUpdatePod(podsDir, name, templateName, style string, requireNew, force, announce bool, out io.Writer) (string, error) {
+	if err := os.MkdirAll(podsDir, 0o755); err != nil {
+		return "", fmt.Errorf("create pods dir: %w", err)
+	}
+
+	// Resolve template: use templateName if provided, otherwise try name.
+	lookupName := templateName
+	if lookupName == "" {
+		lookupName = name
+	}
+	content, ok := config.EmbeddedPodTemplateWithStyle(lookupName, style)
+	if !ok {
+		return "", fmt.Errorf("no built-in pod template %q for style %q", lookupName, style)
+	}
+
+	ext := config.PodFileExtension(content)
+	path := filepath.Join(podsDir, name+ext)
+
+	// Check both extensions to prevent duplicates.
+	for _, existingExt := range []string{".yaml", ".yaml.tmpl"} {
+		existingPath := filepath.Join(podsDir, name+existingExt)
+		if _, err := os.Stat(existingPath); err == nil {
+			if requireNew {
+				return "", fmt.Errorf("pod template %q already exists at %s", name, existingPath)
+			}
+			if !force {
+				return "", fmt.Errorf("pod template %q already exists at %s (use --force to overwrite)", name, existingPath)
+			}
+		} else if err != nil && !os.IsNotExist(err) {
+			return "", fmt.Errorf("check pod file %s: %w", existingPath, err)
+		}
+	}
+
+	if !requireNew && force {
+		_ = os.Remove(filepath.Join(podsDir, name+".yaml"))
+		_ = os.Remove(filepath.Join(podsDir, name+".yaml.tmpl"))
+	}
+
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return "", fmt.Errorf("write pod file: %w", err)
+	}
+
+	if announce {
+		fmt.Fprintf(out, "  Wrote pods/%s\n", filepath.Base(path))
+	}
+	return path, nil
 }

@@ -1,0 +1,41 @@
+pod_name: dev-pod
+
+variables:
+  codename:
+    description: "Code name (sand, sea, leaf, fog, etc.) for identifying this pod"
+  num_coders:
+    description: "Number of coder agents"
+    default: "3"
+  working_dir:
+    description: "Working directory for the agent"
+    default: "."
+  profile:
+    description: "Account profile to use. Must be configured via h2 profile commands."
+    default: "default"
+
+# Optional: bridges (reference named bridges from config.yaml)
+bridges:
+  - bridge: "dcosson-{{ .Var.codename }}" # key in config.yaml's top-level bridges map
+    concierge: "concierge-{{ .Var.codename }}"
+
+# Required: agents
+agents:
+  - name: "concierge-{{ .Var.codename }}"
+    role: concierge
+
+  - name: misc-{{ .Var.codename }}
+    role: default
+    vars:
+      agent_harness: claude_code
+
+  - name: "coder-{{ add 1 .Index }}-{{ .Var.codename }}"
+    role: default
+    count: {{ .Var.num_coders }}
+    vars: # passed to role template rendering
+      agent_harness: "{{ index (split "codex,claude_code,codex" ",") (mod .Index 3)}}"
+      working_dir: "{{ .Var.working_dir }}"
+
+  - name: "reviewer-{{ .Var.codename }}"
+    role: default
+    vars:
+      agent_harness: codex

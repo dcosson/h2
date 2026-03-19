@@ -140,10 +140,10 @@ func createRole(t *testing.T, h2Dir, name, content string) {
 	}
 }
 
-// createPodTemplate writes a pod template YAML file into pods/templates/.
+// createPodTemplate writes a pod template YAML file into pods/.
 func createPodTemplate(t *testing.T, h2Dir, name, content string) {
 	t.Helper()
-	path := filepath.Join(h2Dir, "pods", "templates", name+".yaml")
+	path := filepath.Join(h2Dir, "pods", name+".yaml")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("create pod template %s: %v", name, err)
 	}

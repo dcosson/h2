@@ -25,14 +25,15 @@ description: "A {{ .RoleName }} agent for h2" # description is defined by the fi
 # Other available options:
 # agent_harness_command: claude
 # claude_code_config_path_prefix: "{{ .H2Dir }}/claude-config"
+# claude_code_config_path: "" (defaults to prefix + profile)
 # codex_config_path_prefix: "{{ .H2Dir }}/codex-config"
-# profile: "default"
+# codex_config_path: "" (defaults to prefix + profile)
 
 agent_harness: "{{ .Var.agent_harness }}"
 
 {{ if eq .Var.agent_harness "codex" -}}
 # Codex model
-agent_model: "{{ if eq .Var.agent_model "<harness-default>" -}}gpt-5.3-codex{{- else -}}{{ .Var.agent_model }}{{- end }}"
+agent_model: "{{ if eq .Var.agent_model "<harness-default>" -}}gpt-5.4{{- else -}}{{ .Var.agent_model }}{{- end }}"
 
 # Codex sandbox mode
 # Valid: read-only, workspace-write, danger-full-access
@@ -61,7 +62,12 @@ profile: "{{ .Var.profile }}"
 # agent_harness_command: some-other-binary
 {{- end }}
 
+# set primary working dir
 working_dir: "{{ .Var.working_dir }}"
+
+# also allow agent to read and update h2 configs and logs
+additional_dirs:
+  - "{{ .H2Dir }}"
 
 # System prompt — replaces Claude Code's entire default system prompt.
 # Use this when you need full control over the prompt. Usually you want

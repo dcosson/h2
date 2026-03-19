@@ -78,6 +78,61 @@ func RoleFileExtension(content string) string {
 	return ".yaml"
 }
 
+// EmbeddedPodTemplate returns the embedded YAML template for the given pod name.
+// Returns ("", false) if no template exists for the name.
+func EmbeddedPodTemplate(name string) (string, bool) {
+	return EmbeddedPodTemplateWithStyle(name, templateStyleOpinionated)
+}
+
+// EmbeddedPodTemplateWithStyle returns the embedded YAML template for the given pod
+// and style. Returns ("", false) if the pod template doesn't exist.
+func EmbeddedPodTemplateWithStyle(name, style string) (string, bool) {
+	path := fmt.Sprintf("templates/styles/%s/pods/%s.yaml.tmpl", normalizeTemplateStyle(style), name)
+	data, err := Templates.ReadFile(path)
+	if err != nil {
+		// Try without .tmpl extension.
+		path = fmt.Sprintf("templates/styles/%s/pods/%s.yaml", normalizeTemplateStyle(style), name)
+		data, err = Templates.ReadFile(path)
+		if err != nil {
+			return "", false
+		}
+	}
+	return string(data), true
+}
+
+// EmbeddedPodTemplateNamesWithStyle returns available pod template names for a style.
+// Unknown styles fall back to opinionated.
+func EmbeddedPodTemplateNamesWithStyle(style string) []string {
+	root := fmt.Sprintf("templates/styles/%s/pods", normalizeTemplateStyle(style))
+	names := map[string]struct{}{}
+	_ = fs.WalkDir(Templates, root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		base := filepath.Base(path)
+		switch {
+		case strings.HasSuffix(base, ".yaml.tmpl"):
+			names[strings.TrimSuffix(base, ".yaml.tmpl")] = struct{}{}
+		case strings.HasSuffix(base, ".yaml"):
+			names[strings.TrimSuffix(base, ".yaml")] = struct{}{}
+		}
+		return nil
+	})
+
+	out := make([]string, 0, len(names))
+	for name := range names {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// PodFileExtension returns ".yaml.tmpl" if the content contains template syntax
+// ({{ ), otherwise ".yaml".
+func PodFileExtension(content string) string {
+	return RoleFileExtension(content)
+}
+
 // InstructionsTemplate returns the embedded CLAUDE_AND_AGENTS.md content.
 func InstructionsTemplate() string {
 	return InstructionsTemplateWithStyle(templateStyleOpinionated)

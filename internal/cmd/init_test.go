@@ -77,8 +77,7 @@ func expectedDirs() []string {
 		filepath.Join("profiles-shared", "default", "skills"),
 		"projects",
 		"worktrees",
-		filepath.Join("pods", "roles"),
-		filepath.Join("pods", "templates"),
+		"pods",
 	}
 }
 

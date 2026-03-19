@@ -149,8 +149,7 @@ func runFullInit(cmd *cobra.Command, abs, prefix, style string, out io.Writer) e
 		filepath.Join("profiles-shared", "default", "skills"),
 		"projects",
 		"worktrees",
-		filepath.Join("pods", "roles"),
-		filepath.Join("pods", "templates"),
+		"pods",
 	}
 	for _, sub := range subdirs {
 		d := filepath.Join(abs, sub)
@@ -189,6 +188,11 @@ func runFullInit(cmd *cobra.Command, abs, prefix, style string, out io.Writer) e
 	}
 	_ = rolePath
 
+	// Create default pod templates.
+	if err := generateDefaultPods(abs, style, true, out); err != nil {
+		return fmt.Errorf("create default pods: %w", err)
+	}
+
 	fmt.Fprintf(out, "  Registered route (prefix: %s)\n", resolvedPrefix)
 	fmt.Fprintf(out, "Initialized h2 directory at %s (prefix: %s)\n", abs, resolvedPrefix)
 	return nil
@@ -205,7 +209,10 @@ func runUpdateConfig(abs, style string, out io.Writer) error {
 	if err := generateDefaultProfile(abs, style, true, out); err != nil {
 		return err
 	}
-	return generateDefaultRole(abs, style, true, out)
+	if err := generateDefaultRole(abs, style, true, out); err != nil {
+		return err
+	}
+	return generateDefaultPods(abs, style, true, out)
 }
 
 func generateDefaultProfile(abs, style string, force bool, out io.Writer) error {
@@ -231,6 +238,17 @@ func generateDefaultProfile(abs, style string, force bool, out io.Writer) error 
 func generateDefaultRole(abs, style string, force bool, out io.Writer) error {
 	_, err := createOrUpdateRole(filepath.Join(abs, "roles"), "default", "default", style, false, force, true, out)
 	return err
+}
+
+func generateDefaultPods(abs, style string, force bool, out io.Writer) error {
+	podsDir := filepath.Join(abs, "pods")
+	names := config.EmbeddedPodTemplateNamesWithStyle(style)
+	for _, name := range names {
+		if _, err := createOrUpdatePod(podsDir, name, name, style, false, force, true, out); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // generateRoles regenerates role files for the selected style.

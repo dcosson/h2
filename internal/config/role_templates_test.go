@@ -84,6 +84,52 @@ func TestRoleTemplate_Default_IsValidYAMLAfterStubbing(t *testing.T) {
 	}
 }
 
+func TestEmbeddedPodTemplate_DevPod(t *testing.T) {
+	content, ok := EmbeddedPodTemplate("dev-pod")
+	if !ok {
+		t.Fatal("dev-pod template not found")
+	}
+	if content == "" {
+		t.Fatal("dev-pod template is empty")
+	}
+	if !strings.Contains(content, "pod_name: dev-pod") {
+		t.Error("dev-pod template missing pod_name field")
+	}
+	if !strings.Contains(content, "variables:") {
+		t.Error("dev-pod template missing variables section")
+	}
+	if !strings.Contains(content, "agents:") {
+		t.Error("dev-pod template missing agents section")
+	}
+	if !strings.Contains(content, "bridges:") {
+		t.Error("dev-pod template missing bridges section")
+	}
+}
+
+func TestEmbeddedPodTemplate_Unknown_ReturnsFalse(t *testing.T) {
+	_, ok := EmbeddedPodTemplate("nonexistent-pod-xyz")
+	if ok {
+		t.Error("unknown pod template name should return false")
+	}
+}
+
+func TestEmbeddedPodTemplateNamesWithStyle(t *testing.T) {
+	names := EmbeddedPodTemplateNamesWithStyle("opinionated")
+	if len(names) == 0 {
+		t.Fatal("expected at least one pod template name")
+	}
+	found := false
+	for _, name := range names {
+		if name == "dev-pod" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected dev-pod in pod template names, got: %v", names)
+	}
+}
+
 func TestInstructionsTemplate(t *testing.T) {
 	content := InstructionsTemplate()
 	if content == "" {

@@ -59,8 +59,7 @@ func TestInit_CreatesFullStructure(t *testing.T) {
 		filepath.Join("claude-config", "default"),
 		"projects",
 		"worktrees",
-		filepath.Join("pods", "roles"),
-		filepath.Join("pods", "templates"),
+		"pods",
 	} {
 		path := filepath.Join(h2Dir, sub)
 		if _, err := os.Stat(path); err != nil {
