@@ -63,7 +63,8 @@ func (d *Driver) DetectFullWindowSize() (tilelayout.ScreenSize, error) {
 	// then immediately closes the tab via exit.
 	sizeCmd := fmt.Sprintf(`echo "$(tput cols) $(tput lines)" > %s; exit`, tmpPath)
 	escaped := strings.ReplaceAll(sizeCmd, `"`, `\"`)
-	script := fmt.Sprintf(`tell application "Ghostty" to input text "%s\n" to (focused terminal of selected tab of front window)`, escaped)
+	// Use AppleScript's `return` character to append a real newline (Enter).
+	script := fmt.Sprintf(`tell application "Ghostty" to input text ("%s" & return) to (focused terminal of selected tab of front window)`, escaped)
 	osascript(script)
 
 	// Wait for the command to execute and the tab to close.
@@ -316,9 +317,9 @@ func writeSleep(b *strings.Builder, ms int) {
 
 func writeTypeAttach(b *strings.Builder, agentName string) {
 	// Use Ghostty's AppleScript input text to write directly to the focused pane.
-	// \n triggers Enter. No Accessibility permissions required.
+	// AppleScript's `return` appends a real Enter keypress.
 	escaped := strings.ReplaceAll(agentName, `\`, `\\`)
 	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
-	fmt.Fprintf(b, "osascript -e 'tell application \"Ghostty\" to input text \"h2 attach %s\\n\" to (%s)'\n", escaped, ghosttyTerm)
+	fmt.Fprintf(b, "osascript -e 'tell application \"Ghostty\" to input text (\"h2 attach %s\" & return) to (%s)'\n", escaped, ghosttyTerm)
 	writeSleep(b, 300)
 }
