@@ -210,6 +210,12 @@ func writeBuildPhase(b *strings.Builder, tab tilelayout.TabLayout) {
 		writeSleep(b, 300)
 	}
 
+	// Equalize columns after creating them.
+	if tab.Cols > 1 {
+		writePerformAction(b, "equalize_splits")
+		writeSleep(b, 100)
+	}
+
 	// Build rows in each column, right-to-left.
 	// After column splits, focus is on the rightmost column.
 	for c := tab.Cols - 1; c >= 0; c-- {
@@ -222,6 +228,12 @@ func writeBuildPhase(b *strings.Builder, tab tilelayout.TabLayout) {
 			writeSplit(b, "down")
 			writeSleep(b, 300)
 		}
+	}
+
+	// Equalize all splits after building the full grid.
+	if tab.Cols > 1 || tab.RowsInCol(0) > 1 {
+		writePerformAction(b, "equalize_splits")
+		writeSleep(b, 100)
 	}
 	b.WriteByte('\n')
 }
