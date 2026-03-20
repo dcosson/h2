@@ -311,16 +311,22 @@ func TestPrintDryRun_LongInstructionsTruncated(t *testing.T) {
 	// the command). We only verify the Instructions section truncates.
 }
 
-func TestPrintDryRun_PermissionReviewAgent(t *testing.T) {
+func TestPrintDryRun_PermissionReview(t *testing.T) {
 	t.Setenv("H2_DIR", "")
 
 	enabled := true
 	role := &config.Role{
 		RoleName:     "test-role",
 		Instructions: "Test",
-		PermissionReviewAgent: &config.PermissionReviewAgent{
-			Enabled:      &enabled,
-			Instructions: "Review carefully",
+		PermissionReview: &config.PermissionReview{
+			DCG: &config.DCGConfig{
+				Enabled:           &enabled,
+				DestructivePolicy: "moderate",
+			},
+			AIReviewer: &config.AIReviewerConfig{
+				Enabled:      &enabled,
+				Instructions: "Review carefully",
+			},
 		},
 	}
 
@@ -331,8 +337,14 @@ func TestPrintDryRun_PermissionReviewAgent(t *testing.T) {
 
 	output := capturePrintDryRun(rc)
 
-	if !strings.Contains(output, "Permission Review Agent: enabled") {
-		t.Errorf("output should contain 'Permission Review Agent: enabled', got:\n%s", output)
+	if !strings.Contains(output, "Permission Review (DCG): enabled") {
+		t.Errorf("output should contain 'Permission Review (DCG): enabled', got:\n%s", output)
+	}
+	if !strings.Contains(output, "Destructive Policy: moderate") {
+		t.Errorf("output should contain 'Destructive Policy: moderate', got:\n%s", output)
+	}
+	if !strings.Contains(output, "Permission Review (AI Reviewer): enabled (model: haiku)") {
+		t.Errorf("output should contain AI Reviewer line, got:\n%s", output)
 	}
 }
 

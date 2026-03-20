@@ -5,6 +5,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -25,13 +27,32 @@ func newSessionCmd() *cobra.Command {
 
 func newSessionCleanupCmd() *cobra.Command {
 	var dryRun bool
+	var olderThan string
 
 	cmd := &cobra.Command{
 		Use:   "cleanup",
 		Short: "Remove stale session directories",
 		Long: `Removes session directories from ~/.h2/sessions/ whose agents are no
-longer running. Checks each session directory against running agent sockets.`,
+longer running. Checks each session directory against running agent sockets.
+
+Use --older-than to only remove sessions whose last activity exceeds the
+given age. Accepts units: s (seconds), m (minutes), h (hours), d (days).
+
+Examples:
+  h2 session cleanup                    Remove all stopped sessions
+  h2 session cleanup --older-than 3d    Remove sessions inactive for 3+ days
+  h2 session cleanup --older-than 12h   Remove sessions inactive for 12+ hours
+  h2 session cleanup --dry-run          Show what would be removed`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			var minAge time.Duration
+			if olderThan != "" {
+				d, err := parseAge(olderThan)
+				if err != nil {
+					return fmt.Errorf("invalid --older-than value %q: %w", olderThan, err)
+				}
+				minAge = d
+			}
+
 			sessionsDir := config.SessionsDir()
 			entries, err := os.ReadDir(sessionsDir)
 			if err != nil {
@@ -56,7 +77,8 @@ longer running. Checks each session directory against running agent sockets.`,
 				}
 			}
 
-			var removed, skipped int
+			now := time.Now()
+			var removed, skipped, tooRecent int
 			for _, entry := range entries {
 				if !entry.IsDir() {
 					continue
@@ -67,31 +89,72 @@ longer running. Checks each session directory against running agent sockets.`,
 					continue
 				}
 
-				path := filepath.Join(sessionsDir, name)
-				if dryRun {
-					fmt.Printf("  would remove: %s\n", path)
-				} else {
-					if err := os.RemoveAll(path); err != nil {
-						fmt.Fprintf(os.Stderr, "  error removing %s: %v\n", path, err)
+				sessionDir := filepath.Join(sessionsDir, name)
+
+				// Check age filter against last activity time.
+				if minAge > 0 {
+					la := config.SessionLastActivity(sessionDir)
+					if !la.IsZero() && now.Sub(la) < minAge {
+						tooRecent++
 						continue
 					}
-					fmt.Printf("  removed: %s\n", path)
+				}
+
+				if dryRun {
+					fmt.Printf("  would remove: %s\n", name)
+				} else {
+					if err := os.RemoveAll(sessionDir); err != nil {
+						fmt.Fprintf(os.Stderr, "  error removing %s: %v\n", name, err)
+						continue
+					}
+					fmt.Printf("  removed: %s\n", name)
 				}
 				removed++
 			}
 
+			verb := "Cleaned up"
 			if dryRun {
-				fmt.Printf("\nDry run: %d session(s) would be removed, %d still running.\n", removed, skipped)
-			} else {
-				fmt.Printf("\nCleaned up %d session(s), %d still running.\n", removed, skipped)
+				verb = "Would clean up"
 			}
+			parts := fmt.Sprintf("%s %d session(s)", verb, removed)
+			if skipped > 0 {
+				parts += fmt.Sprintf(", %d still running", skipped)
+			}
+			if tooRecent > 0 {
+				parts += fmt.Sprintf(", %d too recent", tooRecent)
+			}
+			fmt.Printf("\n%s.\n", parts)
 			return nil
 		},
 	}
 
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be removed without deleting")
+	cmd.Flags().StringVar(&olderThan, "older-than", "", "Only remove sessions inactive longer than this (e.g. 3d, 12h, 30m)")
 
 	return cmd
+}
+
+// agePattern matches a number followed by a time unit.
+var agePattern = regexp.MustCompile(`^(\d+)\s*(s|m|h|d|seconds?|minutes?|hours?|days?)$`)
+
+// parseAge parses a human-friendly duration string like "3d", "12h", "30m", "3 days".
+func parseAge(s string) (time.Duration, error) {
+	m := agePattern.FindStringSubmatch(s)
+	if m == nil {
+		return 0, fmt.Errorf("expected format like '3d', '12h', '30m', or '3 days'")
+	}
+	n, _ := strconv.Atoi(m[1])
+	switch m[2][0] {
+	case 's':
+		return time.Duration(n) * time.Second, nil
+	case 'm':
+		return time.Duration(n) * time.Minute, nil
+	case 'h':
+		return time.Duration(n) * time.Hour, nil
+	case 'd':
+		return time.Duration(n) * 24 * time.Hour, nil
+	}
+	return 0, fmt.Errorf("unknown unit %q", m[2])
 }
 
 // isAgentAlive checks if an agent socket is responding.

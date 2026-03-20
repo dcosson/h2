@@ -50,9 +50,10 @@ type RuntimeConfig struct {
 	SystemPrompt string `json:"system_prompt,omitempty"`
 
 	// Permission configuration.
-	ClaudePermissionMode string `json:"claude_permission_mode,omitempty"`
-	CodexSandboxMode     string `json:"codex_sandbox_mode,omitempty"`
-	CodexAskForApproval  string `json:"codex_ask_for_approval,omitempty"`
+	ClaudePermissionMode string            `json:"claude_permission_mode,omitempty"`
+	CodexSandboxMode     string            `json:"codex_sandbox_mode,omitempty"`
+	CodexAskForApproval  string            `json:"codex_ask_for_approval,omitempty"`
+	PermissionReview     *PermissionReview `json:"permission_review,omitempty"`
 
 	// Additional directories.
 	AdditionalDirs []string `json:"additional_dirs,omitempty"`

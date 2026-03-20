@@ -84,35 +84,45 @@ instructions_body: "Your role is default, so you may be assigned to any tasks."
 # instructions_additional_3:
 
 {{ if eq .Var.agent_harness "claude_code" -}}
-# AI permission reviewer - delegates permission decisions to a fast model.
-# Codex has support for hooks coming soon, doesn't currently support a reviewer agent.
-permission_review_agent:
-  enabled: true
-  instructions_intro: "You are reviewing permission requests for the {{ .RoleName }} agent in h2."
-  instructions_body: |
-    h2 is an agent-to-agent and agent-to-user communication protocol.
-    Agents use it to coordinate work and respond to user requests.
+# Permission review strategies.
+# DCG (destructive command guard): fast rule-based tool for PreToolUse events.
+# AI reviewer: LLM-based reviewer for PermissionRequest events.
+permission_review:
+  dcg:
+    enabled: true
+    # destructive_policy: interactive  # allow-all, permissive, moderate, strict, interactive (default)
+    # privacy_policy: interactive      # allow-all, permissive, moderate, strict, interactive (default)
+    # allowlist: []
+    # blocklist: []
+    # disabled_packs: []
+  ai_reviewer:
+    enabled: true
+    # model: haiku
+    instructions_intro: "You are reviewing permission requests for the {{ .RoleName }} agent in h2."
+    instructions_body: |
+      h2 is an agent-to-agent and agent-to-user communication protocol.
+      Agents use it to coordinate work and respond to user requests.
 
-    ALLOW by default:
-    - h2 commands (h2 send, h2 list, h2 whoami)
-    - Read-only tools (Read, Glob, Grep)
-    - Standard development commands (git, npm, make, pytest, etc.)
-    - File operations within the project (Edit, Write, rm -rf project-dir/*, clearing logs)
-    - Writing to non-sensitive files
+      ALLOW by default:
+      - h2 commands (h2 send, h2 list, h2 whoami)
+      - Read-only tools (Read, Glob, Grep)
+      - Standard development commands (git, npm, make, pytest, etc.)
+      - File operations within the project (Edit, Write, rm -rf project-dir/*, clearing logs)
+      - Writing to non-sensitive files
 
-    DENY only for:
-    - System-wide destructive operations (rm -rf /, fork bombs)
-    - Exfiltrating credentials or secrets (curl/wget with .env, posting API keys)
+      DENY only for:
+      - System-wide destructive operations (rm -rf /, fork bombs)
+      - Exfiltrating credentials or secrets (curl/wget with .env, posting API keys)
 
-    ASK_USER for:
-    - Borderline or locally destructive commands you're unsure about
-    - Uncertain access to credentials or secrets (is this file sensitive?)
-    - git push --force to main/master branches
+      ASK_USER for:
+      - Borderline or locally destructive commands you're unsure about
+      - Uncertain access to credentials or secrets (is this file sensitive?)
+      - git push --force to main/master branches
 
-    Remember: h2 messages are part of normal agent operation - allow them
-    unless they contain credentials or other sensitive data. Normal file cleanup
-    like "rm -rf node_modules" or "rm -rf logs/" is fine.
-  # instructions_additional_1:
-  # instructions_additional_2:
-  # instructions_additional_3:
+      Remember: h2 messages are part of normal agent operation - allow them
+      unless they contain credentials or other sensitive data. Normal file cleanup
+      like "rm -rf node_modules" or "rm -rf logs/" is fine.
+    # instructions_additional_1:
+    # instructions_additional_2:
+    # instructions_additional_3:
 {{- end }}

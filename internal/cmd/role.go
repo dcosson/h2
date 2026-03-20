@@ -120,8 +120,13 @@ func newRoleShowCmd() *cobra.Command {
 				}
 			}
 
-			if role.PermissionReviewAgent != nil && role.PermissionReviewAgent.IsEnabled() {
-				fmt.Printf("\nPermission Review Agent: enabled\n")
+			if role.PermissionReview != nil {
+				if role.PermissionReview.DCG != nil && role.PermissionReview.DCG.IsEnabled() {
+					fmt.Printf("\nPermission Review (DCG): enabled\n")
+				}
+				if role.PermissionReview.AIReviewer != nil && role.PermissionReview.AIReviewer.IsEnabled() {
+					fmt.Printf("\nPermission Review (AI Reviewer): enabled (model: %s)\n", role.PermissionReview.AIReviewer.GetModel())
+				}
 			}
 
 			if len(role.Variables) > 0 {
@@ -312,8 +317,13 @@ func newRoleCheckCmd() *cobra.Command {
 			if role.GetModel() != "" {
 				fmt.Printf("  Model:       %s\n", role.GetModel())
 			}
-			if role.PermissionReviewAgent != nil && role.PermissionReviewAgent.IsEnabled() {
-				fmt.Printf("  Review Agent: enabled\n")
+			if role.PermissionReview != nil {
+				if role.PermissionReview.DCG != nil && role.PermissionReview.DCG.IsEnabled() {
+					fmt.Printf("  DCG: enabled\n")
+				}
+				if role.PermissionReview.AIReviewer != nil && role.PermissionReview.AIReviewer.IsEnabled() {
+					fmt.Printf("  AI Reviewer: enabled (model: %s)\n", role.PermissionReview.AIReviewer.GetModel())
+				}
 			}
 			return nil
 		},

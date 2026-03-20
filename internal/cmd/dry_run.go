@@ -245,10 +245,23 @@ func printDryRun(rc *ResolvedAgentConfig) {
 		fmt.Printf("  %s=%s\n", key, rc.EnvVars[key])
 	}
 
-	// Permission review agent.
-	if role.PermissionReviewAgent != nil && role.PermissionReviewAgent.IsEnabled() {
-		fmt.Println()
-		fmt.Printf("Permission Review Agent: enabled\n")
+	// Permission review.
+	if role.PermissionReview != nil {
+		pr := role.PermissionReview
+		if pr.DCG != nil && pr.DCG.IsEnabled() {
+			fmt.Println()
+			fmt.Printf("Permission Review (DCG): enabled\n")
+			if pr.DCG.DestructivePolicy != "" {
+				fmt.Printf("  Destructive Policy: %s\n", pr.DCG.DestructivePolicy)
+			}
+			if pr.DCG.PrivacyPolicy != "" {
+				fmt.Printf("  Privacy Policy: %s\n", pr.DCG.PrivacyPolicy)
+			}
+		}
+		if pr.AIReviewer != nil && pr.AIReviewer.IsEnabled() {
+			fmt.Println()
+			fmt.Printf("Permission Review (AI Reviewer): enabled (model: %s)\n", pr.AIReviewer.GetModel())
+		}
 	}
 
 	// Triggers.

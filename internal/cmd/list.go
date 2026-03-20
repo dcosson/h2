@@ -21,6 +21,7 @@ import (
 func newLsCmd() *cobra.Command {
 	var podFlag string
 	var allFlag bool
+	var includeStoppedFlag bool
 
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -38,16 +39,13 @@ func newLsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if len(entries) == 0 {
-				fmt.Println("No running agents.")
-				return nil
-			}
 
 			// Collect agent and bridge info.
 			var bridgeInfos []*message.BridgeInfo
 			var bridgeUnnamed []socketdir.Entry
 			var agentInfos []*message.AgentInfo
 			var unresponsive []string
+			runningNames := make(map[string]bool)
 			for _, e := range entries {
 				switch e.Type {
 				case socketdir.TypeBridge:
@@ -58,6 +56,7 @@ func newLsCmd() *cobra.Command {
 						bridgeUnnamed = append(bridgeUnnamed, e)
 					}
 				case socketdir.TypeAgent:
+					runningNames[e.Name] = true
 					info := queryAgent(e.Path)
 					if info != nil {
 						agentInfos = append(agentInfos, info)
@@ -65,6 +64,11 @@ func newLsCmd() *cobra.Command {
 						unresponsive = append(unresponsive, e.Name)
 					}
 				}
+			}
+
+			if len(entries) == 0 && !includeStoppedFlag {
+				fmt.Println("No running agents.")
+				return nil
 			}
 
 			// Determine effective pod filter.
@@ -86,12 +90,18 @@ func newLsCmd() *cobra.Command {
 				printOutsidePodSummary(agentInfos, bridgeInfos, podFilter)
 			}
 
+			// Show stopped agents from session directories.
+			if includeStoppedFlag {
+				printStoppedAgents(runningNames, podFilter)
+			}
+
 			return nil
 		},
 	}
 
 	cmd.Flags().StringVar(&podFlag, "pod", "", "Filter by pod name, or '*' to show all grouped by pod")
 	cmd.Flags().BoolVar(&allFlag, "all", false, "List agents from all discovered h2 directories")
+	cmd.Flags().BoolVar(&includeStoppedFlag, "include-stopped", false, "Include stopped agents that can be resumed")
 
 	return cmd
 }
@@ -362,6 +372,94 @@ func printAgentLine(info *message.AgentInfo) {
 		fmt.Printf("  %s %s%s %s — %s%s%s%s%s\n",
 			symbol, info.Name, role, s.Dim(info.Command), stateLabel, metrics, queued, sid, tool)
 	}
+}
+
+// printStoppedAgents lists agents that have session dirs but no active socket.
+func printStoppedAgents(runningNames map[string]bool, podFilter string) {
+	configs := config.ListSessionConfigs()
+	if len(configs) == 0 {
+		return
+	}
+
+	// Filter to stopped agents (not in runningNames or unresponsive).
+	var stopped []*config.RuntimeConfig
+	for _, rc := range configs {
+		if runningNames[rc.AgentName] {
+			continue
+		}
+		// Apply pod filter.
+		if podFilter != "" && podFilter != "*" && rc.Pod != podFilter {
+			continue
+		}
+		stopped = append(stopped, rc)
+	}
+	if len(stopped) == 0 {
+		return
+	}
+
+	// Sort by name.
+	sort.Slice(stopped, func(i, j int) bool {
+		return stopped[i].AgentName < stopped[j].AgentName
+	})
+
+	fmt.Printf("\n%s\n", s.Bold("Stopped"))
+	for _, rc := range stopped {
+		printStoppedAgentLine(rc)
+	}
+}
+
+func printStoppedAgentLine(rc *config.RuntimeConfig) {
+	role := ""
+	if rc.RoleName != "" {
+		role = " " + s.Magenta(fmt.Sprintf("(%s)", rc.RoleName))
+	}
+
+	pod := ""
+	if rc.Pod != "" {
+		pod = " " + s.Dim(fmt.Sprintf("[pod: %s]", rc.Pod))
+	}
+
+	age := ""
+	if rc.StartedAt != "" {
+		t, err := time.Parse(time.RFC3339, rc.StartedAt)
+		if err == nil {
+			age = fmt.Sprintf("started %s ago", formatAge(time.Since(t)))
+		}
+	}
+
+	lastActivity := ""
+	la := config.SessionLastActivity(config.SessionDir(rc.AgentName))
+	if !la.IsZero() {
+		lastActivity = fmt.Sprintf("last active %s ago", formatAge(time.Since(la)))
+	}
+
+	// Combine age and last activity.
+	info := ""
+	switch {
+	case age != "" && lastActivity != "":
+		info = " " + s.Dim(fmt.Sprintf("%s, %s", age, lastActivity))
+	case age != "":
+		info = " " + s.Dim(age)
+	case lastActivity != "":
+		info = " " + s.Dim(lastActivity)
+	}
+
+	fmt.Printf("  %s %s%s %s —%s%s\n",
+		s.GrayDot(), rc.AgentName, role, s.Dim(rc.Command), info, pod)
+}
+
+// formatAge returns a human-readable short duration string for display.
+func formatAge(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd", int(d.Hours()/24))
 }
 
 // newLsAlias returns a hidden "ls" command that delegates to "list".

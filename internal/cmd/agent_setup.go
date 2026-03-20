@@ -177,6 +177,7 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 		ClaudePermissionMode: role.ClaudePermissionMode,
 		CodexSandboxMode:     role.CodexSandboxMode,
 		CodexAskForApproval:  role.CodexAskForApproval,
+		PermissionReview:     role.PermissionReview,
 		AdditionalDirs:       additionalDirs,
 		Overrides:            overrideMap,
 		StartedAt:            time.Now().UTC().Format(time.RFC3339),

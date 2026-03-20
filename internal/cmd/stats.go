@@ -383,8 +383,12 @@ func bucketKey(t time.Time, rollup string) string {
 	case "month":
 		return fmt.Sprintf("%04d-%02d", lt.Year(), int(lt.Month()))
 	case "week":
-		y, w := lt.ISOWeek()
-		return fmt.Sprintf("%04d-W%02d", y, w)
+		weekday := lt.Weekday()
+		if weekday == time.Sunday {
+			weekday = 7
+		}
+		monday := lt.AddDate(0, 0, -int(weekday-time.Monday))
+		return monday.Format("2006-01-02")
 	case "hour":
 		return lt.Format("2006-01-02 15:00")
 	default:

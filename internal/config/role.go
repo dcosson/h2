@@ -179,37 +179,83 @@ var ValidHarnessTypes = []string{
 	"generic",
 }
 
-// PermissionReviewAgent configures the AI permission reviewer.
-type PermissionReviewAgent struct {
-	Enabled                 *bool  `yaml:"enabled,omitempty"` // defaults to true if instructions are set
-	Instructions            string `yaml:"instructions,omitempty"`
-	InstructionsIntro       string `yaml:"instructions_intro,omitempty"`
-	InstructionsBody        string `yaml:"instructions_body,omitempty"`
-	InstructionsAdditional1 string `yaml:"instructions_additional_1,omitempty"`
-	InstructionsAdditional2 string `yaml:"instructions_additional_2,omitempty"`
-	InstructionsAdditional3 string `yaml:"instructions_additional_3,omitempty"`
+// PermissionReview configures permission handling strategies.
+// Two strategies are available and can be used independently or together:
+//   - DCG (destructive command guard): fast rule-based tool for PreToolUse events
+//   - AI reviewer: LLM-based reviewer for PermissionRequest events
+type PermissionReview struct {
+	DCG        *DCGConfig        `yaml:"dcg,omitempty" json:"dcg,omitempty"`
+	AIReviewer *AIReviewerConfig `yaml:"ai_reviewer,omitempty" json:"ai_reviewer,omitempty"`
 }
 
-// IsEnabled returns whether the permission review agent is enabled.
-// Defaults to true when any instructions are present.
-func (pa *PermissionReviewAgent) IsEnabled() bool {
-	if pa.Enabled != nil {
-		return *pa.Enabled
+// HasAnyEnabled returns true if at least one strategy is enabled.
+func (pr *PermissionReview) HasAnyEnabled() bool {
+	return (pr.DCG != nil && pr.DCG.IsEnabled()) ||
+		(pr.AIReviewer != nil && pr.AIReviewer.IsEnabled())
+}
+
+// DCGConfig configures the destructive command guard (dcg-go).
+// Operates on PreToolUse hooks to catch dangerous commands before execution.
+type DCGConfig struct {
+	Enabled           *bool    `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	DestructivePolicy string   `yaml:"destructive_policy,omitempty" json:"destructive_policy,omitempty"` // allow-all, permissive, moderate, strict, interactive (default)
+	PrivacyPolicy     string   `yaml:"privacy_policy,omitempty" json:"privacy_policy,omitempty"`         // allow-all, permissive, moderate, strict, interactive (default)
+	Allowlist         []string `yaml:"allowlist,omitempty" json:"allowlist,omitempty"`                   // glob patterns to always allow
+	Blocklist         []string `yaml:"blocklist,omitempty" json:"blocklist,omitempty"`                   // glob patterns to always deny
+	EnabledPacks      []string `yaml:"enabled_packs,omitempty" json:"enabled_packs,omitempty"`           // only evaluate these packs (empty = all)
+	DisabledPacks     []string `yaml:"disabled_packs,omitempty" json:"disabled_packs,omitempty"`         // skip these packs
+}
+
+// IsEnabled returns whether DCG is enabled. Defaults to false (requires explicit opt-in).
+func (d *DCGConfig) IsEnabled() bool {
+	if d.Enabled != nil {
+		return *d.Enabled
 	}
-	return pa.GetInstructions() != ""
+	return false
+}
+
+// ValidDCGPolicies lists valid policy values for DCG.
+var ValidDCGPolicies = []string{"allow-all", "permissive", "moderate", "strict", "interactive"}
+
+// AIReviewerConfig configures the LLM-based permission reviewer.
+// Operates on PermissionRequest hooks using a fast model.
+type AIReviewerConfig struct {
+	Enabled                 *bool  `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	Model                   string `yaml:"model,omitempty" json:"model,omitempty"` // defaults to "haiku"
+	Instructions            string `yaml:"instructions,omitempty" json:"-"`
+	InstructionsIntro       string `yaml:"instructions_intro,omitempty" json:"-"`
+	InstructionsBody        string `yaml:"instructions_body,omitempty" json:"-"`
+	InstructionsAdditional1 string `yaml:"instructions_additional_1,omitempty" json:"-"`
+	InstructionsAdditional2 string `yaml:"instructions_additional_2,omitempty" json:"-"`
+	InstructionsAdditional3 string `yaml:"instructions_additional_3,omitempty" json:"-"`
+}
+
+// IsEnabled returns whether the AI reviewer is enabled.
+// Defaults to true when any instructions are present.
+func (ar *AIReviewerConfig) IsEnabled() bool {
+	if ar.Enabled != nil {
+		return *ar.Enabled
+	}
+	return ar.GetInstructions() != ""
+}
+
+// GetModel returns the model to use, defaulting to "haiku".
+func (ar *AIReviewerConfig) GetModel() string {
+	if ar.Model != "" {
+		return ar.Model
+	}
+	return "haiku"
 }
 
 // GetInstructions returns the assembled instructions string.
-// If any of the split fields (instructions_intro, instructions_body, etc.) are set,
-// they are concatenated with newlines. Otherwise falls back to the single instructions field.
-func (pa *PermissionReviewAgent) GetInstructions() string {
+func (ar *AIReviewerConfig) GetInstructions() string {
 	return assembleInstructions(
-		pa.Instructions,
-		pa.InstructionsIntro,
-		pa.InstructionsBody,
-		pa.InstructionsAdditional1,
-		pa.InstructionsAdditional2,
-		pa.InstructionsAdditional3,
+		ar.Instructions,
+		ar.InstructionsIntro,
+		ar.InstructionsBody,
+		ar.InstructionsAdditional1,
+		ar.InstructionsAdditional2,
+		ar.InstructionsAdditional3,
 	)
 }
 
@@ -245,7 +291,7 @@ type Role struct {
 	ClaudePermissionMode    string                 `yaml:"claude_permission_mode,omitempty"`    // Claude Code --permission-mode flag
 	CodexSandboxMode        string                 `yaml:"codex_sandbox_mode,omitempty"`        // Codex --sandbox flag
 	CodexAskForApproval     string                 `yaml:"codex_ask_for_approval,omitempty"`    // Codex --ask-for-approval flag
-	PermissionReviewAgent   *PermissionReviewAgent `yaml:"permission_review_agent,omitempty"`   // AI permission reviewer
+	PermissionReview        *PermissionReview      `yaml:"permission_review,omitempty"`         // Permission handling strategies (DCG + AI reviewer)
 	Heartbeat               *HeartbeatConfig       `yaml:"heartbeat,omitempty"`
 	Triggers                []TriggerYAMLSpec      `yaml:"triggers,omitempty"`
 	Schedules               []ScheduleYAMLSpec     `yaml:"schedules,omitempty"`
@@ -400,6 +446,15 @@ func validateInstructionsMutualExclusivity(label, single, intro, body, add1, add
 		return fmt.Errorf("%s: instructions and split instruction fields (instructions_intro, instructions_body, etc.) are mutually exclusive", label)
 	}
 	return nil
+}
+
+func isValidDCGPolicy(p string) bool {
+	for _, v := range ValidDCGPolicies {
+		if p == v {
+			return true
+		}
+	}
+	return false
 }
 
 // GetHarnessType returns the canonical harness type name, defaulting to "claude_code".
@@ -1402,13 +1457,26 @@ func (r *Role) Validate() error {
 	); err != nil {
 		return err
 	}
-	if r.PermissionReviewAgent != nil {
-		if err := validateInstructionsMutualExclusivity("permission_review_agent",
-			r.PermissionReviewAgent.Instructions,
-			r.PermissionReviewAgent.InstructionsIntro, r.PermissionReviewAgent.InstructionsBody,
-			r.PermissionReviewAgent.InstructionsAdditional1, r.PermissionReviewAgent.InstructionsAdditional2, r.PermissionReviewAgent.InstructionsAdditional3,
-		); err != nil {
-			return err
+	if r.PermissionReview != nil {
+		if r.PermissionReview.AIReviewer != nil {
+			if err := validateInstructionsMutualExclusivity("permission_review.ai_reviewer",
+				r.PermissionReview.AIReviewer.Instructions,
+				r.PermissionReview.AIReviewer.InstructionsIntro, r.PermissionReview.AIReviewer.InstructionsBody,
+				r.PermissionReview.AIReviewer.InstructionsAdditional1, r.PermissionReview.AIReviewer.InstructionsAdditional2, r.PermissionReview.AIReviewer.InstructionsAdditional3,
+			); err != nil {
+				return err
+			}
+		}
+		if r.PermissionReview.DCG != nil {
+			dcg := r.PermissionReview.DCG
+			if dcg.DestructivePolicy != "" && !isValidDCGPolicy(dcg.DestructivePolicy) {
+				return fmt.Errorf("invalid permission_review.dcg.destructive_policy %q; valid values: %s",
+					dcg.DestructivePolicy, strings.Join(ValidDCGPolicies, ", "))
+			}
+			if dcg.PrivacyPolicy != "" && !isValidDCGPolicy(dcg.PrivacyPolicy) {
+				return fmt.Errorf("invalid permission_review.dcg.privacy_policy %q; valid values: %s",
+					dcg.PrivacyPolicy, strings.Join(ValidDCGPolicies, ", "))
+			}
 		}
 	}
 	if !r.WorktreeEnabled && r.hasWorktreeFields() {

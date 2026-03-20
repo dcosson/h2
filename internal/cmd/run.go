@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"h2/internal/config"
 	"h2/internal/session"
@@ -45,11 +46,11 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
   h2 run --command "vim"        Run an explicit command
   h2 run coder-1 --resume       Resume a previous agent session`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Safety check: when running inside a Claude Code session,
-			// require --detach to prevent hijacking the parent's terminal.
-			// Skip for --dry-run since it doesn't launch anything.
-			if os.Getenv("CLAUDECODE") != "" && !detach && !dryRun {
-				return fmt.Errorf("running inside a Claude Code session (CLAUDECODE is set); use --detach to avoid hijacking the parent terminal")
+			// Auto-detach when stdin is not a terminal (e.g. running
+			// through a bridge, pipe, or inside a Claude Code session).
+			// Attaching requires a TTY for raw mode and resize signals.
+			if !dryRun && !detach && !term.IsTerminal(int(os.Stdin.Fd())) {
+				detach = true
 			}
 
 			// Check mutual exclusivity of mode flags.
