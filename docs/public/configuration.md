@@ -83,6 +83,17 @@ role_name: coder                     # Required. Role identifier.
 description: "A coding agent"        # Optional. Human-readable description.
 inherits: base-role                  # Optional. Parent role name for inheritance.
 
+# --- Template Variables ---
+# Define parameterized variables with optional defaults.
+# Variables without defaults are required at launch time.
+variables:
+  env:
+    description: "Target environment"
+    default: "dev"
+  team:
+    description: "Team name"
+    # No default = required at launch
+
 # --- Agent Naming ---
 # Supports Go templates and name functions.
 # Functions: randomName, autoIncrement("prefix")
@@ -157,17 +168,6 @@ schedules:                           # Time-based actions (see automation sectio
   - id: daily-check
     rrule: "FREQ=DAILY;BYHOUR=9"
     message: "Time for the daily check-in"
-
-# --- Template Variables ---
-# Define parameterized variables with optional defaults.
-# Variables without defaults are required at launch time.
-variables:
-  env:
-    description: "Target environment"
-    default: "dev"
-  team:
-    description: "Team name"
-    # No default = required at launch
 
 # --- Native Harness Config ---
 hooks: {}      # Merged into Claude Code settings.json hooks (yaml node)
