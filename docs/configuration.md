@@ -110,7 +110,7 @@ A **role** is a named YAML file in `~/.h2/roles/` that defines how to launch an 
 | `claude_permission_mode` | string | | Claude Code `--permission-mode`: `default` \| `acceptEdits` \| `plan` \| `dontAsk` \| `bypassPermissions` \| `delegate` |
 | `codex_sandbox_mode` | string | | Codex `--sandbox`: `read-only` \| `workspace-write` \| `danger-full-access` |
 | `codex_ask_for_approval` | string | | Codex `--ask-for-approval`: `untrusted` \| `on-request` \| `never` |
-| `permission_review_agent` | object | | AI permission reviewer (see below) |
+| `permission_review` | object | | Permission review strategies: `dcg` (rule-based) and `ai_reviewer` (LLM-based). See below. |
 | **Prompt content** | | | |
 | `system_prompt` | string | | Replaces agent's entire default system prompt (`--system-prompt`) |
 | `instructions` | string | | Appended to default system prompt (`--append-system-prompt`) |
@@ -187,21 +187,39 @@ Variable contract rules:
 - `hooks` and `settings` merge via node-aware semantics with custom-tag preservation.
 - Custom YAML tags outside `hooks`/`settings` are rejected in inheritance merge with deterministic errors.
 
-### Permission review agent
+### Permission review
 
-The `permission_review_agent` configures an AI reviewer that evaluates permission requests not handled by native allow/deny rules. Currently supported for Claude Code only.
+The `permission_review` section configures two independent strategies for reviewing agent permission requests. Both are currently supported for Claude Code only.
 
 ```yaml
-permission_review_agent:
-  enabled: true    # defaults to true when instructions are set
-  instructions: |
-    You are reviewing permission requests for a coding agent.
-    ALLOW: standard dev tools (read, write, edit, bash for builds/tests)
-    DENY: destructive operations (rm -rf, sudo, force push)
-    ASK_USER: anything unusual or security-sensitive
+permission_review:
+  # DCG: Destructive Command Guard (rule-based, fast)
+  # Evaluates shell commands on PreToolUse hook events.
+  dcg:
+    enabled: true                    # Default: false (requires explicit opt-in)
+    destructive_policy: moderate     # allow-all, permissive, moderate, strict, interactive
+    privacy_policy: strict           # allow-all, permissive, moderate, strict, interactive
+    allowlist: []                    # Glob patterns to always allow
+    blocklist: []                    # Glob patterns to always deny
+    enabled_packs: []                # Only evaluate these rule packs (empty = all)
+    disabled_packs: []               # Skip these rule packs
+
+  # AI Reviewer: LLM-based permission reviewer
+  # Evaluates PermissionRequest hook events using a fast model.
+  ai_reviewer:
+    enabled: true                    # Default: true when instructions are present
+    model: haiku                     # Model for review (default: haiku)
+    instructions_intro: "You are reviewing permission requests for the coder agent."
+    instructions_body: |
+      ALLOW by default:
+      - Read-only tools, standard dev commands, file operations within project
+      DENY only for:
+      - System-wide destructive operations, exfiltrating credentials
+      ASK_USER for:
+      - Borderline/locally destructive commands, uncertain credential access
 ```
 
-When enabled, h2 writes the instructions to `permission-reviewer.md` in the agent's session directory. The `h2 handle-hook` command reads this file and calls a fast model to evaluate each PermissionRequest.
+DCG operates on `PreToolUse` hooks to catch dangerous shell commands before execution. The AI reviewer operates on `PermissionRequest` hooks using a fast LLM model — h2 writes the instructions to `permission-reviewer.md` in the session directory.
 
 ### How settings are delivered to each agent
 
@@ -226,10 +244,15 @@ agent_model: claude-sonnet-4-6
 claude_permission_mode: acceptEdits
 instructions: |
   You are a coding agent. Implement features and write tests.
-permission_review_agent:
-  instructions: |
-    ALLOW: standard dev tools
-    DENY: destructive operations
+permission_review:
+  dcg:
+    enabled: true
+    destructive_policy: moderate
+    privacy_policy: strict
+  ai_reviewer:
+    instructions: |
+      ALLOW: standard dev tools
+      DENY: destructive operations
 ```
 
 **Codex with workspace sandbox:**
