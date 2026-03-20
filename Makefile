@@ -53,15 +53,11 @@ check-nofix: fmt-nofix ## Run vet + staticcheck without auto-formatting  [CI: 1/
 # ── Tests ────────────────────────────────────────────────────────────
 
 .PHONY: test
-test: ## Run fast unit tests (skips slow + e2e)  [CI: 2/3]
-	$(GO) test -short $$($(GO) list ./... | grep -v '^h2/e2etests$$')
-
-.PHONY: test-all
-test-all: ## Run all unit/integration tests (includes slow, skips e2e)  [CI: 3/3]
+test: ## Run unit + integration tests (skips e2e)  [CI: 2/3]
 	$(GO) test $$($(GO) list ./... | grep -v '^h2/e2etests$$')
 
 .PHONY: test-e2e
-test-e2e: ## Run end-to-end tests
+test-e2e: ## Run end-to-end tests  [CI: 3/3]
 	$(GO) test ./e2etests
 
 .PHONY: test-coverage
@@ -92,8 +88,8 @@ help: ## Show this help
 	@echo ""
 	@echo "CI jobs (single workflow, 3 steps):"
 	@echo "  1/3  check-nofix    Lint + format check"
-	@echo "  2/3  test           Fast unit tests"
-	@echo "  3/3  test-all       All tests (including slow)"
+	@echo "  2/3  test           Unit + integration tests"
+	@echo "  3/3  test-e2e       End-to-end tests"
 	@echo ""
 
 .DEFAULT_GOAL := help

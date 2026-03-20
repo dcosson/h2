@@ -22,11 +22,8 @@ jobs:
       - name: Check (no-fix)
         run: make check-nofix
 
-      - name: Test (fast)
+      - name: Test
         run: make test
-
-      - name: Test (all, including slow)
-        run: make test-all
 
       - name: Test (e2e)
         run: make test-e2e
