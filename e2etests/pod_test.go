@@ -10,7 +10,11 @@ import (
 // createPodRole writes a role YAML file into pods/roles/ directory.
 func createPodRole(t *testing.T, h2Dir, name, content string) {
 	t.Helper()
-	path := filepath.Join(h2Dir, "pods", "roles", name+".yaml")
+	dir := filepath.Join(h2Dir, "pods", "roles")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("create pod roles dir: %v", err)
+	}
+	path := filepath.Join(dir, name+".yaml")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("create pod role %s: %v", name, err)
 	}
