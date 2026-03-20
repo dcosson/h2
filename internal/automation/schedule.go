@@ -22,19 +22,32 @@ type ScheduleEngine struct {
 	runner        *ActionRunner
 	logger        *slog.Logger
 	stateProvider StateProvider
+	clock         Clock
 }
 
 // activeSchedule pairs the spec with runtime state.
 type activeSchedule struct {
 	spec  *Schedule
 	rule  *rrule.RRule
-	timer *time.Timer
+	timer Timer
 	stop  chan struct{} // closed to cancel this schedule's goroutine
 }
 
+// ScheduleEngineOption configures the ScheduleEngine.
+type ScheduleEngineOption func(*ScheduleEngine)
+
+// WithClock sets a custom clock for the schedule engine (used in tests).
+func WithClock(c Clock) ScheduleEngineOption {
+	return func(se *ScheduleEngine) { se.clock = c }
+}
+
+// WithStateProvider sets a state provider for injecting agent state into env.
+func WithStateProvider(sp StateProvider) ScheduleEngineOption {
+	return func(se *ScheduleEngine) { se.stateProvider = sp }
+}
+
 // NewScheduleEngine creates a ScheduleEngine that dispatches actions via the given runner.
-// The optional stateProvider injects H2_AGENT_STATE/H2_AGENT_SUBSTATE into the env.
-func NewScheduleEngine(runner *ActionRunner, logger *slog.Logger, stateProvider ...StateProvider) *ScheduleEngine {
+func NewScheduleEngine(runner *ActionRunner, logger *slog.Logger, opts ...ScheduleEngineOption) *ScheduleEngine {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -42,9 +55,10 @@ func NewScheduleEngine(runner *ActionRunner, logger *slog.Logger, stateProvider 
 		schedules: make(map[string]*activeSchedule),
 		runner:    runner,
 		logger:    logger,
+		clock:     realClock{},
 	}
-	if len(stateProvider) > 0 {
-		se.stateProvider = stateProvider[0]
+	for _, opt := range opts {
+		opt(se)
 	}
 	return se
 }
@@ -86,11 +100,11 @@ func (se *ScheduleEngine) Add(s *Schedule) error {
 		return fmt.Errorf("schedule %q has no occurrences", s.ID)
 	}
 
-	delay := time.Until(next)
+	delay := next.Sub(se.clock.Now())
 	if delay < 0 {
 		delay = 0
 	}
-	as.timer = time.NewTimer(delay)
+	as.timer = se.clock.NewTimer(delay)
 
 	se.schedules[s.ID] = as
 	go se.runSchedule(as)
@@ -131,7 +145,7 @@ func (se *ScheduleEngine) runSchedule(as *activeSchedule) {
 		select {
 		case <-as.stop:
 			return
-		case <-as.timer.C:
+		case <-as.timer.C():
 			se.handleFiring(as)
 		}
 	}
@@ -177,7 +191,7 @@ func (se *ScheduleEngine) handleFiring(as *activeSchedule) {
 	}
 
 	// Schedule next occurrence.
-	now := time.Now()
+	now := se.clock.Now()
 	next := as.rule.After(now, false)
 	if next.IsZero() {
 		se.logger.Info("schedule exhausted (RRULE complete)",
@@ -188,7 +202,7 @@ func (se *ScheduleEngine) handleFiring(as *activeSchedule) {
 		return
 	}
 
-	delay := time.Until(next)
+	delay := next.Sub(now)
 	if delay < 0 {
 		delay = 0
 	}

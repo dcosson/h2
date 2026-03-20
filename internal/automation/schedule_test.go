@@ -3,31 +3,160 @@ package automation
 import (
 	"context"
 	"os"
+	"sync"
 	"testing"
 	"time"
 )
 
-func newTestScheduleEngine() (*ScheduleEngine, *mockEnqueuer) {
-	enq := &mockEnqueuer{}
-	runner := NewActionRunner(enq, nil, nil)
-	se := NewScheduleEngine(runner, nil)
-	return se, enq
+// fakeClock is a controllable clock for schedule engine tests.
+// It manages fake timers that fire when the clock is advanced past their deadline.
+type fakeClock struct {
+	mu     sync.Mutex
+	now    time.Time
+	timers []*fakeTimer
 }
 
-func TestScheduleEngine_FiresOnTime(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping sleep-based schedule test in short mode")
+func newFakeClock(t time.Time) *fakeClock {
+	return &fakeClock{now: t}
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeClock) NewTimer(d time.Duration) Timer {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ft := &fakeTimer{
+		ch:       make(chan time.Time, 1),
+		deadline: c.now.Add(d),
+		clock:    c,
 	}
-	se, enq := newTestScheduleEngine()
+	c.timers = append(c.timers, ft)
+	// Fire immediately if already past deadline.
+	if !ft.deadline.After(c.now) {
+		ft.ch <- c.now
+	}
+	return ft
+}
+
+// Advance moves the clock forward and fires any timers whose deadlines
+// have been reached. It yields briefly between rounds to let goroutines
+// process timer events and potentially call Reset for the next occurrence.
+func (c *fakeClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	c.now = c.now.Add(d)
+	c.mu.Unlock()
+	c.settle()
+}
+
+// settle repeatedly fires ready timers until no more are eligible,
+// yielding between rounds to let handler goroutines process.
+func (c *fakeClock) settle() {
+	for i := 0; i < 50; i++ {
+		if !c.fireReady() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func (c *fakeClock) fireReady() bool {
+	c.mu.Lock()
+	now := c.now
+	timers := make([]*fakeTimer, len(c.timers))
+	copy(timers, c.timers)
+	c.mu.Unlock()
+
+	fired := false
+	for _, t := range timers {
+		if t.tryFire(now) {
+			fired = true
+		}
+	}
+	return fired
+}
+
+type fakeTimer struct {
+	mu       sync.Mutex
+	ch       chan time.Time
+	deadline time.Time
+	stopped  bool
+	clock    *fakeClock
+}
+
+func (ft *fakeTimer) tryFire(now time.Time) bool {
+	ft.mu.Lock()
+	defer ft.mu.Unlock()
+	if ft.stopped || ft.deadline.After(now) {
+		return false
+	}
+	select {
+	case ft.ch <- now:
+		ft.deadline = time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC)
+		return true
+	default:
+		return false
+	}
+}
+
+func (ft *fakeTimer) C() <-chan time.Time { return ft.ch }
+
+func (ft *fakeTimer) Stop() bool {
+	ft.mu.Lock()
+	defer ft.mu.Unlock()
+	wasActive := !ft.stopped
+	ft.stopped = true
+	return wasActive
+}
+
+func (ft *fakeTimer) Reset(d time.Duration) bool {
+	ft.clock.mu.Lock()
+	now := ft.clock.now
+	ft.clock.mu.Unlock()
+
+	ft.mu.Lock()
+	defer ft.mu.Unlock()
+	wasActive := !ft.stopped
+	ft.stopped = false
+	ft.deadline = now.Add(d)
+	if !ft.deadline.After(now) {
+		select {
+		case ft.ch <- now:
+			ft.deadline = time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC)
+		default:
+		}
+	}
+	return wasActive
+}
+
+// --- Test helpers ---
+
+var baseTime = time.Date(2026, 3, 20, 12, 0, 0, 0, time.UTC)
+
+func newFakeScheduleEngine() (*ScheduleEngine, *mockEnqueuer, *fakeClock) {
+	enq := &mockEnqueuer{}
+	runner := NewActionRunner(enq, nil, nil)
+	clk := newFakeClock(baseTime)
+	se := NewScheduleEngine(runner, nil, WithClock(clk))
+	return se, enq, clk
+}
+
+// --- Tests ---
+
+func TestScheduleEngine_FiresOnTime(t *testing.T) {
+	se, enq, clk := newFakeScheduleEngine()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go se.Run(ctx)
 
-	now := time.Now().Add(-1 * time.Second)
+	start := clk.Now().Add(1 * time.Second)
 	err := se.Add(&Schedule{
 		ID:    "s1",
 		Name:  "test-schedule",
-		Start: now.Format(time.RFC3339),
+		Start: start.Format(time.RFC3339),
 		RRule: "FREQ=SECONDLY;INTERVAL=1;COUNT=2",
 		Action: Action{
 			Message:  "tick",
@@ -38,8 +167,8 @@ func TestScheduleEngine_FiresOnTime(t *testing.T) {
 		t.Fatalf("Add failed: %v", err)
 	}
 
-	// Wait for at least one firing.
-	time.Sleep(1500 * time.Millisecond)
+	// Advance to first occurrence.
+	clk.Advance(1 * time.Second)
 
 	msgs := enq.getMessages()
 	if len(msgs) < 1 {
@@ -51,18 +180,15 @@ func TestScheduleEngine_FiresOnTime(t *testing.T) {
 }
 
 func TestScheduleEngine_RunIf_ConditionPass(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping sleep-based schedule test in short mode")
-	}
-	se, enq := newTestScheduleEngine()
+	se, enq, clk := newFakeScheduleEngine()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go se.Run(ctx)
 
-	now := time.Now().Add(-1 * time.Second)
+	start := clk.Now().Add(1 * time.Second)
 	err := se.Add(&Schedule{
 		ID:            "s1",
-		Start:         now.Format(time.RFC3339),
+		Start:         start.Format(time.RFC3339),
 		RRule:         "FREQ=SECONDLY;INTERVAL=1;COUNT=2",
 		Condition:     "true",
 		ConditionMode: RunIf,
@@ -74,7 +200,7 @@ func TestScheduleEngine_RunIf_ConditionPass(t *testing.T) {
 		t.Fatalf("Add failed: %v", err)
 	}
 
-	time.Sleep(1500 * time.Millisecond)
+	clk.Advance(1 * time.Second)
 
 	msgs := enq.getMessages()
 	if len(msgs) < 1 {
@@ -83,18 +209,15 @@ func TestScheduleEngine_RunIf_ConditionPass(t *testing.T) {
 }
 
 func TestScheduleEngine_RunIf_ConditionFail(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping sleep-based schedule test in short mode")
-	}
-	se, enq := newTestScheduleEngine()
+	se, enq, clk := newFakeScheduleEngine()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go se.Run(ctx)
 
-	now := time.Now().Add(-1 * time.Second)
+	start := clk.Now().Add(1 * time.Second)
 	err := se.Add(&Schedule{
 		ID:            "s1",
-		Start:         now.Format(time.RFC3339),
+		Start:         start.Format(time.RFC3339),
 		RRule:         "FREQ=SECONDLY;INTERVAL=1;COUNT=3",
 		Condition:     "false",
 		ConditionMode: RunIf,
@@ -106,7 +229,10 @@ func TestScheduleEngine_RunIf_ConditionFail(t *testing.T) {
 		t.Fatalf("Add failed: %v", err)
 	}
 
-	time.Sleep(2 * time.Second)
+	// Advance through all 3 occurrences.
+	clk.Advance(1 * time.Second)
+	clk.Advance(1 * time.Second)
+	clk.Advance(1 * time.Second)
 
 	msgs := enq.getMessages()
 	if len(msgs) != 0 {
@@ -115,18 +241,15 @@ func TestScheduleEngine_RunIf_ConditionFail(t *testing.T) {
 }
 
 func TestScheduleEngine_StopWhen_ConditionFail(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping sleep-based schedule test in short mode")
-	}
-	se, enq := newTestScheduleEngine()
+	se, enq, clk := newFakeScheduleEngine()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go se.Run(ctx)
 
-	now := time.Now().Add(-1 * time.Second)
+	start := clk.Now().Add(1 * time.Second)
 	err := se.Add(&Schedule{
 		ID:            "s1",
-		Start:         now.Format(time.RFC3339),
+		Start:         start.Format(time.RFC3339),
 		RRule:         "FREQ=SECONDLY;INTERVAL=1;COUNT=3",
 		Condition:     "false",
 		ConditionMode: StopWhen,
@@ -138,7 +261,8 @@ func TestScheduleEngine_StopWhen_ConditionFail(t *testing.T) {
 		t.Fatalf("Add failed: %v", err)
 	}
 
-	time.Sleep(2 * time.Second)
+	clk.Advance(1 * time.Second)
+	clk.Advance(1 * time.Second)
 
 	msgs := enq.getMessages()
 	if len(msgs) < 1 {
@@ -147,18 +271,15 @@ func TestScheduleEngine_StopWhen_ConditionFail(t *testing.T) {
 }
 
 func TestScheduleEngine_StopWhen_ConditionPass(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping sleep-based schedule test in short mode")
-	}
-	se, enq := newTestScheduleEngine()
+	se, enq, clk := newFakeScheduleEngine()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go se.Run(ctx)
 
-	now := time.Now().Add(-1 * time.Second)
+	start := clk.Now().Add(1 * time.Second)
 	err := se.Add(&Schedule{
 		ID:            "s1",
-		Start:         now.Format(time.RFC3339),
+		Start:         start.Format(time.RFC3339),
 		RRule:         "FREQ=SECONDLY;INTERVAL=1;COUNT=5",
 		Condition:     "true",
 		ConditionMode: StopWhen,
@@ -170,7 +291,7 @@ func TestScheduleEngine_StopWhen_ConditionPass(t *testing.T) {
 		t.Fatalf("Add failed: %v", err)
 	}
 
-	time.Sleep(1500 * time.Millisecond)
+	clk.Advance(1 * time.Second)
 
 	// Condition passes immediately → schedule removed, no action.
 	msgs := enq.getMessages()
@@ -183,10 +304,7 @@ func TestScheduleEngine_StopWhen_ConditionPass(t *testing.T) {
 }
 
 func TestScheduleEngine_RunOnceWhen_EventuallyFires(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping sleep-based schedule test in short mode")
-	}
-	se, enq := newTestScheduleEngine()
+	se, enq, clk := newFakeScheduleEngine()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go se.Run(ctx)
@@ -194,10 +312,10 @@ func TestScheduleEngine_RunOnceWhen_EventuallyFires(t *testing.T) {
 	// Use a temp file as a latch: condition passes when file exists.
 	tmp := t.TempDir() + "/latch"
 
-	now := time.Now().Add(-1 * time.Second)
+	start := clk.Now().Add(1 * time.Second)
 	err := se.Add(&Schedule{
 		ID:            "s1",
-		Start:         now.Format(time.RFC3339),
+		Start:         start.Format(time.RFC3339),
 		RRule:         "FREQ=SECONDLY;INTERVAL=1;COUNT=10",
 		Condition:     "test -f " + tmp,
 		ConditionMode: RunOnceWhen,
@@ -209,8 +327,9 @@ func TestScheduleEngine_RunOnceWhen_EventuallyFires(t *testing.T) {
 		t.Fatalf("Add failed: %v", err)
 	}
 
-	// First few firings: condition fails (file doesn't exist).
-	time.Sleep(1500 * time.Millisecond)
+	// First two ticks: condition fails (file doesn't exist).
+	clk.Advance(1 * time.Second)
+	clk.Advance(1 * time.Second)
 	if len(enq.getMessages()) != 0 {
 		t.Fatal("should not fire before condition passes")
 	}
@@ -220,8 +339,8 @@ func TestScheduleEngine_RunOnceWhen_EventuallyFires(t *testing.T) {
 		t.Fatalf("create latch: %v", err)
 	}
 
-	// Wait for the next firing.
-	time.Sleep(1500 * time.Millisecond)
+	// Next tick: condition passes.
+	clk.Advance(1 * time.Second)
 
 	msgs := enq.getMessages()
 	if len(msgs) != 1 {
@@ -236,18 +355,15 @@ func TestScheduleEngine_RunOnceWhen_EventuallyFires(t *testing.T) {
 }
 
 func TestScheduleEngine_RecurringRRule(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping sleep-based schedule test in short mode")
-	}
-	se, enq := newTestScheduleEngine()
+	se, enq, clk := newFakeScheduleEngine()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go se.Run(ctx)
 
-	now := time.Now().Add(-1 * time.Second)
+	start := clk.Now().Add(1 * time.Second)
 	err := se.Add(&Schedule{
 		ID:    "s1",
-		Start: now.Format(time.RFC3339),
+		Start: start.Format(time.RFC3339),
 		RRule: "FREQ=SECONDLY;INTERVAL=1;COUNT=3",
 		Action: Action{
 			Message: "recurring",
@@ -257,8 +373,10 @@ func TestScheduleEngine_RecurringRRule(t *testing.T) {
 		t.Fatalf("Add failed: %v", err)
 	}
 
-	// Wait for all 3 firings.
-	time.Sleep(3500 * time.Millisecond)
+	// Advance through all 3 occurrences.
+	clk.Advance(1 * time.Second)
+	clk.Advance(1 * time.Second)
+	clk.Advance(1 * time.Second)
 
 	msgs := enq.getMessages()
 	if len(msgs) < 2 {
@@ -267,18 +385,15 @@ func TestScheduleEngine_RecurringRRule(t *testing.T) {
 }
 
 func TestScheduleEngine_FiniteRRule(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping sleep-based schedule test in short mode")
-	}
-	se, enq := newTestScheduleEngine()
+	se, enq, clk := newFakeScheduleEngine()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go se.Run(ctx)
 
-	now := time.Now().Add(-1 * time.Second)
+	start := clk.Now().Add(1 * time.Second)
 	err := se.Add(&Schedule{
 		ID:    "s1",
-		Start: now.Format(time.RFC3339),
+		Start: start.Format(time.RFC3339),
 		RRule: "FREQ=SECONDLY;INTERVAL=1;COUNT=2",
 		Action: Action{
 			Message: "finite",
@@ -288,32 +403,32 @@ func TestScheduleEngine_FiniteRRule(t *testing.T) {
 		t.Fatalf("Add failed: %v", err)
 	}
 
-	// Wait for schedule to exhaust.
-	time.Sleep(3 * time.Second)
+	// Advance through both occurrences.
+	clk.Advance(1 * time.Second)
+	clk.Advance(1 * time.Second)
 
 	msgs := enq.getMessages()
 	if len(msgs) < 1 {
 		t.Fatal("expected at least 1 message from finite schedule")
 	}
 	// Schedule should be auto-removed after exhaustion.
+	// Give a small extra advance to ensure cleanup completed.
+	clk.Advance(1 * time.Second)
 	if len(se.List()) != 0 {
 		t.Fatal("finite schedule should be removed after RRULE exhaustion")
 	}
 }
 
 func TestScheduleEngine_Remove(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping sleep-based schedule test in short mode")
-	}
-	se, enq := newTestScheduleEngine()
+	se, enq, clk := newFakeScheduleEngine()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go se.Run(ctx)
 
-	now := time.Now().Add(2 * time.Second) // starts in the future
+	start := clk.Now().Add(2 * time.Second) // starts in the future
 	err := se.Add(&Schedule{
 		ID:    "s1",
-		Start: now.Format(time.RFC3339),
+		Start: start.Format(time.RFC3339),
 		RRule: "FREQ=SECONDLY;INTERVAL=1;COUNT=5",
 		Action: Action{
 			Message: "should not fire",
@@ -330,7 +445,7 @@ func TestScheduleEngine_Remove(t *testing.T) {
 		t.Fatal("Remove should return false for non-existent schedule")
 	}
 
-	time.Sleep(3 * time.Second)
+	clk.Advance(5 * time.Second)
 
 	if len(enq.getMessages()) != 0 {
 		t.Fatal("removed schedule should not fire")
@@ -338,15 +453,15 @@ func TestScheduleEngine_Remove(t *testing.T) {
 }
 
 func TestScheduleEngine_AddDuplicateID(t *testing.T) {
-	se, _ := newTestScheduleEngine()
+	se, _, clk := newFakeScheduleEngine()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go se.Run(ctx)
 
-	now := time.Now().Add(-1 * time.Second)
+	start := clk.Now().Add(1 * time.Second)
 	err := se.Add(&Schedule{
 		ID:    "s1",
-		Start: now.Format(time.RFC3339),
+		Start: start.Format(time.RFC3339),
 		RRule: "FREQ=SECONDLY;INTERVAL=1;COUNT=2",
 		Action: Action{
 			Message: "first",
@@ -358,7 +473,7 @@ func TestScheduleEngine_AddDuplicateID(t *testing.T) {
 
 	err = se.Add(&Schedule{
 		ID:    "s1",
-		Start: now.Format(time.RFC3339),
+		Start: start.Format(time.RFC3339),
 		RRule: "FREQ=SECONDLY;INTERVAL=1;COUNT=2",
 		Action: Action{
 			Message: "duplicate",
@@ -370,7 +485,7 @@ func TestScheduleEngine_AddDuplicateID(t *testing.T) {
 }
 
 func TestScheduleEngine_InvalidRRule(t *testing.T) {
-	se, _ := newTestScheduleEngine()
+	se, _, _ := newFakeScheduleEngine()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go se.Run(ctx)
@@ -388,18 +503,15 @@ func TestScheduleEngine_InvalidRRule(t *testing.T) {
 }
 
 func TestScheduleEngine_EnvVarsSet(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping sleep-based schedule test in short mode")
-	}
-	se, enq := newTestScheduleEngine()
+	se, enq, clk := newFakeScheduleEngine()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go se.Run(ctx)
 
-	now := time.Now().Add(-1 * time.Second)
+	start := clk.Now().Add(1 * time.Second)
 	err := se.Add(&Schedule{
 		ID:        "s1",
-		Start:     now.Format(time.RFC3339),
+		Start:     start.Format(time.RFC3339),
 		RRule:     "FREQ=SECONDLY;INTERVAL=1;COUNT=1",
 		Condition: `test "$H2_SCHEDULE_ID" = "s1"`,
 		Action: Action{
@@ -410,7 +522,7 @@ func TestScheduleEngine_EnvVarsSet(t *testing.T) {
 		t.Fatalf("Add failed: %v", err)
 	}
 
-	time.Sleep(1500 * time.Millisecond)
+	clk.Advance(1 * time.Second)
 
 	if len(enq.getMessages()) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(enq.getMessages()))

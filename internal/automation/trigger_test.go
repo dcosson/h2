@@ -47,20 +47,13 @@ func newTestTriggerEngine() (*TriggerEngine, *mockEnqueuer) {
 	return te, enq
 }
 
-// sendEvent sends an event to the TriggerEngine by running it briefly.
+// sendEvent sends a single event to the TriggerEngine synchronously.
+// It creates a closed channel with the event so Run drains and returns.
 func sendEvent(te *TriggerEngine, evt monitor.AgentEvent) {
 	ch := make(chan monitor.AgentEvent, 1)
 	ch <- evt
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		te.Run(ctx, ch)
-		close(done)
-	}()
-	// Give the engine time to process.
-	time.Sleep(50 * time.Millisecond)
-	cancel()
-	<-done
+	close(ch)
+	te.Run(context.Background(), ch)
 }
 
 func stateChangeEvent(state monitor.State, sub monitor.SubState) monitor.AgentEvent {
@@ -402,6 +395,18 @@ func (c *mockClock) Set(t time.Time) {
 	defer c.mu.Unlock()
 	c.now = t
 }
+
+// NewTimer satisfies the Clock interface. Trigger tests don't use timers,
+// so this returns a stopped timer that never fires.
+func (c *mockClock) NewTimer(d time.Duration) Timer {
+	return &mockTimer{ch: make(chan time.Time)}
+}
+
+type mockTimer struct{ ch chan time.Time }
+
+func (t *mockTimer) C() <-chan time.Time        { return t.ch }
+func (t *mockTimer) Stop() bool                 { return true }
+func (t *mockTimer) Reset(d time.Duration) bool { return true }
 
 // newTestTriggerEngineWithClock creates a TriggerEngine with a mock clock.
 func newTestTriggerEngineWithClock(clock Clock) (*TriggerEngine, *mockEnqueuer) {
@@ -804,12 +809,11 @@ func TestTriggerEngine_ConcurrentAddDuringProcessEvent(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < 50; i++ {
 			ch <- stateChangeEvent(monitor.StateIdle, monitor.SubStateNone)
-			time.Sleep(1 * time.Millisecond)
 		}
 	}()
 
 	wg.Wait()
-	time.Sleep(100 * time.Millisecond) // let remaining events process
+	close(ch) // Run drains remaining events then returns
 	cancel()
 
 	// The test passes if no race condition panic occurs.
