@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dcosson/destructive-command-guard-go/guard"
 	"github.com/spf13/cobra"
 
 	"h2/internal/config"
@@ -74,12 +75,34 @@ in settings.json. Exits 0 with JSON on stdout.`,
 			// Step 1: Always forward the hook event to the agent.
 			sendHookEvent(agentName, envelope.HookEventName, data)
 
-			// Step 2: For PermissionRequest, optionally run the permission reviewer.
+			// Load permission review config from session metadata.
+			sessionDir := config.FindSessionDirByAgentName(agentName)
+			var prConfig *config.PermissionReview
+			if sessionDir != "" {
+				if rc, err := config.ReadRuntimeConfig(sessionDir); err == nil {
+					prConfig = rc.PermissionReview
+				}
+			}
+
+			// Step 2: For PreToolUse, optionally run DCG.
+			if envelope.HookEventName == "PreToolUse" {
+				if prConfig != nil && prConfig.DCG != nil && prConfig.DCG.IsEnabled() {
+					return handleDCGPreToolUse(cmd, prConfig.DCG, data)
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), "{}")
+				return nil
+			}
+
+			// Step 3: For PermissionRequest, optionally run the permission reviewer.
 			if envelope.HookEventName == "PermissionRequest" {
 				if delayPermissionRequestSeconds > 0 {
 					time.Sleep(time.Duration(delayPermissionRequestSeconds * float64(time.Second)))
 				}
-				return handlePermissionRequest(cmd, agentName, data, forcedPermissionResult)
+				model := "haiku"
+				if prConfig != nil && prConfig.AIReviewer != nil {
+					model = prConfig.AIReviewer.GetModel()
+				}
+				return handlePermissionRequest(cmd, agentName, data, forcedPermissionResult, model)
 			}
 
 			// All other events: return empty JSON.
@@ -150,7 +173,7 @@ func sendPermissionDecision(agentName, sessionID, toolName, decision, reason str
 // The PermissionRequest event has already been forwarded to the agent
 // (setting PermissionReview state). This function optionally runs
 // the AI reviewer and returns a decision to Claude Code.
-func handlePermissionRequest(cmd *cobra.Command, agentName string, data []byte, forcedResult string) error {
+func handlePermissionRequest(cmd *cobra.Command, agentName string, data []byte, forcedResult string, model string) error {
 	var request permissionInput
 	if err := json.Unmarshal(data, &request); err != nil {
 		// Can't parse — fall through to Claude Code's built-in dialog.
@@ -183,8 +206,8 @@ func handlePermissionRequest(cmd *cobra.Command, agentName string, data []byte, 
 		return nil
 	}
 
-	// Call claude --print --model haiku with reviewer instructions.
-	decision, reason := callReviewer(string(reviewerInstructions), request)
+	// Call claude --print with reviewer instructions.
+	decision, reason := callReviewer(string(reviewerInstructions), request, model)
 
 	switch decision {
 	case "ALLOW":
@@ -224,6 +247,148 @@ func handlePermissionRequest(cmd *cobra.Command, agentName string, data []byte, 
 	}
 
 	return nil
+}
+
+// preToolUseInput represents the relevant fields from a PreToolUse hook payload.
+type preToolUseInput struct {
+	ToolName  string          `json:"tool_name"`
+	ToolInput json.RawMessage `json:"tool_input"`
+}
+
+// preToolUseResponse is the JSON output for a PreToolUse hook with a permission decision.
+type preToolUseResponse struct {
+	HookSpecificOutput preToolUseDecision `json:"hookSpecificOutput"`
+}
+
+type preToolUseDecision struct {
+	HookEventName            string `json:"hookEventName"`
+	PermissionDecision       string `json:"permissionDecision"`
+	PermissionDecisionReason string `json:"permissionDecisionReason,omitempty"`
+}
+
+// handleDCGPreToolUse evaluates a PreToolUse event using the DCG guard library.
+// Only evaluates Bash tool invocations; all other tools pass through.
+func handleDCGPreToolUse(cmd *cobra.Command, dcgCfg *config.DCGConfig, data []byte) error {
+	var input preToolUseInput
+	if err := json.Unmarshal(data, &input); err != nil {
+		fmt.Fprintln(cmd.OutOrStdout(), "{}")
+		return nil
+	}
+
+	// DCG only evaluates shell commands (Bash tool).
+	if input.ToolName != "Bash" {
+		fmt.Fprintln(cmd.OutOrStdout(), "{}")
+		return nil
+	}
+
+	// Extract the command string from tool_input.
+	var toolInput struct {
+		Command string `json:"command"`
+	}
+	if err := json.Unmarshal(input.ToolInput, &toolInput); err != nil || toolInput.Command == "" {
+		fmt.Fprintln(cmd.OutOrStdout(), "{}")
+		return nil
+	}
+
+	// Build guard options from DCGConfig.
+	opts := buildDCGOptions(dcgCfg)
+
+	// Evaluate the command.
+	result := guard.Evaluate(toolInput.Command, opts...)
+
+	switch result.Decision {
+	case guard.Allow:
+		fmt.Fprintln(cmd.OutOrStdout(), "{}")
+	case guard.Deny:
+		reason := dcgResultReason(result)
+		resp := preToolUseResponse{
+			HookSpecificOutput: preToolUseDecision{
+				HookEventName:            "PreToolUse",
+				PermissionDecision:       "deny",
+				PermissionDecisionReason: reason,
+			},
+		}
+		out, _ := json.Marshal(resp)
+		fmt.Fprintln(cmd.OutOrStdout(), string(out))
+	case guard.Ask:
+		reason := dcgResultReason(result)
+		resp := preToolUseResponse{
+			HookSpecificOutput: preToolUseDecision{
+				HookEventName:            "PreToolUse",
+				PermissionDecision:       "ask",
+				PermissionDecisionReason: reason,
+			},
+		}
+		out, _ := json.Marshal(resp)
+		fmt.Fprintln(cmd.OutOrStdout(), string(out))
+	}
+
+	return nil
+}
+
+// buildDCGOptions converts a DCGConfig into guard.Option slice.
+func buildDCGOptions(cfg *config.DCGConfig) []guard.Option {
+	var opts []guard.Option
+
+	if cfg.DestructivePolicy != "" {
+		if p := dcgPolicyFromString(cfg.DestructivePolicy); p != nil {
+			opts = append(opts, guard.WithDestructivePolicy(p))
+		}
+	}
+	if cfg.PrivacyPolicy != "" {
+		if p := dcgPolicyFromString(cfg.PrivacyPolicy); p != nil {
+			opts = append(opts, guard.WithPrivacyPolicy(p))
+		}
+	}
+	if len(cfg.Allowlist) > 0 {
+		opts = append(opts, guard.WithAllowlist(cfg.Allowlist...))
+	}
+	if len(cfg.Blocklist) > 0 {
+		opts = append(opts, guard.WithBlocklist(cfg.Blocklist...))
+	}
+	if len(cfg.EnabledPacks) > 0 {
+		opts = append(opts, guard.WithPacks(cfg.EnabledPacks...))
+	}
+	if len(cfg.DisabledPacks) > 0 {
+		opts = append(opts, guard.WithDisabledPacks(cfg.DisabledPacks...))
+	}
+
+	// Provide environment for env-sensitive rules.
+	opts = append(opts, guard.WithEnv(os.Environ()))
+
+	return opts
+}
+
+// dcgPolicyFromString maps a policy name to a guard.Policy.
+func dcgPolicyFromString(name string) guard.Policy {
+	switch name {
+	case "allow-all":
+		return guard.AllowAllPolicy()
+	case "permissive":
+		return guard.PermissivePolicy()
+	case "moderate":
+		return guard.ModeratePolicy()
+	case "strict":
+		return guard.StrictPolicy()
+	case "interactive":
+		return guard.InteractivePolicy()
+	default:
+		return nil
+	}
+}
+
+// dcgResultReason builds a human-readable reason from a guard.Result.
+func dcgResultReason(result guard.Result) string {
+	if len(result.Matches) == 0 {
+		return ""
+	}
+	// Use the first match's reason as the primary explanation.
+	m := result.Matches[0]
+	reason := m.Reason
+	if m.Pack != "" {
+		reason = fmt.Sprintf("[%s] %s", m.Pack, reason)
+	}
+	return reason
 }
 
 func isValidForcedPermissionResult(v string) bool {
@@ -299,9 +464,9 @@ type decisionPayload struct {
 	Message  string `json:"message,omitempty"`
 }
 
-// callReviewer invokes claude --print --model haiku with the reviewer
-// instructions and permission request, returning the decision and reason.
-func callReviewer(instructions string, req permissionInput) (decision string, reason string) {
+// callReviewer invokes claude --print with the specified model, the reviewer
+// instructions, and the permission request, returning the decision and reason.
+func callReviewer(instructions string, req permissionInput, model string) (decision string, reason string) {
 	toolInput, _ := json.Marshal(req.ToolInput)
 	prompt := fmt.Sprintf(`%s
 
@@ -314,7 +479,7 @@ Line 1: the decision word (ALLOW, DENY, or ASK_USER).
 Line 2: a brief reason.
 No other text.`, instructions, req.ToolName, string(toolInput))
 
-	cmd := exec.Command("claude", "--print", "--model", "haiku")
+	cmd := exec.Command("claude", "--print", "--model", model)
 	cmd.Stdin = strings.NewReader(prompt)
 	cmd.Stderr = nil
 

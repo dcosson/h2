@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // SessionsDir returns the directory where agent session dirs are created (~/.h2/sessions/).
@@ -15,6 +16,16 @@ func SessionsDir() string {
 // SessionDir returns the session directory for a given agent name.
 func SessionDir(agentName string) string {
 	return filepath.Join(SessionsDir(), agentName)
+}
+
+// FindSessionDirByAgentName returns the session directory for an agent if it exists.
+// Returns empty string if not found.
+func FindSessionDirByAgentName(agentName string) string {
+	dir := SessionDir(agentName)
+	if _, err := os.Stat(dir); err != nil {
+		return ""
+	}
+	return dir
 }
 
 // FindSessionDirByID returns the session directory whose RuntimeConfig contains
@@ -41,6 +52,43 @@ func FindSessionDirByID(sessionID string) string {
 	return ""
 }
 
+// SessionLastActivity returns the last modification time of the events.jsonl
+// file in the session directory, which represents the last activity time.
+// Falls back to the directory's mod time if events.jsonl doesn't exist.
+func SessionLastActivity(sessionDir string) time.Time {
+	eventsPath := filepath.Join(sessionDir, "events.jsonl")
+	if info, err := os.Stat(eventsPath); err == nil {
+		return info.ModTime()
+	}
+	if info, err := os.Stat(sessionDir); err == nil {
+		return info.ModTime()
+	}
+	return time.Time{}
+}
+
+// ListSessionConfigs reads all session directories and returns their RuntimeConfigs.
+// Directories with missing or invalid metadata are silently skipped.
+func ListSessionConfigs() []*RuntimeConfig {
+	root := SessionsDir()
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var configs []*RuntimeConfig
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		dir := filepath.Join(root, entry.Name())
+		rc, err := ReadRuntimeConfig(dir)
+		if err != nil {
+			continue
+		}
+		configs = append(configs, rc)
+	}
+	return configs
+}
+
 // SetupSessionDir creates the session directory for an agent and writes
 // per-agent files (e.g. permission-reviewer.md). Claude Code config
 // (auth, hooks, settings) lives in the shared claude config dir, not here.
@@ -51,11 +99,14 @@ func SetupSessionDir(agentName string, role *Role) (string, error) {
 		return "", fmt.Errorf("create session dir: %w", err)
 	}
 
-	// Write permission-reviewer.md if permission_review_agent is configured.
-	if role.PermissionReviewAgent != nil && role.PermissionReviewAgent.IsEnabled() {
-		reviewerPath := filepath.Join(sessionDir, "permission-reviewer.md")
-		if err := os.WriteFile(reviewerPath, []byte(role.PermissionReviewAgent.GetInstructions()), 0o644); err != nil {
-			return "", fmt.Errorf("write permission-reviewer.md: %w", err)
+	// Write permission review files to session dir.
+	if role.PermissionReview != nil {
+		// Write permission-reviewer.md for the AI reviewer (human-readable instructions).
+		if role.PermissionReview.AIReviewer != nil && role.PermissionReview.AIReviewer.IsEnabled() {
+			reviewerPath := filepath.Join(sessionDir, "permission-reviewer.md")
+			if err := os.WriteFile(reviewerPath, []byte(role.PermissionReview.AIReviewer.GetInstructions()), 0o644); err != nil {
+				return "", fmt.Errorf("write permission-reviewer.md: %w", err)
+			}
 		}
 	}
 

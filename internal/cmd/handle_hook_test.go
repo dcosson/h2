@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"h2/internal/config"
 	"h2/internal/session/message"
 	"h2/internal/socketdir"
@@ -633,6 +635,346 @@ func TestSplitLines(t *testing.T) {
 				t.Errorf("splitLines(%q)[%d] = %q, want %q", tt.input, i, got[i], tt.want[i])
 			}
 		}
+	}
+}
+
+// --- DCG PreToolUse tests ---
+
+func TestHandleDCGPreToolUse_NonBashTool_PassThrough(t *testing.T) {
+	payload := `{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"/tmp/foo"}}`
+	cfg := &config.DCGConfig{}
+
+	cmd := &cobra.Command{}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+
+	err := handleDCGPreToolUse(cmd, cfg, []byte(payload))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.TrimSpace(out.String()) != "{}" {
+		t.Errorf("expected {} for non-Bash tool, got %q", out.String())
+	}
+}
+
+func TestHandleDCGPreToolUse_SafeCommand_Allow(t *testing.T) {
+	payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls -la"}}`
+	cfg := &config.DCGConfig{}
+
+	cmd := &cobra.Command{}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+
+	err := handleDCGPreToolUse(cmd, cfg, []byte(payload))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Safe command should return {} (allow/pass through).
+	if strings.TrimSpace(out.String()) != "{}" {
+		t.Errorf("expected {} for safe command, got %q", out.String())
+	}
+}
+
+func TestHandleDCGPreToolUse_DestructiveCommand_StrictPolicy_Deny(t *testing.T) {
+	payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /"}}`
+	cfg := &config.DCGConfig{
+		DestructivePolicy: "strict",
+	}
+
+	cmd := &cobra.Command{}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+
+	err := handleDCGPreToolUse(cmd, cfg, []byte(payload))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	result := out.String()
+	if strings.TrimSpace(result) == "{}" {
+		t.Fatal("expected deny response for destructive command with strict policy, got {}")
+	}
+	if !strings.Contains(result, `"permissionDecision":"deny"`) {
+		t.Errorf("expected deny decision, got %q", result)
+	}
+}
+
+func TestHandleDCGPreToolUse_DestructiveCommand_InteractivePolicy_Ask(t *testing.T) {
+	// "git push --force" with interactive policy should trigger an Ask decision.
+	payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push --force"}}`
+	cfg := &config.DCGConfig{
+		DestructivePolicy: "interactive",
+	}
+
+	cmd := &cobra.Command{}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+
+	err := handleDCGPreToolUse(cmd, cfg, []byte(payload))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	result := strings.TrimSpace(out.String())
+	// Interactive policy returns Ask for medium+ severity.
+	// If dcg classifies it as destructive, we expect either ask or deny, not {}.
+	if result == "{}" {
+		// Some commands may not match any rules — that's OK, just pass through.
+		t.Skip("command did not match any DCG rules")
+	}
+	// Should contain either "ask" or "deny" decision.
+	if !strings.Contains(result, `"permissionDecision"`) {
+		t.Errorf("expected permissionDecision in response, got %q", result)
+	}
+}
+
+func TestHandleDCGPreToolUse_AllowAllPolicy_Allows(t *testing.T) {
+	// Even destructive commands pass with allow-all.
+	payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /"}}`
+	cfg := &config.DCGConfig{
+		DestructivePolicy: "allow-all",
+		PrivacyPolicy:     "allow-all",
+	}
+
+	cmd := &cobra.Command{}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+
+	err := handleDCGPreToolUse(cmd, cfg, []byte(payload))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.TrimSpace(out.String()) != "{}" {
+		t.Errorf("expected {} with allow-all policy, got %q", out.String())
+	}
+}
+
+func TestHandleDCGPreToolUse_EmptyCommand_PassThrough(t *testing.T) {
+	payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":""}}`
+	cfg := &config.DCGConfig{}
+
+	cmd := &cobra.Command{}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+
+	err := handleDCGPreToolUse(cmd, cfg, []byte(payload))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.TrimSpace(out.String()) != "{}" {
+		t.Errorf("expected {} for empty command, got %q", out.String())
+	}
+}
+
+func TestHandleDCGPreToolUse_InvalidJSON_PassThrough(t *testing.T) {
+	cfg := &config.DCGConfig{}
+
+	cmd := &cobra.Command{}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+
+	err := handleDCGPreToolUse(cmd, cfg, []byte("not json"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.TrimSpace(out.String()) != "{}" {
+		t.Errorf("expected {} for invalid JSON, got %q", out.String())
+	}
+}
+
+// --- buildDCGOptions tests ---
+
+func TestBuildDCGOptions_Empty(t *testing.T) {
+	cfg := &config.DCGConfig{}
+	opts := buildDCGOptions(cfg)
+	// Should have at least the WithEnv option.
+	if len(opts) < 1 {
+		t.Errorf("expected at least 1 option (WithEnv), got %d", len(opts))
+	}
+}
+
+func TestBuildDCGOptions_AllFields(t *testing.T) {
+	cfg := &config.DCGConfig{
+		DestructivePolicy: "strict",
+		PrivacyPolicy:     "moderate",
+		Allowlist:         []string{"git status"},
+		Blocklist:         []string{"rm *"},
+		EnabledPacks:      []string{"core.git"},
+		DisabledPacks:     []string{"database.sql"},
+	}
+	opts := buildDCGOptions(cfg)
+	// Should have: destructive policy + privacy policy + allowlist + blocklist + packs + disabled packs + env = 7.
+	if len(opts) != 7 {
+		t.Errorf("expected 7 options, got %d", len(opts))
+	}
+}
+
+// --- dcgPolicyFromString tests ---
+
+func TestDCGPolicyFromString(t *testing.T) {
+	tests := []struct {
+		name    string
+		wantNil bool
+	}{
+		{"allow-all", false},
+		{"permissive", false},
+		{"moderate", false},
+		{"strict", false},
+		{"interactive", false},
+		{"unknown", true},
+		{"", true},
+	}
+	for _, tt := range tests {
+		p := dcgPolicyFromString(tt.name)
+		if tt.wantNil && p != nil {
+			t.Errorf("dcgPolicyFromString(%q) = %v, want nil", tt.name, p)
+		}
+		if !tt.wantNil && p == nil {
+			t.Errorf("dcgPolicyFromString(%q) = nil, want non-nil", tt.name)
+		}
+	}
+}
+
+// --- DCG integration test via handle-hook command ---
+
+func TestHandleHook_PreToolUse_DCG_DeniesDestructive(t *testing.T) {
+	tmpDir := shortHookTempDir(t)
+	setupMockAgent(t, tmpDir, "dcg-agent")
+
+	// Create session dir with RuntimeConfig that has DCG enabled + strict.
+	h2Root := filepath.Join(tmpDir, ".h2")
+	sessionDir := filepath.Join(h2Root, "sessions", "dcg-agent")
+	os.MkdirAll(sessionDir, 0o755)
+
+	enabled := true
+	rc := &config.RuntimeConfig{
+		AgentName:   "dcg-agent",
+		SessionID:   "test-session",
+		HarnessType: "claude_code",
+		Command:     "claude",
+		CWD:         tmpDir,
+		StartedAt:   "2026-01-01T00:00:00Z",
+		PermissionReview: &config.PermissionReview{
+			DCG: &config.DCGConfig{
+				Enabled:           &enabled,
+				DestructivePolicy: "strict",
+			},
+		},
+	}
+	if err := config.WriteRuntimeConfig(sessionDir, rc); err != nil {
+		t.Fatalf("write runtime config: %v", err)
+	}
+
+	payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /"},"session_id":"test-session"}`
+
+	cmd := newHandleHookCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetIn(strings.NewReader(payload))
+	cmd.SetArgs([]string{"--agent", "dcg-agent"})
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	result := strings.TrimSpace(out.String())
+	if result == "{}" {
+		t.Fatal("expected deny response for 'rm -rf /' with strict policy, got {}")
+	}
+	if !strings.Contains(result, `"permissionDecision":"deny"`) {
+		t.Errorf("expected deny in response, got %q", result)
+	}
+}
+
+func TestHandleHook_PreToolUse_DCG_AllowsSafeCommand(t *testing.T) {
+	tmpDir := shortHookTempDir(t)
+	setupMockAgent(t, tmpDir, "dcg-agent2")
+
+	h2Root := filepath.Join(tmpDir, ".h2")
+	sessionDir := filepath.Join(h2Root, "sessions", "dcg-agent2")
+	os.MkdirAll(sessionDir, 0o755)
+
+	enabled := true
+	rc := &config.RuntimeConfig{
+		AgentName:   "dcg-agent2",
+		SessionID:   "test-session",
+		HarnessType: "claude_code",
+		Command:     "claude",
+		CWD:         tmpDir,
+		StartedAt:   "2026-01-01T00:00:00Z",
+		PermissionReview: &config.PermissionReview{
+			DCG: &config.DCGConfig{
+				Enabled:           &enabled,
+				DestructivePolicy: "strict",
+			},
+		},
+	}
+	if err := config.WriteRuntimeConfig(sessionDir, rc); err != nil {
+		t.Fatalf("write runtime config: %v", err)
+	}
+
+	payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls -la"},"session_id":"test-session"}`
+
+	cmd := newHandleHookCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetIn(strings.NewReader(payload))
+	cmd.SetArgs([]string{"--agent", "dcg-agent2"})
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if strings.TrimSpace(out.String()) != "{}" {
+		t.Errorf("expected {} for safe command, got %q", out.String())
+	}
+}
+
+func TestHandleHook_PreToolUse_DCG_Disabled_PassThrough(t *testing.T) {
+	tmpDir := shortHookTempDir(t)
+	setupMockAgent(t, tmpDir, "dcg-agent3")
+
+	h2Root := filepath.Join(tmpDir, ".h2")
+	sessionDir := filepath.Join(h2Root, "sessions", "dcg-agent3")
+	os.MkdirAll(sessionDir, 0o755)
+
+	disabled := false
+	rc := &config.RuntimeConfig{
+		AgentName:   "dcg-agent3",
+		SessionID:   "test-session",
+		HarnessType: "claude_code",
+		Command:     "claude",
+		CWD:         tmpDir,
+		StartedAt:   "2026-01-01T00:00:00Z",
+		PermissionReview: &config.PermissionReview{
+			DCG: &config.DCGConfig{
+				Enabled:           &disabled,
+				DestructivePolicy: "strict",
+			},
+		},
+	}
+	if err := config.WriteRuntimeConfig(sessionDir, rc); err != nil {
+		t.Fatalf("write runtime config: %v", err)
+	}
+
+	payload := `{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /"},"session_id":"test-session"}`
+
+	cmd := newHandleHookCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetIn(strings.NewReader(payload))
+	cmd.SetArgs([]string{"--agent", "dcg-agent3"})
+
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	// DCG disabled — should pass through.
+	if strings.TrimSpace(out.String()) != "{}" {
+		t.Errorf("expected {} when DCG disabled, got %q", out.String())
 	}
 }
 

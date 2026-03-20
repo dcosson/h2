@@ -2,7 +2,7 @@
   "id": "h2-rv3",
   "title": "import-dcg-library",
   "description": "## Import dcg-go as a Go Library\n\nReplace the current exec.Command(\"dcg-go\") approach in handle_hook.go with a direct Go library import of github.com/dcosson/destructive-command-guard-go/guard v0.1.0.\n\n### Current State\n- handle_hook.go has handleDCGPreToolUse() that shells out to dcg-go binary\n- session_dir.go writes dcg-config.yaml to session dir for DCG_CONFIG env var\n- DCGConfigPath() and writeDCGConfig() exist to support the file-based config\n\n### Changes Required\n\n**go.mod**\n- Add: require github.com/dcosson/destructive-command-guard-go v0.1.0\n- Run go mod tidy\n\n**internal/cmd/handle_hook.go**\n- Import github.com/dcosson/destructive-command-guard-go/guard\n- Rewrite handleDCGPreToolUse() to:\n  1. Parse the PreToolUse JSON to extract tool_name and tool_input.command\n  2. Skip if tool_name is not \"Bash\" (DCG only evaluates shell commands)\n  3. Build guard.Option slice from DCGConfig: map policy strings to guard policy funcs\n     - \"allow-all\" → guard.AllowAllPolicy()\n     - \"permissive\" → guard.PermissivePolicy()\n     - \"moderate\" → guard.ModeratePolicy()\n     - \"strict\" → guard.StrictPolicy()\n     - \"interactive\" → guard.InteractivePolicy() (default)\n  4. Add guard.WithDestructivePolicy(), guard.WithPrivacyPolicy()\n  5. Add guard.WithAllowlist(), guard.WithBlocklist() if configured\n  6. Add guard.WithPacks(), guard.WithDisabledPacks() if configured\n  7. Add guard.WithEnv(os.Environ()) for env-sensitive rules\n  8. Call guard.Evaluate(command, opts...)\n  9. Map result.Decision to hook response JSON:\n     - guard.Allow → return {} (no block)\n     - guard.Deny → return permissionDecision: \"deny\" with result reason\n     - guard.Ask → return permissionDecision: \"ask\" with result reason\n- Remove exec.Command and DCG_CONFIG env var logic\n\n**internal/config/session_dir.go**\n- Remove writeDCGConfig(), dcgFileConfig struct, DCGConfigPath()\n- Remove yaml import if no longer needed\n- Remove dcg-config.yaml writing from SetupSessionDir\n\n**internal/cmd/handle_hook.go**\n- Read DCGConfig directly from RuntimeConfig.PermissionReview.DCG (already done)\n- Pass the DCGConfig struct to the new library-based handler\n\n### Hook Response Format (PreToolUse)\nThe hook JSON response for PreToolUse uses permissionDecision field:\n```json\n{\n  \"hookSpecificOutput\": {\n    \"hookEventName\": \"PreToolUse\",\n    \"permissionDecision\": \"deny\",\n    \"permissionDecisionReason\": \"destructive: rm -rf with root path\"\n  }\n}\n```\n\n### Testing\n- Unit test: mock guard.Evaluate or test the option-building logic\n- Verify existing handle_hook tests still pass\n- Test policy string → guard.Policy mapping for all 5 policies\n- Test that non-Bash tools are skipped (return {})\n- Integration: verify a known destructive command like \"rm -rf /\" returns deny",
-  "status": "open",
+  "status": "closed",
   "priority": 2,
   "type": "task",
   "created_by": "Danny Cosson",
@@ -11,5 +11,7 @@
     "project=h2"
   ],
   "created_at": "2026-03-20T09:19:29.036316-07:00",
-  "updated_at": "2026-03-20T09:19:29.036316-07:00"
+  "updated_at": "2026-03-20T11:15:28.28357-07:00",
+  "closed_at": "2026-03-20T11:15:28.28357-07:00",
+  "close_reason": "Closed"
 }

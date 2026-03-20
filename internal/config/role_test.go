@@ -21,12 +21,15 @@ agent_model: opus
 instructions: |
   You are an architect agent.
   Design system architecture.
-permission_review_agent:
-  enabled: true
-  instructions: |
-    You are reviewing permissions for an architect.
-    ALLOW: read-only tools
-    DENY: destructive operations
+permission_review:
+  dcg:
+    enabled: true
+  ai_reviewer:
+    enabled: true
+    instructions: |
+      You are reviewing permissions for an architect.
+      ALLOW: read-only tools
+      DENY: destructive operations
 `
 	path := writeTempFile(t, "architect.yaml", yaml)
 
@@ -44,14 +47,17 @@ permission_review_agent:
 	if role.GetModel() != "opus" {
 		t.Errorf("GetModel() = %q, want %q", role.GetModel(), "opus")
 	}
-	if role.PermissionReviewAgent == nil {
-		t.Fatal("PermissionReviewAgent is nil")
+	if role.PermissionReview == nil {
+		t.Fatal("PermissionReview is nil")
 	}
-	if !role.PermissionReviewAgent.IsEnabled() {
-		t.Error("PermissionReviewAgent should be enabled")
+	if role.PermissionReview.DCG == nil || !role.PermissionReview.DCG.IsEnabled() {
+		t.Error("DCG should be enabled")
 	}
-	if role.PermissionReviewAgent.Instructions == "" {
-		t.Error("PermissionReviewAgent instructions should not be empty")
+	if role.PermissionReview.AIReviewer == nil || !role.PermissionReview.AIReviewer.IsEnabled() {
+		t.Error("AIReviewer should be enabled")
+	}
+	if role.PermissionReview.AIReviewer.GetInstructions() == "" {
+		t.Error("AIReviewer instructions should not be empty")
 	}
 }
 
@@ -74,8 +80,8 @@ instructions: |
 	if role.GetModel() != "" {
 		t.Errorf("GetModel() = %q, want empty", role.GetModel())
 	}
-	if role.PermissionReviewAgent != nil {
-		t.Error("PermissionReviewAgent should be nil for minimal role")
+	if role.PermissionReview != nil {
+		t.Error("PermissionReview should be nil for minimal role")
 	}
 }
 
@@ -92,31 +98,67 @@ instructions: |
 	}
 }
 
-func TestPermissionReviewAgent_IsEnabled(t *testing.T) {
-	// Explicit enabled: true
+func TestAIReviewerConfig_IsEnabled(t *testing.T) {
 	tr := true
-	pa := &PermissionReviewAgent{Enabled: &tr, Instructions: "test"}
-	if !pa.IsEnabled() {
+	fa := false
+
+	// Explicit enabled: true
+	ar := &AIReviewerConfig{Enabled: &tr, Instructions: "test"}
+	if !ar.IsEnabled() {
 		t.Error("should be enabled when Enabled=true")
 	}
 
 	// Explicit enabled: false
-	fa := false
-	pa2 := &PermissionReviewAgent{Enabled: &fa, Instructions: "test"}
-	if pa2.IsEnabled() {
+	ar2 := &AIReviewerConfig{Enabled: &fa, Instructions: "test"}
+	if ar2.IsEnabled() {
 		t.Error("should be disabled when Enabled=false")
 	}
 
 	// Implicit: instructions present → enabled
-	pa3 := &PermissionReviewAgent{Instructions: "test"}
-	if !pa3.IsEnabled() {
+	ar3 := &AIReviewerConfig{Instructions: "test"}
+	if !ar3.IsEnabled() {
 		t.Error("should be enabled when instructions present")
 	}
 
 	// Implicit: no instructions → disabled
-	pa4 := &PermissionReviewAgent{}
-	if pa4.IsEnabled() {
+	ar4 := &AIReviewerConfig{}
+	if ar4.IsEnabled() {
 		t.Error("should be disabled when no instructions")
+	}
+}
+
+func TestDCGConfig_IsEnabled(t *testing.T) {
+	tr := true
+	fa := false
+
+	// Explicit enabled: true
+	d := &DCGConfig{Enabled: &tr}
+	if !d.IsEnabled() {
+		t.Error("should be enabled when Enabled=true")
+	}
+
+	// Explicit enabled: false
+	d2 := &DCGConfig{Enabled: &fa}
+	if d2.IsEnabled() {
+		t.Error("should be disabled when Enabled=false")
+	}
+
+	// Implicit: defaults to false (requires opt-in)
+	d3 := &DCGConfig{}
+	if d3.IsEnabled() {
+		t.Error("should be disabled by default")
+	}
+}
+
+func TestAIReviewerConfig_GetModel(t *testing.T) {
+	ar := &AIReviewerConfig{}
+	if ar.GetModel() != "haiku" {
+		t.Errorf("default model = %q, want haiku", ar.GetModel())
+	}
+
+	ar2 := &AIReviewerConfig{Model: "sonnet"}
+	if ar2.GetModel() != "sonnet" {
+		t.Errorf("custom model = %q, want sonnet", ar2.GetModel())
 	}
 }
 
@@ -167,12 +209,19 @@ instructions: |
 func TestSetupSessionDir(t *testing.T) {
 	setupFakeHome(t)
 
+	tr := true
 	role := &Role{
 		RoleName:     "architect",
 		AgentModel:   "opus",
 		Instructions: "You are an architect agent.\nDesign systems.\n",
-		PermissionReviewAgent: &PermissionReviewAgent{
-			Instructions: "Review permissions for architect.\nALLOW: read-only\n",
+		PermissionReview: &PermissionReview{
+			DCG: &DCGConfig{
+				Enabled:           &tr,
+				DestructivePolicy: "moderate",
+			},
+			AIReviewer: &AIReviewerConfig{
+				Instructions: "Review permissions for architect.\nALLOW: read-only\n",
+			},
 		},
 	}
 
@@ -191,8 +240,8 @@ func TestSetupSessionDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read permission-reviewer.md: %v", err)
 	}
-	if string(reviewerData) != role.PermissionReviewAgent.Instructions {
-		t.Errorf("permission-reviewer.md content = %q, want %q", string(reviewerData), role.PermissionReviewAgent.Instructions)
+	if string(reviewerData) != role.PermissionReview.AIReviewer.GetInstructions() {
+		t.Errorf("permission-reviewer.md content = %q, want %q", string(reviewerData), role.PermissionReview.AIReviewer.GetInstructions())
 	}
 
 	// No .claude subdir should be created.
@@ -1230,20 +1279,42 @@ func TestValidate_InstructionsAndSplitMutuallyExclusive(t *testing.T) {
 	}
 }
 
-func TestValidate_PermissionReviewAgentInstructionsMutuallyExclusive(t *testing.T) {
+func TestValidate_AIReviewerInstructionsMutuallyExclusive(t *testing.T) {
 	role := &Role{
 		RoleName: "test",
-		PermissionReviewAgent: &PermissionReviewAgent{
-			Instructions:      "single",
-			InstructionsIntro: "intro",
+		PermissionReview: &PermissionReview{
+			AIReviewer: &AIReviewerConfig{
+				Instructions:      "single",
+				InstructionsIntro: "intro",
+			},
 		},
 	}
 	err := role.Validate()
 	if err == nil {
-		t.Fatal("expected error when permission_review_agent has both instructions and split fields")
+		t.Fatal("expected error when ai_reviewer has both instructions and split fields")
 	}
 	if !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Errorf("expected mutually exclusive error, got: %v", err)
+	}
+}
+
+func TestValidate_DCGInvalidPolicy(t *testing.T) {
+	tr := true
+	role := &Role{
+		RoleName: "test",
+		PermissionReview: &PermissionReview{
+			DCG: &DCGConfig{
+				Enabled:           &tr,
+				DestructivePolicy: "invalid",
+			},
+		},
+	}
+	err := role.Validate()
+	if err == nil {
+		t.Fatal("expected error for invalid DCG policy")
+	}
+	if !strings.Contains(err.Error(), "invalid permission_review.dcg.destructive_policy") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 
