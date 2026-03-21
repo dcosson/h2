@@ -1402,6 +1402,30 @@ func TestModeLabel_Normal(t *testing.T) {
 	}
 }
 
+func TestModeStatusLabel_IncludesSteerAndIdleBacklog(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.QueueStatus = func() message.QueueSnapshot {
+		return message.QueueSnapshot{
+			Interrupt: 3,
+			Normal:    1,
+			IdleFirst: 1,
+		}
+	}
+	if got := o.ModeStatusLabel(); got != "Normal [2]" {
+		t.Fatalf("expected 'Normal [2]', got %q", got)
+	}
+}
+
+func TestModeStatusLabel_OmitsBacklogWhenZero(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.QueueStatus = func() message.QueueSnapshot {
+		return message.QueueSnapshot{Interrupt: 2}
+	}
+	if got := o.ModeStatusLabel(); got != "Normal" {
+		t.Fatalf("expected 'Normal', got %q", got)
+	}
+}
+
 func TestFormatWorkingDirForBar_RelativeToH2DirTwoPartsNoPrefix(t *testing.T) {
 	o := newTestClient(10, 80)
 	t.Setenv("H2_DIR", "/Users/dcosson/h2home")

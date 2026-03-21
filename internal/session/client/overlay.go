@@ -64,7 +64,7 @@ type Client struct {
 	DebugKeyBuf         []string
 	AgentName           string
 	OnModeChange        func(mode InputMode)
-	QueueStatus         func() (int, bool)
+	QueueStatus         func() message.QueueSnapshot
 	OtelMetrics         func() (inputTokens int64, outputTokens int64, totalCostUSD float64, connected bool, port int) // returns OTEL metrics for status bar
 	WorkingDir          func() string                                                                                  // returns agent working directory for status bar
 	AgentState          func() (state string, subState string, duration string)                                        // returns Agent's derived state + sub-state

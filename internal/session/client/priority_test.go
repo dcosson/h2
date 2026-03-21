@@ -20,6 +20,15 @@ func TestCyclePriority(t *testing.T) {
 	}
 
 	o.CyclePriority()
+	if o.InputPriority != message.PriorityNormal {
+		t.Fatalf("expected normal when no idle backlog, got %s", o.InputPriority)
+	}
+
+	o.QueueStatus = func() message.QueueSnapshot {
+		return message.QueueSnapshot{Idle: 1}
+	}
+	o.InputPriority = message.PriorityIdle
+	o.CyclePriority()
 	if o.InputPriority != message.PriorityIdleFirst {
 		t.Fatalf("expected idle-first, got %s", o.InputPriority)
 	}

@@ -205,6 +205,32 @@ func TestPendingCount(t *testing.T) {
 	}
 }
 
+func TestSnapshot(t *testing.T) {
+	q := NewMessageQueue()
+	q.Enqueue(newMsg("interrupt-1", PriorityInterrupt))
+	q.Enqueue(newMsg("normal-1", PriorityNormal))
+	q.Enqueue(newMsg("idle-first-1", PriorityIdleFirst))
+	q.Enqueue(newMsg("idle-1", PriorityIdle))
+	q.Pause()
+
+	snap := q.Snapshot()
+	if snap.Interrupt != 1 || snap.Normal != 1 || snap.IdleFirst != 1 || snap.Idle != 1 {
+		t.Fatalf("unexpected snapshot: %+v", snap)
+	}
+	if !snap.Paused {
+		t.Fatal("expected snapshot to report paused queue")
+	}
+	if snap.Total() != 4 {
+		t.Fatalf("expected total 4, got %d", snap.Total())
+	}
+	if snap.SteerAndIdleBacklog() != 3 {
+		t.Fatalf("expected steer+idle backlog 3, got %d", snap.SteerAndIdleBacklog())
+	}
+	if !snap.HasIdleBacklog() {
+		t.Fatal("expected idle backlog to be reported")
+	}
+}
+
 func TestLookup(t *testing.T) {
 	q := NewMessageQueue()
 	q.Enqueue(newMsg("msg-1", PriorityNormal))

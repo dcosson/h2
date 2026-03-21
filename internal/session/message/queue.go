@@ -19,6 +19,32 @@ type MessageQueue struct {
 	notify      chan struct{}
 }
 
+// QueueSnapshot describes the current undelivered queue state.
+type QueueSnapshot struct {
+	Interrupt int
+	Normal    int
+	IdleFirst int
+	Idle      int
+	Paused    bool
+}
+
+// Total returns the total number of undelivered messages.
+func (s QueueSnapshot) Total() int {
+	return s.Interrupt + s.Normal + s.IdleFirst + s.Idle
+}
+
+// SteerAndIdleBacklog returns the count of undelivered steer/idle messages.
+// Interrupts are excluded because they bypass the normal steer/idle flow.
+func (s QueueSnapshot) SteerAndIdleBacklog() int {
+	return s.Normal + s.IdleFirst + s.Idle
+}
+
+// HasIdleBacklog reports whether there is queued idle-priority work that an
+// idle-first message would jump ahead of.
+func (s QueueSnapshot) HasIdleBacklog() bool {
+	return s.IdleFirst+s.Idle > 0
+}
+
 // NewMessageQueue creates a new empty message queue.
 func NewMessageQueue() *MessageQueue {
 	return &MessageQueue{
@@ -127,9 +153,20 @@ func (q *MessageQueue) Lookup(id string) *Message {
 
 // PendingCount returns the number of undelivered messages.
 func (q *MessageQueue) PendingCount() int {
+	return q.Snapshot().Total()
+}
+
+// Snapshot returns the current undelivered queue state.
+func (q *MessageQueue) Snapshot() QueueSnapshot {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return len(q.interrupt) + len(q.normal) + len(q.idleFirst) + len(q.idle)
+	return QueueSnapshot{
+		Interrupt: len(q.interrupt),
+		Normal:    len(q.normal),
+		IdleFirst: len(q.idleFirst),
+		Idle:      len(q.idle),
+		Paused:    q.paused,
+	}
 }
 
 // Notify returns the channel that is signaled on enqueue or unpause.

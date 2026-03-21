@@ -609,12 +609,29 @@ var priorityOrder = []message.Priority{
 
 // CyclePriority advances InputPriority to the next value in the cycle.
 func (c *Client) CyclePriority() {
+	start := -1
 	for i, p := range priorityOrder {
 		if p == c.InputPriority {
-			c.InputPriority = priorityOrder[(i+1)%len(priorityOrder)]
-			return
+			start = i
+			break
 		}
 	}
+	if start == -1 {
+		c.InputPriority = message.PriorityNormal
+		return
+	}
+
+	for step := 1; step <= len(priorityOrder); step++ {
+		next := priorityOrder[(start+step)%len(priorityOrder)]
+		if next == message.PriorityIdleFirst {
+			if c.QueueStatus == nil || !c.QueueStatus().HasIdleBacklog() {
+				continue
+			}
+		}
+		c.InputPriority = next
+		return
+	}
+
 	c.InputPriority = message.PriorityNormal
 }
 

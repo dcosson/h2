@@ -243,8 +243,8 @@ func (s *Session) NewClient() *client.Client {
 	cl.IsPassthroughLocked = func() bool {
 		return s.PassthroughOwner != nil && s.PassthroughOwner != cl
 	}
-	cl.QueueStatus = func() (int, bool) {
-		return s.Queue.PendingCount(), s.Queue.IsPaused()
+	cl.QueueStatus = func() message.QueueSnapshot {
+		return s.Queue.Snapshot()
 	}
 	cl.OtelMetrics = func() (int64, int64, float64, bool, int) {
 		m := s.Metrics()

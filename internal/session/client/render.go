@@ -233,7 +233,7 @@ func (c *Client) RenderStatusBar() {
 	} else {
 		style = c.ModeBarStyle()
 		help := c.HelpLabel()
-		label = " " + c.ModeLabel()
+		label = " " + c.ModeStatusLabel()
 
 		if c.Mode != ModeMenu {
 			status := c.StatusLabel()
@@ -254,17 +254,6 @@ func (c *Client) RenderStatusBar() {
 				}
 			}
 
-			// Queue indicator
-			if c.QueueStatus != nil {
-				count, paused := c.QueueStatus()
-				if count > 0 {
-					if paused {
-						label += fmt.Sprintf(" | [%d paused]", count)
-					} else {
-						label += fmt.Sprintf(" | [%d queued]", count)
-					}
-				}
-			}
 		}
 
 		if help != "" {
@@ -280,7 +269,7 @@ func (c *Client) RenderStatusBar() {
 	if len(label)+len(right) > c.VT.Cols {
 		if !c.VT.ChildExited {
 			// Tight on space - drop help first, then right-align.
-			label = " " + c.ModeLabel()
+			label = " " + c.ModeStatusLabel()
 			if c.Mode != ModeMenu {
 				label += " | " + c.StatusLabel()
 			}
@@ -414,6 +403,19 @@ func (c *Client) ModeLabel() string {
 	default:
 		return "Normal"
 	}
+}
+
+// ModeStatusLabel returns the current mode label plus steer/idle backlog.
+func (c *Client) ModeStatusLabel() string {
+	label := c.ModeLabel()
+	if c.QueueStatus == nil || c.Mode == ModeMenu {
+		return label
+	}
+	backlog := c.QueueStatus().SteerAndIdleBacklog()
+	if backlog > 0 {
+		return fmt.Sprintf("%s [%d]", label, backlog)
+	}
+	return label
 }
 
 // ModeBarStyle returns the ANSI style for the current mode.
