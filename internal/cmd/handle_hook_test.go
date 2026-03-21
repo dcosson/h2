@@ -820,6 +820,7 @@ func TestDCGPolicyFromString(t *testing.T) {
 		{"permissive", false},
 		{"moderate", false},
 		{"strict", false},
+		{"very-strict", false},
 		{"interactive", false},
 		{"unknown", true},
 		{"", true},

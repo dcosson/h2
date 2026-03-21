@@ -215,7 +215,7 @@ func (d *DCGConfig) IsEnabled() bool {
 }
 
 // ValidDCGPolicies lists valid policy values for DCG.
-var ValidDCGPolicies = []string{"allow-all", "permissive", "moderate", "strict", "interactive"}
+var ValidDCGPolicies = []string{"allow-all", "permissive", "moderate", "strict", "very-strict", "interactive"}
 
 // AIReviewerConfig configures the LLM-based permission reviewer.
 // Operates on PermissionRequest hooks using a fast model.

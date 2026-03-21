@@ -246,10 +246,11 @@ permission_review:
 | Policy | Behavior |
 |--------|----------|
 | `allow-all` | Allow everything (effectively disables the check) |
-| `permissive` | Only flag obviously dangerous commands |
-| `moderate` | Flag commands that modify or delete files/data |
-| `strict` | Flag most commands that have side effects |
-| `interactive` | Flag everything and require explicit approval |
+| `permissive` | Allow up to High severity, deny Critical |
+| `moderate` | Allow up to Medium severity, deny High+ and Indeterminate |
+| `strict` | Allow only Low severity, deny everything else |
+| `very-strict` | Deny all matched rules regardless of severity |
+| `interactive` | Ask for Medium/High/Indeterminate, allow Low, deny Critical |
 
 ### Agent name functions
 

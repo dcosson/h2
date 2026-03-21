@@ -4,7 +4,7 @@ go 1.24.4
 
 require (
 	github.com/creack/pty v1.1.24
-	github.com/dcosson/destructive-command-guard-go v0.1.0
+	github.com/dcosson/destructive-command-guard-go v0.1.1
 	github.com/gofrs/flock v0.13.0
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/google/uuid v1.6.0
@@ -18,8 +18,6 @@ require (
 )
 
 replace github.com/vito/midterm v0.2.3 => github.com/dcosson/midterm v0.2.4-0.20260227002018-dc3436126736
-
-replace github.com/dcosson/destructive-command-guard-go v0.1.0 => ../destructive-command-guard-go
 
 require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect

@@ -370,6 +370,8 @@ func dcgPolicyFromString(name string) guard.Policy {
 		return guard.ModeratePolicy()
 	case "strict":
 		return guard.StrictPolicy()
+	case "very-strict":
+		return guard.VeryStrictPolicy()
 	case "interactive":
 		return guard.InteractivePolicy()
 	default:
