@@ -307,8 +307,12 @@ func (c *Client) HandleDefaultBytes(buf []byte, start, n int) int {
 		case 0x0D, 0x0A:
 			if len(c.Input) > 0 {
 				cmd := string(c.Input)
-				if c.InputPriority == message.PriorityNormal {
-					// Normal: direct PTY write.
+				if c.OnSubmit != nil {
+					// Route all non-empty input through the session so it uses the
+					// message queue for the selected priority, including normal/steer.
+					c.OnSubmit(cmd, c.InputPriority)
+				} else {
+					// Fallback for tests or standalone clients without a submit hook.
 					if !c.writePTYOrHang(c.Input) {
 						return n
 					}
@@ -317,9 +321,6 @@ func (c *Client) HandleDefaultBytes(buf []byte, start, n int) int {
 						time.Sleep(50 * time.Millisecond)
 						ptm.Write([]byte{'\r'})
 					}()
-				} else if c.OnSubmit != nil {
-					// Non-normal: route through session for priority-aware delivery.
-					c.OnSubmit(cmd, c.InputPriority)
 				}
 				c.History = append(c.History, cmd)
 				c.Input = c.Input[:0]

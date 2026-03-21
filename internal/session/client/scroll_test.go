@@ -5,9 +5,11 @@ import (
 	"io"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/vito/midterm"
 
+	"h2/internal/session/message"
 	"h2/internal/session/virtualterminal"
 )
 
@@ -1256,6 +1258,72 @@ func TestPassthrough_EnterStaysInPassthrough(t *testing.T) {
 	o.HandlePassthroughBytes(buf, 0, len(buf))
 	if o.Mode != ModePassthrough {
 		t.Fatalf("expected ModePassthrough after Enter, got %d", o.Mode)
+	}
+}
+
+func TestHandleDefaultBytes_EnterWithEmptyInputPassesThroughToPTY(t *testing.T) {
+	o, r := newTestClientWithPTY(10, 80)
+	defer r.Close()
+	defer o.VT.Ptm.Close()
+
+	buf := []byte{'\r'}
+	o.HandleDefaultBytes(buf, 0, len(buf))
+
+	got := make([]byte, 1)
+	done := make(chan error, 1)
+	go func() {
+		_, err := r.Read(got)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("read PTY: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for Enter to reach PTY")
+	}
+
+	if got[0] != '\r' {
+		t.Fatalf("expected PTY to receive carriage return, got %q", got[0])
+	}
+}
+
+func TestHandleDefaultBytes_EnterWithInputUsesSubmitHookForNormalPriority(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.Input = []byte("choose option")
+	o.CursorPos = len(o.Input)
+	o.InputPriority = message.PriorityNormal
+
+	var (
+		gotText     string
+		gotPriority message.Priority
+		called      bool
+	)
+	o.OnSubmit = func(text string, pri message.Priority) {
+		called = true
+		gotText = text
+		gotPriority = pri
+	}
+
+	buf := []byte{'\r'}
+	o.HandleDefaultBytes(buf, 0, len(buf))
+
+	if !called {
+		t.Fatal("expected Enter with input to use OnSubmit")
+	}
+	if gotText != "choose option" {
+		t.Fatalf("expected submitted text %q, got %q", "choose option", gotText)
+	}
+	if gotPriority != message.PriorityNormal {
+		t.Fatalf("expected normal priority, got %s", gotPriority)
+	}
+	if len(o.Input) != 0 {
+		t.Fatalf("expected input to be cleared, got %q", string(o.Input))
+	}
+	if o.InputPriority != message.PriorityNormal {
+		t.Fatalf("expected priority reset to normal, got %s", o.InputPriority)
 	}
 }
 
