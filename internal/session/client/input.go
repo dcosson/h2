@@ -307,7 +307,9 @@ func (c *Client) HandleDefaultBytes(buf []byte, start, n int) int {
 		case 0x0D, 0x0A:
 			if len(c.Input) > 0 {
 				cmd := string(c.Input)
-				if c.OnSubmit != nil {
+				if c.InputAction == InputActionStash {
+					// Stash saves the draft to local history without sending it.
+				} else if c.OnSubmit != nil {
 					// Route all non-empty input through the session so it uses the
 					// message queue for the selected priority, including normal/steer.
 					c.OnSubmit(cmd, c.InputPriority)
@@ -326,6 +328,7 @@ func (c *Client) HandleDefaultBytes(buf []byte, start, n int) int {
 				c.Input = c.Input[:0]
 				c.CursorPos = 0
 				c.InputPriority = message.PriorityNormal
+				c.InputAction = InputActionNone
 			} else {
 				if !c.writePTYOrHang([]byte{'\r'}) {
 					return n
@@ -600,39 +603,39 @@ func (c *Client) HandleCSI(remaining []byte) (consumed int, handled bool) {
 }
 
 // priorityOrder defines the Tab cycling order for input priorities.
-var priorityOrder = []message.Priority{
-	message.PriorityNormal,
-	message.PriorityInterrupt,
-	message.PriorityIdle,
-	message.PriorityIdleFirst,
-}
-
 // CyclePriority advances InputPriority to the next value in the cycle.
 func (c *Client) CyclePriority() {
+	type cycleState struct {
+		priority message.Priority
+		action   InputAction
+	}
+
+	states := []cycleState{
+		{priority: message.PriorityNormal},
+		{priority: message.PriorityInterrupt},
+		{priority: message.PriorityIdle},
+	}
+	if c.QueueStatus != nil && c.QueueStatus().HasIdleBacklog() {
+		states = append(states, cycleState{priority: message.PriorityIdleFirst})
+	}
+	states = append(states, cycleState{priority: message.PriorityNormal, action: InputActionStash})
+
 	start := -1
-	for i, p := range priorityOrder {
-		if p == c.InputPriority {
+	for i, state := range states {
+		if state.priority == c.InputPriority && state.action == c.InputAction {
 			start = i
 			break
 		}
 	}
 	if start == -1 {
 		c.InputPriority = message.PriorityNormal
+		c.InputAction = InputActionNone
 		return
 	}
 
-	for step := 1; step <= len(priorityOrder); step++ {
-		next := priorityOrder[(start+step)%len(priorityOrder)]
-		if next == message.PriorityIdleFirst {
-			if c.QueueStatus == nil || !c.QueueStatus().HasIdleBacklog() {
-				continue
-			}
-		}
-		c.InputPriority = next
-		return
-	}
-
-	c.InputPriority = message.PriorityNormal
+	next := states[(start+1)%len(states)]
+	c.InputPriority = next.priority
+	c.InputAction = next.action
 }
 
 // HandleScrollBytes processes input when in scroll mode.

@@ -312,7 +312,7 @@ func (c *Client) RenderInputBar() {
 	}
 
 	// --- Input line ---
-	prompt := c.InputPriority.String() + " > "
+	prompt := c.InputPromptLabel() + " > "
 	maxInput := c.VT.Cols - len(prompt)
 	if maxInput < 0 {
 		maxInput = 0
@@ -347,6 +347,8 @@ func (c *Client) RenderInputBar() {
 	promptColor := "\033[36m" // cyan
 	if c.InputPriority == message.PriorityInterrupt {
 		promptColor = "\033[31m" // red
+	} else if c.InputAction == InputActionStash {
+		promptColor = "\033[35m" // purple
 	}
 	fmt.Fprintf(&buf, "%s%s\033[0m%s", promptColor, prompt, displayInput)
 
@@ -379,6 +381,13 @@ func (c *Client) RenderInputBar() {
 	c.OutputMu.Lock()
 	c.Output.Write(buf.Bytes())
 	c.OutputMu.Unlock()
+}
+
+func (c *Client) InputPromptLabel() string {
+	if c.InputAction == InputActionStash {
+		return "stash"
+	}
+	return c.InputPriority.String()
 }
 
 // RenderBar draws both the status bar and input bar.

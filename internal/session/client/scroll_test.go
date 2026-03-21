@@ -1327,6 +1327,37 @@ func TestHandleDefaultBytes_EnterWithInputUsesSubmitHookForNormalPriority(t *tes
 	}
 }
 
+func TestHandleDefaultBytes_EnterWithInputStashesWithoutSubmitting(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.Input = []byte("finish this later")
+	o.CursorPos = len(o.Input)
+	o.InputAction = InputActionStash
+
+	var called bool
+	o.OnSubmit = func(text string, pri message.Priority) {
+		called = true
+	}
+
+	buf := []byte{'\r'}
+	o.HandleDefaultBytes(buf, 0, len(buf))
+
+	if called {
+		t.Fatal("expected stash to avoid OnSubmit")
+	}
+	if got := len(o.History); got != 1 {
+		t.Fatalf("expected 1 history entry, got %d", got)
+	}
+	if o.History[0] != "finish this later" {
+		t.Fatalf("expected stashed history entry, got %q", o.History[0])
+	}
+	if len(o.Input) != 0 {
+		t.Fatalf("expected input to be cleared, got %q", string(o.Input))
+	}
+	if o.InputPriority != message.PriorityNormal {
+		t.Fatalf("expected priority reset to normal, got %s", o.InputPriority)
+	}
+}
+
 func TestPassthrough_CtrlBackslash_Exits(t *testing.T) {
 	o := newTestClient(10, 80)
 	o.Mode = ModePassthrough

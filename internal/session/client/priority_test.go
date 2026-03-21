@@ -28,9 +28,15 @@ func TestCyclePriority(t *testing.T) {
 		return message.QueueSnapshot{Idle: 1}
 	}
 	o.InputPriority = message.PriorityIdle
+	o.InputAction = InputActionNone
 	o.CyclePriority()
-	if o.InputPriority != message.PriorityIdleFirst {
-		t.Fatalf("expected idle-first, got %s", o.InputPriority)
+	if o.InputPriority != message.PriorityIdleFirst || o.InputAction != InputActionNone {
+		t.Fatalf("expected idle-first, got priority=%s action=%d", o.InputPriority, o.InputAction)
+	}
+
+	o.CyclePriority()
+	if o.InputAction != InputActionStash {
+		t.Fatalf("expected stash action, got priority=%s action=%d", o.InputPriority, o.InputAction)
 	}
 
 	o.CyclePriority()
@@ -68,5 +74,10 @@ func TestPromptShowsPriority(t *testing.T) {
 	o.InputPriority = message.PriorityInterrupt
 	if o.InputPriority.String() != "interrupt" {
 		t.Fatalf("expected 'interrupt', got %q", o.InputPriority.String())
+	}
+
+	o.InputAction = InputActionStash
+	if got := o.InputPromptLabel(); got != "stash" {
+		t.Fatalf("expected 'stash', got %q", got)
 	}
 }

@@ -33,6 +33,15 @@ const (
 	ModePassthroughScroll
 )
 
+// InputAction is a local input-bar action that affects Enter handling without
+// changing the underlying message priority.
+type InputAction int
+
+const (
+	InputActionNone InputAction = iota
+	InputActionStash
+)
+
 // IsScrollMode returns true if the client is in any scroll mode.
 func (c *Client) IsScrollMode() bool {
 	return c.Mode == ModeScroll || c.Mode == ModePassthroughScroll
@@ -59,6 +68,7 @@ type Client struct {
 	SelectHint          bool
 	SelectHintTimer     *time.Timer
 	InputPriority       message.Priority
+	InputAction         InputAction
 	DebugKeys           bool
 	DebugScroll         bool
 	DebugKeyBuf         []string
