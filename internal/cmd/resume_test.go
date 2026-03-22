@@ -134,6 +134,56 @@ func TestRunResume_DryRun(t *testing.T) {
 	}
 }
 
+func TestRunResume_DryRun_CodexUsesHarnessSessionID(t *testing.T) {
+	t.Setenv("CLAUDECODE", "")
+
+	name := "resume-test-dry-run-codex"
+	tmpDir := t.TempDir()
+	codexConfigDir := filepath.Join(tmpDir, "codex-config")
+	os.MkdirAll(codexConfigDir, 0o755)
+
+	writeTestRuntimeConfig(t, name, &config.RuntimeConfig{
+		AgentName:               name,
+		SessionID:               "internal-session-id",
+		HarnessSessionID:        "codex-harness-session-id",
+		Command:                 "codex",
+		HarnessType:             "codex",
+		HarnessConfigPathPrefix: tmpDir,
+		Profile:                 "codex-config",
+		CWD:                     tmpDir,
+		StartedAt:               "2024-01-01T00:00:00Z",
+	})
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	cmd := newRunCmd()
+	cmd.SetArgs([]string{name, "--resume", "--dry-run"})
+	err := cmd.Execute()
+
+	w.Close()
+	os.Stdout = old
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var buf strings.Builder
+	io.Copy(&buf, r)
+	output := buf.String()
+
+	if !strings.Contains(output, "resume") {
+		t.Fatalf("dry-run output should contain resume command, got:\n%s", output)
+	}
+	if !strings.Contains(output, "codex-harness-session-id") {
+		t.Fatalf("dry-run output should contain harness session id, got:\n%s", output)
+	}
+	if strings.Contains(output, "resume \\\n  internal-session-id") || strings.Contains(output, "resume internal-session-id") {
+		t.Fatalf("dry-run output should not use internal session id in the resume command, got:\n%s", output)
+	}
+}
+
 func TestRunResume_NoSessionMetadata(t *testing.T) {
 	t.Setenv("CLAUDECODE", "")
 
@@ -175,28 +225,27 @@ func TestRunResume_InvalidConfig(t *testing.T) {
 	}
 }
 
-func TestRunResume_UnsupportedHarness(t *testing.T) {
+func TestRunResume_MissingHarnessSessionID(t *testing.T) {
 	t.Setenv("CLAUDECODE", "")
 
 	name := "resume-test-codex"
 	writeTestRuntimeConfig(t, name, &config.RuntimeConfig{
-		AgentName:        name,
-		SessionID:        "old-session-id",
-		HarnessSessionID: "old-session-id",
-		Command:          "codex",
-		HarnessType:      "codex",
-		CWD:              t.TempDir(),
-		StartedAt:        "2024-01-01T00:00:00Z",
+		AgentName:   name,
+		SessionID:   "old-session-id",
+		Command:     "codex",
+		HarnessType: "codex",
+		CWD:         t.TempDir(),
+		StartedAt:   "2024-01-01T00:00:00Z",
 	})
 
 	cmd := newRunCmd()
 	cmd.SetArgs([]string{name, "--resume", "--detach"})
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected error for unsupported harness")
+		t.Fatal("expected error for missing harness session id")
 	}
-	if !strings.Contains(err.Error(), "does not support --resume") {
-		t.Errorf("error = %q, want containing 'does not support --resume'", err.Error())
+	if !strings.Contains(err.Error(), "has no harness_session_id") {
+		t.Errorf("error = %q, want containing 'has no harness_session_id'", err.Error())
 	}
 }
 
@@ -319,8 +368,8 @@ func TestClaudeHarness_SupportsResume(t *testing.T) {
 
 func TestCodexHarness_SupportsResume(t *testing.T) {
 	h, _ := harness.Resolve(&config.RuntimeConfig{HarnessType: "codex", Command: "codex"}, nil)
-	if h.SupportsResume() {
-		t.Error("Codex should not support resume")
+	if !h.SupportsResume() {
+		t.Error("Codex should support resume")
 	}
 }
 

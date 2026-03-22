@@ -80,6 +80,35 @@ func TestBuildCommandArgs_EmptyConfig_NoFlags(t *testing.T) {
 	}
 }
 
+func TestBuildCommandArgs_ResumeUsesHarnessSessionID(t *testing.T) {
+	h := New(&config.RuntimeConfig{
+		HarnessType:     "codex",
+		Command:         "codex",
+		AgentName:       "test",
+		CWD:             "/tmp",
+		StartedAt:       "2024-01-01T00:00:00Z",
+		SessionID:       "internal-session-id",
+		ResumeSessionID: "harness-session-id",
+		Model:           "gpt-5",
+		Instructions:    "ignored in resume mode",
+	}, nil)
+	args := h.BuildCommandArgs(nil, nil)
+	want := []string{"resume", "harness-session-id"}
+	if len(args) != len(want) {
+		t.Fatalf("expected %v, got %v", want, args)
+	}
+	for i, w := range want {
+		if args[i] != w {
+			t.Fatalf("arg[%d] = %q, want %q", i, args[i], w)
+		}
+	}
+	for _, arg := range args {
+		if arg == "--model" || arg == "-c" {
+			t.Fatalf("resume args should not include normal launch flags, got %v", args)
+		}
+	}
+}
+
 func TestBuildCommandArgs_IgnoresSessionID(t *testing.T) {
 	h := New(&config.RuntimeConfig{HarnessType: "codex", Command: "codex", AgentName: "test", CWD: "/tmp", StartedAt: "2024-01-01T00:00:00Z", SessionID: "some-uuid"}, nil)
 	args := h.BuildCommandArgs(nil, nil)

@@ -62,7 +62,7 @@ func (h *CodexHarness) DisplayCommand() string { return "codex" }
 
 // --- Resume ---
 
-func (h *CodexHarness) SupportsResume() bool { return false }
+func (h *CodexHarness) SupportsResume() bool { return true }
 
 // --- Config (called before launch) ---
 
@@ -71,6 +71,10 @@ func (h *CodexHarness) SupportsResume() bool { return false }
 func (h *CodexHarness) BuildCommandArgs(prependArgs, extraArgs []string) []string {
 	var roleArgs []string
 	rc := h.rc
+	if rc.ResumeSessionID != "" {
+		roleArgs = append(roleArgs, "resume", rc.ResumeSessionID)
+		return harness.CombineArgs(prependArgs, extraArgs, roleArgs)
+	}
 	if rc.Instructions != "" {
 		// JSON-encode the value so newlines become \n and quotes are escaped.
 		// Codex -c parses values as JSON when possible.

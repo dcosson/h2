@@ -310,11 +310,9 @@ func runResume(cmd *cobra.Command, args []string, detach bool, dryRun bool) erro
 		return fmt.Errorf("agent %q uses harness %q which does not support --resume", name, rc.HarnessType)
 	}
 
-	// Ensure the harness config dir exists (e.g. Claude's CLAUDE_CONFIG_DIR).
-	if configDir := rc.HarnessConfigDir(); configDir != "" {
-		if err := config.EnsureClaudeConfigDir(configDir); err != nil {
-			return fmt.Errorf("ensure config dir: %w", err)
-		}
+	// Ensure the harness config dir exists for the selected harness.
+	if err := h.EnsureConfigDir(config.ConfigDir()); err != nil {
+		return fmt.Errorf("ensure config dir: %w", err)
 	}
 
 	if rc.HarnessSessionID == "" {
