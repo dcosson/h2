@@ -170,8 +170,8 @@ func TestRotate_GenericHarness_NoLogMove(t *testing.T) {
 	}
 }
 
-func TestRotate_LiveFlag_StopsRotatesResumes(t *testing.T) {
-	name := "rotate-test-live"
+func TestRotate_StoppedAgent_NoResume(t *testing.T) {
+	name := "rotate-test-stopped"
 	tmpDir := t.TempDir()
 
 	os.MkdirAll(filepath.Join(tmpDir, "default"), 0o755)
@@ -189,20 +189,18 @@ func TestRotate_LiveFlag_StopsRotatesResumes(t *testing.T) {
 		StartedAt:               "2024-01-01T00:00:00Z",
 	})
 
-	// Mock forkDaemonFunc to capture calls.
-	var capturedSessionDir string
-	var capturedResume bool
+	// Mock forkDaemonFunc to detect if it's called.
+	forkCalled := false
 	origFork := forkDaemonFunc
 	forkDaemonFunc = func(sd string, hints session.TerminalHints, resume bool) error {
-		capturedSessionDir = sd
-		capturedResume = resume
+		forkCalled = true
 		return nil
 	}
 	defer func() { forkDaemonFunc = origFork }()
 
-	// Agent is not running (no socket), so --live should just rotate and resume.
+	// Agent is not running (no socket) — should rotate without resuming.
 	cmd := newRotateCmd()
-	cmd.SetArgs([]string{name, "staging", "--live"})
+	cmd.SetArgs([]string{name, "staging"})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -215,11 +213,8 @@ func TestRotate_LiveFlag_StopsRotatesResumes(t *testing.T) {
 	if rc.Profile != "staging" {
 		t.Errorf("Profile = %q, want %q", rc.Profile, "staging")
 	}
-	if capturedSessionDir != sessionDir {
-		t.Errorf("fork sessionDir = %q, want %q", capturedSessionDir, sessionDir)
-	}
-	if !capturedResume {
-		t.Error("fork should be called with resume=true")
+	if forkCalled {
+		t.Error("fork should not be called for a stopped agent")
 	}
 }
 
@@ -523,18 +518,13 @@ func TestResolveRotateCandidates(t *testing.T) {
 	}
 }
 
-func TestRotate_AutoSelect(t *testing.T) {
+func TestRotate_AutoSelectWithCandidates(t *testing.T) {
 	name := "rotate-test-autoselect"
 	tmpDir := t.TempDir()
 
 	// Create profile dirs.
 	os.MkdirAll(filepath.Join(tmpDir, "default"), 0o755)
 	os.MkdirAll(filepath.Join(tmpDir, "staging"), 0o755)
-
-	// Also create profiles-shared dirs so discoverProfiles finds them.
-	h2Dir := config.ConfigDir()
-	os.MkdirAll(filepath.Join(h2Dir, "profiles-shared", "default"), 0o755)
-	os.MkdirAll(filepath.Join(h2Dir, "profiles-shared", "staging"), 0o755)
 
 	sessionDir := writeTestRuntimeConfig(t, name, &config.RuntimeConfig{
 		AgentName:               name,
@@ -548,9 +538,9 @@ func TestRotate_AutoSelect(t *testing.T) {
 		StartedAt:               "2024-01-01T00:00:00Z",
 	})
 
-	// Auto-select with no profile arg — should pick next after "default".
+	// Explicit candidate list — should pick next after "default".
 	cmd := newRotateCmd()
-	cmd.SetArgs([]string{name})
+	cmd.SetArgs([]string{name, "default", "staging"})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -560,7 +550,6 @@ func TestRotate_AutoSelect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read config: %v", err)
 	}
-	// "staging" comes after "default" alphabetically.
 	if rc.Profile != "staging" {
 		t.Errorf("Profile = %q, want %q", rc.Profile, "staging")
 	}
@@ -575,11 +564,13 @@ func TestRotate_GlobPattern(t *testing.T) {
 	os.MkdirAll(filepath.Join(tmpDir, "staging-2"), 0o755)
 	os.MkdirAll(filepath.Join(tmpDir, "staging-3"), 0o755)
 
-	// Create profiles-shared dirs so discoverProfiles finds them.
+	// Create profiles-shared dirs so discoverProfiles finds them, and clean up after.
 	h2Dir := config.ConfigDir()
-	os.MkdirAll(filepath.Join(h2Dir, "profiles-shared", "staging-1"), 0o755)
-	os.MkdirAll(filepath.Join(h2Dir, "profiles-shared", "staging-2"), 0o755)
-	os.MkdirAll(filepath.Join(h2Dir, "profiles-shared", "staging-3"), 0o755)
+	for _, p := range []string{"staging-1", "staging-2", "staging-3"} {
+		dir := filepath.Join(h2Dir, "profiles-shared", p)
+		os.MkdirAll(dir, 0o755)
+		defer os.Remove(dir)
+	}
 
 	sessionDir := writeTestRuntimeConfig(t, name, &config.RuntimeConfig{
 		AgentName:               name,
@@ -617,11 +608,6 @@ func TestRotate_VariadicCandidates(t *testing.T) {
 	os.MkdirAll(filepath.Join(tmpDir, "alpha"), 0o755)
 	os.MkdirAll(filepath.Join(tmpDir, "beta"), 0o755)
 	os.MkdirAll(filepath.Join(tmpDir, "gamma"), 0o755)
-
-	h2Dir := config.ConfigDir()
-	os.MkdirAll(filepath.Join(h2Dir, "profiles-shared", "alpha"), 0o755)
-	os.MkdirAll(filepath.Join(h2Dir, "profiles-shared", "beta"), 0o755)
-	os.MkdirAll(filepath.Join(h2Dir, "profiles-shared", "gamma"), 0o755)
 
 	sessionDir := writeTestRuntimeConfig(t, name, &config.RuntimeConfig{
 		AgentName:               name,

@@ -18,13 +18,13 @@ import (
 )
 
 func newRotateCmd() *cobra.Command {
-	var live bool
-
 	cmd := &cobra.Command{
 		Use:   "rotate <agent-name> [profiles...]",
 		Short: "Rotate an agent to a different profile",
 		Long: `Rotate an agent's profile by updating its session metadata and moving
 its session log to the new profile's Claude config directory.
+
+If the agent is running, it is stopped, rotated, and resumed automatically.
 
 Profile selection:
   h2 rotate agent                     Auto-select next from all profiles
@@ -39,12 +39,7 @@ is selected.
 
 Glob patterns (containing * or ?) are expanded against discovered profiles
 and the matches are sorted alphabetically. Literal names preserve their
-argument order.
-
-The agent must not be running unless --live is specified. The target profile
-must exist for the agent's harness type.
-
-With --live, the agent is stopped, rotated, and resumed with --detach.`,
+argument order.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agentName := args[0]
@@ -99,21 +94,13 @@ With --live, the agent is stopped, rotated, and resumed with --detach.`,
 				return fmt.Errorf("profile path is not a directory: %s", newProfileDir)
 			}
 
-			// Check if agent is running.
+			// Stop the agent if it's running — we'll resume after rotating.
 			running := isAgentRunning(agentName)
-
-			if running && !live {
-				return fmt.Errorf("agent %q is running; use --live to stop, rotate, and resume, or stop it first with 'h2 stop %s'",
-					agentName, agentName)
-			}
-
-			// --live: stop the running agent.
-			if running && live {
+			if running {
 				fmt.Fprintf(cmd.OutOrStderr(), "Stopping agent %q...\n", agentName)
 				if err := stopAgentByName(agentName); err != nil {
 					return fmt.Errorf("stop agent: %w", err)
 				}
-				// Wait for socket cleanup.
 				waitForAgentStop(agentName, 5*time.Second)
 			}
 
@@ -131,8 +118,8 @@ With --live, the agent is stopped, rotated, and resumed with --detach.`,
 
 			fmt.Fprintf(cmd.OutOrStderr(), "Rotated agent %q from profile %q to %q.\n", agentName, currentProfile, newProfile)
 
-			// --live: resume the agent.
-			if live {
+			// Resume the agent if it was running.
+			if running {
 				fmt.Fprintf(cmd.OutOrStderr(), "Resuming agent %q...\n", agentName)
 				colorHints := detectTerminalHints()
 				if err := forkDaemonFunc(sessionDir, session.TerminalHints{
@@ -150,8 +137,6 @@ With --live, the agent is stopped, rotated, and resumed with --detach.`,
 			return nil
 		},
 	}
-
-	cmd.Flags().BoolVar(&live, "live", false, "Stop running agent, rotate, and resume with --detach")
 
 	return cmd
 }
