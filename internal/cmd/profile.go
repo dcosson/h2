@@ -124,7 +124,7 @@ func newProfileListCmd() *cobra.Command {
 		Short: "List profiles",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			h2Dir := config.ConfigDir()
-			profiles, err := discoverProfiles(h2Dir)
+			profiles, err := discoverProfilesWithHarness(h2Dir)
 			if err != nil {
 				return err
 			}
@@ -132,8 +132,8 @@ func newProfileListCmd() *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), "No profiles found.")
 				return nil
 			}
-			for _, profile := range profiles {
-				fmt.Fprintln(cmd.OutOrStdout(), profile)
+			for _, p := range profiles {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s (%s)\n", p.Name, strings.Join(p.Harnesses, ", "))
 			}
 			return nil
 		},
@@ -165,7 +165,20 @@ func newProfileShowCmd() *cobra.Command {
 			}
 
 			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "Profile: %s\n", name)
+
+			// Build harness list for header.
+			var harnesses []string
+			if claudeExists {
+				harnesses = append(harnesses, profileHarnessClaude)
+			}
+			if codexExists {
+				harnesses = append(harnesses, profileHarnessCodex)
+			}
+			if len(harnesses) > 0 {
+				fmt.Fprintf(out, "Profile: %s (%s)\n", name, strings.Join(harnesses, ", "))
+			} else {
+				fmt.Fprintf(out, "Profile: %s (shared only)\n", name)
+			}
 			fmt.Fprintf(out, "  Shared: %s (%s)\n", sharedDir, yesNo(sharedExists))
 			fmt.Fprintf(out, "  Claude: %s (%s)\n", claudeDir, yesNo(claudeExists))
 			fmt.Fprintf(out, "  Codex:  %s (%s)\n", codexDir, yesNo(codexExists))
@@ -917,32 +930,68 @@ func ensurePathMissing(path, label string) error {
 	return nil
 }
 
-func discoverProfiles(h2Dir string) ([]string, error) {
-	seen := map[string]struct{}{}
-	for _, root := range []string{
-		filepath.Join(h2Dir, "profiles-shared"),
-		filepath.Join(h2Dir, "claude-config"),
-		filepath.Join(h2Dir, "codex-config"),
-	} {
-		entries, err := os.ReadDir(root)
+// profileInfo holds a profile name and which harnesses it's available in.
+type profileInfo struct {
+	Name      string
+	Harnesses []string // e.g. ["claude_code", "codex"]
+}
+
+// discoverProfilesWithHarness scans harness-specific config directories
+// (claude-config/, codex-config/) and returns profiles with their harness
+// availability. profiles-shared/ is an implementation detail and not scanned.
+func discoverProfilesWithHarness(h2Dir string) ([]profileInfo, error) {
+	type harnessDir struct {
+		harness string
+		dir     string
+	}
+	harnessDirs := []harnessDir{
+		{profileHarnessClaude, filepath.Join(h2Dir, "claude-config")},
+		{profileHarnessCodex, filepath.Join(h2Dir, "codex-config")},
+	}
+
+	// Collect which harnesses each profile appears in.
+	profileHarnesses := map[string][]string{}
+	for _, hd := range harnessDirs {
+		entries, err := os.ReadDir(hd.dir)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
-			return nil, fmt.Errorf("read %s: %w", root, err)
+			return nil, fmt.Errorf("read %s: %w", hd.dir, err)
 		}
 		for _, entry := range entries {
 			if entry.IsDir() {
-				seen[entry.Name()] = struct{}{}
+				profileHarnesses[entry.Name()] = append(profileHarnesses[entry.Name()], hd.harness)
 			}
 		}
 	}
-	profiles := make([]string, 0, len(seen))
-	for profile := range seen {
-		profiles = append(profiles, profile)
+
+	// Sort by name.
+	names := make([]string, 0, len(profileHarnesses))
+	for name := range profileHarnesses {
+		names = append(names, name)
 	}
-	sort.Strings(profiles)
-	return profiles, nil
+	sort.Strings(names)
+
+	result := make([]profileInfo, len(names))
+	for i, name := range names {
+		result[i] = profileInfo{Name: name, Harnesses: profileHarnesses[name]}
+	}
+	return result, nil
+}
+
+// discoverProfiles returns sorted profile names found across all config directories.
+// Used by profile update --all which needs to iterate all profile names.
+func discoverProfiles(h2Dir string) ([]string, error) {
+	infos, err := discoverProfilesWithHarness(h2Dir)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, len(infos))
+	for i, info := range infos {
+		names[i] = info.Name
+	}
+	return names, nil
 }
 
 func pathExists(path string) bool {

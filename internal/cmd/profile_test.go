@@ -547,3 +547,63 @@ func TestProfileUpdate_DryRunAll(t *testing.T) {
 		t.Fatal("dry-run modified p1")
 	}
 }
+
+func TestDiscoverProfilesWithHarness(t *testing.T) {
+	h2Dir := setupProfileTestH2Dir(t)
+
+	// Create claude-only, codex-only, and both profiles.
+	os.MkdirAll(filepath.Join(h2Dir, "claude-config", "claude-only"), 0o755)
+	os.MkdirAll(filepath.Join(h2Dir, "codex-config", "codex-only"), 0o755)
+	os.MkdirAll(filepath.Join(h2Dir, "claude-config", "both"), 0o755)
+	os.MkdirAll(filepath.Join(h2Dir, "codex-config", "both"), 0o755)
+	// profiles-shared only should NOT appear.
+	os.MkdirAll(filepath.Join(h2Dir, "profiles-shared", "shared-only"), 0o755)
+
+	infos, err := discoverProfilesWithHarness(h2Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := map[string][]string{}
+	for _, info := range infos {
+		got[info.Name] = info.Harnesses
+	}
+
+	// Check expected profiles.
+	if h := got["both"]; len(h) != 2 || h[0] != "claude_code" || h[1] != "codex" {
+		t.Errorf("both: got %v, want [claude_code codex]", h)
+	}
+	if h := got["claude-only"]; len(h) != 1 || h[0] != "claude_code" {
+		t.Errorf("claude-only: got %v, want [claude_code]", h)
+	}
+	if h := got["codex-only"]; len(h) != 1 || h[0] != "codex" {
+		t.Errorf("codex-only: got %v, want [codex]", h)
+	}
+	if _, found := got["shared-only"]; found {
+		t.Error("profiles-shared-only profile should not be discovered")
+	}
+}
+
+func TestProfileList_ShowsHarnesses(t *testing.T) {
+	h2Dir := setupProfileTestH2Dir(t)
+
+	os.MkdirAll(filepath.Join(h2Dir, "claude-config", "staging"), 0o755)
+	os.MkdirAll(filepath.Join(h2Dir, "codex-config", "staging"), 0o755)
+	os.MkdirAll(filepath.Join(h2Dir, "claude-config", "prod"), 0o755)
+
+	cmd := newProfileListCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	output := out.String()
+	if !strings.Contains(output, "prod (claude_code)") {
+		t.Errorf("expected 'prod (claude_code)' in output:\n%s", output)
+	}
+	if !strings.Contains(output, "staging (claude_code, codex)") {
+		t.Errorf("expected 'staging (claude_code, codex)' in output:\n%s", output)
+	}
+}

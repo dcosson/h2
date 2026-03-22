@@ -153,7 +153,7 @@ func resolveRotateCandidates(args []string, configPrefix string) ([]string, erro
 	}
 
 	if len(args) == 0 {
-		return allProfiles, nil // already sorted by discoverProfiles
+		return allProfiles, nil // already sorted by listProfilesInDir
 	}
 
 	seen := make(map[string]bool)
