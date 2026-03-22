@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"h2/internal/config"
 	"h2/internal/session"
@@ -623,6 +624,165 @@ func TestRotate_GlobPattern(t *testing.T) {
 	}
 	if rc.Profile != "staging-2" {
 		t.Errorf("Profile = %q, want %q", rc.Profile, "staging-2")
+	}
+}
+
+func TestFilterRateLimited(t *testing.T) {
+	configPrefix := t.TempDir()
+	for _, name := range []string{"a", "b", "c"} {
+		os.MkdirAll(filepath.Join(configPrefix, name), 0o755)
+	}
+
+	// Rate-limit profile "b".
+	rl := &config.RateLimitInfo{
+		ResetsAt:   time.Now().Add(1 * time.Hour),
+		RecordedAt: time.Now(),
+	}
+	if err := config.WriteRateLimit(filepath.Join(configPrefix, "b"), rl); err != nil {
+		t.Fatal(err)
+	}
+
+	filtered, skipped := filterRateLimited([]string{"a", "b", "c"}, configPrefix)
+	if !reflect.DeepEqual(filtered, []string{"a", "c"}) {
+		t.Errorf("filtered = %v, want [a c]", filtered)
+	}
+	if len(skipped) != 1 || skipped[0].name != "b" {
+		t.Errorf("skipped = %+v, want [{name:b}]", skipped)
+	}
+}
+
+func TestFilterRateLimited_ExpiredNotFiltered(t *testing.T) {
+	configPrefix := t.TempDir()
+	os.MkdirAll(filepath.Join(configPrefix, "a"), 0o755)
+
+	// Write an expired rate limit.
+	rl := &config.RateLimitInfo{
+		ResetsAt:   time.Now().Add(-1 * time.Hour),
+		RecordedAt: time.Now().Add(-2 * time.Hour),
+	}
+	if err := config.WriteRateLimit(filepath.Join(configPrefix, "a"), rl); err != nil {
+		t.Fatal(err)
+	}
+
+	filtered, skipped := filterRateLimited([]string{"a"}, configPrefix)
+	if !reflect.DeepEqual(filtered, []string{"a"}) {
+		t.Errorf("filtered = %v, want [a]", filtered)
+	}
+	if len(skipped) != 0 {
+		t.Errorf("skipped = %+v, want empty", skipped)
+	}
+}
+
+func TestFilterRateLimited_AllLimited(t *testing.T) {
+	configPrefix := t.TempDir()
+	for _, name := range []string{"a", "b"} {
+		os.MkdirAll(filepath.Join(configPrefix, name), 0o755)
+		rl := &config.RateLimitInfo{
+			ResetsAt:   time.Now().Add(1 * time.Hour),
+			RecordedAt: time.Now(),
+		}
+		if err := config.WriteRateLimit(filepath.Join(configPrefix, name), rl); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	filtered, skipped := filterRateLimited([]string{"a", "b"}, configPrefix)
+	if len(filtered) != 0 {
+		t.Errorf("filtered = %v, want empty", filtered)
+	}
+	if len(skipped) != 2 {
+		t.Errorf("skipped = %+v, want 2 entries", skipped)
+	}
+}
+
+func TestRotate_SkipsRateLimitedProfile(t *testing.T) {
+	setupRotateTestH2Dir(t)
+	name := "rotate-test-ratelimit"
+	tmpDir := t.TempDir()
+
+	os.MkdirAll(filepath.Join(tmpDir, "default"), 0o755)
+	os.MkdirAll(filepath.Join(tmpDir, "staging"), 0o755)
+	os.MkdirAll(filepath.Join(tmpDir, "prod"), 0o755)
+
+	// Rate-limit "staging".
+	rl := &config.RateLimitInfo{
+		ResetsAt:   time.Now().Add(1 * time.Hour),
+		RecordedAt: time.Now(),
+	}
+	if err := config.WriteRateLimit(filepath.Join(tmpDir, "staging"), rl); err != nil {
+		t.Fatal(err)
+	}
+
+	sessionDir := writeTestRuntimeConfig(t, name, &config.RuntimeConfig{
+		AgentName:               name,
+		SessionID:               "sid-1",
+		HarnessSessionID:        "sid-1",
+		HarnessType:             "claude_code",
+		HarnessConfigPathPrefix: tmpDir,
+		Profile:                 "default",
+		Command:                 "claude",
+		CWD:                     tmpDir,
+		StartedAt:               "2024-01-01T00:00:00Z",
+	})
+
+	// Auto-select should skip "staging" and pick "prod" (sorted: default, prod, staging).
+	cmd := newRotateCmd()
+	cmd.SetArgs([]string{name})
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	rc, err := config.ReadRuntimeConfig(sessionDir)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if rc.Profile != "prod" {
+		t.Errorf("Profile = %q, want %q (staging should be skipped)", rc.Profile, "prod")
+	}
+}
+
+func TestRotate_AllCandidatesRateLimited(t *testing.T) {
+	setupRotateTestH2Dir(t)
+	name := "rotate-test-all-limited"
+	tmpDir := t.TempDir()
+
+	os.MkdirAll(filepath.Join(tmpDir, "default"), 0o755)
+	os.MkdirAll(filepath.Join(tmpDir, "staging"), 0o755)
+
+	// Rate-limit both non-current profiles.
+	for _, p := range []string{"staging"} {
+		rl := &config.RateLimitInfo{
+			ResetsAt:   time.Now().Add(1 * time.Hour),
+			RecordedAt: time.Now(),
+		}
+		if err := config.WriteRateLimit(filepath.Join(tmpDir, p), rl); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writeTestRuntimeConfig(t, name, &config.RuntimeConfig{
+		AgentName:               name,
+		SessionID:               "sid-1",
+		HarnessSessionID:        "sid-1",
+		HarnessType:             "claude_code",
+		HarnessConfigPathPrefix: tmpDir,
+		Profile:                 "default",
+		Command:                 "claude",
+		CWD:                     tmpDir,
+		StartedAt:               "2024-01-01T00:00:00Z",
+	})
+
+	// Only candidate besides current is "staging" which is limited.
+	// After filtering, only "default" remains, but that's the current → error.
+	cmd := newRotateCmd()
+	cmd.SetArgs([]string{name})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when all non-current candidates are rate limited")
+	}
+	if !strings.Contains(err.Error(), "already using profile") {
+		t.Errorf("error = %q, want containing 'already using profile'", err.Error())
 	}
 }
 

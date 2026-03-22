@@ -255,6 +255,25 @@ func (p *EventHandler) processEvent(name string, attrs []otelAttribute, ts time.
 			p.debugf("span=codex.sse_event completed input=%d output=%d cached=%d delta_input=%d delta_cached=%d", input, output, cached, deltaInput, deltaCached)
 			return spanProcessResult{recognized: true, emitted: 1}
 		}
+		// Zero tokens with an error.message containing usage limit text
+		// means the request was rejected due to rate limiting. This is
+		// the primary path for Codex websocket-based rate limit errors.
+		errMsg := getAttr(attrs, "error.message")
+		if errMsg != "" && isUsageLimitError(errMsg) {
+			p.cancelPendingIdle()
+			p.emitStateChange(ts, monitor.StateIdle, monitor.SubStateUsageLimit)
+			resetsAt := parseCodexResetsAtHuman(errMsg, ts)
+			if resetsAt.IsZero() {
+				resetsAt = parseCodexResetsAt(errMsg, ts)
+			}
+			p.emit(monitor.AgentEvent{
+				Type:      monitor.EventUsageLimitInfo,
+				Timestamp: ts,
+				Data:      monitor.UsageLimitData{ResetsAt: resetsAt, Message: errMsg},
+			})
+			p.debugf("span=codex.sse_event usage_limit error=%q resets_at=%v", errMsg, resetsAt)
+			return spanProcessResult{recognized: true, emitted: 2}
+		}
 		p.debugf("span=codex.sse_event completed but zero tokens (ignored)")
 		return spanProcessResult{recognized: true}
 
@@ -571,6 +590,32 @@ func parseCodexResetsAt(errMsg string, now time.Time) time.Time {
 		return time.Time{}
 	}
 	return now.Add(time.Duration(secs) * time.Second)
+}
+
+// isUsageLimitError returns true if the error message indicates a usage limit.
+func isUsageLimitError(errMsg string) bool {
+	lower := strings.ToLower(errMsg)
+	return strings.Contains(lower, "usage limit") || strings.Contains(lower, "usage_limit_reached")
+}
+
+// reHumanResetsAt matches "try again at <date>" in Codex usage limit messages.
+// Example: "try again at Mar 25th, 2026 12:45 PM."
+var reHumanResetsAt = regexp.MustCompile(`(?i)try again at\s+([A-Za-z]+)\s+(\d+)(?:st|nd|rd|th)?,?\s+(\d{4})\s+(\d{1,2}:\d{2}\s*[APap][Mm])`)
+
+// parseCodexResetsAtHuman extracts the reset time from a human-readable Codex
+// usage limit message like "try again at Mar 25th, 2026 12:45 PM."
+func parseCodexResetsAtHuman(errMsg string, now time.Time) time.Time {
+	m := reHumanResetsAt.FindStringSubmatch(errMsg)
+	if m == nil {
+		return time.Time{}
+	}
+	// m[1]=month, m[2]=day, m[3]=year, m[4]=time
+	dateStr := fmt.Sprintf("%s %s, %s %s", m[1], m[2], m[3], strings.TrimSpace(m[4]))
+	t, err := time.ParseInLocation("Jan 2, 2006 3:04 PM", dateStr, now.Location())
+	if err != nil {
+		return time.Time{}
+	}
+	return t
 }
 
 // --- Attribute extraction helpers ---

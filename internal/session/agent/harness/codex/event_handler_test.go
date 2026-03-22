@@ -799,6 +799,118 @@ func TestEventHandler_UserPrompt_DuringUsageLimit_NoStateChange(t *testing.T) {
 	}
 }
 
+func TestEventHandler_SSEEvent_UsageLimitError(t *testing.T) {
+	events := make(chan monitor.AgentEvent, 64)
+	p := NewEventHandler(events)
+
+	// Move to active/thinking first.
+	p.OnLogs(makeLogsPayload("codex.user_prompt", nil))
+	_ = drainEvents(events, 2)
+
+	// SSE response.completed with zero tokens and a usage limit error.message.
+	body := makeLogsPayload("codex.sse_event", []otelAttribute{
+		{Key: "event.kind", Value: otelAttrValue{StringValue: "response.completed"}},
+		{Key: "error.message", Value: otelAttrValue{StringValue: "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Mar 25th, 2026 12:45 PM."}},
+	})
+	p.OnLogs(body)
+
+	got := drainEvents(events, 2)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(got))
+	}
+	if got[0].Type != monitor.EventStateChange {
+		t.Fatalf("event[0].Type = %v, want EventStateChange", got[0].Type)
+	}
+	state := got[0].Data.(monitor.StateChangeData)
+	if state.State != monitor.StateIdle || state.SubState != monitor.SubStateUsageLimit {
+		t.Errorf("state = (%v,%v), want (Idle,UsageLimit)", state.State, state.SubState)
+	}
+	if got[1].Type != monitor.EventUsageLimitInfo {
+		t.Fatalf("event[1].Type = %v, want EventUsageLimitInfo", got[1].Type)
+	}
+	ulData := got[1].Data.(monitor.UsageLimitData)
+	if ulData.ResetsAt.IsZero() {
+		t.Error("ResetsAt should not be zero — human date 'Mar 25th, 2026 12:45 PM' should parse")
+	}
+	if !strings.Contains(ulData.Message, "usage limit") {
+		t.Errorf("Message = %q, want containing 'usage limit'", ulData.Message)
+	}
+}
+
+func TestParseCodexResetsAtHuman(t *testing.T) {
+	now := time.Date(2026, 3, 21, 22, 0, 0, 0, time.Local)
+	tests := []struct {
+		name    string
+		errMsg  string
+		wantDay int
+		wantOK  bool
+	}{
+		{
+			name:    "standard ordinal with comma",
+			errMsg:  "try again at Mar 25th, 2026 12:45 PM.",
+			wantDay: 25,
+			wantOK:  true,
+		},
+		{
+			name:    "1st ordinal",
+			errMsg:  "try again at Apr 1st, 2026 9:00 AM",
+			wantDay: 1,
+			wantOK:  true,
+		},
+		{
+			name:    "2nd ordinal",
+			errMsg:  "try again at Apr 2nd, 2026 10:30 AM",
+			wantDay: 2,
+			wantOK:  true,
+		},
+		{
+			name:    "3rd ordinal",
+			errMsg:  "try again at Apr 3rd, 2026 1:15 PM",
+			wantDay: 3,
+			wantOK:  true,
+		},
+		{
+			name:   "no match",
+			errMsg: "something went wrong",
+			wantOK: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseCodexResetsAtHuman(tt.errMsg, now)
+			if tt.wantOK {
+				if got.IsZero() {
+					t.Fatal("expected non-zero time")
+				}
+				if got.Day() != tt.wantDay {
+					t.Errorf("day = %d, want %d", got.Day(), tt.wantDay)
+				}
+			} else {
+				if !got.IsZero() {
+					t.Errorf("expected zero time, got %v", got)
+				}
+			}
+		})
+	}
+}
+
+func TestIsUsageLimitError(t *testing.T) {
+	tests := []struct {
+		msg  string
+		want bool
+	}{
+		{"You've hit your usage limit.", true},
+		{"usage_limit_reached", true},
+		{"rate_limit_exceeded", false},
+		{"something else", false},
+	}
+	for _, tt := range tests {
+		if got := isUsageLimitError(tt.msg); got != tt.want {
+			t.Errorf("isUsageLimitError(%q) = %v, want %v", tt.msg, got, tt.want)
+		}
+	}
+}
+
 func TestEventHandler_InvalidJSON_NoEmit(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
 	p := NewEventHandler(events)

@@ -64,13 +64,23 @@ argument order.`,
 				return fmt.Errorf("agent %q has no harness config path prefix; cannot rotate profile", agentName)
 			}
 
-			// Resolve candidate profiles from the harness-specific config dir.
+			// Resolve candidate profiles from the harness-specific config dir,
+			// filtering out any that are currently rate-limited.
 			candidates, err := resolveRotateCandidates(profileArgs, rc.HarnessConfigPathPrefix)
 			if err != nil {
 				return err
 			}
 			if len(candidates) == 0 {
 				return fmt.Errorf("no profiles found")
+			}
+
+			candidates, skipped := filterRateLimited(candidates, rc.HarnessConfigPathPrefix)
+			for _, s := range skipped {
+				fmt.Fprintf(cmd.OutOrStderr(), "Skipping profile %q (rate limited until %s)\n",
+					s.name, s.resetsAt.Local().Format("Jan 2 3:04 PM"))
+			}
+			if len(candidates) == 0 {
+				return fmt.Errorf("all candidate profiles are rate limited")
 			}
 
 			// Select the next profile.
@@ -201,6 +211,28 @@ func listProfilesInDir(dir string) ([]string, error) {
 	}
 	sort.Strings(profiles)
 	return profiles, nil
+}
+
+// skippedProfile records a profile that was filtered out due to rate limiting.
+type skippedProfile struct {
+	name     string
+	resetsAt time.Time
+}
+
+// filterRateLimited removes rate-limited profiles from candidates.
+// Returns the filtered list and info about which profiles were skipped.
+func filterRateLimited(candidates []string, configPrefix string) ([]string, []skippedProfile) {
+	var filtered []string
+	var skipped []skippedProfile
+	for _, name := range candidates {
+		profileDir := filepath.Join(configPrefix, name)
+		if rl := config.IsProfileRateLimited(profileDir); rl != nil {
+			skipped = append(skipped, skippedProfile{name: name, resetsAt: rl.ResetsAt})
+		} else {
+			filtered = append(filtered, name)
+		}
+	}
+	return filtered, skipped
 }
 
 // isGlobPattern returns true if s contains glob metacharacters.

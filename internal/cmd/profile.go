@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"h2/internal/config"
+	"h2/internal/termstyle"
 )
 
 const (
@@ -133,7 +134,7 @@ func newProfileListCmd() *cobra.Command {
 				return nil
 			}
 			for _, p := range profiles {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s (%s)\n", p.Name, strings.Join(p.Harnesses, ", "))
+				fmt.Fprintf(cmd.OutOrStdout(), "%s (%s)\n", p.Name, formatHarnessLabels(p))
 			}
 			return nil
 		},
@@ -166,16 +167,24 @@ func newProfileShowCmd() *cobra.Command {
 
 			out := cmd.OutOrStdout()
 
-			// Build harness list for header.
+			// Build harness list for header with rate limit info.
+			rlMap := map[string]*config.RateLimitInfo{}
 			var harnesses []string
 			if claudeExists {
 				harnesses = append(harnesses, profileHarnessClaude)
+				if rl := config.IsProfileRateLimited(claudeDir); rl != nil {
+					rlMap[profileHarnessClaude] = rl
+				}
 			}
 			if codexExists {
 				harnesses = append(harnesses, profileHarnessCodex)
+				if rl := config.IsProfileRateLimited(codexDir); rl != nil {
+					rlMap[profileHarnessCodex] = rl
+				}
 			}
 			if len(harnesses) > 0 {
-				fmt.Fprintf(out, "Profile: %s (%s)\n", name, strings.Join(harnesses, ", "))
+				p := profileInfo{Name: name, Harnesses: harnesses, RateLimitedMap: rlMap}
+				fmt.Fprintf(out, "Profile: %s (%s)\n", name, formatHarnessLabels(p))
 			} else {
 				fmt.Fprintf(out, "Profile: %s (shared only)\n", name)
 			}
@@ -932,8 +941,39 @@ func ensurePathMissing(path, label string) error {
 
 // profileInfo holds a profile name and which harnesses it's available in.
 type profileInfo struct {
-	Name      string
-	Harnesses []string // e.g. ["claude_code", "codex"]
+	Name           string
+	Harnesses      []string                          // e.g. ["claude_code", "codex"]
+	RateLimitedMap map[string]*config.RateLimitInfo   // harness -> rate limit info (nil if not limited)
+}
+
+// formatHarnessLabels builds a comma-separated harness list, appending
+// red "rate limited until <time>" for any harness that is currently limited.
+func formatHarnessLabels(p profileInfo) string {
+	labels := make([]string, len(p.Harnesses))
+	for i, h := range p.Harnesses {
+		if rl, ok := p.RateLimitedMap[h]; ok && rl != nil {
+			resetStr := rl.ResetsAt.Local().Format("Jan 2 3:04 PM")
+			labels[i] = termstyle.Red(h + " rate limited until " + resetStr)
+		} else {
+			labels[i] = h
+		}
+	}
+	return strings.Join(labels, ", ")
+}
+
+// formatHarnessLabelsPlain is like formatHarnessLabels but without ANSI colors.
+// Used in tests.
+func formatHarnessLabelsPlain(p profileInfo) string {
+	labels := make([]string, len(p.Harnesses))
+	for i, h := range p.Harnesses {
+		if rl, ok := p.RateLimitedMap[h]; ok && rl != nil {
+			resetStr := rl.ResetsAt.Local().Format("Jan 2 3:04 PM")
+			labels[i] = h + " rate limited until " + resetStr
+		} else {
+			labels[i] = h
+		}
+	}
+	return strings.Join(labels, ", ")
 }
 
 // discoverProfilesWithHarness scans harness-specific config directories
@@ -949,8 +989,9 @@ func discoverProfilesWithHarness(h2Dir string) ([]profileInfo, error) {
 		{profileHarnessCodex, filepath.Join(h2Dir, "codex-config")},
 	}
 
-	// Collect which harnesses each profile appears in.
+	// Collect which harnesses each profile appears in, plus rate limit info.
 	profileHarnesses := map[string][]string{}
+	profileRateLimits := map[string]map[string]*config.RateLimitInfo{}
 	for _, hd := range harnessDirs {
 		entries, err := os.ReadDir(hd.dir)
 		if err != nil {
@@ -961,7 +1002,15 @@ func discoverProfilesWithHarness(h2Dir string) ([]profileInfo, error) {
 		}
 		for _, entry := range entries {
 			if entry.IsDir() {
-				profileHarnesses[entry.Name()] = append(profileHarnesses[entry.Name()], hd.harness)
+				name := entry.Name()
+				profileHarnesses[name] = append(profileHarnesses[name], hd.harness)
+				rl := config.IsProfileRateLimited(filepath.Join(hd.dir, name))
+				if rl != nil {
+					if profileRateLimits[name] == nil {
+						profileRateLimits[name] = map[string]*config.RateLimitInfo{}
+					}
+					profileRateLimits[name][hd.harness] = rl
+				}
 			}
 		}
 	}
@@ -975,7 +1024,11 @@ func discoverProfilesWithHarness(h2Dir string) ([]profileInfo, error) {
 
 	result := make([]profileInfo, len(names))
 	for i, name := range names {
-		result[i] = profileInfo{Name: name, Harnesses: profileHarnesses[name]}
+		result[i] = profileInfo{
+			Name:           name,
+			Harnesses:      profileHarnesses[name],
+			RateLimitedMap: profileRateLimits[name],
+		}
 	}
 	return result, nil
 }

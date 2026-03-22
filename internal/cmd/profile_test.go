@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"h2/internal/config"
 )
@@ -605,5 +606,66 @@ func TestProfileList_ShowsHarnesses(t *testing.T) {
 	}
 	if !strings.Contains(output, "staging (claude_code, codex)") {
 		t.Errorf("expected 'staging (claude_code, codex)' in output:\n%s", output)
+	}
+}
+
+func TestProfileList_ShowsRateLimitedHarness(t *testing.T) {
+	h2Dir := setupProfileTestH2Dir(t)
+
+	os.MkdirAll(filepath.Join(h2Dir, "claude-config", "default"), 0o755)
+	os.MkdirAll(filepath.Join(h2Dir, "codex-config", "default"), 0o755)
+
+	// Write a rate limit for codex only.
+	rl := &config.RateLimitInfo{
+		ResetsAt:   time.Now().Add(2 * time.Hour),
+		RecordedAt: time.Now(),
+		AgentName:  "test-agent",
+	}
+	if err := config.WriteRateLimit(filepath.Join(h2Dir, "codex-config", "default"), rl); err != nil {
+		t.Fatal(err)
+	}
+
+	infos, err := discoverProfilesWithHarness(h2Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 1 {
+		t.Fatalf("expected 1 profile, got %d", len(infos))
+	}
+
+	label := formatHarnessLabelsPlain(infos[0])
+	if !strings.Contains(label, "codex rate limited until") {
+		t.Errorf("expected rate limit in label, got: %s", label)
+	}
+	// claude_code should not be rate limited.
+	if strings.Contains(label, "claude_code rate limited") {
+		t.Errorf("claude_code should not be rate limited: %s", label)
+	}
+}
+
+func TestFormatHarnessLabels_NoRateLimit(t *testing.T) {
+	p := profileInfo{
+		Name:      "test",
+		Harnesses: []string{"claude_code", "codex"},
+	}
+	got := formatHarnessLabelsPlain(p)
+	if got != "claude_code, codex" {
+		t.Errorf("got %q, want %q", got, "claude_code, codex")
+	}
+}
+
+func TestFormatHarnessLabels_WithRateLimit(t *testing.T) {
+	resetsAt := time.Date(2026, 3, 25, 12, 45, 0, 0, time.Local)
+	p := profileInfo{
+		Name:      "test",
+		Harnesses: []string{"claude_code", "codex"},
+		RateLimitedMap: map[string]*config.RateLimitInfo{
+			"codex": {ResetsAt: resetsAt},
+		},
+	}
+	got := formatHarnessLabelsPlain(p)
+	want := "claude_code, codex rate limited until Mar 25 12:45 PM"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }
