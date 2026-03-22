@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -355,18 +356,12 @@ func TestRotate_NoExistingLog_SucceedsWithoutMove(t *testing.T) {
 }
 
 func TestRotate_WrongArgCount(t *testing.T) {
+	// Zero args should fail (need at least agent name).
 	cmd := newRotateCmd()
-	cmd.SetArgs([]string{"only-one-arg"})
+	cmd.SetArgs([]string{})
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected error for wrong arg count")
-	}
-
-	cmd2 := newRotateCmd()
-	cmd2.SetArgs([]string{"one", "two", "three"})
-	err = cmd2.Execute()
-	if err == nil {
-		t.Fatal("expected error for too many args")
+		t.Fatal("expected error for zero args")
 	}
 }
 
@@ -391,5 +386,268 @@ func TestRotate_NoHarnessConfigPrefix(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no harness config path prefix") {
 		t.Errorf("error = %q, want containing 'no harness config path prefix'", err.Error())
+	}
+}
+
+func TestSelectNextProfile(t *testing.T) {
+	tests := []struct {
+		name       string
+		current    string
+		candidates []string
+		want       string
+	}{
+		{
+			name:       "current in list, select next",
+			current:    "b",
+			candidates: []string{"a", "b", "c"},
+			want:       "c",
+		},
+		{
+			name:       "current is last, wrap around",
+			current:    "c",
+			candidates: []string{"a", "b", "c"},
+			want:       "a",
+		},
+		{
+			name:       "current is first, select second",
+			current:    "a",
+			candidates: []string{"a", "b", "c"},
+			want:       "b",
+		},
+		{
+			name:       "current not in list, select first",
+			current:    "x",
+			candidates: []string{"a", "b", "c"},
+			want:       "a",
+		},
+		{
+			name:       "single candidate same as current wraps to itself",
+			current:    "a",
+			candidates: []string{"a"},
+			want:       "a",
+		},
+		{
+			name:       "single candidate different from current",
+			current:    "x",
+			candidates: []string{"a"},
+			want:       "a",
+		},
+		{
+			name:       "two candidates, current is first",
+			current:    "a",
+			candidates: []string{"a", "b"},
+			want:       "b",
+		},
+		{
+			name:       "two candidates, current is second",
+			current:    "b",
+			candidates: []string{"a", "b"},
+			want:       "a",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := selectNextProfile(tt.current, tt.candidates)
+			if got != tt.want {
+				t.Errorf("selectNextProfile(%q, %v) = %q, want %q", tt.current, tt.candidates, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveRotateCandidates(t *testing.T) {
+	// Create a temp h2Dir with some profile directories.
+	h2Dir := t.TempDir()
+	for _, name := range []string{"default", "staging-1", "staging-2", "staging-3", "prod"} {
+		os.MkdirAll(filepath.Join(h2Dir, "profiles-shared", name), 0o755)
+	}
+
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{
+			name: "no args returns all sorted",
+			args: nil,
+			want: []string{"default", "prod", "staging-1", "staging-2", "staging-3"},
+		},
+		{
+			name: "literal args preserve order",
+			args: []string{"staging-2", "staging-1"},
+			want: []string{"staging-2", "staging-1"},
+		},
+		{
+			name: "glob expands and sorts",
+			args: []string{"staging-*"},
+			want: []string{"staging-1", "staging-2", "staging-3"},
+		},
+		{
+			name: "mixed literal and glob, literals first in order",
+			args: []string{"prod", "staging-*"},
+			want: []string{"prod", "staging-1", "staging-2", "staging-3"},
+		},
+		{
+			name: "dedup between literal and glob",
+			args: []string{"staging-1", "staging-*"},
+			want: []string{"staging-1", "staging-2", "staging-3"},
+		},
+		{
+			name: "glob with no matches returns empty",
+			args: []string{"nonexistent-*"},
+			want: nil,
+		},
+		{
+			name: "single literal",
+			args: []string{"prod"},
+			want: []string{"prod"},
+		},
+		{
+			name: "question mark glob",
+			args: []string{"staging-?"},
+			want: []string{"staging-1", "staging-2", "staging-3"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveRotateCandidates(tt.args, h2Dir)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("resolveRotateCandidates(%v) = %v, want %v", tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRotate_AutoSelect(t *testing.T) {
+	name := "rotate-test-autoselect"
+	tmpDir := t.TempDir()
+
+	// Create profile dirs.
+	os.MkdirAll(filepath.Join(tmpDir, "default"), 0o755)
+	os.MkdirAll(filepath.Join(tmpDir, "staging"), 0o755)
+
+	// Also create profiles-shared dirs so discoverProfiles finds them.
+	h2Dir := config.ConfigDir()
+	os.MkdirAll(filepath.Join(h2Dir, "profiles-shared", "default"), 0o755)
+	os.MkdirAll(filepath.Join(h2Dir, "profiles-shared", "staging"), 0o755)
+
+	sessionDir := writeTestRuntimeConfig(t, name, &config.RuntimeConfig{
+		AgentName:               name,
+		SessionID:               "sid-1",
+		HarnessSessionID:        "sid-1",
+		HarnessType:             "claude_code",
+		HarnessConfigPathPrefix: tmpDir,
+		Profile:                 "default",
+		Command:                 "claude",
+		CWD:                     tmpDir,
+		StartedAt:               "2024-01-01T00:00:00Z",
+	})
+
+	// Auto-select with no profile arg — should pick next after "default".
+	cmd := newRotateCmd()
+	cmd.SetArgs([]string{name})
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	rc, err := config.ReadRuntimeConfig(sessionDir)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	// "staging" comes after "default" alphabetically.
+	if rc.Profile != "staging" {
+		t.Errorf("Profile = %q, want %q", rc.Profile, "staging")
+	}
+}
+
+func TestRotate_GlobPattern(t *testing.T) {
+	name := "rotate-test-glob"
+	tmpDir := t.TempDir()
+
+	// Create profile dirs.
+	os.MkdirAll(filepath.Join(tmpDir, "staging-1"), 0o755)
+	os.MkdirAll(filepath.Join(tmpDir, "staging-2"), 0o755)
+	os.MkdirAll(filepath.Join(tmpDir, "staging-3"), 0o755)
+
+	// Create profiles-shared dirs so discoverProfiles finds them.
+	h2Dir := config.ConfigDir()
+	os.MkdirAll(filepath.Join(h2Dir, "profiles-shared", "staging-1"), 0o755)
+	os.MkdirAll(filepath.Join(h2Dir, "profiles-shared", "staging-2"), 0o755)
+	os.MkdirAll(filepath.Join(h2Dir, "profiles-shared", "staging-3"), 0o755)
+
+	sessionDir := writeTestRuntimeConfig(t, name, &config.RuntimeConfig{
+		AgentName:               name,
+		SessionID:               "sid-1",
+		HarnessSessionID:        "sid-1",
+		HarnessType:             "claude_code",
+		HarnessConfigPathPrefix: tmpDir,
+		Profile:                 "staging-1",
+		Command:                 "claude",
+		CWD:                     tmpDir,
+		StartedAt:               "2024-01-01T00:00:00Z",
+	})
+
+	// Glob "staging-*" with current=staging-1 should pick staging-2.
+	cmd := newRotateCmd()
+	cmd.SetArgs([]string{name, "staging-*"})
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	rc, err := config.ReadRuntimeConfig(sessionDir)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if rc.Profile != "staging-2" {
+		t.Errorf("Profile = %q, want %q", rc.Profile, "staging-2")
+	}
+}
+
+func TestRotate_VariadicCandidates(t *testing.T) {
+	name := "rotate-test-variadic"
+	tmpDir := t.TempDir()
+
+	os.MkdirAll(filepath.Join(tmpDir, "alpha"), 0o755)
+	os.MkdirAll(filepath.Join(tmpDir, "beta"), 0o755)
+	os.MkdirAll(filepath.Join(tmpDir, "gamma"), 0o755)
+
+	h2Dir := config.ConfigDir()
+	os.MkdirAll(filepath.Join(h2Dir, "profiles-shared", "alpha"), 0o755)
+	os.MkdirAll(filepath.Join(h2Dir, "profiles-shared", "beta"), 0o755)
+	os.MkdirAll(filepath.Join(h2Dir, "profiles-shared", "gamma"), 0o755)
+
+	sessionDir := writeTestRuntimeConfig(t, name, &config.RuntimeConfig{
+		AgentName:               name,
+		SessionID:               "sid-1",
+		HarnessSessionID:        "sid-1",
+		HarnessType:             "claude_code",
+		HarnessConfigPathPrefix: tmpDir,
+		Profile:                 "beta",
+		Command:                 "claude",
+		CWD:                     tmpDir,
+		StartedAt:               "2024-01-01T00:00:00Z",
+	})
+
+	// Candidates in order: gamma, alpha, beta. Current is beta (index 2), next wraps to gamma.
+	cmd := newRotateCmd()
+	cmd.SetArgs([]string{name, "gamma", "alpha", "beta"})
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	rc, err := config.ReadRuntimeConfig(sessionDir)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if rc.Profile != "gamma" {
+		t.Errorf("Profile = %q, want %q", rc.Profile, "gamma")
 	}
 }

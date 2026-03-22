@@ -5,6 +5,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -19,19 +21,34 @@ func newRotateCmd() *cobra.Command {
 	var live bool
 
 	cmd := &cobra.Command{
-		Use:   "rotate <agent-name> <profile>",
+		Use:   "rotate <agent-name> [profiles...]",
 		Short: "Rotate an agent to a different profile",
 		Long: `Rotate an agent's profile by updating its session metadata and moving
 its session log to the new profile's Claude config directory.
+
+Profile selection:
+  h2 rotate agent                     Auto-select next from all profiles
+  h2 rotate agent staging             Rotate to specific profile
+  h2 rotate agent prof-1 prof-2       Next from these candidates (in given order)
+  h2 rotate agent "staging-*"         Next from profiles matching glob pattern
+
+When multiple candidates are given, they are checked in the order provided.
+If the current profile is in the list, the next one is selected (wrapping
+around). If the current profile is not in the list, the first candidate
+is selected.
+
+Glob patterns (containing * or ?) are expanded against discovered profiles
+and the matches are sorted alphabetically. Literal names preserve their
+argument order.
 
 The agent must not be running unless --live is specified. The target profile
 must exist for the agent's harness type.
 
 With --live, the agent is stopped, rotated, and resumed with --detach.`,
-		Args: cobra.ExactArgs(2),
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agentName := args[0]
-			newProfile := args[1]
+			profileArgs := args[1:]
 
 			// Read the agent's RuntimeConfig.
 			sessionDir := config.SessionDir(agentName)
@@ -43,19 +60,32 @@ With --live, the agent is stopped, rotated, and resumed with --detach.`,
 				return fmt.Errorf("read session config for %q: %w", agentName, err)
 			}
 
-			// Check if already on the target profile.
 			currentProfile := rc.Profile
 			if currentProfile == "" {
 				currentProfile = "default"
 			}
-			if currentProfile == newProfile {
-				return fmt.Errorf("agent %q is already using profile %q", agentName, newProfile)
-			}
 
-			// Validate the target profile exists for this harness type.
 			if rc.HarnessConfigPathPrefix == "" {
 				return fmt.Errorf("agent %q has no harness config path prefix; cannot rotate profile", agentName)
 			}
+
+			// Resolve candidate profiles.
+			h2Dir := config.ConfigDir()
+			candidates, err := resolveRotateCandidates(profileArgs, h2Dir)
+			if err != nil {
+				return err
+			}
+			if len(candidates) == 0 {
+				return fmt.Errorf("no profiles found")
+			}
+
+			// Select the next profile.
+			newProfile := selectNextProfile(currentProfile, candidates)
+			if newProfile == currentProfile {
+				return fmt.Errorf("agent %q is already using profile %q and no other candidates available", agentName, currentProfile)
+			}
+
+			// Validate the target profile exists for this harness type.
 			newProfileDir := filepath.Join(rc.HarnessConfigPathPrefix, newProfile)
 			info, err := os.Stat(newProfileDir)
 			if err != nil {
@@ -124,6 +154,67 @@ With --live, the agent is stopped, rotated, and resumed with --detach.`,
 	cmd.Flags().BoolVar(&live, "live", false, "Stop running agent, rotate, and resume with --detach")
 
 	return cmd
+}
+
+// resolveRotateCandidates builds the ordered list of candidate profiles from
+// the user-provided args. If no args are given, all discovered profiles are
+// returned (sorted). Glob patterns (containing * or ?) are expanded against
+// discovered profiles and sorted; literal names preserve argument order.
+func resolveRotateCandidates(args []string, h2Dir string) ([]string, error) {
+	allProfiles, err := discoverProfiles(h2Dir)
+	if err != nil {
+		return nil, fmt.Errorf("discover profiles: %w", err)
+	}
+
+	if len(args) == 0 {
+		return allProfiles, nil // already sorted by discoverProfiles
+	}
+
+	seen := make(map[string]bool)
+	var candidates []string
+
+	for _, arg := range args {
+		if isGlobPattern(arg) {
+			// Expand glob against all profiles, collect matches sorted.
+			var matches []string
+			for _, p := range allProfiles {
+				if matched, _ := filepath.Match(arg, p); matched {
+					matches = append(matches, p)
+				}
+			}
+			sort.Strings(matches)
+			for _, m := range matches {
+				if !seen[m] {
+					seen[m] = true
+					candidates = append(candidates, m)
+				}
+			}
+		} else {
+			if !seen[arg] {
+				seen[arg] = true
+				candidates = append(candidates, arg)
+			}
+		}
+	}
+
+	return candidates, nil
+}
+
+// isGlobPattern returns true if s contains glob metacharacters.
+func isGlobPattern(s string) bool {
+	return strings.ContainsAny(s, "*?[")
+}
+
+// selectNextProfile picks the next profile from candidates after currentProfile.
+// If currentProfile is in the list, return the next one (wrapping around).
+// If not in the list, return the first candidate.
+func selectNextProfile(currentProfile string, candidates []string) string {
+	for i, c := range candidates {
+		if c == currentProfile {
+			return candidates[(i+1)%len(candidates)]
+		}
+	}
+	return candidates[0]
 }
 
 // isAgentRunning checks if an agent has a live socket without cleaning up stale sockets.
