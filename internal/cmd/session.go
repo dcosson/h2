@@ -22,6 +22,7 @@ func newSessionCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(newSessionCleanupCmd())
+	cmd.AddCommand(newRotateCmd())
 	return cmd
 }
 
