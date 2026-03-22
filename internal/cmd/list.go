@@ -112,8 +112,8 @@ func newLsCmd() *cobra.Command {
 	cmd.Flags().StringVar(&podFlag, "pod", "", "Filter by pod name, or '*' to show all grouped by pod")
 	cmd.Flags().BoolVar(&allFlag, "all", false, "List agents from all discovered h2 directories")
 	cmd.Flags().BoolVar(&includeStoppedFlag, "include-stopped", false, "Include stopped agents that can be resumed")
-	cmd.Flags().StringVar(&olderThan, "older-than", "", "Only show entries older than this age (e.g. 3d, 12h, 30m)")
-	cmd.Flags().StringVar(&newerThan, "newer-than", "", "Only show entries newer than this age (e.g. 3d, 12h, 30m)")
+	cmd.Flags().StringVar(&olderThan, "older-than", "", "Only show entries whose last activity is older than this age (e.g. 3d, 12h, 30m)")
+	cmd.Flags().StringVar(&newerThan, "newer-than", "", "Only show entries whose last activity is newer than this age (e.g. 3d, 12h, 30m)")
 
 	return cmd
 }
@@ -177,7 +177,7 @@ func filterAgentInfos(infos []*message.AgentInfo, filter listAgeFilter) []*messa
 	}
 	var out []*message.AgentInfo
 	for _, info := range infos {
-		age, ok := parseListItemAge(info.Uptime)
+		age, ok := parseListItemAge(info.LastActivity)
 		if filter.matchesAge(age, ok) {
 			out = append(out, info)
 		}

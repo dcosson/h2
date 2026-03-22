@@ -362,10 +362,10 @@ func TestBuildListAgeFilter_UsesParseAge(t *testing.T) {
 	}
 }
 
-func TestFilterAgentInfos_ByUptime(t *testing.T) {
+func TestFilterAgentInfos_ByLastActivity(t *testing.T) {
 	infos := []*message.AgentInfo{
-		{Name: "newer", Uptime: "30m"},
-		{Name: "older", Uptime: "2h"},
+		{Name: "newer", LastActivity: "30m", Uptime: "24h"},
+		{Name: "older", LastActivity: "2h", Uptime: "5m"},
 	}
 	filter := listAgeFilter{minAge: time.Hour}
 	got := filterAgentInfos(infos, filter)

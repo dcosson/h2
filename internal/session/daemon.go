@@ -245,6 +245,9 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 		StateDuration:    virtualterminal.FormatIdleDuration(s.StateDuration()),
 		QueuedCount:      s.Queue.PendingCount(),
 	}
+	if !activity.LastActivityAt.IsZero() {
+		info.LastActivity = virtualterminal.FormatIdleDuration(time.Since(activity.LastActivityAt))
+	}
 
 	// Pull from OTEL collector if active.
 	m := s.Metrics()

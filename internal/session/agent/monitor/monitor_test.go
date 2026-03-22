@@ -495,6 +495,26 @@ func TestProcessEvent_BlockedOnPermission_SetsBlocked(t *testing.T) {
 	}
 }
 
+func TestProcessEvent_TracksLastActivityAt(t *testing.T) {
+	m := New()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go m.Run(ctx)
+
+	ts := time.Date(2026, 3, 21, 12, 0, 0, 0, time.UTC)
+	m.Events() <- AgentEvent{
+		Type:      EventAgentMessage,
+		Timestamp: ts,
+		Data:      AgentMessageData{Content: "hello"},
+	}
+	time.Sleep(20 * time.Millisecond)
+
+	activity := m.Activity()
+	if !activity.LastActivityAt.Equal(ts) {
+		t.Fatalf("LastActivityAt = %v, want %v", activity.LastActivityAt, ts)
+	}
+}
+
 func TestProcessEvent_UsageLimitInfo(t *testing.T) {
 	m := New()
 	ctx, cancel := context.WithCancel(context.Background())

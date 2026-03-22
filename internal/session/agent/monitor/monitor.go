@@ -35,6 +35,7 @@ type AgentMonitor struct {
 	toolCounts      map[string]int64
 
 	lastToolName        string
+	lastActivityAt      time.Time
 	toolUseCount        int64
 	blockedOnPermission bool
 	blockedToolName     string
@@ -119,6 +120,11 @@ func (m *AgentMonitor) processEvent(ev AgentEvent) {
 	var sessionStartedData SessionStartedData
 
 	m.mu.Lock()
+	if !ev.Timestamp.IsZero() {
+		m.lastActivityAt = ev.Timestamp
+	} else {
+		m.lastActivityAt = time.Now()
+	}
 
 	switch ev.Type {
 	case EventSessionStarted:
@@ -358,6 +364,7 @@ type AgentMetrics struct {
 // ActivitySnapshot contains monitor-derived activity state commonly used in status surfaces.
 type ActivitySnapshot struct {
 	LastToolName        string
+	LastActivityAt      time.Time
 	ToolUseCount        int64
 	BlockedOnPermission bool
 	BlockedToolName     string
@@ -383,6 +390,7 @@ func (m *AgentMonitor) Activity() ActivitySnapshot {
 	defer m.mu.RUnlock()
 	return ActivitySnapshot{
 		LastToolName:        m.lastToolName,
+		LastActivityAt:      m.lastActivityAt,
 		ToolUseCount:        m.toolUseCount,
 		BlockedOnPermission: m.blockedOnPermission,
 		BlockedToolName:     m.blockedToolName,
