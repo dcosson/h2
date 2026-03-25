@@ -942,8 +942,8 @@ func ensurePathMissing(path, label string) error {
 // profileInfo holds a profile name and which harnesses it's available in.
 type profileInfo struct {
 	Name           string
-	Harnesses      []string                          // e.g. ["claude_code", "codex"]
-	RateLimitedMap map[string]*config.RateLimitInfo   // harness -> rate limit info (nil if not limited)
+	Harnesses      []string                         // e.g. ["claude_code", "codex"]
+	RateLimitedMap map[string]*config.RateLimitInfo // harness -> rate limit info (nil if not limited)
 }
 
 // formatHarnessLabels builds a comma-separated harness list, appending

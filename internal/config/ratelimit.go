@@ -13,10 +13,10 @@ const RateLimitFileName = "ratelimit.json"
 
 // RateLimitInfo records when a profile hit a usage/rate limit.
 type RateLimitInfo struct {
-	ResetsAt   time.Time `json:"resets_at"`             // when the limit resets
-	Message    string    `json:"message,omitempty"`      // raw message from the harness
-	RecordedAt time.Time `json:"recorded_at"`            // when we recorded this
-	AgentName  string    `json:"agent_name,omitempty"`   // which agent hit the limit
+	ResetsAt   time.Time `json:"resets_at"`            // when the limit resets
+	Message    string    `json:"message,omitempty"`    // raw message from the harness
+	RecordedAt time.Time `json:"recorded_at"`          // when we recorded this
+	AgentName  string    `json:"agent_name,omitempty"` // which agent hit the limit
 }
 
 // WriteRateLimit writes rate limit info to the profile's ratelimit.json.

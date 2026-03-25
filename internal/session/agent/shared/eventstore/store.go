@@ -143,17 +143,17 @@ type eventEnvelope struct {
 
 // eventTypeToString maps AgentEventType to its string representation.
 var eventTypeToString = map[monitor.AgentEventType]string{
-	monitor.EventSessionStarted:    "session_started",
-	monitor.EventUserPrompt:        "user_prompt",
-	monitor.EventTurnCompleted:     "turn_completed",
-	monitor.EventToolStarted:       "tool_started",
-	monitor.EventToolCompleted:     "tool_completed",
-	monitor.EventApprovalRequested: "approval_requested",
-	monitor.EventAgentMessage:      "agent_message",
-	monitor.EventStateChange:       "state_change",
-	monitor.EventSessionEnded:      "session_ended",
-	monitor.EventUsageLimitInfo:        "usage_limit_info",
-	monitor.EventPermissionDecision:    "permission_decision",
+	monitor.EventSessionStarted:     "session_started",
+	monitor.EventUserPrompt:         "user_prompt",
+	monitor.EventTurnCompleted:      "turn_completed",
+	monitor.EventToolStarted:        "tool_started",
+	monitor.EventToolCompleted:      "tool_completed",
+	monitor.EventApprovalRequested:  "approval_requested",
+	monitor.EventAgentMessage:       "agent_message",
+	monitor.EventStateChange:        "state_change",
+	monitor.EventSessionEnded:       "session_ended",
+	monitor.EventUsageLimitInfo:     "usage_limit_info",
+	monitor.EventPermissionDecision: "permission_decision",
 }
 
 // stringToEventType maps string to AgentEventType.

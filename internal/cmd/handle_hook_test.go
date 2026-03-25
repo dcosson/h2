@@ -666,7 +666,7 @@ func TestHandleDCGPreToolUse_SafeCommand_Allow(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 
-	err := handleDCGPreToolUse(cmd, "test-agent", "test-role", cfg,[]byte(payload))
+	err := handleDCGPreToolUse(cmd, "test-agent", "test-role", cfg, []byte(payload))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -686,7 +686,7 @@ func TestHandleDCGPreToolUse_DestructiveCommand_StrictPolicy_Deny(t *testing.T) 
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 
-	err := handleDCGPreToolUse(cmd, "test-agent", "test-role", cfg,[]byte(payload))
+	err := handleDCGPreToolUse(cmd, "test-agent", "test-role", cfg, []byte(payload))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -711,7 +711,7 @@ func TestHandleDCGPreToolUse_DestructiveCommand_InteractivePolicy_Ask(t *testing
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 
-	err := handleDCGPreToolUse(cmd, "test-agent", "test-role", cfg,[]byte(payload))
+	err := handleDCGPreToolUse(cmd, "test-agent", "test-role", cfg, []byte(payload))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -741,7 +741,7 @@ func TestHandleDCGPreToolUse_AllowAllPolicy_Allows(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 
-	err := handleDCGPreToolUse(cmd, "test-agent", "test-role", cfg,[]byte(payload))
+	err := handleDCGPreToolUse(cmd, "test-agent", "test-role", cfg, []byte(payload))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -776,7 +776,7 @@ func TestHandleDCGPreToolUse_InvalidJSON_PassThrough(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 
-	err := handleDCGPreToolUse(cmd, "test-agent", "test-role", cfg,[]byte("not json"))
+	err := handleDCGPreToolUse(cmd, "test-agent", "test-role", cfg, []byte("not json"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
