@@ -235,13 +235,9 @@ func TestSetupSessionDir(t *testing.T) {
 		t.Fatal("session dir should exist")
 	}
 
-	// Check permission-reviewer.md was created.
-	reviewerData, err := os.ReadFile(filepath.Join(sessionDir, "permission-reviewer.md"))
-	if err != nil {
-		t.Fatalf("read permission-reviewer.md: %v", err)
-	}
-	if string(reviewerData) != role.PermissionReview.AIReviewer.GetInstructions() {
-		t.Errorf("permission-reviewer.md content = %q, want %q", string(reviewerData), role.PermissionReview.AIReviewer.GetInstructions())
+	// permission-reviewer.md should NOT exist (instructions are in runtime config).
+	if _, err := os.Stat(filepath.Join(sessionDir, "permission-reviewer.md")); !os.IsNotExist(err) {
+		t.Error("permission-reviewer.md should not exist — instructions are stored in runtime config")
 	}
 
 	// No .claude subdir should be created.

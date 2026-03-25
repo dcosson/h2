@@ -201,6 +201,20 @@ func (h *EventHandler) ProcessHookEvent(eventName string, payload json.RawMessag
 
 	case "permission_decision":
 		decision := extractDecision(payload)
+		reason := extractReason(payload)
+		processedBy := extractField(payload, "processed_by")
+		role := extractField(payload, "role")
+		h.emit(monitor.AgentEvent{
+			Type:      monitor.EventPermissionDecision,
+			Timestamp: now,
+			Data: monitor.PermissionDecisionData{
+				ToolName:    toolName,
+				Decision:    decision,
+				Reason:      reason,
+				ProcessedBy: processedBy,
+				Role:        role,
+			},
+		})
 		switch decision {
 		case "ask_user":
 			h.emitStateChange(now, monitor.StateActive, monitor.SubStateBlockedOnPermission)
@@ -288,10 +302,12 @@ func (h *EventHandler) emit(ev monitor.AgentEvent) {
 // --- hook payload helpers ---
 
 type hookPayload struct {
-	ToolName  string `json:"tool_name"`
-	SessionID string `json:"session_id"`
-	Decision  string `json:"decision"`
-	Reason    string `json:"reason"`
+	ToolName    string `json:"tool_name"`
+	SessionID   string `json:"session_id"`
+	Decision    string `json:"decision"`
+	Reason      string `json:"reason"`
+	ProcessedBy string `json:"processed_by"`
+	Role        string `json:"role"`
 }
 
 func extractToolName(payload json.RawMessage) string {
@@ -336,6 +352,25 @@ func extractReason(payload json.RawMessage) string {
 		return ""
 	}
 	return p.Reason
+}
+
+func extractField(payload json.RawMessage, field string) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &m); err != nil {
+		return ""
+	}
+	raw, ok := m[field]
+	if !ok {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return ""
+	}
+	return s
 }
 
 // --- session log parsing ---

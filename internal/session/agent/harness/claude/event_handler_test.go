@@ -254,11 +254,17 @@ func TestEventHandler_PermissionDecisionAllow(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
 	h := NewEventHandler(events, nil)
 
-	payload, _ := json.Marshal(map[string]string{"decision": "allow"})
+	payload, _ := json.Marshal(map[string]string{
+		"decision": "allow", "reason": "safe", "processed_by": "dcg", "role": "default",
+	})
 	h.ProcessHookEvent("permission_decision", payload)
 
-	got := drainEvents(events, 1)
-	sc := got[0].Data.(monitor.StateChangeData)
+	got := drainEvents(events, 2)
+	pd := got[0].Data.(monitor.PermissionDecisionData)
+	if pd.Decision != "allow" || pd.ProcessedBy != "dcg" || pd.Role != "default" {
+		t.Fatalf("PermissionDecisionData = %+v", pd)
+	}
+	sc := got[1].Data.(monitor.StateChangeData)
 	if sc.SubState != monitor.SubStateToolUse {
 		t.Fatalf("SubState = %v, want ToolUse", sc.SubState)
 	}
@@ -268,11 +274,15 @@ func TestEventHandler_PermissionDecisionAskUser(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
 	h := NewEventHandler(events, nil)
 
-	payload, _ := json.Marshal(map[string]string{"decision": "ask_user"})
+	payload, _ := json.Marshal(map[string]string{"decision": "ask_user", "processed_by": "none"})
 	h.ProcessHookEvent("permission_decision", payload)
 
-	got := drainEvents(events, 1)
-	sc := got[0].Data.(monitor.StateChangeData)
+	got := drainEvents(events, 2)
+	pd := got[0].Data.(monitor.PermissionDecisionData)
+	if pd.Decision != "ask_user" {
+		t.Fatalf("Decision = %v, want ask_user", pd.Decision)
+	}
+	sc := got[1].Data.(monitor.StateChangeData)
 	if sc.SubState != monitor.SubStateBlockedOnPermission {
 		t.Fatalf("SubState = %v, want BlockedOnPermission", sc.SubState)
 	}
@@ -282,11 +292,17 @@ func TestEventHandler_PermissionDecisionDeny(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
 	h := NewEventHandler(events, nil)
 
-	payload, _ := json.Marshal(map[string]string{"decision": "deny"})
+	payload, _ := json.Marshal(map[string]string{
+		"decision": "deny", "reason": "destructive", "processed_by": "ai_reviewer",
+	})
 	h.ProcessHookEvent("permission_decision", payload)
 
-	got := drainEvents(events, 1)
-	sc := got[0].Data.(monitor.StateChangeData)
+	got := drainEvents(events, 2)
+	pd := got[0].Data.(monitor.PermissionDecisionData)
+	if pd.Decision != "deny" || pd.Reason != "destructive" {
+		t.Fatalf("PermissionDecisionData = %+v", pd)
+	}
+	sc := got[1].Data.(monitor.StateChangeData)
 	if sc.SubState != monitor.SubStateThinking {
 		t.Fatalf("SubState = %v, want Thinking", sc.SubState)
 	}

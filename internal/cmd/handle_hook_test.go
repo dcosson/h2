@@ -648,7 +648,7 @@ func TestHandleDCGPreToolUse_NonBashTool_PassThrough(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 
-	err := handleDCGPreToolUse(cmd, cfg, []byte(payload))
+	err := handleDCGPreToolUse(cmd, "test-agent", "test-role", cfg,[]byte(payload))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -665,13 +665,13 @@ func TestHandleDCGPreToolUse_SafeCommand_Allow(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 
-	err := handleDCGPreToolUse(cmd, cfg, []byte(payload))
+	err := handleDCGPreToolUse(cmd, "test-agent", "test-role", cfg,[]byte(payload))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Safe command should return {} (allow/pass through).
-	if strings.TrimSpace(out.String()) != "{}" {
-		t.Errorf("expected {} for safe command, got %q", out.String())
+	result := strings.TrimSpace(out.String())
+	if !strings.Contains(result, `"permissionDecision":"allow"`) {
+		t.Errorf("expected explicit allow for safe command, got %q", result)
 	}
 }
 
@@ -685,7 +685,7 @@ func TestHandleDCGPreToolUse_DestructiveCommand_StrictPolicy_Deny(t *testing.T) 
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 
-	err := handleDCGPreToolUse(cmd, cfg, []byte(payload))
+	err := handleDCGPreToolUse(cmd, "test-agent", "test-role", cfg,[]byte(payload))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -710,7 +710,7 @@ func TestHandleDCGPreToolUse_DestructiveCommand_InteractivePolicy_Ask(t *testing
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 
-	err := handleDCGPreToolUse(cmd, cfg, []byte(payload))
+	err := handleDCGPreToolUse(cmd, "test-agent", "test-role", cfg,[]byte(payload))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -740,12 +740,13 @@ func TestHandleDCGPreToolUse_AllowAllPolicy_Allows(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 
-	err := handleDCGPreToolUse(cmd, cfg, []byte(payload))
+	err := handleDCGPreToolUse(cmd, "test-agent", "test-role", cfg,[]byte(payload))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if strings.TrimSpace(out.String()) != "{}" {
-		t.Errorf("expected {} with allow-all policy, got %q", out.String())
+	result := strings.TrimSpace(out.String())
+	if !strings.Contains(result, `"permissionDecision":"allow"`) {
+		t.Errorf("expected explicit allow with allow-all policy, got %q", result)
 	}
 }
 
@@ -757,7 +758,7 @@ func TestHandleDCGPreToolUse_EmptyCommand_PassThrough(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 
-	err := handleDCGPreToolUse(cmd, cfg, []byte(payload))
+	err := handleDCGPreToolUse(cmd, "test-agent", "test-role", cfg,[]byte(payload))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -773,7 +774,7 @@ func TestHandleDCGPreToolUse_InvalidJSON_PassThrough(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 
-	err := handleDCGPreToolUse(cmd, cfg, []byte("not json"))
+	err := handleDCGPreToolUse(cmd, "test-agent", "test-role", cfg,[]byte("not json"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -928,8 +929,9 @@ func TestHandleHook_PreToolUse_DCG_AllowsSafeCommand(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 
-	if strings.TrimSpace(out.String()) != "{}" {
-		t.Errorf("expected {} for safe command, got %q", out.String())
+	result := strings.TrimSpace(out.String())
+	if !strings.Contains(result, `"permissionDecision":"allow"`) {
+		t.Errorf("expected explicit allow for safe command, got %q", result)
 	}
 }
 

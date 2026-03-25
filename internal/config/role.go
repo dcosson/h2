@@ -222,12 +222,12 @@ var ValidDCGPolicies = []string{"allow-all", "permissive", "moderate", "strict",
 type AIReviewerConfig struct {
 	Enabled                 *bool  `yaml:"enabled,omitempty" json:"enabled,omitempty"`
 	Model                   string `yaml:"model,omitempty" json:"model,omitempty"` // defaults to "haiku"
-	Instructions            string `yaml:"instructions,omitempty" json:"-"`
-	InstructionsIntro       string `yaml:"instructions_intro,omitempty" json:"-"`
-	InstructionsBody        string `yaml:"instructions_body,omitempty" json:"-"`
-	InstructionsAdditional1 string `yaml:"instructions_additional_1,omitempty" json:"-"`
-	InstructionsAdditional2 string `yaml:"instructions_additional_2,omitempty" json:"-"`
-	InstructionsAdditional3 string `yaml:"instructions_additional_3,omitempty" json:"-"`
+	Instructions            string `yaml:"instructions,omitempty" json:"instructions,omitempty"`
+	InstructionsIntro       string `yaml:"instructions_intro,omitempty" json:"instructions_intro,omitempty"`
+	InstructionsBody        string `yaml:"instructions_body,omitempty" json:"instructions_body,omitempty"`
+	InstructionsAdditional1 string `yaml:"instructions_additional_1,omitempty" json:"instructions_additional_1,omitempty"`
+	InstructionsAdditional2 string `yaml:"instructions_additional_2,omitempty" json:"instructions_additional_2,omitempty"`
+	InstructionsAdditional3 string `yaml:"instructions_additional_3,omitempty" json:"instructions_additional_3,omitempty"`
 }
 
 // IsEnabled returns whether the AI reviewer is enabled.

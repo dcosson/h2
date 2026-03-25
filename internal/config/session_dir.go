@@ -89,25 +89,15 @@ func ListSessionConfigs() []*RuntimeConfig {
 	return configs
 }
 
-// SetupSessionDir creates the session directory for an agent and writes
-// per-agent files (e.g. permission-reviewer.md). Claude Code config
-// (auth, hooks, settings) lives in the shared claude config dir, not here.
+// SetupSessionDir creates the session directory for an agent. Claude Code
+// config (auth, hooks, settings) lives in the shared claude config dir, not
+// here. Permission review config (including AI reviewer instructions) is
+// stored in the RuntimeConfig written to session.metadata.json by the launcher.
 func SetupSessionDir(agentName string, role *Role) (string, error) {
 	sessionDir := SessionDir(agentName)
 
 	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
 		return "", fmt.Errorf("create session dir: %w", err)
-	}
-
-	// Write permission review files to session dir.
-	if role.PermissionReview != nil {
-		// Write permission-reviewer.md for the AI reviewer (human-readable instructions).
-		if role.PermissionReview.AIReviewer != nil && role.PermissionReview.AIReviewer.IsEnabled() {
-			reviewerPath := filepath.Join(sessionDir, "permission-reviewer.md")
-			if err := os.WriteFile(reviewerPath, []byte(role.PermissionReview.AIReviewer.GetInstructions()), 0o644); err != nil {
-				return "", fmt.Errorf("write permission-reviewer.md: %w", err)
-			}
-		}
 	}
 
 	return sessionDir, nil

@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -75,19 +74,21 @@ in settings.json. Exits 0 with JSON on stdout.`,
 			// Step 1: Always forward the hook event to the agent.
 			sendHookEvent(agentName, envelope.HookEventName, data)
 
-			// Load permission review config from session metadata.
+			// Load permission review config and role from session metadata.
 			sessionDir := config.FindSessionDirByAgentName(agentName)
 			var prConfig *config.PermissionReview
+			var roleName string
 			if sessionDir != "" {
 				if rc, err := config.ReadRuntimeConfig(sessionDir); err == nil {
 					prConfig = rc.PermissionReview
+					roleName = rc.RoleName
 				}
 			}
 
 			// Step 2: For PreToolUse, optionally run DCG.
 			if envelope.HookEventName == "PreToolUse" {
 				if prConfig != nil && prConfig.DCG != nil && prConfig.DCG.IsEnabled() {
-					return handleDCGPreToolUse(cmd, prConfig.DCG, data)
+					return handleDCGPreToolUse(cmd, agentName, roleName, prConfig.DCG, data)
 				}
 				fmt.Fprintln(cmd.OutOrStdout(), "{}")
 				return nil
@@ -98,11 +99,11 @@ in settings.json. Exits 0 with JSON on stdout.`,
 				if delayPermissionRequestSeconds > 0 {
 					time.Sleep(time.Duration(delayPermissionRequestSeconds * float64(time.Second)))
 				}
-				model := "haiku"
-				if prConfig != nil && prConfig.AIReviewer != nil {
-					model = prConfig.AIReviewer.GetModel()
+				var aiReviewer *config.AIReviewerConfig
+				if prConfig != nil {
+					aiReviewer = prConfig.AIReviewer
 				}
-				return handlePermissionRequest(cmd, agentName, data, forcedPermissionResult, model)
+				return handlePermissionRequest(cmd, agentName, roleName, data, forcedPermissionResult, aiReviewer)
 			}
 
 			// All other events: return empty JSON.
@@ -142,13 +143,15 @@ func sendHookEvent(agentName, eventName string, payload []byte) {
 }
 
 // sendPermissionDecision sends a permission_decision event to the agent.
-func sendPermissionDecision(agentName, sessionID, toolName, decision, reason string) {
+func sendPermissionDecision(agentName, sessionID, toolName, decision, reason, processedBy, role string) {
 	payload, _ := json.Marshal(map[string]string{
 		"hook_event_name": "permission_decision",
 		"session_id":      sessionID,
 		"tool_name":       toolName,
 		"decision":        decision,
 		"reason":          reason,
+		"processed_by":    processedBy,
+		"role":            role,
 	})
 
 	sockPath, err := socketdir.Find(agentName)
@@ -173,7 +176,7 @@ func sendPermissionDecision(agentName, sessionID, toolName, decision, reason str
 // The PermissionRequest event has already been forwarded to the agent
 // (setting PermissionReview state). This function optionally runs
 // the AI reviewer and returns a decision to Claude Code.
-func handlePermissionRequest(cmd *cobra.Command, agentName string, data []byte, forcedResult string, model string) error {
+func handlePermissionRequest(cmd *cobra.Command, agentName, roleName string, data []byte, forcedResult string, aiReviewer *config.AIReviewerConfig) error {
 	var request permissionInput
 	if err := json.Unmarshal(data, &request); err != nil {
 		// Can't parse — fall through to Claude Code's built-in dialog.
@@ -182,7 +185,7 @@ func handlePermissionRequest(cmd *cobra.Command, agentName string, data []byte, 
 	}
 
 	if forcedResult != "" {
-		return writeForcedPermissionResult(cmd, agentName, request, forcedResult)
+		return writeForcedPermissionResult(cmd, agentName, roleName, request, forcedResult)
 	}
 
 	// Skip review for non-risky tools.
@@ -192,26 +195,19 @@ func handlePermissionRequest(cmd *cobra.Command, agentName string, data []byte, 
 		return nil
 	}
 
-	// Find the session directory and check for reviewer instructions.
-	sessionDir := os.Getenv("H2_SESSION_DIR")
-	if sessionDir == "" {
-		sessionDir = config.SessionDir(agentName)
-	}
-	reviewerPath := filepath.Join(sessionDir, "permission-reviewer.md")
-	reviewerInstructions, err := os.ReadFile(reviewerPath)
-	if err != nil {
-		// No reviewer — report ask_user and fall through.
-		sendPermissionDecision(agentName, request.SessionID, request.ToolName, "ask_user", "no reviewer instructions")
+	// Check if AI reviewer is configured and enabled.
+	if aiReviewer == nil || !aiReviewer.IsEnabled() {
+		sendPermissionDecision(agentName, request.SessionID, request.ToolName, "ask_user", "no permission reviewer configured", "none", roleName)
 		fmt.Fprintln(cmd.OutOrStdout(), "{}")
 		return nil
 	}
 
 	// Call claude --print with reviewer instructions.
-	decision, reason := callReviewer(string(reviewerInstructions), request, model)
+	decision, reason := callReviewer(aiReviewer.GetInstructions(), request, aiReviewer.GetModel())
 
 	switch decision {
 	case "ALLOW":
-		sendPermissionDecision(agentName, request.SessionID, request.ToolName, "allow", reason)
+		sendPermissionDecision(agentName, request.SessionID, request.ToolName, "allow", reason, "ai_reviewer", roleName)
 		resp := hookResponse{
 			HookSpecificOutput: hookDecision{
 				HookEventName: "PermissionRequest",
@@ -227,7 +223,7 @@ func handlePermissionRequest(cmd *cobra.Command, agentName string, data []byte, 
 		if reason == "" {
 			reason = "Denied by permission reviewer"
 		}
-		sendPermissionDecision(agentName, request.SessionID, request.ToolName, "deny", reason)
+		sendPermissionDecision(agentName, request.SessionID, request.ToolName, "deny", reason, "ai_reviewer", roleName)
 		resp := hookResponse{
 			HookSpecificOutput: hookDecision{
 				HookEventName: "PermissionRequest",
@@ -242,7 +238,7 @@ func handlePermissionRequest(cmd *cobra.Command, agentName string, data []byte, 
 
 	default:
 		// ASK_USER or unrecognized — fall through to Claude Code's dialog.
-		sendPermissionDecision(agentName, request.SessionID, request.ToolName, "ask_user", reason)
+		sendPermissionDecision(agentName, request.SessionID, request.ToolName, "ask_user", reason, "ai_reviewer", roleName)
 		fmt.Fprintln(cmd.OutOrStdout(), "{}")
 	}
 
@@ -253,6 +249,7 @@ func handlePermissionRequest(cmd *cobra.Command, agentName string, data []byte, 
 type preToolUseInput struct {
 	ToolName  string          `json:"tool_name"`
 	ToolInput json.RawMessage `json:"tool_input"`
+	SessionID string          `json:"session_id"`
 }
 
 // preToolUseResponse is the JSON output for a PreToolUse hook with a permission decision.
@@ -268,7 +265,7 @@ type preToolUseDecision struct {
 
 // handleDCGPreToolUse evaluates a PreToolUse event using the DCG guard library.
 // Only evaluates Bash tool invocations; all other tools pass through.
-func handleDCGPreToolUse(cmd *cobra.Command, dcgCfg *config.DCGConfig, data []byte) error {
+func handleDCGPreToolUse(cmd *cobra.Command, agentName, roleName string, dcgCfg *config.DCGConfig, data []byte) error {
 	var input preToolUseInput
 	if err := json.Unmarshal(data, &input); err != nil {
 		fmt.Fprintln(cmd.OutOrStdout(), "{}")
@@ -295,33 +292,29 @@ func handleDCGPreToolUse(cmd *cobra.Command, dcgCfg *config.DCGConfig, data []by
 
 	// Evaluate the command.
 	result := guard.Evaluate(toolInput.Command, opts...)
+	reason := result.Reason()
 
+	var decisionStr string
 	switch result.Decision {
 	case guard.Allow:
-		fmt.Fprintln(cmd.OutOrStdout(), "{}")
+		decisionStr = "allow"
 	case guard.Deny:
-		reason := dcgResultReason(result)
-		resp := preToolUseResponse{
-			HookSpecificOutput: preToolUseDecision{
-				HookEventName:            "PreToolUse",
-				PermissionDecision:       "deny",
-				PermissionDecisionReason: reason,
-			},
-		}
-		out, _ := json.Marshal(resp)
-		fmt.Fprintln(cmd.OutOrStdout(), string(out))
+		decisionStr = "deny"
 	case guard.Ask:
-		reason := dcgResultReason(result)
-		resp := preToolUseResponse{
-			HookSpecificOutput: preToolUseDecision{
-				HookEventName:            "PreToolUse",
-				PermissionDecision:       "ask",
-				PermissionDecisionReason: reason,
-			},
-		}
-		out, _ := json.Marshal(resp)
-		fmt.Fprintln(cmd.OutOrStdout(), string(out))
+		decisionStr = "ask"
 	}
+
+	sendPermissionDecision(agentName, input.SessionID, input.ToolName, decisionStr, reason, "dcg", roleName)
+
+	resp := preToolUseResponse{
+		HookSpecificOutput: preToolUseDecision{
+			HookEventName:            "PreToolUse",
+			PermissionDecision:       decisionStr,
+			PermissionDecisionReason: reason,
+		},
+	}
+	out, _ := json.Marshal(resp)
+	fmt.Fprintln(cmd.OutOrStdout(), string(out))
 
 	return nil
 }
@@ -379,20 +372,6 @@ func dcgPolicyFromString(name string) guard.Policy {
 	}
 }
 
-// dcgResultReason builds a human-readable reason from a guard.Result.
-func dcgResultReason(result guard.Result) string {
-	if len(result.Matches) == 0 {
-		return ""
-	}
-	// Use the first match's reason as the primary explanation.
-	m := result.Matches[0]
-	reason := m.Reason
-	if m.Pack != "" {
-		reason = fmt.Sprintf("[%s] %s", m.Pack, reason)
-	}
-	return reason
-}
-
 func isValidForcedPermissionResult(v string) bool {
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "allow", "deny", "ask_user":
@@ -402,12 +381,12 @@ func isValidForcedPermissionResult(v string) bool {
 	}
 }
 
-func writeForcedPermissionResult(cmd *cobra.Command, agentName string, request permissionInput, forcedResult string) error {
+func writeForcedPermissionResult(cmd *cobra.Command, agentName, roleName string, request permissionInput, forcedResult string) error {
 	reason := "forced by --force-permission-request-result"
 
 	switch strings.ToLower(strings.TrimSpace(forcedResult)) {
 	case "allow":
-		sendPermissionDecision(agentName, request.SessionID, request.ToolName, "allow", reason)
+		sendPermissionDecision(agentName, request.SessionID, request.ToolName, "allow", reason, "forced", roleName)
 		resp := hookResponse{
 			HookSpecificOutput: hookDecision{
 				HookEventName: "PermissionRequest",
@@ -420,7 +399,7 @@ func writeForcedPermissionResult(cmd *cobra.Command, agentName string, request p
 		fmt.Fprintln(cmd.OutOrStdout(), string(out))
 		return nil
 	case "deny":
-		sendPermissionDecision(agentName, request.SessionID, request.ToolName, "deny", reason)
+		sendPermissionDecision(agentName, request.SessionID, request.ToolName, "deny", reason, "forced", roleName)
 		resp := hookResponse{
 			HookSpecificOutput: hookDecision{
 				HookEventName: "PermissionRequest",
@@ -434,7 +413,7 @@ func writeForcedPermissionResult(cmd *cobra.Command, agentName string, request p
 		fmt.Fprintln(cmd.OutOrStdout(), string(out))
 		return nil
 	case "ask_user":
-		sendPermissionDecision(agentName, request.SessionID, request.ToolName, "ask_user", reason)
+		sendPermissionDecision(agentName, request.SessionID, request.ToolName, "ask_user", reason, "forced", roleName)
 		fmt.Fprintln(cmd.OutOrStdout(), "{}")
 		return nil
 	default:

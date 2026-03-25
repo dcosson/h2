@@ -26,6 +26,7 @@ const (
 	EventStateChange
 	EventSessionEnded
 	EventUsageLimitInfo
+	EventPermissionDecision
 )
 
 // String returns the event type name.
@@ -51,6 +52,8 @@ func (t AgentEventType) String() string {
 		return "session_ended"
 	case EventUsageLimitInfo:
 		return "usage_limit_info"
+	case EventPermissionDecision:
+		return "permission_decision"
 	default:
 		return "unknown"
 	}
@@ -130,4 +133,13 @@ type StateChangeData struct {
 type UsageLimitData struct {
 	ResetsAt time.Time // absolute time when the usage limit resets
 	Message  string    // raw message from the harness (e.g. "resets 12pm (America/Los_Angeles)")
+}
+
+// PermissionDecisionData is the payload for EventPermissionDecision.
+type PermissionDecisionData struct {
+	ToolName    string `json:"tool_name"`
+	Decision    string `json:"decision"`     // allow, deny, ask_user
+	Reason      string `json:"reason"`       // human-readable reason from the engine
+	ProcessedBy string `json:"processed_by"` // dcg, ai_reviewer, forced, none
+	Role        string `json:"role"`         // role name from session metadata
 }

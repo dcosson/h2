@@ -19,6 +19,8 @@ require (
 
 replace github.com/vito/midterm v0.2.3 => github.com/dcosson/midterm v0.2.4-0.20260227002018-dc3436126736
 
+replace github.com/dcosson/destructive-command-guard-go v0.1.1 => ../destructive-command-guard-go
+
 require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/danielgatis/go-ansicode v1.0.7 // indirect

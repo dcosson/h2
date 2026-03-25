@@ -152,7 +152,8 @@ var eventTypeToString = map[monitor.AgentEventType]string{
 	monitor.EventAgentMessage:      "agent_message",
 	monitor.EventStateChange:       "state_change",
 	monitor.EventSessionEnded:      "session_ended",
-	monitor.EventUsageLimitInfo:    "usage_limit_info",
+	monitor.EventUsageLimitInfo:        "usage_limit_info",
+	monitor.EventPermissionDecision:    "permission_decision",
 }
 
 // stringToEventType maps string to AgentEventType.
@@ -277,6 +278,9 @@ func unmarshalData(evType monitor.AgentEventType, raw json.RawMessage) (any, err
 		return d, json.Unmarshal(raw, &d)
 	case monitor.EventUsageLimitInfo:
 		var d monitor.UsageLimitData
+		return d, json.Unmarshal(raw, &d)
+	case monitor.EventPermissionDecision:
+		var d monitor.PermissionDecisionData
 		return d, json.Unmarshal(raw, &d)
 	default:
 		// For event types without a known payload struct, preserve raw JSON.
