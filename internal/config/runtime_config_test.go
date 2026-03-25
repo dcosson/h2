@@ -35,6 +35,21 @@ func TestWriteReadRuntimeConfig_RoundTrip(t *testing.T) {
 		Schedules: []ScheduleYAMLSpec{
 			{ID: "s1", Name: "test-schedule", RRule: "FREQ=SECONDLY;INTERVAL=30", Exec: "echo tick"},
 		},
+		PermissionReview: &PermissionReview{
+			DCG: &DCGConfig{
+				Enabled:           boolPtr(true),
+				DestructivePolicy: "moderate",
+				PrivacyPolicy:     "strict",
+				Allowlist:         []string{"echo *"},
+				Blocklist:         []string{"rm *"},
+			},
+			AIReviewer: &AIReviewerConfig{
+				Enabled:           boolPtr(true),
+				Model:             "haiku",
+				InstructionsIntro: "You are a permission reviewer.",
+				InstructionsBody:  "Review tool calls carefully.",
+			},
+		},
 		Overrides: map[string]string{"worktree_enabled": "true"},
 		StartedAt: "2026-03-05T10:00:00Z",
 	}
@@ -111,6 +126,38 @@ func TestWriteReadRuntimeConfig_RoundTrip(t *testing.T) {
 	}
 	if got.StartedAt != rc.StartedAt {
 		t.Errorf("StartedAt = %q, want %q", got.StartedAt, rc.StartedAt)
+	}
+	// PermissionReview round-trip.
+	if got.PermissionReview == nil {
+		t.Fatal("PermissionReview is nil after round-trip")
+	}
+	if got.PermissionReview.DCG == nil {
+		t.Fatal("DCG config is nil after round-trip")
+	}
+	if !got.PermissionReview.DCG.IsEnabled() {
+		t.Error("DCG should be enabled")
+	}
+	if got.PermissionReview.DCG.DestructivePolicy != "moderate" {
+		t.Errorf("DCG DestructivePolicy = %q, want %q", got.PermissionReview.DCG.DestructivePolicy, "moderate")
+	}
+	if got.PermissionReview.DCG.PrivacyPolicy != "strict" {
+		t.Errorf("DCG PrivacyPolicy = %q, want %q", got.PermissionReview.DCG.PrivacyPolicy, "strict")
+	}
+	if len(got.PermissionReview.DCG.Allowlist) != 1 || got.PermissionReview.DCG.Allowlist[0] != "echo *" {
+		t.Errorf("DCG Allowlist = %v, want [echo *]", got.PermissionReview.DCG.Allowlist)
+	}
+	if got.PermissionReview.AIReviewer == nil {
+		t.Fatal("AIReviewer config is nil after round-trip")
+	}
+	if !got.PermissionReview.AIReviewer.IsEnabled() {
+		t.Error("AIReviewer should be enabled")
+	}
+	if got.PermissionReview.AIReviewer.GetModel() != "haiku" {
+		t.Errorf("AIReviewer Model = %q, want %q", got.PermissionReview.AIReviewer.GetModel(), "haiku")
+	}
+	wantInstructions := rc.PermissionReview.AIReviewer.GetInstructions()
+	if got.PermissionReview.AIReviewer.GetInstructions() != wantInstructions {
+		t.Errorf("AIReviewer instructions = %q, want %q", got.PermissionReview.AIReviewer.GetInstructions(), wantInstructions)
 	}
 }
 
@@ -382,3 +429,5 @@ func TestRuntimeConfig_HarnessConfigDir(t *testing.T) {
 		})
 	}
 }
+
+func boolPtr(b bool) *bool { return &b }
