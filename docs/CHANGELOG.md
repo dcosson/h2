@@ -1,5 +1,124 @@
 # Changelog
 
+## v0.3.0
+
+Major release adding an automation system (triggers, schedules, expects-response),
+DCG permission hooks, tiled terminal layouts, pod templates, and session management
+improvements. **Contains breaking changes** — see details below.
+
+### Breaking Changes
+
+- **`--responds-to` renamed to `--closes`**: The flag for message-triggered
+  responses has been renamed. Update any scripts or role configs using the old name.
+- **`h2 rotate` moved to `h2 session rotate`**: The rotate command is now a
+  subcommand of `session`.
+- **`make test-all` removed**: `make test` now runs all tests (without `-short`).
+  Use `make test` for the full suite.
+- **`e2etests/` moved to `tests/external/`**: The e2e test directory has been
+  relocated. The make target is now `test-external`.
+- **Pod simplification**: Pod paths flattened, pod-scoped roles removed, overrides
+  and bridges added. Existing pod configurations will need to be updated.
+
+### New Features
+
+#### Automation System (Triggers & Schedules)
+
+A full automation system for event-driven and time-based agent actions:
+
+- **Triggers**: Fire actions on events (message received, state change, etc.)
+  with condition evaluation and environment variable support.
+- **Schedules**: RRULE-based recurring actions with cron-style scheduling.
+- **Expects-response**: Syntactic sugar over triggers for tracking message
+  reply expectations. Use `--closes` flag on `h2 send`.
+- **Repeating triggers**: Triggers that fire repeatedly on matching events.
+- **CLI commands**: `h2 trigger` and `h2 schedule` subcommands with full
+  CRUD and socket protocol support.
+- Compensating trigger removal on message send failure.
+- Heartbeat migrated to the new schedule system.
+
+#### DCG Permission Hooks
+
+- Integrated dcg-go as a native Go library (no more shelling out to binary).
+- `permission_decision` events emitted to `events.jsonl` for all tool use.
+- DCG hook handler uses `EvaluateToolUse` for all tools.
+- Added `very-strict` policy support.
+
+#### Tiled Ghostty Layouts
+
+- `h2 attach --tile` for automatic tiled split layouts in Ghostty.
+- `--dry-run` support for tile layout preview.
+- Switched from `ghostty +action` CLI to Ghostty AppleScript API.
+- Auto-detect full window size for overflow tabs.
+- Fill columns before rows in tile layout; equalize splits after grid build.
+
+#### Pod Templates
+
+- `h2 pod create` and `h2 pod update` commands.
+- Embedded `dev-pod` template with codename and profile variable support.
+- `.yaml.tmpl` extension support for pod templates.
+- Arithmetic template functions and proper `.Index`/`.Count` rendering.
+
+#### Session Management
+
+- **Session rotate**: Auto-select next profile, support globs and candidate
+  lists, auto stop/resume running agents.
+- **Codex resume support**.
+- **Rate limit tracking**: `ratelimit.json` written on usage limit events,
+  limits shown in profile commands, skipped during rotate.
+
+#### UI Improvements
+
+- Input bar stash mode, priority preservation, and Enter routing fixes.
+- Steer backlog display with skip-idle-first.
+- Age filters (`--older-than`, `--newer-than`) on `h2 list`.
+- `--include-stopped` flag and session cleanup with `--older-than`.
+- Harness types shown in profile list and show commands.
+- Pod YAML agent ordering preserved in list and tile attach.
+- Auto-attach pod launch in Ghostty.
+
+#### Planning & Review Skills
+
+- `plan-to-beads`: Decompose plan docs into implementation tasks with
+  dependencies.
+- `plan-seam-review`: Review interfaces between connected plan components.
+- `code-review` and `code-review-incorporate`: Structured code review process.
+- `plan-work-completion-signoff`: Verify implementations against plans.
+- `e2e-wiring-review`: End-to-end wiring audit for any project type.
+- Shared skill scripts directory in profile template system.
+- Implementation Guide concept added to planning skills.
+
+### Bug Fixes
+
+- Fixed daemon crash resilience: stderr logging, panic recovery, nil guards,
+  data race fixes.
+- Converted all VT mutex manual unlocks to `defer` with panic recovery.
+- Fixed PipeOutput crash on terminal resize (Content/Format mismatch).
+- Fixed RenderInputBar panic on narrow terminal (tab switch crash root cause).
+- Fixed attach panic recovery and narrow resize edge cases.
+- Fixed Codex agent stuck in `active/tool_use` after tool completion.
+- Fixed agent state stuck on `Exited` after relaunch.
+- Fixed bridge relaunch race: wait for socket cleanup before re-fork.
+- Fixed pod external tests: removed pod-scoped roles, aligned with current
+  pod system.
+- Fixed Codex SSE rate limit detection.
+- Fixed condition environment: merge base env into condition evaluation.
+- Fixed expects-response trigger ID mismatch on collision retry.
+- Sped up automation tests with mock Clock/Timer interfaces.
+- Removed slog from automation package, fixed schedule test races.
+
+### Build and CI
+
+- Added e2e tests to CI workflow.
+- Makefile reorganization: `test-external` target, auto-detach support.
+- `make check` required before feature commits.
+
+### Documentation
+
+- Public configuration docs added.
+- Design docs for triggers/schedules, expects-response, pod simplification,
+  and RuntimeConfig.
+- Concrete test location and make target requirements in all plan docs.
+
 ## v0.2.0
 
 Major release that refactors agent architecture, simplifies role configuration,
