@@ -14,6 +14,8 @@ github.com/danielgatis/go-vte v1.0.8 h1:ot/fnUB7dMag0lMurMCei4mjRI8KyxpLeA7lhTtd
 github.com/danielgatis/go-vte v1.0.8/go.mod h1:HBeSBT/XiLQRNEoYpBYrBeK2mSUkOfHvsVtb8LPmexQ=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
+github.com/dcosson/destructive-command-guard-go v0.2.3 h1:JKgtpXtleRjzRZFTGBM83pSxT3mkKfujrPb5AC+7oeo=
+github.com/dcosson/destructive-command-guard-go v0.2.3/go.mod h1:5HJPETCjVmyQ5IiF1EKnJzlngxXUDlJVbMYCHsAmoDo=
 github.com/dcosson/midterm v0.2.4-0.20260227002018-dc3436126736 h1:KFPEBDl/Ixy1giO/vFjmVKaPB0EMm5N8DYCBJJqHquM=
 github.com/dcosson/midterm v0.2.4-0.20260227002018-dc3436126736/go.mod h1:WkbqZBIhH4jfxXkE2bjhosM1BdF/dCp7sR4x9wQB6fA=
 github.com/dcosson/treesitter-go v0.1.0 h1:E+tXGxZTJT7wPlAAANLMbejaNhreemIKiZgxj4oXV5I=
