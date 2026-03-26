@@ -98,6 +98,12 @@ func doAttach(name string) error {
 		os.Stdout.WriteString("\033[?25h\033[0m\r\n")
 	}()
 
+	// Ignore SIGQUIT (Ctrl+\) and SIGINT (Ctrl+C) — in raw mode these
+	// keystrokes are forwarded as bytes to the remote process.  Trapping
+	// them here prevents Go's default handler from dumping goroutines and
+	// crashing the attach client.
+	signal.Ignore(syscall.SIGQUIT, syscall.SIGINT)
+
 	// Handle SIGWINCH for resizing.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGWINCH)
