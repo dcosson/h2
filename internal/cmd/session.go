@@ -22,8 +22,37 @@ func newSessionCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(newSessionCleanupCmd())
+	cmd.AddCommand(newSessionRestartCmd())
 	cmd.AddCommand(newRotateCmd())
 	return cmd
+}
+
+func newSessionRestartCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "restart <agent-name>",
+		Short: "Restart an agent's harness process",
+		Long: `Restart the underlying harness process (claude, codex, etc.) for a running
+agent. The daemon stays alive and attached terminals remain connected.
+
+This is useful when an agent gets stuck, hits an error, or you want a
+fresh harness process without losing your terminal session.
+
+The agent's RuntimeConfig is re-read from disk, so any config changes
+made since the last launch will take effect.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			if !isAgentRunning(name) {
+				return fmt.Errorf("agent %q is not running", name)
+			}
+			fmt.Fprintf(cmd.OutOrStderr(), "Restarting agent %q...\n", name)
+			if err := relaunchAgent(name, true); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStderr(), "Agent %q restarted.\n", name)
+			return nil
+		},
+	}
 }
 
 func newSessionCleanupCmd() *cobra.Command {
