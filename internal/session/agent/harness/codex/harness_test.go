@@ -93,18 +93,71 @@ func TestBuildCommandArgs_ResumeUsesHarnessSessionID(t *testing.T) {
 		Instructions:    "ignored in resume mode",
 	}, nil)
 	args := h.BuildCommandArgs(nil, nil)
-	want := []string{"resume", "harness-session-id"}
-	if len(args) != len(want) {
-		t.Fatalf("expected %v, got %v", want, args)
-	}
-	for i, w := range want {
-		if args[i] != w {
-			t.Fatalf("arg[%d] = %q, want %q", i, args[i], w)
+	// Should contain resume + session ID and --model, but NOT instructions.
+	foundResume := false
+	foundModel := false
+	for i, arg := range args {
+		if arg == "resume" && i+1 < len(args) && args[i+1] == "harness-session-id" {
+			foundResume = true
+		}
+		if arg == "--model" && i+1 < len(args) && args[i+1] == "gpt-5" {
+			foundModel = true
+		}
+		if arg == "-c" {
+			t.Fatalf("resume args should not include instructions, got %v", args)
 		}
 	}
+	if !foundResume {
+		t.Fatalf("expected 'resume harness-session-id' in args, got %v", args)
+	}
+	if !foundModel {
+		t.Fatalf("expected '--model gpt-5' in args, got %v", args)
+	}
+}
+
+// TestBuildCommandArgs_ResumePreservesRoleConfig verifies that sandbox mode,
+// approval settings, model, and additional dirs are passed through on resume.
+// This is a regression test: previously resume returned early with only the
+// resume subcommand, dropping all role configuration.
+func TestBuildCommandArgs_ResumePreservesRoleConfig(t *testing.T) {
+	h := New(&config.RuntimeConfig{
+		HarnessType:         "codex",
+		Command:             "codex",
+		AgentName:           "test",
+		CWD:                 "/tmp",
+		StartedAt:           "2024-01-01T00:00:00Z",
+		ResumeSessionID:     "conv-123",
+		Model:               "o3",
+		CodexAskForApproval: "never",
+		CodexSandboxMode:    "workspace-write",
+		AdditionalDirs:      []string{"/extra"},
+		Instructions:        "should be skipped on resume",
+	}, nil)
+	args := h.BuildCommandArgs(nil, nil)
+
+	checks := map[string]string{
+		"resume":             "conv-123",
+		"--model":            "o3",
+		"--ask-for-approval": "never",
+		"--sandbox":          "workspace-write",
+		"--add-dir":          "/extra",
+	}
+	for flag, val := range checks {
+		found := false
+		for i, arg := range args {
+			if arg == flag && i+1 < len(args) && args[i+1] == val {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected '%s %s' in args, got %v", flag, val, args)
+		}
+	}
+	// Instructions should NOT be present on resume.
 	for _, arg := range args {
-		if arg == "--model" || arg == "-c" {
-			t.Fatalf("resume args should not include normal launch flags, got %v", args)
+		if arg == "-c" {
+			t.Errorf("instructions should not be passed on resume, got %v", args)
 		}
 	}
 }

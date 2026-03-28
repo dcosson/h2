@@ -73,11 +73,13 @@ func (h *CodexHarness) BuildCommandArgs(prependArgs, extraArgs []string) []strin
 	rc := h.rc
 	if rc.ResumeSessionID != "" {
 		roleArgs = append(roleArgs, "resume", rc.ResumeSessionID)
-		return harness.CombineArgs(prependArgs, extraArgs, roleArgs)
 	}
-	if rc.Instructions != "" {
-		// JSON-encode the value so newlines become \n and quotes are escaped.
-		// Codex -c parses values as JSON when possible.
+	// Configuration flags apply to both fresh and resumed sessions.
+	// Codex does not persist config like sandbox mode or approval settings
+	// in its session state, so they must always be passed explicitly.
+	if rc.Instructions != "" && rc.ResumeSessionID == "" {
+		// Instructions only apply to fresh sessions — the resumed session
+		// already has its conversation history.
 		encoded, _ := json.Marshal(rc.Instructions)
 		roleArgs = append(roleArgs, "-c", "instructions="+string(encoded))
 	}
