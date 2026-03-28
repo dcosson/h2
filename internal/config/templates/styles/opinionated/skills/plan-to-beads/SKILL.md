@@ -26,6 +26,7 @@ Read reviewed plan docs and decompose them into implementation beads (epics + ta
 3. Do NOT auto-assign beads to agents. All beads are created unassigned — the concierge/scheduler assigns them.
 4. Do NOT create beads for plan docs that haven't completed their full review cycle including seam review. Check that docs are in "Seam Reviewed" status (not just "Approved") before proceeding. If seam review has completed but the Implementation Guide (`docs/plans/00-implementation-guide.md`) does not yet exist, flag this to the orchestrator — the guide should be generated (Phase 4.75 in plan-orchestrate) before bead creation proceeds.
 5. **NEVER start implementation work when running this skill.** This skill creates beads only. The scheduler/concierge kicks off implementation as a separate step after reviewing and confirming the bead structure.
+6. **External/acceptance test beads must include "tests pass against a running system" as acceptance criteria**, not just "test files written". The bead is not done until the tests actually execute and pass.
 
 ## Phase 1: Read & Catalog
 
@@ -161,6 +162,18 @@ Each primary plan doc gets **one epic** that contains:
 This keeps related work together. Addendum tasks and test harness tasks are child tasks within the same epic as their parent plan doc, with dependencies between them as needed (e.g., harness framework task depends on core implementation tasks; addendum tasks may depend on specific parent doc tasks).
 
 After all epics are created, the **orchestrator creates cross-epic dependencies** based on the plan index dependency graph (e.g., Gateway epic depends on Cache/KV engine epic).
+
+### Verification & Signoff Bead
+
+Every epic MUST include a final **"Verification & Signoff"** bead:
+- This bead depends on ALL other beads in the epic
+- Its description must include:
+  1. Run `/plan-work-completion-signoff` to verify implemented code matches plan docs
+  2. Run `/e2e-wiring-review` to verify all entry points are reachable end-to-end
+  3. Execute acceptance tests against a running system and verify they pass
+  4. Report any gaps as new beads
+- It is NOT a code-writing bead — it is a verification gate
+- The epic CANNOT be closed until this bead is closed
 
 ### Creating Beads
 

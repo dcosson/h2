@@ -21,6 +21,7 @@ Review the implementation for a bead or feature. Produce a structured review doc
 1. Do NOT review code you wrote. Fresh eyes catch more issues.
 2. Do NOT read other reviewers' review files for the same bead before completing your own review. Reviews must be independent.
 3. Review the actual code diff, not just the plan. The plan says what *should* be built — the review verifies what *was* built.
+4. **For beads that include external/E2E/acceptance tests**: the reviewer MUST execute the tests against a running system, not just review the test code. Tests that compile but were never run against the actual system are not reviewed. If the reviewer cannot run the tests (e.g., missing infrastructure), they must flag this as a blocker rather than approving.
 
 ## Phase 1: Scope the Review
 

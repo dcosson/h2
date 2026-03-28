@@ -285,6 +285,28 @@ Dependencies:
 - All incorporations must complete before summarize runs
 - Summarize must complete before next round's reviews start
 
+## Phase 5: Implementation Verification
+
+**This phase runs after all implementation beads are closed, before reporting the batch/epic as complete. It is MANDATORY.**
+
+An epic/batch is NOT complete until all four verification steps pass. The concierge/scheduler must not report completion to the user until this phase is done.
+
+### Step 1: Plan-Code Signoff
+
+Run `/plan-work-completion-signoff` on each implemented plan doc. This verifies that the code matches the plan and appends a `## Completion Signoff` section. Any gaps surfaced here become new beads that must be closed before proceeding.
+
+### Step 2: End-to-End Wiring Audit
+
+Run `/e2e-wiring-review` on the implemented component. This traces every user-facing entry point through the full request path and identifies what is wired vs stubbed/dead. Wiring gaps that affect user-facing functionality become new beads.
+
+### Step 3: Acceptance Test Execution
+
+Execute all acceptance test suites against a running system (e.g., external black-box tests, E2E tests, harness suites). **Tests must PASS — writing test files is not sufficient.** If tests fail, the failures must be fixed and tests re-run until green before proceeding.
+
+### Step 4: Gap Resolution
+
+Report any gaps discovered in Steps 1-3 as new beads. These beads must be completed (implemented, reviewed, and closed) before the batch/epic is declared complete.
+
 ## What Requires Judgment
 
 The orchestrating agent makes these calls — they cannot be fully automated:
