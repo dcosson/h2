@@ -66,6 +66,12 @@ type Session struct {
 	// Quit is set when the user explicitly chooses to quit.
 	Quit bool
 
+	// relaunchWithSetup is set when a config-changing relaunch is requested
+	// (e.g. profile rotation). The lifecycle loop will stop the old agent
+	// pipeline, re-read the RuntimeConfig, re-setup the harness, and restart
+	// the pipeline before starting the new child process.
+	relaunchWithSetup bool
+
 	exitNotify chan struct{} // buffered(1), signaled on child exit
 
 	stopCh     chan struct{}
@@ -565,6 +571,21 @@ func (s *Session) lifecycleLoop(stopStatus chan struct{}, interactive bool) erro
 		select {
 		case <-s.relaunchCh:
 			s.VT.Ptm.Close()
+
+			// If a config-changing relaunch was requested (e.g. profile
+			// rotation), stop the old agent pipeline, re-read the config,
+			// and re-setup the harness before starting the new child.
+			restartPipeline := false
+			if s.relaunchWithSetup {
+				s.relaunchWithSetup = false
+				if err := s.configRelaunch(); err != nil {
+					log.Printf("config relaunch failed: %v", err)
+					// Fall through to start with existing config.
+				} else {
+					restartPipeline = true
+				}
+			}
+
 			if err := s.VT.StartPTY(s.RC.Command, s.childArgs(), s.VT.ChildRows, s.VT.Cols, s.ExtraEnv); err != nil {
 				close(stopStatus)
 				s.Stop()
@@ -598,6 +619,9 @@ func (s *Session) lifecycleLoop(stopStatus chan struct{}, interactive bool) erro
 			}()
 
 			s.monitor.ResetForRelaunch()
+			if restartPipeline {
+				s.startAgentPipeline(context.Background())
+			}
 			go s.VT.PipeOutput(s.pipeOutputCallback())
 
 			s.Queue.Unpause()
@@ -804,6 +828,50 @@ func (s *Session) buildSessionSummary() activitylog.SessionSummaryData {
 	}
 
 	return d
+}
+
+// configRelaunch stops the current agent pipeline, re-reads the RuntimeConfig
+// from disk, and re-initializes the harness with the updated config. Called by
+// the lifecycle loop when relaunchWithSetup is true (e.g. after profile rotation).
+// The caller must call startAgentPipeline after the new child process is ready.
+func (s *Session) configRelaunch() error {
+	// Stop the old agent pipeline (cancels harness.Start, monitor.Run, cleans up OTEL server).
+	s.stopAgentPipeline()
+
+	// Re-read RuntimeConfig from disk (rotate/restart already wrote the updated config).
+	if s.SessionDir == "" {
+		return fmt.Errorf("no session dir for config relaunch")
+	}
+	newRC, err := config.ReadRuntimeConfig(s.SessionDir)
+	if err != nil {
+		return fmt.Errorf("re-read runtime config: %w", err)
+	}
+
+	// Apply resume if HarnessSessionID is set and ResumeSessionID was requested.
+	// The caller sets RC.ResumeSessionID before triggering the relaunch.
+	resumeSessionID := s.RC.ResumeSessionID
+	*s.RC = *newRC
+	s.RC.ResumeSessionID = resumeSessionID
+
+	// Re-initialize the harness with updated config.
+	if err := s.setupAgent(); err != nil {
+		return fmt.Errorf("re-setup agent: %w", err)
+	}
+
+	// Rebuild environment variables with new harness config.
+	s.ExtraEnv["H2_ACTOR"] = s.Name()
+	if s.RC.RoleName != "" {
+		s.ExtraEnv["H2_ROLE"] = s.RC.RoleName
+	}
+	if s.SessionDir != "" {
+		s.ExtraEnv["H2_SESSION_DIR"] = s.SessionDir
+	}
+	for k, v := range s.harness.BuildCommandEnvVars(config.ConfigDir()) {
+		s.ExtraEnv[k] = v
+	}
+
+	log.Printf("config relaunch: profile=%q harness=%q command=%q", s.RC.Profile, s.RC.HarnessType, s.RC.Command)
+	return nil
 }
 
 func (s *Session) startAgentPipeline(ctx context.Context) {

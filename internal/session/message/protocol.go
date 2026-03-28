@@ -10,7 +10,7 @@ import (
 
 // Request is the JSON request sent over the Unix socket.
 type Request struct {
-	Type string `json:"type"` // "send", "attach", "show", "status", "hook_event", "stop", "trigger_add", "trigger_list", "trigger_remove", "schedule_add", "schedule_list", "schedule_remove"
+	Type string `json:"type"` // "send", "attach", "show", "status", "hook_event", "stop", "relaunch", "trigger_add", "trigger_list", "trigger_remove", "schedule_add", "schedule_list", "schedule_remove"
 
 	// send fields
 	Priority        string `json:"priority,omitempty"`
@@ -29,6 +29,9 @@ type Request struct {
 
 	// show fields
 	MessageID string `json:"message_id,omitempty"`
+
+	// relaunch fields
+	Resume bool `json:"resume,omitempty"` // set ResumeSessionID from HarnessSessionID
 
 	// hook_event fields
 	EventName string          `json:"event_name,omitempty"`

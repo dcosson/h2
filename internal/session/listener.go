@@ -53,6 +53,8 @@ func (d *Daemon) handleConn(conn net.Conn) {
 		d.handleHookEvent(conn, req)
 	case "stop":
 		d.handleStop(conn)
+	case "relaunch":
+		d.handleRelaunch(conn, req)
 	case "trigger_add":
 		d.handleTriggerAdd(conn, req)
 	case "trigger_list":
@@ -174,6 +176,40 @@ func (d *Daemon) handleStop(conn net.Conn) {
 	case s.quitCh <- struct{}{}:
 	default:
 	}
+}
+
+// handleRelaunch restarts the child process with updated config. The daemon
+// stays alive and attached terminals remain connected. Used by profile rotation
+// and restart to avoid detaching the terminal.
+func (d *Daemon) handleRelaunch(conn net.Conn, req *message.Request) {
+	defer conn.Close()
+
+	s := d.Session
+
+	// Set resume session ID if requested (e.g. rotate wants to resume the
+	// conversation in the new profile).
+	if req.Resume && s.RC.HarnessSessionID != "" {
+		s.RC.ResumeSessionID = s.RC.HarnessSessionID
+	} else {
+		s.RC.ResumeSessionID = ""
+	}
+
+	// Flag the lifecycle loop to do a full config re-setup on relaunch.
+	s.relaunchWithSetup = true
+
+	// Kill the child process. The lifecycle loop will detect the exit,
+	// see relaunchWithSetup=true, re-read config, re-setup harness, and
+	// start a new child.
+	s.VT.KillChild()
+
+	// Signal relaunchCh so the lifecycle loop auto-relaunches instead of
+	// waiting for user input.
+	select {
+	case s.relaunchCh <- struct{}{}:
+	default:
+	}
+
+	message.SendResponse(conn, &message.Response{OK: true})
 }
 
 func (d *Daemon) handleHookEvent(conn net.Conn, req *message.Request) {

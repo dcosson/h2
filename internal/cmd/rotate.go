@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"h2/internal/config"
-	"h2/internal/session"
 	"h2/internal/session/message"
 	"h2/internal/socketdir"
 )
@@ -103,15 +102,7 @@ argument order.`,
 				return fmt.Errorf("profile path is not a directory: %s", newProfileDir)
 			}
 
-			// Stop the agent if it's running — we'll resume after rotating.
 			running := isAgentRunning(agentName)
-			if running {
-				fmt.Fprintf(cmd.OutOrStderr(), "Stopping agent %q...\n", agentName)
-				if err := stopAgentByName(agentName); err != nil {
-					return fmt.Errorf("stop agent: %w", err)
-				}
-				waitForAgentStop(agentName, 5*time.Second)
-			}
 
 			// Move the session log from old profile to new profile.
 			if err := moveSessionLog(rc, currentProfile, newProfile); err != nil {
@@ -127,20 +118,13 @@ argument order.`,
 
 			fmt.Fprintf(cmd.OutOrStderr(), "Rotated agent %q from profile %q to %q.\n", agentName, currentProfile, newProfile)
 
-			// Resume the agent if it was running.
+			// If the agent is running, tell the daemon to relaunch with the
+			// updated config. The daemon stays alive and terminals stay attached.
 			if running {
-				fmt.Fprintf(cmd.OutOrStderr(), "Resuming agent %q...\n", agentName)
-				colorHints := detectTerminalHints()
-				if err := forkDaemonFunc(sessionDir, session.TerminalHints{
-					OscFg:     colorHints.OscFg,
-					OscBg:     colorHints.OscBg,
-					ColorFGBG: colorHints.ColorFGBG,
-					Term:      colorHints.Term,
-					ColorTerm: colorHints.ColorTerm,
-				}, true); err != nil {
-					return fmt.Errorf("resume agent: %w", err)
+				fmt.Fprintf(cmd.OutOrStderr(), "Relaunching agent %q...\n", agentName)
+				if err := relaunchAgent(agentName, true); err != nil {
+					return fmt.Errorf("relaunch agent: %w", err)
 				}
-				fmt.Fprintf(cmd.OutOrStderr(), "Agent %q resumed (detached). Use 'h2 attach %s' to connect.\n", agentName, agentName)
 			}
 
 			return nil
@@ -266,8 +250,11 @@ func isAgentRunning(name string) bool {
 	return true
 }
 
-// stopAgentByName sends a stop request to a running agent via its socket.
-func stopAgentByName(name string) error {
+// relaunchAgent sends a relaunch request to a running agent via its socket.
+// The daemon kills the child process, re-reads the updated RuntimeConfig from
+// disk, re-initializes the harness, and starts a new child process. The daemon
+// stays alive and attached terminals remain connected.
+func relaunchAgent(name string, resume bool) error {
 	sockPath, err := socketdir.Find(name)
 	if err != nil {
 		return err
@@ -278,28 +265,17 @@ func stopAgentByName(name string) error {
 	}
 	defer conn.Close()
 
-	if err := message.SendRequest(conn, &message.Request{Type: "stop"}); err != nil {
-		return fmt.Errorf("send stop: %w", err)
+	if err := message.SendRequest(conn, &message.Request{Type: "relaunch", Resume: resume}); err != nil {
+		return fmt.Errorf("send relaunch: %w", err)
 	}
 	resp, err := message.ReadResponse(conn)
 	if err != nil {
 		return fmt.Errorf("read response: %w", err)
 	}
 	if !resp.OK {
-		return fmt.Errorf("stop failed: %s", resp.Error)
+		return fmt.Errorf("relaunch failed: %s", resp.Error)
 	}
 	return nil
-}
-
-// waitForAgentStop polls until the agent socket disappears or timeout.
-func waitForAgentStop(name string, timeout time.Duration) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if !isAgentRunning(name) {
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
 }
 
 // moveSessionLog moves the harness's native session log from the old profile
