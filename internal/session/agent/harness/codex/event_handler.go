@@ -605,20 +605,42 @@ func isUsageLimitError(errMsg string) bool {
 // Example: "try again at Mar 25th, 2026 12:45 PM."
 var reHumanResetsAt = regexp.MustCompile(`(?i)try again at\s+([A-Za-z]+)\s+(\d+)(?:st|nd|rd|th)?,?\s+(\d{4})\s+(\d{1,2}:\d{2}\s*[APap][Mm])`)
 
+// reTimeOnlyResetsAt matches "try again at <time>" without a date.
+// Example: "try again at 11:40 PM."
+var reTimeOnlyResetsAt = regexp.MustCompile(`(?i)try again at\s+(\d{1,2}:\d{2}\s*[APap][Mm])`)
+
 // parseCodexResetsAtHuman extracts the reset time from a human-readable Codex
-// usage limit message like "try again at Mar 25th, 2026 12:45 PM."
+// usage limit message. Supports two formats:
+//   - Full date+time: "try again at Mar 25th, 2026 12:45 PM."
+//   - Time only:      "try again at 11:40 PM."
+//
+// For time-only, assumes today; if the time has already passed, assumes tomorrow.
 func parseCodexResetsAtHuman(errMsg string, now time.Time) time.Time {
-	m := reHumanResetsAt.FindStringSubmatch(errMsg)
-	if m == nil {
-		return time.Time{}
+	// Try full date+time first.
+	if m := reHumanResetsAt.FindStringSubmatch(errMsg); m != nil {
+		// m[1]=month, m[2]=day, m[3]=year, m[4]=time
+		dateStr := fmt.Sprintf("%s %s, %s %s", m[1], m[2], m[3], strings.TrimSpace(m[4]))
+		t, err := time.ParseInLocation("Jan 2, 2006 3:04 PM", dateStr, now.Location())
+		if err == nil {
+			return t
+		}
 	}
-	// m[1]=month, m[2]=day, m[3]=year, m[4]=time
-	dateStr := fmt.Sprintf("%s %s, %s %s", m[1], m[2], m[3], strings.TrimSpace(m[4]))
-	t, err := time.ParseInLocation("Jan 2, 2006 3:04 PM", dateStr, now.Location())
-	if err != nil {
-		return time.Time{}
+
+	// Try time-only format.
+	if m := reTimeOnlyResetsAt.FindStringSubmatch(errMsg); m != nil {
+		timeStr := strings.TrimSpace(m[1])
+		ref := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		t, err := time.ParseInLocation("3:04 PM", timeStr, now.Location())
+		if err == nil {
+			result := ref.Add(time.Duration(t.Hour())*time.Hour + time.Duration(t.Minute())*time.Minute)
+			if result.Before(now) {
+				result = result.Add(24 * time.Hour)
+			}
+			return result
+		}
 	}
-	return t
+
+	return time.Time{}
 }
 
 // --- Attribute extraction helpers ---

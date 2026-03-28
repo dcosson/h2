@@ -894,6 +894,83 @@ func TestParseCodexResetsAtHuman(t *testing.T) {
 	}
 }
 
+// TestParseCodexResetsAtHuman_TimeOnly verifies parsing of the time-only
+// format: "try again at 11:40 PM." — no date, just a time. This is a
+// regression test for a real Codex error message that caused ResetsAt to
+// be zero, making h2 profile list not show the profile as rate-limited.
+func TestParseCodexResetsAtHuman_TimeOnly(t *testing.T) {
+	tests := []struct {
+		name     string
+		errMsg   string
+		now      time.Time
+		wantHour int
+		wantMin  int
+		wantDay  int
+		wantOK   bool
+	}{
+		{
+			name:     "time only PM",
+			errMsg:   `You've hit your usage limit. Upgrade to Pro, visit settings to purchase more credits or try again at 11:40 PM.`,
+			now:      time.Date(2026, 3, 27, 21, 0, 0, 0, time.Local),
+			wantHour: 23,
+			wantMin:  40,
+			wantDay:  27, // same day since 11:40 PM hasn't passed yet
+			wantOK:   true,
+		},
+		{
+			name:     "time only AM",
+			errMsg:   "try again at 9:00 AM.",
+			now:      time.Date(2026, 3, 27, 22, 0, 0, 0, time.Local),
+			wantHour: 9,
+			wantMin:  0,
+			wantDay:  28, // next day since 9:00 AM has already passed
+			wantOK:   true,
+		},
+		{
+			name:     "time only wraps midnight",
+			errMsg:   "try again at 12:30 AM.",
+			now:      time.Date(2026, 3, 27, 23, 50, 0, 0, time.Local),
+			wantHour: 0,
+			wantMin:  30,
+			wantDay:  28, // next day
+			wantOK:   true,
+		},
+		{
+			// Full date+time should still work (falls through to that parser).
+			name:     "full date still works",
+			errMsg:   "try again at Mar 25th, 2026 12:45 PM.",
+			now:      time.Date(2026, 3, 21, 22, 0, 0, 0, time.Local),
+			wantHour: 12,
+			wantMin:  45,
+			wantDay:  25,
+			wantOK:   true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseCodexResetsAtHuman(tt.errMsg, tt.now)
+			if tt.wantOK {
+				if got.IsZero() {
+					t.Fatal("expected non-zero time")
+				}
+				if got.Hour() != tt.wantHour {
+					t.Errorf("hour = %d, want %d (got %v)", got.Hour(), tt.wantHour, got)
+				}
+				if got.Minute() != tt.wantMin {
+					t.Errorf("minute = %d, want %d (got %v)", got.Minute(), tt.wantMin, got)
+				}
+				if got.Day() != tt.wantDay {
+					t.Errorf("day = %d, want %d (got %v)", got.Day(), tt.wantDay, got)
+				}
+			} else {
+				if !got.IsZero() {
+					t.Errorf("expected zero time, got %v", got)
+				}
+			}
+		})
+	}
+}
+
 func TestIsUsageLimitError(t *testing.T) {
 	tests := []struct {
 		msg  string
