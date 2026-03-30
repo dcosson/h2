@@ -117,7 +117,7 @@ triggers:
 schedules:
   - name: check-assigned-beads
     rrule: "FREQ=MINUTELY;INTERVAL=10"
-    condition: 'test "$H2_AGENT_STATE" = "idle" && command -v bd >/dev/null 2>&1 && bd list --assignee "$H2_ACTOR" -q 2>/dev/null | grep -q .'
+    condition: 'test "$H2_AGENT_STATE" = "idle" && command -v bd >/dev/null 2>&1 && { bd list --assignee "$H2_ACTOR" --status open -q 2>/dev/null | grep -q . || bd list --assignee "$H2_ACTOR" --status in_progress -q 2>/dev/null | grep -q .; }'
     condition_mode: run_if
     priority: idle
     message: "You have open beads assigned to you. Complete your assigned tasks."
