@@ -9,10 +9,12 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"h2/internal/config"
+	"h2/internal/socketdir"
 	"h2/internal/termstyle"
 )
 
@@ -1014,6 +1016,7 @@ func discoverProfilesWithHarness(h2Dir string) ([]profileInfo, error) {
 			}
 		}
 	}
+	mergeLiveProfileRateLimits(profileRateLimits)
 
 	// Sort by name.
 	names := make([]string, 0, len(profileHarnesses))
@@ -1031,6 +1034,71 @@ func discoverProfilesWithHarness(h2Dir string) ([]profileInfo, error) {
 		}
 	}
 	return result, nil
+}
+
+func mergeLiveProfileRateLimits(profileRateLimits map[string]map[string]*config.RateLimitInfo) {
+	for _, rl := range discoverLiveProfileRateLimits() {
+		if rl.profile == "" || rl.harness == "" || rl.info == nil {
+			continue
+		}
+		if profileRateLimits[rl.profile] == nil {
+			profileRateLimits[rl.profile] = map[string]*config.RateLimitInfo{}
+		}
+		existing := profileRateLimits[rl.profile][rl.harness]
+		if existing == nil || rl.info.ResetsAt.After(existing.ResetsAt) {
+			profileRateLimits[rl.profile][rl.harness] = rl.info
+		}
+	}
+}
+
+type liveProfileRateLimit struct {
+	profile string
+	harness string
+	info    *config.RateLimitInfo
+}
+
+func discoverLiveProfileRateLimits() []liveProfileRateLimit {
+	entries, err := socketdir.ListByType(socketdir.TypeAgent)
+	if err != nil {
+		return nil
+	}
+	var live []liveProfileRateLimit
+	for _, e := range entries {
+		info := queryAgent(e.Path)
+		if info == nil || info.Profile == "" || info.SubState != "usage_limit" || info.UsageLimitResetsAt == "" {
+			continue
+		}
+		resetsAt, err := time.Parse(time.RFC3339, info.UsageLimitResetsAt)
+		if err != nil || !resetsAt.After(time.Now()) {
+			continue
+		}
+		harness := profileHarnessFromCommand(info.Command)
+		if harness == "" {
+			continue
+		}
+		live = append(live, liveProfileRateLimit{
+			profile: info.Profile,
+			harness: harness,
+			info: &config.RateLimitInfo{
+				ResetsAt:   resetsAt,
+				Message:    info.UsageLimitMessage,
+				RecordedAt: time.Now(),
+				AgentName:  info.Name,
+			},
+		})
+	}
+	return live
+}
+
+func profileHarnessFromCommand(command string) string {
+	switch strings.ToLower(strings.TrimSpace(command)) {
+	case "claude":
+		return profileHarnessClaude
+	case "codex":
+		return profileHarnessCodex
+	default:
+		return ""
+	}
 }
 
 // discoverProfiles returns sorted profile names found across all config directories.

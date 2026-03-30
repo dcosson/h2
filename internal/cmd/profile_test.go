@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,8 @@ import (
 	"time"
 
 	"h2/internal/config"
+	"h2/internal/session/message"
+	"h2/internal/socketdir"
 )
 
 func setupProfileTestH2Dir(t *testing.T) string {
@@ -16,6 +19,8 @@ func setupProfileTestH2Dir(t *testing.T) string {
 
 	config.ResetResolveCache()
 	t.Cleanup(config.ResetResolveCache)
+	socketdir.ResetDirCache()
+	t.Cleanup(socketdir.ResetDirCache)
 
 	h2Dir := filepath.Join(t.TempDir(), "myh2")
 	for _, sub := range []string{
@@ -667,5 +672,76 @@ func TestFormatHarnessLabels_WithRateLimit(t *testing.T) {
 	want := "claude_code, codex rate limited until Mar 25 12:45 PM"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestDiscoverProfilesWithHarness_UsesLiveUsageLimitFromAgent(t *testing.T) {
+	h2Dir := setupProfileTestH2Dir(t)
+
+	if err := os.MkdirAll(filepath.Join(h2Dir, "claude-config", "default"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(h2Dir, "codex-config", "default"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	resetsAt := time.Now().Add(90 * time.Minute).UTC().Truncate(time.Second)
+	agentName := "live-claude-limit"
+	sockPath := socketdir.Path(socketdir.TypeAgent, agentName)
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ln.Close()
+		_ = os.Remove(sockPath)
+	})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		req, err := message.ReadRequest(conn)
+		if err != nil {
+			return
+		}
+		if req.Type != "status" {
+			return
+		}
+		_ = message.SendResponse(conn, &message.Response{
+			OK: true,
+			Agent: &message.AgentInfo{
+				Name:               agentName,
+				Command:            "claude",
+				Profile:            "default",
+				SubState:           "usage_limit",
+				UsageLimitResetsAt: resetsAt.Format(time.RFC3339),
+				UsageLimitMessage:  "You've hit your limit · resets 12am (America/Los_Angeles)",
+			},
+		})
+	}()
+
+	infos, err := discoverProfilesWithHarness(h2Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-done
+
+	if len(infos) != 1 {
+		t.Fatalf("expected 1 profile, got %d", len(infos))
+	}
+	rl := infos[0].RateLimitedMap[profileHarnessClaude]
+	if rl == nil {
+		t.Fatalf("expected live claude rate limit to be surfaced, got %+v", infos[0].RateLimitedMap)
+	}
+	if !rl.ResetsAt.Equal(resetsAt) {
+		t.Fatalf("ResetsAt = %v, want %v", rl.ResetsAt, resetsAt)
+	}
+	if rl.AgentName != agentName {
+		t.Fatalf("AgentName = %q, want %q", rl.AgentName, agentName)
 	}
 }
