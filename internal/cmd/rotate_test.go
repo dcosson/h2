@@ -470,6 +470,53 @@ func TestRotate_SessionLogContentPreserved(t *testing.T) {
 	}
 }
 
+func TestRotate_ClaudeCode_MissingNativeLogSuffix_ComputesAndMoves(t *testing.T) {
+	setupRotateTestH2Dir(t)
+	name := "rotate-test-missing-suffix"
+	tmpDir := t.TempDir()
+	cwd := "/Users/testuser/myproject"
+
+	os.MkdirAll(filepath.Join(tmpDir, "old-profile"), 0o755)
+	os.MkdirAll(filepath.Join(tmpDir, "new-profile"), 0o755)
+
+	// Create a session log in the old profile (as Claude Code would).
+	sanitizedCWD := strings.ReplaceAll(cwd, string(filepath.Separator), "-")
+	oldLogDir := filepath.Join(tmpDir, "old-profile", "projects", sanitizedCWD)
+	os.MkdirAll(oldLogDir, 0o755)
+	logContent := `{"role":"user","content":"test"}`
+	os.WriteFile(filepath.Join(oldLogDir, "sid-missing.jsonl"), []byte(logContent), 0o644)
+
+	// Simulate the bug: NativeLogPathSuffix is empty (not persisted to disk).
+	writeTestRuntimeConfig(t, name, &config.RuntimeConfig{
+		AgentName:               name,
+		SessionID:               "sid-missing",
+		HarnessSessionID:        "sid-missing",
+		HarnessType:             "claude_code",
+		HarnessConfigPathPrefix: tmpDir,
+		Profile:                 "old-profile",
+		NativeLogPathSuffix:     "", // <-- the bug: not persisted
+		Command:                 "claude",
+		CWD:                     cwd,
+		StartedAt:               "2024-01-01T00:00:00Z",
+	})
+
+	cmd := newRotateCmd()
+	cmd.SetArgs([]string{name, "new-profile"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// The log should have been moved to the new profile.
+	newLogPath := filepath.Join(tmpDir, "new-profile", "projects", sanitizedCWD, "sid-missing.jsonl")
+	data, err := os.ReadFile(newLogPath)
+	if err != nil {
+		t.Fatalf("session log not found in new profile after rotate: %v", err)
+	}
+	if string(data) != logContent {
+		t.Errorf("log content = %q, want %q", string(data), logContent)
+	}
+}
+
 func TestRotate_NoExistingLog_SucceedsWithoutMove(t *testing.T) {
 	setupRotateTestH2Dir(t)
 	name := "rotate-test-no-log"

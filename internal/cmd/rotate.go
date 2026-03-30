@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"h2/internal/config"
+	"h2/internal/session/agent/harness/claude"
 	"h2/internal/session/message"
 	"h2/internal/socketdir"
 )
@@ -290,13 +291,23 @@ func moveSessionLog(rc *config.RuntimeConfig, oldProfile, newProfile string) err
 		return nil
 	}
 
-	// If NativeLogPathSuffix is empty, try to discover it for codex agents.
+	// If NativeLogPathSuffix is empty, try to discover/compute it.
 	if rc.NativeLogPathSuffix == "" {
-		if rc.HarnessType == "codex" && rc.HarnessSessionID != "" {
-			oldConfigDir := filepath.Join(rc.HarnessConfigPathPrefix, oldProfile)
-			discovered := discoverCodexSessionLog(oldConfigDir, rc.HarnessSessionID)
-			if discovered != "" {
-				rc.NativeLogPathSuffix = discovered
+		switch rc.HarnessType {
+		case "claude_code":
+			// Claude Code stores logs at projects/<sanitized-cwd>/<session-id>.jsonl.
+			// PrepareForLaunch sets this in memory but it may not have been
+			// persisted to disk (fixed in daemon.go but handle older sessions).
+			if rc.CWD != "" && rc.HarnessSessionID != "" {
+				rc.NativeLogPathSuffix = claude.NativeLogPathSuffix(rc.CWD, rc.HarnessSessionID)
+			}
+		case "codex":
+			if rc.HarnessSessionID != "" {
+				oldConfigDir := filepath.Join(rc.HarnessConfigPathPrefix, oldProfile)
+				discovered := discoverCodexSessionLog(oldConfigDir, rc.HarnessSessionID)
+				if discovered != "" {
+					rc.NativeLogPathSuffix = discovered
+				}
 			}
 		}
 		if rc.NativeLogPathSuffix == "" {

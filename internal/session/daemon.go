@@ -67,13 +67,29 @@ func RunDaemon(sessionDir string, rc *config.RuntimeConfig, resume bool) error {
 	s.StartTime = time.Now()
 	s.SessionDir = sessionDir
 
+	// Track whether NativeLogPathSuffix has been persisted to disk.
+	// PrepareForLaunch sets it in memory but the initial WriteRuntimeConfig
+	// (done by the launcher) may not include it.
+	nativeLogSuffixPersisted := rc.NativeLogPathSuffix != ""
+
 	// Wire OnSessionStarted callback to persist harness_session_id and
-	// native_log_path_suffix. The harness may have set NativeLogPathSuffix
-	// on the RC in its onConversationStarted callback (e.g. Codex discovers
-	// the log file via glob), so we always re-write when the session ID changes.
+	// native_log_path_suffix. Write when the harness session ID changes
+	// (e.g. Codex reports its conversation ID async) OR when NativeLogPathSuffix
+	// was set by PrepareForLaunch but not yet persisted to disk.
 	s.monitor.SetOnSessionStarted(func(data monitor.SessionStartedData) {
+		needsWrite := false
 		if data.SessionID != "" && data.SessionID != rc.HarnessSessionID {
 			rc.HarnessSessionID = data.SessionID
+			needsWrite = true
+		}
+		// PrepareForLaunch may have set NativeLogPathSuffix in memory
+		// (e.g. Claude Code computes it deterministically at launch) but
+		// it won't be on disk yet. Persist it so rotate can move the log.
+		if rc.NativeLogPathSuffix != "" && !nativeLogSuffixPersisted {
+			nativeLogSuffixPersisted = true
+			needsWrite = true
+		}
+		if needsWrite {
 			if err := config.WriteRuntimeConfig(sessionDir, rc); err != nil {
 				log.Printf("warning: update runtime config: %v", err)
 			}
