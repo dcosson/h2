@@ -197,6 +197,43 @@ func TestScheduleEngine_AutoGeneratesID(t *testing.T) {
 	}
 }
 
+func TestParseSchedule_NoStart_TruncatesToMinute(t *testing.T) {
+	s := &Schedule{RRule: "FREQ=MINUTELY;INTERVAL=10", Action: Action{Message: "a"}}
+	_, startTime, err := parseSchedule(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if startTime.Second() != 0 || startTime.Nanosecond() != 0 {
+		t.Errorf("start time should have zero seconds, got %v", startTime)
+	}
+}
+
+func TestParseSchedule_NoStart_SecondlyAlignedToMinuteBoundary(t *testing.T) {
+	s := &Schedule{RRule: "FREQ=SECONDLY;INTERVAL=5", Action: Action{Message: "a"}}
+	_, startTime, err := parseSchedule(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if startTime.Second() != 0 || startTime.Nanosecond() != 0 {
+		t.Errorf("secondly schedule should still truncate to :00 seconds, got %v", startTime)
+	}
+}
+
+func TestParseSchedule_ExplicitStart_Preserved(t *testing.T) {
+	s := &Schedule{
+		Start:  "2026-03-29T21:05:37Z",
+		RRule:  "FREQ=MINUTELY;INTERVAL=10",
+		Action: Action{Message: "a"},
+	}
+	_, startTime, err := parseSchedule(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if startTime.Second() != 37 {
+		t.Errorf("explicit start should preserve seconds, got %d", startTime.Second())
+	}
+}
+
 func TestScheduleEngine_FiresOnTime(t *testing.T) {
 	se, enq, clk := newFakeScheduleEngine()
 	ctx, cancel := context.WithCancel(context.Background())
