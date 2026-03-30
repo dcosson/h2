@@ -82,6 +82,11 @@ func TestIsProfileRateLimited_Expired(t *testing.T) {
 	if got != nil {
 		t.Errorf("expected nil for expired rate limit, got %+v", got)
 	}
+
+	// The expired file should have been cleaned up.
+	if _, err := os.Stat(filepath.Join(dir, RateLimitFileName)); !os.IsNotExist(err) {
+		t.Fatal("expired ratelimit.json should be removed after IsProfileRateLimited")
+	}
 }
 
 func TestIsProfileRateLimited_NoFile(t *testing.T) {

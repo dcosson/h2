@@ -173,6 +173,30 @@ func newFakeScheduleEngine() (*ScheduleEngine, *mockEnqueuer, *fakeClock) {
 
 // --- Tests ---
 
+func TestScheduleEngine_AutoGeneratesID(t *testing.T) {
+	se, _, clk := newFakeScheduleEngine()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go se.Run(ctx)
+
+	start := clk.Now().Add(1 * time.Second)
+	s1 := &Schedule{Name: "first", RRule: "FREQ=MINUTELY;INTERVAL=10", Start: start.Format(time.RFC3339), Action: Action{Message: "a"}}
+	s2 := &Schedule{Name: "second", RRule: "FREQ=MINUTELY;INTERVAL=10", Start: start.Format(time.RFC3339), Action: Action{Message: "b"}}
+
+	if err := se.Add(s1); err != nil {
+		t.Fatalf("first add: %v", err)
+	}
+	if s1.ID == "" {
+		t.Fatal("ID should have been auto-generated")
+	}
+	if err := se.Add(s2); err != nil {
+		t.Fatalf("second add: %v", err)
+	}
+	if s1.ID == s2.ID {
+		t.Errorf("auto-generated IDs should be unique, both are %q", s1.ID)
+	}
+}
+
 func TestScheduleEngine_FiresOnTime(t *testing.T) {
 	se, enq, clk := newFakeScheduleEngine()
 	ctx, cancel := context.WithCancel(context.Background())

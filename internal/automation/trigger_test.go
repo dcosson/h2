@@ -64,6 +64,30 @@ func stateChangeEvent(state monitor.State, sub monitor.SubState) monitor.AgentEv
 	}
 }
 
+func TestTriggerEngine_AutoGeneratesID(t *testing.T) {
+	te, _ := newTestTriggerEngine()
+
+	// Add two triggers with no ID — should get unique auto-generated IDs.
+	t1 := &Trigger{Name: "first", Event: "state_change", Action: Action{Message: "a"}}
+	t2 := &Trigger{Name: "second", Event: "state_change", Action: Action{Message: "b"}}
+
+	if !te.Add(t1) {
+		t.Fatal("first add should succeed")
+	}
+	if t1.ID == "" {
+		t.Fatal("ID should have been auto-generated")
+	}
+	if !te.Add(t2) {
+		t.Fatal("second add should succeed")
+	}
+	if t2.ID == "" {
+		t.Fatal("ID should have been auto-generated")
+	}
+	if t1.ID == t2.ID {
+		t.Errorf("auto-generated IDs should be unique, both are %q", t1.ID)
+	}
+}
+
 func TestTriggerEngine_FiresOnMatch(t *testing.T) {
 	te, enq := newTestTriggerEngine()
 	te.Add(&Trigger{
