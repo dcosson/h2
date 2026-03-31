@@ -1,2 +1,5 @@
 # Codex profile configuration
 # Intentionally minimal placeholder; add values as needed.
+
+[notice]
+hide_rate_limit_model_nudge = true
