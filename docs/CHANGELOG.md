@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.3.1
+
+### New Features
+
+- **Session restarted/rotated events**: New `session_restarted` and `session_rotated`
+  event types for triggers, with `H2_OLD_PROFILE` and `H2_NEW_PROFILE` env vars
+  on rotate events.
+- **Next fire time in schedule list**: `h2 schedule list` now shows a NEXT column
+  with the computed next fire time.
+- **Auto-ID for triggers/schedules**: Empty IDs are auto-generated, so role YAML
+  only needs `name`.
+- **Default role automations**: Opinionated default role now includes auto-rotate-on-limit
+  trigger, resume-after-restart trigger, and check-assigned-beads schedule.
+- **Expanded concierge role template**: Comprehensive coordination instructions and
+  agent-nudge schedule.
+- **Reduced minimum tile pane width**: From 79 to 59 columns, allowing 3-wide layouts
+  on standard laptop screens.
+
+### Bug Fixes
+
+- **Rotate fails to move session log**: `NativeLogPathSuffix` was set in memory by
+  `PrepareForLaunch` but never persisted to disk for Claude Code sessions, causing
+  `moveSessionLog` to skip the file during rotation.
+- **Session log tailer replays old rate limits after rotate**: The moved session log
+  was read from the beginning, replaying old events. Now seeks to end on resume.
+- **Expired ratelimit.json not cleaned up**: Stale files accumulated on disk and
+  poisoned rotate profile selection. Now cleaned up on read when expired.
+- **Bridge prefix parsing fails on multiline messages**: The agent prefix regex used
+  `.*` which doesn't match newlines, causing multiline messages to fall through to
+  concierge routing.
+- **Automation commands run in wrong CWD**: Trigger/schedule conditions and exec
+  actions now run in the agent's configured working directory.
+- **Triggers/schedules not reloaded on restart**: `h2 session restart` now reloads
+  automations from the updated RuntimeConfig.
+- **Schedule start time alignment**: Schedules without explicit start times now
+  truncate to the top of the minute for clean firing times.
+- **Harness/profile order in h2 list**: Now shows `claude [default]` instead of
+  `[default] claude`.
+- **Generic bridge naming in pod template**: Replaced hardcoded username with
+  `user-{codename}` convention.
+
 ## v0.3.0
 
 Major release adding an automation system (triggers, schedules, expects-response),
