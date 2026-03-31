@@ -73,6 +73,13 @@ func (te *TriggerEngine) Add(t *Trigger) bool {
 	return true
 }
 
+// Clear removes all registered triggers.
+func (te *TriggerEngine) Clear() {
+	te.mu.Lock()
+	defer te.mu.Unlock()
+	te.triggers = make(map[string]*Trigger)
+}
+
 // Remove deletes a trigger by ID. Returns true if it existed.
 func (te *TriggerEngine) Remove(id string) bool {
 	te.mu.Lock()

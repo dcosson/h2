@@ -110,6 +110,22 @@ func (se *ScheduleEngine) Add(s *Schedule) error {
 	return nil
 }
 
+// Clear removes all registered schedules, stopping their goroutines.
+func (se *ScheduleEngine) Clear() {
+	se.mu.Lock()
+	all := make([]*activeSchedule, 0, len(se.schedules))
+	for _, as := range se.schedules {
+		all = append(all, as)
+	}
+	se.schedules = make(map[string]*activeSchedule)
+	se.mu.Unlock()
+
+	for _, as := range all {
+		close(as.stop)
+		as.timer.Stop()
+	}
+}
+
 // Remove deletes a schedule by ID. Returns true if it existed.
 func (se *ScheduleEngine) Remove(id string) bool {
 	se.mu.Lock()

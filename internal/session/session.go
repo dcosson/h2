@@ -590,6 +590,12 @@ func (s *Session) lifecycleLoop(stopStatus chan struct{}, interactive bool) erro
 					// Fall through to start with existing config.
 				} else {
 					restartPipeline = true
+					// Reload triggers/schedules from updated RuntimeConfig.
+					if s.Daemon != nil {
+						if err := s.Daemon.ReloadAutomations(); err != nil {
+							log.Printf("reload automations failed: %v", err)
+						}
+					}
 				}
 			}
 

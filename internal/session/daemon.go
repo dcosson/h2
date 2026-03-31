@@ -190,6 +190,15 @@ func RunDaemon(sessionDir string, rc *config.RuntimeConfig, resume bool) error {
 	return err
 }
 
+// ReloadAutomations clears existing role-defined triggers/schedules and
+// re-registers them from the current RuntimeConfig. Called after configRelaunch
+// to pick up changes to the session metadata.
+func (d *Daemon) ReloadAutomations() error {
+	d.TriggerEngine.Clear()
+	d.ScheduleEngine.Clear()
+	return d.loadRoleAutomations(d.Session.RC)
+}
+
 // loadRoleAutomations registers triggers and schedules from the RuntimeConfig
 // (originally defined in the role YAML). Called during daemon startup.
 func (d *Daemon) loadRoleAutomations(rc *config.RuntimeConfig) error {
