@@ -1947,6 +1947,110 @@ func TestHandleSGRMouse_AltScrollUp_SendsArrowKeys(t *testing.T) {
 	}
 }
 
+// --- HandleDefaultBytes bare Escape ---
+
+func TestHandleDefaultBytes_EscAtEndStartsPendingEsc(t *testing.T) {
+	o := newTestClient(10, 80)
+	// Bare ESC at end of buffer should start the pending esc timer.
+	buf := []byte{0x1B}
+	o.HandleDefaultBytes(buf, 0, len(buf))
+	if !o.PendingEsc {
+		t.Fatal("expected PendingEsc to be true")
+	}
+	if o.Mode != ModeNormal {
+		t.Fatalf("expected ModeNormal, got %d", o.Mode)
+	}
+}
+
+func TestHandleDefaultBytes_BareEscForwardedToPTY(t *testing.T) {
+	o, r := newTestClientWithPTY(10, 80)
+	defer r.Close()
+	defer o.VT.Ptm.Close()
+
+	// Send bare ESC at end of buffer to trigger StartPendingEsc.
+	buf := []byte{0x1B}
+	o.HandleDefaultBytes(buf, 0, len(buf))
+	if !o.PendingEsc {
+		t.Fatal("expected PendingEsc to be true")
+	}
+
+	// Wait for the 50ms timer to fire and forward ESC to PTY.
+	got := make([]byte, 1)
+	done := make(chan error, 1)
+	go func() {
+		_, err := r.Read(got)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("read PTY: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for bare Escape to reach PTY")
+	}
+
+	if got[0] != 0x1B {
+		t.Fatalf("expected PTY to receive ESC (0x1B), got %q", got[0])
+	}
+}
+
+func TestHandleDefaultBytes_PendingEscContinuation(t *testing.T) {
+	o := newTestClient(10, 80)
+	// ESC at end of first read.
+	buf1 := []byte{0x1B}
+	o.HandleDefaultBytes(buf1, 0, len(buf1))
+	if !o.PendingEsc {
+		t.Fatal("expected PendingEsc")
+	}
+
+	// Continuation in next read: [ A (arrow up) should be handled as escape sequence.
+	buf2 := []byte{'[', 'A'}
+	o.HandleDefaultBytes(buf2, 0, len(buf2))
+	if o.PendingEsc {
+		t.Fatal("expected PendingEsc to be cleared")
+	}
+	if o.Mode != ModeNormal {
+		t.Fatalf("expected ModeNormal after arrow key, got %d", o.Mode)
+	}
+}
+
+func TestHandleDefaultBytes_EscMidBufferStillWorks(t *testing.T) {
+	o, r := newTestClientWithPTY(10, 80)
+	defer r.Close()
+	defer o.VT.Ptm.Close()
+
+	// ESC followed by [ A in same buffer — should be processed as arrow up
+	// and forwarded to PTY as an escape sequence (not start pending esc).
+	buf := []byte{0x1B, '[', 'A'}
+	o.HandleDefaultBytes(buf, 0, len(buf))
+	if o.PendingEsc {
+		t.Fatal("expected PendingEsc to be false for mid-buffer escape sequence")
+	}
+
+	got := make([]byte, 3)
+	done := make(chan error, 1)
+	go func() {
+		_, err := r.Read(got)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("read PTY: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for arrow key to reach PTY")
+	}
+
+	wantSeq := "\x1b[A"
+	if string(got) != wantSeq {
+		t.Fatalf("expected PTY to receive %q, got %q", wantSeq, string(got))
+	}
+}
+
 func TestHandleSGRMouse_AltScrollDown_SendsArrowKeys(t *testing.T) {
 	c, r := newTestClientWithPTY(10, 80)
 	defer r.Close()

@@ -113,6 +113,9 @@ func (c *Client) StartPendingEsc() {
 		}
 		c.PendingEsc = false
 		switch c.Mode {
+		case ModeNormal:
+			// Forward bare Escape to the child process (e.g. Claude Code interrupt).
+			c.writePTYOrHang([]byte{0x1B})
 		case ModePassthrough:
 			// Pass bare Escape through to the child process.
 			c.PassthroughEsc = c.PassthroughEsc[:0]
@@ -329,10 +332,31 @@ func (c *Client) HandleDefaultBytes(buf []byte, start, n int) int {
 			return c.HandleExitedBytes(buf, i, n)
 		}
 
+		// Handle continuation of a pending ESC from a previous read.
+		if c.PendingEsc {
+			c.CancelPendingEsc()
+			consumed, handled := c.HandleEscape(buf[i:n])
+			if handled {
+				i += consumed
+				continue
+			}
+			// ESC followed by non-sequence byte — forward ESC to PTY,
+			// then let the current byte be processed normally.
+			if !c.writePTYOrHang([]byte{0x1B}) {
+				return n
+			}
+			continue
+		}
+
 		b := buf[i]
 		i++
 
 		if b == 0x1B {
+			if i >= n {
+				// ESC at end of buffer — wait to see if more bytes follow.
+				c.StartPendingEsc()
+				continue
+			}
 			consumed, _ := c.HandleEscape(buf[i:n])
 			i += consumed
 			continue
