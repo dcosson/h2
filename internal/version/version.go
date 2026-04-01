@@ -3,7 +3,7 @@ package version
 import "strings"
 
 // Version is the current version of h2.
-const Version = "0.3.1"
+const Version = "0.3.2"
 
 // GitRef is injected at build time for dev builds (e.g. via -ldflags -X).
 var GitRef = "unknown"

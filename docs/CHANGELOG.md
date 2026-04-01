@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.2
+
+### New Features
+
+- **Ctrl+Space mode switching**: Added ctrl+space as an alternative to ctrl+\
+  for switching between modes (normal, menu, passthrough). Helps users with
+  keyboard layouts that lack a backslash key (e.g. Norwegian).
+
 ## v0.3.1
 
 ### New Features
