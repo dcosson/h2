@@ -180,7 +180,7 @@ func (c *Client) HandlePassthroughBytes(buf []byte, start, n int) int {
 				return n
 			}
 			i++
-		case 0x1C: // ctrl+\ — exit passthrough (universal fallback)
+		case 0x1C, 0x00: // ctrl+\ or ctrl+space — exit passthrough (universal fallback)
 			c.CancelPendingEsc()
 			c.PassthroughEsc = c.PassthroughEsc[:0]
 			c.setMode(ModeNormal)
@@ -241,7 +241,7 @@ func (c *Client) HandleMenuBytes(buf []byte, start, n int) int {
 				c.setMode(ModeNormal)
 				c.RenderBar()
 			}
-		case 0x1C: // ctrl+\ — exit menu (toggle with default mode shortcut)
+		case 0x1C, 0x00: // ctrl+\ or ctrl+space — exit menu (toggle with default mode shortcut)
 			c.setMode(ModeNormal)
 			c.RenderBar()
 		case 'p', 'P': // passthrough mode
@@ -339,7 +339,7 @@ func (c *Client) HandleDefaultBytes(buf []byte, start, n int) int {
 		}
 
 		switch b {
-		case 0x1C: // ctrl+\ — open menu (universal fallback)
+		case 0x1C, 0x00: // ctrl+\ or ctrl+space — open menu (universal fallback)
 			c.setMode(ModeMenu)
 			c.RenderBar()
 

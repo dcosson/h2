@@ -967,6 +967,15 @@ func TestCtrlBackslash_EntersMenuMode(t *testing.T) {
 	}
 }
 
+func TestCtrlSpace_EntersMenuMode(t *testing.T) {
+	o := newTestClient(10, 80)
+	buf := []byte{0x00} // ctrl+space
+	o.HandleDefaultBytes(buf, 0, len(buf))
+	if o.Mode != ModeMenu {
+		t.Fatalf("expected ModeMenu, got %d", o.Mode)
+	}
+}
+
 func TestCtrlBackslash_EntersMenuWithInput(t *testing.T) {
 	o := newTestClient(10, 80)
 	o.Input = []byte("hello")
@@ -1104,6 +1113,16 @@ func TestMenu_CtrlBackslashExits(t *testing.T) {
 	o.HandleMenuBytes(buf, 0, len(buf))
 	if o.Mode != ModeNormal {
 		t.Fatalf("expected ModeNormal after Ctrl+\\, got %d", o.Mode)
+	}
+}
+
+func TestMenu_CtrlSpaceExits(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.Mode = ModeMenu
+	buf := []byte{0x00} // ctrl+space
+	o.HandleMenuBytes(buf, 0, len(buf))
+	if o.Mode != ModeNormal {
+		t.Fatalf("expected ModeNormal after Ctrl+Space, got %d", o.Mode)
 	}
 }
 
@@ -1476,6 +1495,16 @@ func TestPassthrough_CtrlBackslash_Exits(t *testing.T) {
 	o.HandlePassthroughBytes(buf, 0, len(buf))
 	if o.Mode != ModeNormal {
 		t.Fatalf("expected ModeNormal after Ctrl+\\, got %d", o.Mode)
+	}
+}
+
+func TestPassthrough_CtrlSpace_Exits(t *testing.T) {
+	o := newTestClient(10, 80)
+	o.Mode = ModePassthrough
+	buf := []byte{0x00} // ctrl+space
+	o.HandlePassthroughBytes(buf, 0, len(buf))
+	if o.Mode != ModeNormal {
+		t.Fatalf("expected ModeNormal after Ctrl+Space, got %d", o.Mode)
 	}
 }
 
