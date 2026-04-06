@@ -43,6 +43,7 @@ const (
 	SubStateCompacting                          // context compaction in progress
 	SubStateUsageLimit                          // API usage limit reached, waiting for reset
 	SubStateBlockedOnPermission                 // human must approve a permission request
+	SubStateAuthError                           // OAuth token expired or invalid
 )
 
 // String returns a human-readable name for the sub-state.
@@ -62,6 +63,8 @@ func (ss SubState) String() string {
 		return "usage_limit"
 	case SubStateBlockedOnPermission:
 		return "blocked_on_permission"
+	case SubStateAuthError:
+		return "auth_error"
 	default:
 		return ""
 	}
@@ -112,6 +115,8 @@ func FormatStateLabel(state, subState string, toolName ...string) string {
 		pretty = "compacting"
 	case "usage_limit":
 		pretty = "usage limit"
+	case "auth_error":
+		pretty = "auth error"
 	default:
 		pretty = subState
 	}

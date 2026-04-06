@@ -777,6 +777,11 @@ func (s *Session) UsageLimitMessage() string {
 	return s.monitor.UsageLimitMessage()
 }
 
+// AuthErrorMessage returns the auth error message from the harness.
+func (s *Session) AuthErrorMessage() string {
+	return s.monitor.AuthErrorMessage()
+}
+
 // SubmitInput enqueues user-typed input for priority-aware delivery.
 func (s *Session) SubmitInput(text string, priority message.Priority) {
 	msg := &message.Message{

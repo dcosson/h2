@@ -128,6 +128,10 @@ func (h *EventHandler) processLogRecord(eventName string, lr otelLogRecord, ts t
 			h.emitStateChange(ts, monitor.StateIdle, monitor.SubStateUsageLimit)
 			return true, fmt.Sprintf("usage_limit status=%s error=%q", statusCode, errMsg)
 		}
+		if statusCode == "401" {
+			h.emitStateChange(ts, monitor.StateIdle, monitor.SubStateAuthError)
+			return true, fmt.Sprintf("auth_error status=%s error=%q", statusCode, errMsg)
+		}
 		return false, fmt.Sprintf("api_error status=%s", statusCode)
 
 	case "tool_result":
@@ -420,6 +424,13 @@ func (m *sessionMessage) extractContent() string {
 	return ""
 }
 
+// isAuthErrorMessage returns true if the message content indicates an
+// authentication error (expired OAuth token, invalid credentials).
+func isAuthErrorMessage(content string) bool {
+	return strings.Contains(content, "authentication_error") ||
+		strings.Contains(content, "OAuth token has expired")
+}
+
 // resetsPattern matches Claude Code's synthetic rate limit message format:
 //
 //	"resets 12pm (America/Los_Angeles)"
@@ -464,6 +475,15 @@ func parseSessionLine(line []byte) ([]monitor.AgentEvent, bool) {
 				},
 			})
 		}
+	}
+
+	// Check for auth error messages (expired OAuth token, 401).
+	if entry.IsApiErrorMessage && isAuthErrorMessage(content) {
+		events = append(events, monitor.AgentEvent{
+			Type:      monitor.EventAuthErrorInfo,
+			Timestamp: now,
+			Data:      monitor.AuthErrorData{Message: content},
+		})
 	}
 
 	// Always emit the agent message.

@@ -322,6 +322,16 @@ func (p *EventHandler) processEvent(name string, attrs []otelAttribute, ts time.
 			})
 			return spanProcessResult{recognized: true, emitted: 2}
 		}
+		if statusCode == "401" {
+			p.cancelPendingIdle()
+			p.emitStateChange(ts, monitor.StateIdle, monitor.SubStateAuthError)
+			p.emit(monitor.AgentEvent{
+				Type:      monitor.EventAuthErrorInfo,
+				Timestamp: ts,
+				Data:      monitor.AuthErrorData{Message: errMsg},
+			})
+			return spanProcessResult{recognized: true, emitted: 2}
+		}
 		return spanProcessResult{recognized: true}
 
 	case "codex.tool_decision":

@@ -29,6 +29,7 @@ const (
 	EventPermissionDecision
 	EventSessionRotated
 	EventSessionRestarted
+	EventAuthErrorInfo
 )
 
 // String returns the event type name.
@@ -60,6 +61,8 @@ func (t AgentEventType) String() string {
 		return "session_rotated"
 	case EventSessionRestarted:
 		return "session_restarted"
+	case EventAuthErrorInfo:
+		return "auth_error_info"
 	default:
 		return "unknown"
 	}
@@ -158,3 +161,8 @@ type SessionRotatedData struct {
 
 // SessionRestartedData is the payload for EventSessionRestarted.
 type SessionRestartedData struct{}
+
+// AuthErrorData is the payload for EventAuthErrorInfo.
+type AuthErrorData struct {
+	Message string // raw error message from the harness
+}

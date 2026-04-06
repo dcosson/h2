@@ -94,6 +94,7 @@ func RunDaemon(sessionDir string, rc *config.RuntimeConfig, resume bool) error {
 				log.Printf("warning: update runtime config: %v", err)
 			}
 		}
+
 	})
 
 	// Wire OnUsageLimit callback to persist rate limit info to the profile's
@@ -111,6 +112,35 @@ func RunDaemon(sessionDir string, rc *config.RuntimeConfig, resume bool) error {
 		}
 		if err := config.WriteRateLimit(profileDir, info); err != nil {
 			log.Printf("warning: write rate limit info: %v", err)
+		}
+	})
+
+	// Wire OnAuthError callback to persist auth error info to the profile's
+	// autherror.json so other tools (e.g. rotate, auth) can check it.
+	s.monitor.SetOnAuthError(func(data monitor.AuthErrorData) {
+		profileDir := rc.HarnessConfigDir()
+		if profileDir == "" {
+			return
+		}
+		info := &config.AuthErrorInfo{
+			Message:    data.Message,
+			RecordedAt: time.Now(),
+			AgentName:  rc.AgentName,
+		}
+		if err := config.WriteAuthError(profileDir, info); err != nil {
+			log.Printf("warning: write auth error info: %v", err)
+		}
+	})
+
+	// Wire OnAuthErrorCleared callback to remove autherror.json when the
+	// agent transitions out of auth_error state (e.g. after /login).
+	s.monitor.SetOnAuthErrorCleared(func() {
+		profileDir := rc.HarnessConfigDir()
+		if profileDir == "" {
+			return
+		}
+		if err := config.ClearAuthError(profileDir); err != nil {
+			log.Printf("warning: clear auth error info: %v", err)
 		}
 	})
 
@@ -319,6 +349,7 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 		info.UsageLimitResetsAt = resetsAt.Format(time.RFC3339)
 	}
 	info.UsageLimitMessage = s.UsageLimitMessage()
+	info.AuthErrorMessage = s.AuthErrorMessage()
 
 	return info
 }

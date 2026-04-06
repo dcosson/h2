@@ -169,6 +169,9 @@ type AgentInfo struct {
 	// Usage limit info (populated when sub_state is usage_limit)
 	UsageLimitResetsAt string `json:"usage_limit_resets_at,omitempty"` // RFC3339 timestamp
 	UsageLimitMessage  string `json:"usage_limit_message,omitempty"`
+
+	// Auth error info (populated when sub_state is auth_error)
+	AuthErrorMessage string `json:"auth_error_message,omitempty"`
 }
 
 // ModelStat holds per-model cost and token breakdown.

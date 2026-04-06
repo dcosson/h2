@@ -167,6 +167,7 @@ func TestAgentEventType_String(t *testing.T) {
 		{EventStateChange, "state_change"},
 		{EventSessionEnded, "session_ended"},
 		{EventUsageLimitInfo, "usage_limit_info"},
+		{EventAuthErrorInfo, "auth_error_info"},
 		{AgentEventType(99), "unknown"},
 	}
 	for _, tt := range tests {

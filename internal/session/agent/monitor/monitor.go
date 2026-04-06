@@ -21,10 +21,12 @@ type AgentMonitor struct {
 	stateChangedAt time.Time
 	stateCh        chan struct{} // closed on state change
 
-	sessionID        string
-	onSessionStarted func(SessionStartedData)
-	onUsageLimit     func(UsageLimitData)
-	model            string
+	sessionID          string
+	onSessionStarted   func(SessionStartedData)
+	onUsageLimit       func(UsageLimitData)
+	onAuthError        func(AuthErrorData)
+	onAuthErrorCleared func()
+	model              string
 
 	// Accumulated metrics from events.
 	inputTokens     int64
@@ -43,6 +45,7 @@ type AgentMonitor struct {
 
 	usageLimitResetsAt *time.Time
 	usageLimitMessage  string
+	authErrorMessage   string
 
 	// subscribers receive a copy of every event processed by the monitor.
 	// Protected by subscribersMu (separate from mu to avoid contention).
@@ -121,6 +124,9 @@ func (m *AgentMonitor) processEvent(ev AgentEvent) {
 	var sessionStartedData SessionStartedData
 	var usageLimitCb func(UsageLimitData)
 	var usageLimitData UsageLimitData
+	var authErrorCb func(AuthErrorData)
+	var authErrorData AuthErrorData
+	var authErrorClearCb func()
 
 	m.mu.Lock()
 	if !ev.Timestamp.IsZero() {
@@ -195,6 +201,11 @@ func (m *AgentMonitor) processEvent(ev AgentEvent) {
 				m.usageLimitResetsAt = nil
 				m.usageLimitMessage = ""
 			}
+			// Clear auth error info when leaving auth_error state.
+			if data.SubState != SubStateAuthError && m.authErrorMessage != "" {
+				m.authErrorMessage = ""
+				authErrorClearCb = m.onAuthErrorCleared
+			}
 		}
 
 	case EventUsageLimitInfo:
@@ -203,6 +214,13 @@ func (m *AgentMonitor) processEvent(ev AgentEvent) {
 			m.usageLimitMessage = data.Message
 			usageLimitCb = m.onUsageLimit
 			usageLimitData = data
+		}
+
+	case EventAuthErrorInfo:
+		if data, ok := ev.Data.(AuthErrorData); ok {
+			m.authErrorMessage = data.Message
+			authErrorCb = m.onAuthError
+			authErrorData = data
 		}
 
 	case EventSessionEnded:
@@ -218,6 +236,12 @@ func (m *AgentMonitor) processEvent(ev AgentEvent) {
 	}
 	if usageLimitCb != nil {
 		usageLimitCb(usageLimitData)
+	}
+	if authErrorCb != nil {
+		authErrorCb(authErrorData)
+	}
+	if authErrorClearCb != nil {
+		authErrorClearCb()
 	}
 }
 
@@ -296,6 +320,20 @@ func (m *AgentMonitor) SetOnSessionStarted(fn func(SessionStartedData)) {
 // Must be called before Run.
 func (m *AgentMonitor) SetOnUsageLimit(fn func(UsageLimitData)) {
 	m.onUsageLimit = fn
+}
+
+// SetOnAuthError sets a callback invoked when EventAuthErrorInfo is
+// processed. The daemon uses this to persist auth error info to disk.
+// Must be called before Run.
+func (m *AgentMonitor) SetOnAuthError(fn func(AuthErrorData)) {
+	m.onAuthError = fn
+}
+
+// SetOnAuthErrorCleared sets a callback invoked when the agent transitions
+// out of auth_error state (e.g. after a successful /login). The daemon
+// uses this to remove the autherror.json file. Must be called before Run.
+func (m *AgentMonitor) SetOnAuthErrorCleared(fn func()) {
+	m.onAuthErrorCleared = fn
 }
 
 // Model returns the model name (set by EventSessionStarted).
@@ -408,6 +446,13 @@ func (m *AgentMonitor) UsageLimitMessage() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.usageLimitMessage
+}
+
+// AuthErrorMessage returns the auth error message from the harness.
+func (m *AgentMonitor) AuthErrorMessage() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.authErrorMessage
 }
 
 // Activity returns a snapshot of activity fields derived from normalized events.

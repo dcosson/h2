@@ -450,6 +450,12 @@ func printAgentLine(info *message.AgentInfo) {
 		tool = " " + s.Red(fmt.Sprintf("(blocked %s)", blocked))
 	}
 
+	// Auth error indicator.
+	authErr := ""
+	if info.AuthErrorMessage != "" {
+		authErr = " " + s.Red("(auth error: run /login)")
+	}
+
 	// Role label.
 	role := ""
 	if info.RoleName != "" {
@@ -463,11 +469,11 @@ func printAgentLine(info *message.AgentInfo) {
 	}
 
 	if info.State != "" {
-		fmt.Printf("  %s %s%s %s%s — %s, up %s%s%s%s\n",
-			symbol, info.Name, role, s.Dim(info.Command), profile, stateLabel, info.Uptime, metrics, queued, tool)
+		fmt.Printf("  %s %s%s %s%s — %s, up %s%s%s%s%s\n",
+			symbol, info.Name, role, s.Dim(info.Command), profile, stateLabel, info.Uptime, metrics, queued, tool, authErr)
 	} else {
-		fmt.Printf("  %s %s%s %s%s — %s%s%s%s\n",
-			symbol, info.Name, role, s.Dim(info.Command), profile, stateLabel, metrics, queued, tool)
+		fmt.Printf("  %s %s%s %s%s — %s%s%s%s%s\n",
+			symbol, info.Name, role, s.Dim(info.Command), profile, stateLabel, metrics, queued, tool, authErr)
 	}
 }
 

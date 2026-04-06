@@ -167,13 +167,17 @@ func newProfileShowCmd() *cobra.Command {
 
 			out := cmd.OutOrStdout()
 
-			// Build harness list for header with rate limit info.
+			// Build harness list for header with rate limit and auth error info.
 			rlMap := map[string]*config.RateLimitInfo{}
+			aeMap := map[string]*config.AuthErrorInfo{}
 			var harnesses []string
 			if claudeExists {
 				harnesses = append(harnesses, profileHarnessClaude)
 				if rl := config.IsProfileRateLimited(claudeDir); rl != nil {
 					rlMap[profileHarnessClaude] = rl
+				}
+				if ae := config.IsProfileAuthError(claudeDir); ae != nil {
+					aeMap[profileHarnessClaude] = ae
 				}
 			}
 			if codexExists {
@@ -181,9 +185,12 @@ func newProfileShowCmd() *cobra.Command {
 				if rl := config.IsProfileRateLimited(codexDir); rl != nil {
 					rlMap[profileHarnessCodex] = rl
 				}
+				if ae := config.IsProfileAuthError(codexDir); ae != nil {
+					aeMap[profileHarnessCodex] = ae
+				}
 			}
 			if len(harnesses) > 0 {
-				p := profileInfo{Name: name, Harnesses: harnesses, RateLimitedMap: rlMap}
+				p := profileInfo{Name: name, Harnesses: harnesses, RateLimitedMap: rlMap, AuthErrorMap: aeMap}
 				fmt.Fprintf(out, "Profile: %s (%s)\n", name, formatHarnessLabels(p))
 			} else {
 				fmt.Fprintf(out, "Profile: %s (shared only)\n", name)
@@ -944,6 +951,7 @@ type profileInfo struct {
 	Name           string
 	Harnesses      []string                         // e.g. ["claude_code", "codex"]
 	RateLimitedMap map[string]*config.RateLimitInfo // harness -> rate limit info (nil if not limited)
+	AuthErrorMap   map[string]*config.AuthErrorInfo // harness -> auth error info (nil if no error)
 }
 
 // formatHarnessLabels builds a comma-separated harness list, appending
@@ -951,7 +959,9 @@ type profileInfo struct {
 func formatHarnessLabels(p profileInfo) string {
 	labels := make([]string, len(p.Harnesses))
 	for i, h := range p.Harnesses {
-		if rl, ok := p.RateLimitedMap[h]; ok && rl != nil {
+		if ae, ok := p.AuthErrorMap[h]; ok && ae != nil {
+			labels[i] = termstyle.Red(h + " auth error: run /login")
+		} else if rl, ok := p.RateLimitedMap[h]; ok && rl != nil {
 			resetStr := rl.ResetsAt.Local().Format("Jan 2 3:04 PM")
 			labels[i] = termstyle.Red(h + " rate limited until " + resetStr)
 		} else {
@@ -966,7 +976,9 @@ func formatHarnessLabels(p profileInfo) string {
 func formatHarnessLabelsPlain(p profileInfo) string {
 	labels := make([]string, len(p.Harnesses))
 	for i, h := range p.Harnesses {
-		if rl, ok := p.RateLimitedMap[h]; ok && rl != nil {
+		if ae, ok := p.AuthErrorMap[h]; ok && ae != nil {
+			labels[i] = h + " auth error: run /login"
+		} else if rl, ok := p.RateLimitedMap[h]; ok && rl != nil {
 			resetStr := rl.ResetsAt.Local().Format("Jan 2 3:04 PM")
 			labels[i] = h + " rate limited until " + resetStr
 		} else {
@@ -989,9 +1001,10 @@ func discoverProfilesWithHarness(h2Dir string) ([]profileInfo, error) {
 		{profileHarnessCodex, filepath.Join(h2Dir, "codex-config")},
 	}
 
-	// Collect which harnesses each profile appears in, plus rate limit info.
+	// Collect which harnesses each profile appears in, plus rate limit and auth error info.
 	profileHarnesses := map[string][]string{}
 	profileRateLimits := map[string]map[string]*config.RateLimitInfo{}
+	profileAuthErrors := map[string]map[string]*config.AuthErrorInfo{}
 	for _, hd := range harnessDirs {
 		entries, err := os.ReadDir(hd.dir)
 		if err != nil {
@@ -1003,13 +1016,19 @@ func discoverProfilesWithHarness(h2Dir string) ([]profileInfo, error) {
 		for _, entry := range entries {
 			if entry.IsDir() {
 				name := entry.Name()
+				profileDir := filepath.Join(hd.dir, name)
 				profileHarnesses[name] = append(profileHarnesses[name], hd.harness)
-				rl := config.IsProfileRateLimited(filepath.Join(hd.dir, name))
-				if rl != nil {
+				if rl := config.IsProfileRateLimited(profileDir); rl != nil {
 					if profileRateLimits[name] == nil {
 						profileRateLimits[name] = map[string]*config.RateLimitInfo{}
 					}
 					profileRateLimits[name][hd.harness] = rl
+				}
+				if ae := config.IsProfileAuthError(profileDir); ae != nil {
+					if profileAuthErrors[name] == nil {
+						profileAuthErrors[name] = map[string]*config.AuthErrorInfo{}
+					}
+					profileAuthErrors[name][hd.harness] = ae
 				}
 			}
 		}
@@ -1028,6 +1047,7 @@ func discoverProfilesWithHarness(h2Dir string) ([]profileInfo, error) {
 			Name:           name,
 			Harnesses:      profileHarnesses[name],
 			RateLimitedMap: profileRateLimits[name],
+			AuthErrorMap:   profileAuthErrors[name],
 		}
 	}
 	return result, nil

@@ -63,8 +63,15 @@ func runAuthClaude(cmd *cobra.Command, args []string) error {
 	}
 
 	if isAuth {
-		fmt.Printf("✓ Claude config already authenticated: %s\n", configDir)
-		return nil
+		// Check if this profile has a recorded auth error — if so, proceed
+		// even though oauthAccount exists (the token may be expired).
+		if authErr := config.IsProfileAuthError(configDir); authErr != nil {
+			fmt.Printf("⚠ Auth error detected: %s\n", authErr.Message)
+			fmt.Println("Proceeding with re-authentication...")
+		} else {
+			fmt.Printf("✓ Claude config already authenticated: %s\n", configDir)
+			return nil
+		}
 	}
 
 	// Create config directory if it doesn't exist
@@ -103,6 +110,9 @@ func runAuthClaude(cmd *cobra.Command, args []string) error {
 		fmt.Println("Run 'h2 auth claude' again to retry.")
 		return nil
 	}
+
+	// Clear any recorded auth error now that re-authentication succeeded.
+	_ = config.ClearAuthError(configDir)
 
 	fmt.Println()
 	fmt.Printf("✓ Successfully authenticated: %s\n", configDir)

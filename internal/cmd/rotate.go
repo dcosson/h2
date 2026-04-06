@@ -79,8 +79,14 @@ argument order.`,
 				fmt.Fprintf(cmd.OutOrStderr(), "Skipping profile %q (rate limited until %s)\n",
 					s.name, s.resetsAt.Local().Format("Jan 2 3:04 PM"))
 			}
+
+			candidates, authSkipped := filterAuthErrored(candidates, rc.HarnessConfigPathPrefix)
+			for _, name := range authSkipped {
+				fmt.Fprintf(cmd.OutOrStderr(), "Skipping profile %q (auth error: run /login)\n", name)
+			}
+
 			if len(candidates) == 0 {
-				return fmt.Errorf("all candidate profiles are rate limited")
+				return fmt.Errorf("all candidate profiles are rate limited or have auth errors")
 			}
 
 			// Select the next profile.
@@ -213,6 +219,22 @@ func filterRateLimited(candidates []string, configPrefix string) ([]string, []sk
 		profileDir := filepath.Join(configPrefix, name)
 		if rl := config.IsProfileRateLimited(profileDir); rl != nil {
 			skipped = append(skipped, skippedProfile{name: name, resetsAt: rl.ResetsAt})
+		} else {
+			filtered = append(filtered, name)
+		}
+	}
+	return filtered, skipped
+}
+
+// filterAuthErrored removes profiles with auth errors from candidates.
+// Returns the filtered list and names of skipped profiles.
+func filterAuthErrored(candidates []string, configPrefix string) ([]string, []string) {
+	var filtered []string
+	var skipped []string
+	for _, name := range candidates {
+		profileDir := filepath.Join(configPrefix, name)
+		if config.IsProfileAuthError(profileDir) != nil {
+			skipped = append(skipped, name)
 		} else {
 			filtered = append(filtered, name)
 		}
