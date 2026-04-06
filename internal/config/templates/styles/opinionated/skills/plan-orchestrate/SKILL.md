@@ -72,9 +72,10 @@ Each round follows five steps:
 - Message each incorporator agent with their assignment
 - Each incorporator runs `plan-incorporate` on their assigned docs
 - Incorporators must discuss P0/P1 findings with reviewers before applying changes
+- **Incorporators must delete the `-review.md` files after incorporating their findings.** Review files should not accumulate in the repo — the disposition tables in each plan doc are the durable record of what was found and how it was handled.
 
 **Step 4: Summarize**
-- Assign an agent to run `plan-summarize`
+- Assign an agent to run `plan-summarize` with output to `docs/plans/00-planning-review-summary.md`
 - Review the convergence numbers
 
 **Step 5: Decide next round**

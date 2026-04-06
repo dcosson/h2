@@ -12,7 +12,7 @@ Generate a planning summary doc with aggregate statistics across plan docs AND t
 
 ## Inputs
 
-- `$0`: Output file path (e.g., `docs/plans/99-planning-review-summary.md`)
+- `$0`: Output file path (e.g., `docs/plans/00-planning-review-summary.md`)
 - `$1` (optional): Glob pattern for plan docs (default: `docs/plans/0*.md`, excluding index/architecture/shaping/summary docs)
 
 ## Phase 0: Run Automated Aggregation
