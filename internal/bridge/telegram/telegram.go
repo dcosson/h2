@@ -29,8 +29,9 @@ const (
 	maxPages = 3
 )
 
-// Telegram implements bridge.Bridge, bridge.Sender, and bridge.Receiver
-// using the Telegram Bot API. Standard library only — no external Telegram SDK.
+// Telegram implements bridge.Bridge, bridge.Sender, bridge.FormattedSender,
+// and bridge.Receiver using the Telegram Bot API. Standard library only — no
+// external Telegram SDK.
 type Telegram struct {
 	Token           string
 	ChatID          int64
@@ -66,20 +67,34 @@ func (t *Telegram) apiURL(method string) string {
 // Telegram's 4096-character limit are split into multiple messages at line
 // boundaries when possible, up to maxPages messages.
 func (t *Telegram) Send(ctx context.Context, text string) error {
+	return t.sendWithFormat(ctx, text, "")
+}
+
+// SendFormatted posts a formatted message (HTML or MarkdownV2) to the
+// configured chat, setting Telegram's parse_mode parameter.
+func (t *Telegram) SendFormatted(ctx context.Context, text, format string) error {
+	return t.sendWithFormat(ctx, text, format)
+}
+
+func (t *Telegram) sendWithFormat(ctx context.Context, text, format string) error {
 	chunks := bridge.SplitMessage(text, maxMessageLen, maxPages)
 	for _, chunk := range chunks {
-		if err := t.sendChunk(ctx, chunk); err != nil {
+		if err := t.sendChunk(ctx, chunk, format); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (t *Telegram) sendChunk(ctx context.Context, text string) error {
-	resp, err := t.client.PostForm(t.apiURL("sendMessage"), url.Values{
+func (t *Telegram) sendChunk(ctx context.Context, text, format string) error {
+	params := url.Values{
 		"chat_id": {strconv.FormatInt(t.ChatID, 10)},
 		"text":    {text},
-	})
+	}
+	if format != "" {
+		params.Set("parse_mode", format)
+	}
+	resp, err := t.client.PostForm(t.apiURL("sendMessage"), params)
 	if err != nil {
 		return fmt.Errorf("telegram send: %w", err)
 	}
