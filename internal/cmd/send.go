@@ -149,12 +149,13 @@ func registerExpectsResponseTrigger(agentName, sender, triggerID string) (string
 			sender, id, id, sender,
 		)
 		return &message.TriggerSpec{
-			ID:       id,
-			Name:     "expects-response-" + id,
-			Event:    "state_change",
-			State:    "idle",
-			Message:  reminderMsg,
-			Priority: "idle",
+			ID:         id,
+			Name:       "expects-response-" + id,
+			Event:      "state_change",
+			State:      "idle",
+			Message:    reminderMsg,
+			Priority:   "idle",
+			MaxFirings: 10,
 		}
 	}
 
