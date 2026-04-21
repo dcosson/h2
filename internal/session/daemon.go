@@ -144,6 +144,36 @@ func RunDaemon(sessionDir string, rc *config.RuntimeConfig, resume bool) error {
 		}
 	})
 
+	// Wire OnServerError callback to persist server error info to the profile's
+	// servererror.json so other tools can check it.
+	s.monitor.SetOnServerError(func(data monitor.ServerErrorData) {
+		profileDir := rc.HarnessConfigDir()
+		if profileDir == "" {
+			return
+		}
+		info := &config.ServerErrorInfo{
+			StatusCode: data.StatusCode,
+			Message:    data.Message,
+			RecordedAt: time.Now(),
+			AgentName:  rc.AgentName,
+		}
+		if err := config.WriteServerError(profileDir, info); err != nil {
+			log.Printf("warning: write server error info: %v", err)
+		}
+	})
+
+	// Wire OnServerErrorCleared callback to remove servererror.json when the
+	// agent receives a successful API response (auto-clear).
+	s.monitor.SetOnServerErrorCleared(func() {
+		profileDir := rc.HarnessConfigDir()
+		if profileDir == "" {
+			return
+		}
+		if err := config.ClearServerError(profileDir); err != nil {
+			log.Printf("warning: clear server error info: %v", err)
+		}
+	})
+
 	// Create socket directory.
 	if err := os.MkdirAll(socketdir.Dir(), 0o700); err != nil {
 		return fmt.Errorf("create socket dir: %w", err)
@@ -350,6 +380,7 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 	}
 	info.UsageLimitMessage = s.UsageLimitMessage()
 	info.AuthErrorMessage = s.AuthErrorMessage()
+	info.ServerErrorMessage = s.ServerErrorMessage()
 
 	return info
 }

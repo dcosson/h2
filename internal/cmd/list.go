@@ -456,6 +456,12 @@ func printAgentLine(info *message.AgentInfo) {
 		authErr = " " + s.Red("(auth error: run /login)")
 	}
 
+	// Server error indicator.
+	serverErr := ""
+	if info.ServerErrorMessage != "" {
+		serverErr = " " + s.Yellow("(server error)")
+	}
+
 	// Role label.
 	role := ""
 	if info.RoleName != "" {
@@ -469,11 +475,11 @@ func printAgentLine(info *message.AgentInfo) {
 	}
 
 	if info.State != "" {
-		fmt.Printf("  %s %s%s %s%s — %s, up %s%s%s%s%s\n",
-			symbol, info.Name, role, s.Dim(info.Command), profile, stateLabel, info.Uptime, metrics, queued, tool, authErr)
+		fmt.Printf("  %s %s%s %s%s — %s, up %s%s%s%s%s%s\n",
+			symbol, info.Name, role, s.Dim(info.Command), profile, stateLabel, info.Uptime, metrics, queued, tool, authErr, serverErr)
 	} else {
-		fmt.Printf("  %s %s%s %s%s — %s%s%s%s%s\n",
-			symbol, info.Name, role, s.Dim(info.Command), profile, stateLabel, metrics, queued, tool, authErr)
+		fmt.Printf("  %s %s%s %s%s — %s%s%s%s%s%s\n",
+			symbol, info.Name, role, s.Dim(info.Command), profile, stateLabel, metrics, queued, tool, authErr, serverErr)
 	}
 }
 

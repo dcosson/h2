@@ -24,8 +24,10 @@ type AgentMonitor struct {
 	sessionID          string
 	onSessionStarted   func(SessionStartedData)
 	onUsageLimit       func(UsageLimitData)
-	onAuthError        func(AuthErrorData)
-	onAuthErrorCleared func()
+	onAuthError          func(AuthErrorData)
+	onAuthErrorCleared   func()
+	onServerError        func(ServerErrorData)
+	onServerErrorCleared func()
 	model              string
 
 	// Accumulated metrics from events.
@@ -45,7 +47,9 @@ type AgentMonitor struct {
 
 	usageLimitResetsAt *time.Time
 	usageLimitMessage  string
-	authErrorMessage   string
+	authErrorMessage    string
+	serverErrorMessage  string
+	serverErrorCode     string
 
 	// subscribers receive a copy of every event processed by the monitor.
 	// Protected by subscribersMu (separate from mu to avoid contention).
@@ -127,6 +131,9 @@ func (m *AgentMonitor) processEvent(ev AgentEvent) {
 	var authErrorCb func(AuthErrorData)
 	var authErrorData AuthErrorData
 	var authErrorClearCb func()
+	var serverErrorCb func(ServerErrorData)
+	var serverErrorData ServerErrorData
+	var serverErrorClearCb func()
 
 	m.mu.Lock()
 	if !ev.Timestamp.IsZero() {
@@ -154,6 +161,16 @@ func (m *AgentMonitor) processEvent(ev AgentEvent) {
 			m.outputTokens += data.OutputTokens
 			m.cachedTokens += data.CachedTokens
 			m.totalCostUSD += data.CostUSD
+			// A successful turn with tokens means the API responded — clear server error.
+			if (data.InputTokens > 0 || data.OutputTokens > 0) && m.serverErrorMessage != "" {
+				m.serverErrorMessage = ""
+				m.serverErrorCode = ""
+				serverErrorClearCb = m.onServerErrorCleared
+				// Also transition out of server_error sub-state if still in it.
+				if m.subState == SubStateServerError {
+					m.setStateLocked(StateActive, SubStateThinking)
+				}
+			}
 		}
 
 	case EventToolCompleted:
@@ -206,6 +223,12 @@ func (m *AgentMonitor) processEvent(ev AgentEvent) {
 				m.authErrorMessage = ""
 				authErrorClearCb = m.onAuthErrorCleared
 			}
+			// Clear server error info when leaving server_error state.
+			if data.SubState != SubStateServerError && m.serverErrorMessage != "" {
+				m.serverErrorMessage = ""
+				m.serverErrorCode = ""
+				serverErrorClearCb = m.onServerErrorCleared
+			}
 		}
 
 	case EventUsageLimitInfo:
@@ -221,6 +244,14 @@ func (m *AgentMonitor) processEvent(ev AgentEvent) {
 			m.authErrorMessage = data.Message
 			authErrorCb = m.onAuthError
 			authErrorData = data
+		}
+
+	case EventServerErrorInfo:
+		if data, ok := ev.Data.(ServerErrorData); ok {
+			m.serverErrorMessage = data.Message
+			m.serverErrorCode = data.StatusCode
+			serverErrorCb = m.onServerError
+			serverErrorData = data
 		}
 
 	case EventSessionEnded:
@@ -242,6 +273,12 @@ func (m *AgentMonitor) processEvent(ev AgentEvent) {
 	}
 	if authErrorClearCb != nil {
 		authErrorClearCb()
+	}
+	if serverErrorCb != nil {
+		serverErrorCb(serverErrorData)
+	}
+	if serverErrorClearCb != nil {
+		serverErrorClearCb()
 	}
 }
 
@@ -334,6 +371,20 @@ func (m *AgentMonitor) SetOnAuthError(fn func(AuthErrorData)) {
 // uses this to remove the autherror.json file. Must be called before Run.
 func (m *AgentMonitor) SetOnAuthErrorCleared(fn func()) {
 	m.onAuthErrorCleared = fn
+}
+
+// SetOnServerError sets a callback invoked when EventServerErrorInfo is
+// processed. The daemon uses this to persist server error info to disk.
+// Must be called before Run.
+func (m *AgentMonitor) SetOnServerError(fn func(ServerErrorData)) {
+	m.onServerError = fn
+}
+
+// SetOnServerErrorCleared sets a callback invoked when the agent transitions
+// out of server_error state (e.g. after a successful API response). The daemon
+// uses this to remove the servererror.json file. Must be called before Run.
+func (m *AgentMonitor) SetOnServerErrorCleared(fn func()) {
+	m.onServerErrorCleared = fn
 }
 
 // Model returns the model name (set by EventSessionStarted).
@@ -453,6 +504,13 @@ func (m *AgentMonitor) AuthErrorMessage() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.authErrorMessage
+}
+
+// ServerErrorMessage returns the server error message from the harness.
+func (m *AgentMonitor) ServerErrorMessage() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.serverErrorMessage
 }
 
 // Activity returns a snapshot of activity fields derived from normalized events.

@@ -172,6 +172,9 @@ type AgentInfo struct {
 
 	// Auth error info (populated when sub_state is auth_error)
 	AuthErrorMessage string `json:"auth_error_message,omitempty"`
+
+	// Server error info (populated when sub_state is server_error)
+	ServerErrorMessage string `json:"server_error_message,omitempty"`
 }
 
 // ModelStat holds per-model cost and token breakdown.

@@ -332,6 +332,16 @@ func (p *EventHandler) processEvent(name string, attrs []otelAttribute, ts time.
 			})
 			return spanProcessResult{recognized: true, emitted: 2}
 		}
+		if len(statusCode) > 0 && statusCode[0] == '5' {
+			p.cancelPendingIdle()
+			p.emitStateChange(ts, monitor.StateIdle, monitor.SubStateServerError)
+			p.emit(monitor.AgentEvent{
+				Type:      monitor.EventServerErrorInfo,
+				Timestamp: ts,
+				Data:      monitor.ServerErrorData{StatusCode: statusCode, Message: errMsg},
+			})
+			return spanProcessResult{recognized: true, emitted: 2}
+		}
 		return spanProcessResult{recognized: true}
 
 	case "codex.tool_decision":

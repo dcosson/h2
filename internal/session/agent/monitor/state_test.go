@@ -32,6 +32,8 @@ func TestSubState_String(t *testing.T) {
 		{SubStateCompacting, "compacting"},
 		{SubStateUsageLimit, "usage_limit"},
 		{SubStateBlockedOnPermission, "blocked_on_permission"},
+		{SubStateAuthError, "auth_error"},
+		{SubStateServerError, "server_error"},
 		{SubState(99), ""},
 	}
 	for _, tt := range tests {
@@ -59,6 +61,8 @@ func TestFormatStateLabel_Basic(t *testing.T) {
 		{"active", "compacting", "Active (compacting)"},
 		{"active", "something_new", "Active (something_new)"},
 		{"idle", "usage_limit", "Idle (usage limit)"},
+		{"idle", "auth_error", "Idle (auth error)"},
+		{"idle", "server_error", "Idle (server error)"},
 		{"idle", "thinking", "Idle (thinking)"},
 	}
 	for _, tt := range tests {

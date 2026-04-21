@@ -680,3 +680,136 @@ func TestInject_ReachesSubscribers(t *testing.T) {
 		t.Fatal("subscriber did not receive injected restart event")
 	}
 }
+
+func TestProcessEvent_ServerError_SetAndAutoClear(t *testing.T) {
+	m := New()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go m.Run(ctx)
+
+	// Enter server error state.
+	m.Events() <- AgentEvent{
+		Type:      EventStateChange,
+		Timestamp: time.Now(),
+		Data:      StateChangeData{State: StateIdle, SubState: SubStateServerError},
+	}
+	m.Events() <- AgentEvent{
+		Type:      EventServerErrorInfo,
+		Timestamp: time.Now(),
+		Data:      ServerErrorData{StatusCode: "500", Message: "Internal server error"},
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	state, subState := m.State()
+	if state != StateIdle || subState != SubStateServerError {
+		t.Fatalf("state = (%v,%v), want (Idle,ServerError)", state, subState)
+	}
+	if m.ServerErrorMessage() != "Internal server error" {
+		t.Fatalf("ServerErrorMessage = %q, want %q", m.ServerErrorMessage(), "Internal server error")
+	}
+
+	// Successful turn should auto-clear the server error.
+	m.Events() <- AgentEvent{
+		Type:      EventTurnCompleted,
+		Timestamp: time.Now(),
+		Data:      TurnCompletedData{InputTokens: 100, OutputTokens: 50, CostUSD: 0.01},
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	state, subState = m.State()
+	if subState == SubStateServerError {
+		t.Fatalf("subState should not be ServerError after successful turn, got (%v,%v)", state, subState)
+	}
+	if m.ServerErrorMessage() != "" {
+		t.Fatalf("ServerErrorMessage should be cleared, got %q", m.ServerErrorMessage())
+	}
+}
+
+func TestProcessEvent_ServerError_ClearedCallback(t *testing.T) {
+	m := New()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cleared := make(chan struct{}, 1)
+	m.SetOnServerErrorCleared(func() {
+		cleared <- struct{}{}
+	})
+
+	errored := make(chan ServerErrorData, 1)
+	m.SetOnServerError(func(data ServerErrorData) {
+		errored <- data
+	})
+
+	go m.Run(ctx)
+
+	// Enter server error state.
+	m.Events() <- AgentEvent{
+		Type:      EventStateChange,
+		Timestamp: time.Now(),
+		Data:      StateChangeData{State: StateIdle, SubState: SubStateServerError},
+	}
+	m.Events() <- AgentEvent{
+		Type:      EventServerErrorInfo,
+		Timestamp: time.Now(),
+		Data:      ServerErrorData{StatusCode: "500", Message: "Internal server error"},
+	}
+
+	select {
+	case data := <-errored:
+		if data.StatusCode != "500" {
+			t.Errorf("StatusCode = %q, want %q", data.StatusCode, "500")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("OnServerError callback not called")
+	}
+
+	// Successful turn triggers clear callback.
+	m.Events() <- AgentEvent{
+		Type:      EventTurnCompleted,
+		Timestamp: time.Now(),
+		Data:      TurnCompletedData{InputTokens: 100, OutputTokens: 50},
+	}
+
+	select {
+	case <-cleared:
+		// OK
+	case <-time.After(time.Second):
+		t.Fatal("OnServerErrorCleared callback not called after successful turn")
+	}
+}
+
+func TestProcessEvent_ServerError_NotClearedByZeroTokenTurn(t *testing.T) {
+	m := New()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go m.Run(ctx)
+
+	// Enter server error state.
+	m.Events() <- AgentEvent{
+		Type:      EventStateChange,
+		Timestamp: time.Now(),
+		Data:      StateChangeData{State: StateIdle, SubState: SubStateServerError},
+	}
+	m.Events() <- AgentEvent{
+		Type:      EventServerErrorInfo,
+		Timestamp: time.Now(),
+		Data:      ServerErrorData{StatusCode: "500", Message: "Internal server error"},
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	// A turn with zero tokens (not a real successful response) should NOT clear.
+	m.Events() <- AgentEvent{
+		Type:      EventTurnCompleted,
+		Timestamp: time.Now(),
+		Data:      TurnCompletedData{},
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	if m.ServerErrorMessage() != "Internal server error" {
+		t.Fatalf("ServerErrorMessage should not be cleared by zero-token turn, got %q", m.ServerErrorMessage())
+	}
+}

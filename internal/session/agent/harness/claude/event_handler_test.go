@@ -115,7 +115,7 @@ func TestEventHandler_APIError_429_UsageLimit(t *testing.T) {
 	}
 }
 
-func TestEventHandler_APIError_Non429_NoEmit(t *testing.T) {
+func TestEventHandler_APIError_500_ServerError(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
 	h := NewEventHandler(events, nil)
 
@@ -135,9 +135,83 @@ func TestEventHandler_APIError_Non429_NoEmit(t *testing.T) {
 	body, _ := json.Marshal(payload)
 	h.OnLogs(body)
 
+	got := drainEvents(events, 2)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 events (state_change + server_error_info), got %d", len(got))
+	}
+	if got[0].Type != monitor.EventStateChange {
+		t.Fatalf("event[0].Type = %v, want EventStateChange", got[0].Type)
+	}
+	state := got[0].Data.(monitor.StateChangeData)
+	if state.State != monitor.StateIdle || state.SubState != monitor.SubStateServerError {
+		t.Errorf("state = (%v,%v), want (Idle,ServerError)", state.State, state.SubState)
+	}
+	if got[1].Type != monitor.EventServerErrorInfo {
+		t.Fatalf("event[1].Type = %v, want EventServerErrorInfo", got[1].Type)
+	}
+	data := got[1].Data.(monitor.ServerErrorData)
+	if data.StatusCode != "500" {
+		t.Errorf("StatusCode = %q, want %q", data.StatusCode, "500")
+	}
+}
+
+func TestEventHandler_APIError_502_ServerError(t *testing.T) {
+	events := make(chan monitor.AgentEvent, 64)
+	h := NewEventHandler(events, nil)
+
+	payload := otelLogsPayload{
+		ResourceLogs: []otelResourceLogs{{
+			ScopeLogs: []otelScopeLogs{{
+				LogRecords: []otelLogRecord{{
+					Attributes: []otelAttribute{
+						{Key: "event.name", Value: otelAttrValue{StringValue: "api_error"}},
+						{Key: "status_code", Value: otelAttrValue{StringValue: "502"}},
+						{Key: "error", Value: otelAttrValue{StringValue: "bad gateway"}},
+					},
+				}},
+			}},
+		}},
+	}
+	body, _ := json.Marshal(payload)
+	h.OnLogs(body)
+
+	got := drainEvents(events, 2)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(got))
+	}
+	state := got[0].Data.(monitor.StateChangeData)
+	if state.SubState != monitor.SubStateServerError {
+		t.Errorf("SubState = %v, want ServerError", state.SubState)
+	}
+	data := got[1].Data.(monitor.ServerErrorData)
+	if data.StatusCode != "502" {
+		t.Errorf("StatusCode = %q, want %q", data.StatusCode, "502")
+	}
+}
+
+func TestEventHandler_APIError_Non4xx5xx_NoEmit(t *testing.T) {
+	events := make(chan monitor.AgentEvent, 64)
+	h := NewEventHandler(events, nil)
+
+	payload := otelLogsPayload{
+		ResourceLogs: []otelResourceLogs{{
+			ScopeLogs: []otelScopeLogs{{
+				LogRecords: []otelLogRecord{{
+					Attributes: []otelAttribute{
+						{Key: "event.name", Value: otelAttrValue{StringValue: "api_error"}},
+						{Key: "status_code", Value: otelAttrValue{StringValue: "400"}},
+						{Key: "error", Value: otelAttrValue{StringValue: "bad request"}},
+					},
+				}},
+			}},
+		}},
+	}
+	body, _ := json.Marshal(payload)
+	h.OnLogs(body)
+
 	select {
 	case ev := <-events:
-		t.Errorf("unexpected event for non-429 api_error: %+v", ev)
+		t.Errorf("unexpected event for 400 api_error: %+v", ev)
 	case <-time.After(50 * time.Millisecond):
 	}
 }
@@ -702,6 +776,57 @@ func TestEventHandler_OnSessionLogLine_AuthError(t *testing.T) {
 
 	if got[1].Type != monitor.EventAgentMessage {
 		t.Fatalf("event[1].Type = %v, want EventAgentMessage", got[1].Type)
+	}
+}
+
+func TestEventHandler_OnSessionLogLine_ServerError(t *testing.T) {
+	events := make(chan monitor.AgentEvent, 64)
+	h := NewEventHandler(events, nil)
+
+	line, _ := json.Marshal(map[string]any{
+		"type": "assistant",
+		"message": map[string]any{
+			"role":    "assistant",
+			"content": "API Error: 500 {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"Internal server error\"},\"request_id\":\"req_abc123\"}",
+		},
+		"isApiErrorMessage": true,
+	})
+	h.OnSessionLogLine(line)
+
+	got := drainEvents(events, 2)
+	if len(got) < 2 {
+		t.Fatalf("expected 2 events (server_error_info + agent_message), got %d", len(got))
+	}
+
+	if got[0].Type != monitor.EventServerErrorInfo {
+		t.Fatalf("event[0].Type = %v, want EventServerErrorInfo", got[0].Type)
+	}
+	data := got[0].Data.(monitor.ServerErrorData)
+	if !strings.Contains(data.Message, "Internal server error") {
+		t.Errorf("expected 'Internal server error' in message, got %q", data.Message)
+	}
+
+	if got[1].Type != monitor.EventAgentMessage {
+		t.Fatalf("event[1].Type = %v, want EventAgentMessage", got[1].Type)
+	}
+}
+
+func TestIsServerErrorMessage(t *testing.T) {
+	tests := []struct {
+		content string
+		want    bool
+	}{
+		{`API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}`, true},
+		{`API Error: {"type":"error","error":{"type":"api_error","message":"Internal server error"}}`, true},
+		{"API Error: 529 overloaded", true},
+		{"OAuth token has expired. Please obtain a new token.", false},
+		{"authentication_error: invalid credentials", false},
+		{"normal assistant message", false},
+	}
+	for _, tt := range tests {
+		if got := isServerErrorMessage(tt.content); got != tt.want {
+			t.Errorf("isServerErrorMessage(%q) = %v, want %v", tt.content, got, tt.want)
+		}
 	}
 }
 

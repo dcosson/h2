@@ -782,6 +782,11 @@ func (s *Session) AuthErrorMessage() string {
 	return s.monitor.AuthErrorMessage()
 }
 
+// ServerErrorMessage returns the server error message from the harness.
+func (s *Session) ServerErrorMessage() string {
+	return s.monitor.ServerErrorMessage()
+}
+
 // SubmitInput enqueues user-typed input for priority-aware delivery.
 func (s *Session) SubmitInput(text string, priority message.Priority) {
 	msg := &message.Message{

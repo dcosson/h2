@@ -132,6 +132,15 @@ func (h *EventHandler) processLogRecord(eventName string, lr otelLogRecord, ts t
 			h.emitStateChange(ts, monitor.StateIdle, monitor.SubStateAuthError)
 			return true, fmt.Sprintf("auth_error status=%s error=%q", statusCode, errMsg)
 		}
+		if len(statusCode) > 0 && statusCode[0] == '5' {
+			h.emitStateChange(ts, monitor.StateIdle, monitor.SubStateServerError)
+			h.emit(monitor.AgentEvent{
+				Type:      monitor.EventServerErrorInfo,
+				Timestamp: ts,
+				Data:      monitor.ServerErrorData{StatusCode: statusCode, Message: errMsg},
+			})
+			return true, fmt.Sprintf("server_error status=%s error=%q", statusCode, errMsg)
+		}
 		return false, fmt.Sprintf("api_error status=%s", statusCode)
 
 	case "tool_result":
@@ -431,6 +440,16 @@ func isAuthErrorMessage(content string) bool {
 		strings.Contains(content, "OAuth token has expired")
 }
 
+// isServerErrorMessage returns true if the message content indicates an
+// API server error (5xx). Matches patterns like "Internal server error",
+// "API Error: 500", or the Anthropic error type "api_error".
+func isServerErrorMessage(content string) bool {
+	lower := strings.ToLower(content)
+	return strings.Contains(lower, "internal server error") ||
+		strings.Contains(lower, "\"type\":\"api_error\"") ||
+		strings.Contains(lower, "api error: 5")
+}
+
 // resetsPattern matches Claude Code's synthetic rate limit message format:
 //
 //	"resets 12pm (America/Los_Angeles)"
@@ -478,11 +497,23 @@ func parseSessionLine(line []byte) ([]monitor.AgentEvent, bool) {
 	}
 
 	// Check for auth error messages (expired OAuth token, 401).
-	if entry.IsApiErrorMessage && isAuthErrorMessage(content) {
+	isAuth := entry.IsApiErrorMessage && isAuthErrorMessage(content)
+	if isAuth {
 		events = append(events, monitor.AgentEvent{
 			Type:      monitor.EventAuthErrorInfo,
 			Timestamp: now,
 			Data:      monitor.AuthErrorData{Message: content},
+		})
+	}
+
+	// Check for server error messages (5xx). An API error message that isn't
+	// a rate limit or auth error is treated as a server error.
+	isRateLimit := entry.Error == "rate_limit" || (entry.IsApiErrorMessage && resetsPattern.MatchString(content))
+	if entry.IsApiErrorMessage && !isAuth && !isRateLimit && isServerErrorMessage(content) {
+		events = append(events, monitor.AgentEvent{
+			Type:      monitor.EventServerErrorInfo,
+			Timestamp: now,
+			Data:      monitor.ServerErrorData{Message: content},
 		})
 	}
 

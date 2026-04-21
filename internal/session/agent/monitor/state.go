@@ -44,6 +44,7 @@ const (
 	SubStateUsageLimit                          // API usage limit reached, waiting for reset
 	SubStateBlockedOnPermission                 // human must approve a permission request
 	SubStateAuthError                           // OAuth token expired or invalid
+	SubStateServerError                         // API server error (5xx), auto-clears on success
 )
 
 // String returns a human-readable name for the sub-state.
@@ -65,6 +66,8 @@ func (ss SubState) String() string {
 		return "blocked_on_permission"
 	case SubStateAuthError:
 		return "auth_error"
+	case SubStateServerError:
+		return "server_error"
 	default:
 		return ""
 	}
@@ -117,6 +120,8 @@ func FormatStateLabel(state, subState string, toolName ...string) string {
 		pretty = "usage limit"
 	case "auth_error":
 		pretty = "auth error"
+	case "server_error":
+		pretty = "server error"
 	default:
 		pretty = subState
 	}
