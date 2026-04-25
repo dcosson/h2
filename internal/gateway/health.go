@@ -39,6 +39,8 @@ type Request struct {
 	RuntimeConfig *config.RuntimeConfig `json:"runtime_config,omitempty"`
 	Resume        bool                  `json:"resume,omitempty"`
 	AgentName     string                `json:"agent_name,omitempty"`
+	LaunchEnv     map[string]string     `json:"launch_env,omitempty"`
+	RoleEnv       map[string]string     `json:"role_env,omitempty"`
 }
 
 type Response struct {
@@ -141,6 +143,8 @@ func (s *Server) handleConn(conn net.Conn) {
 			SessionDir:    req.SessionDir,
 			RuntimeConfig: req.RuntimeConfig,
 			Resume:        false,
+			LaunchEnv:     req.LaunchEnv,
+			RoleEnv:       req.RoleEnv,
 		})
 		if err != nil {
 			writeResponse(enc, Response{OK: false, Error: err.Error()})
@@ -152,6 +156,8 @@ func (s *Server) handleConn(conn net.Conn) {
 			SessionDir:    req.SessionDir,
 			RuntimeConfig: req.RuntimeConfig,
 			Resume:        true,
+			LaunchEnv:     req.LaunchEnv,
+			RoleEnv:       req.RoleEnv,
 		})
 		if err != nil {
 			writeResponse(enc, Response{OK: false, Error: err.Error()})
@@ -216,6 +222,8 @@ func StartSession(ctx context.Context, socketPath string, req StartSessionReques
 		SessionDir:    req.SessionDir,
 		RuntimeConfig: req.RuntimeConfig,
 		Resume:        false,
+		LaunchEnv:     req.LaunchEnv,
+		RoleEnv:       req.RoleEnv,
 	})
 	if err != nil {
 		return nil, err
@@ -233,6 +241,8 @@ func ResumeSession(ctx context.Context, socketPath string, req StartSessionReque
 		SessionDir:    req.SessionDir,
 		RuntimeConfig: req.RuntimeConfig,
 		Resume:        true,
+		LaunchEnv:     req.LaunchEnv,
+		RoleEnv:       req.RoleEnv,
 	})
 	if err != nil {
 		return nil, err

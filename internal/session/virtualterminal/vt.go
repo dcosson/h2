@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -113,23 +114,20 @@ func (vt *VT) KillChild() {
 func (vt *VT) StartPTY(command string, args []string, childRows, cols int, extraEnv map[string]string) error {
 	vt.Cmd = exec.Command(command, args...)
 	if len(extraEnv) > 0 {
-		// Build new env, filtering out keys we're overriding
-		env := make([]string, 0, len(os.Environ())+len(extraEnv))
-		for _, e := range os.Environ() {
-			key := e
-			if idx := strings.Index(e, "="); idx >= 0 {
-				key = e[:idx]
-			}
-			if _, override := extraEnv[key]; !override {
-				env = append(env, e)
-			}
-		}
-		// Add our overrides
-		for k, v := range extraEnv {
-			env = append(env, k+"="+v)
-		}
-		vt.Cmd.Env = env
+		vt.Cmd.Env = MergeEnv(os.Environ(), extraEnv)
 	}
+	return vt.startPTY(childRows, cols)
+}
+
+// StartPTYWithEnvMap starts the child with exactly env plus command args. It
+// does not inherit os.Environ and is used by gateway-managed sessions.
+func (vt *VT) StartPTYWithEnvMap(command string, args []string, childRows, cols int, env map[string]string) error {
+	vt.Cmd = exec.Command(command, args...)
+	vt.Cmd.Env = EnvMapToList(env)
+	return vt.startPTY(childRows, cols)
+}
+
+func (vt *VT) startPTY(childRows, cols int) error {
 	var err error
 	vt.Ptm, err = pty.StartWithSize(vt.Cmd, &pty.Winsize{
 		Rows: uint16(childRows),
@@ -139,6 +137,37 @@ func (vt *VT) StartPTY(command string, args []string, childRows, cols int, extra
 		return fmt.Errorf("start command: %w", err)
 	}
 	return nil
+}
+
+func MergeEnv(base []string, overrides map[string]string) []string {
+	env := make(map[string]string, len(base)+len(overrides))
+	for _, entry := range base {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok && key != "" {
+			env[key] = value
+		}
+	}
+	for key, value := range overrides {
+		if key != "" {
+			env[key] = value
+		}
+	}
+	return EnvMapToList(env)
+}
+
+func EnvMapToList(env map[string]string) []string {
+	keys := make([]string, 0, len(env))
+	for key := range env {
+		if key != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	result := make([]string, 0, len(keys))
+	for _, key := range keys {
+		result = append(result, key+"="+env[key])
+	}
+	return result
 }
 
 // PipeOutput reads child PTY output into the virtual terminal and calls

@@ -12,6 +12,7 @@ import (
 type ManagedOpts struct {
 	SessionDir string
 	Resume     bool
+	ChildEnv   map[string]string
 }
 
 // ManagedRuntime owns one session without creating a per-agent socket. The
@@ -28,8 +29,10 @@ type ManagedRuntime struct {
 }
 
 func NewManagedRuntime(rc *config.RuntimeConfig, opts ManagedOpts) *ManagedRuntime {
+	s := newRuntimeSession(opts.SessionDir, rc, opts.Resume)
+	s.BaseEnv = copyEnvMap(opts.ChildEnv)
 	return &ManagedRuntime{
-		Session: newRuntimeSession(opts.SessionDir, rc, opts.Resume),
+		Session: s,
 		done:    make(chan error, 1),
 	}
 }
@@ -82,4 +85,15 @@ func (r *ManagedRuntime) Stop() {
 
 func (r *ManagedRuntime) Status() *message.AgentInfo {
 	return r.Session.AgentInfo(r.Session.StartTime, r.Session.RC.Pod)
+}
+
+func copyEnvMap(env map[string]string) map[string]string {
+	if env == nil {
+		return nil
+	}
+	copy := make(map[string]string, len(env))
+	for key, value := range env {
+		copy[key] = value
+	}
+	return copy
 }

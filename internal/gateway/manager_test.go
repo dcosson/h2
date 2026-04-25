@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -137,6 +138,54 @@ func TestManagerChildExitKeepsDesiredRunning(t *testing.T) {
 	}
 }
 
+func TestManagerPassesAllowedLaunchEnvToChild(t *testing.T) {
+	setupGatewayTestH2Dir(t)
+	t.Setenv("CLAUDECODE", "supervisor-parent-agent")
+
+	outPath := filepath.Join(t.TempDir(), "child-env.txt")
+	sessionDir := filepath.Join(config.ConfigDir(), "sessions", "managed-env")
+	rc := gatewayTestRC("managed-env", "sh", []string{"-c", "printf '%s|%s|%s|%s' \"$OPENAI_API_KEY\" \"$ROLE_ONLY\" \"$CLAUDECODE\" \"$UNRELATED\" > " + outPath})
+	writeGatewayTestRC(t, sessionDir, rc)
+
+	manager := NewManager(ManagerOpts{Generation: "test-generation"})
+	if _, err := manager.StartSession(StartSessionRequest{
+		SessionDir:    sessionDir,
+		RuntimeConfig: rc,
+		LaunchEnv: map[string]string{
+			"OPENAI_API_KEY": "launch-secret",
+			"CLAUDECODE":     "blocked-parent-agent",
+			"UNRELATED":      "blocked-unrelated",
+		},
+		RoleEnv: map[string]string{
+			"ROLE_ONLY": "role-value",
+		},
+	}); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = manager.StopSession("managed-env")
+		shutdownManager(t, manager)
+	})
+
+	got := waitForFile(t, outPath)
+	parts := strings.Split(got, "|")
+	if len(parts) != 4 {
+		t.Fatalf("child env output = %q", got)
+	}
+	if parts[0] != "launch-secret" {
+		t.Fatalf("OPENAI_API_KEY = %q, want launch-secret", parts[0])
+	}
+	if parts[1] != "role-value" {
+		t.Fatalf("ROLE_ONLY = %q, want role-value", parts[1])
+	}
+	if parts[2] != "" {
+		t.Fatalf("CLAUDECODE = %q, want empty", parts[2])
+	}
+	if parts[3] != "" {
+		t.Fatalf("UNRELATED = %q, want empty", parts[3])
+	}
+}
+
 func TestManagerRejectsDuplicateManagedSession(t *testing.T) {
 	setupGatewayTestH2Dir(t)
 
@@ -155,6 +204,22 @@ func TestManagerRejectsDuplicateManagedSession(t *testing.T) {
 	if _, err := manager.StartSession(StartSessionRequest{SessionDir: sessionDir, RuntimeConfig: rc}); err == nil {
 		t.Fatal("expected duplicate StartSession to fail")
 	}
+}
+
+func waitForFile(t *testing.T, path string) string {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			return string(data)
+		}
+		lastErr = err
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("file %s not written: %v", path, lastErr)
+	return ""
 }
 
 func setupGatewayTestH2Dir(t *testing.T) {

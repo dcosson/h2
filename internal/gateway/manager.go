@@ -35,6 +35,8 @@ type StartSessionRequest struct {
 	SessionDir    string
 	RuntimeConfig *config.RuntimeConfig
 	Resume        bool
+	LaunchEnv     map[string]string
+	RoleEnv       map[string]string
 }
 
 type SessionStatus struct {
@@ -113,11 +115,16 @@ func (m *Manager) StartSession(req StartSessionRequest) (*SessionStatus, error) 
 		return nil, fmt.Errorf("session %q is already managed by gateway", req.RuntimeConfig.AgentName)
 	}
 	rc := *req.RuntimeConfig
+	childEnv := m.childEnv(req.LaunchEnv, req.RoleEnv)
 	entry := &managedSession{
 		sessionDir: req.SessionDir,
 		rc:         &rc,
-		runtime:    session.NewManagedRuntime(&rc, session.ManagedOpts{SessionDir: req.SessionDir, Resume: req.Resume}),
-		done:       make(chan struct{}),
+		runtime: session.NewManagedRuntime(&rc, session.ManagedOpts{
+			SessionDir: req.SessionDir,
+			Resume:     req.Resume,
+			ChildEnv:   childEnv,
+		}),
+		done: make(chan struct{}),
 	}
 	m.sessions[rc.AgentName] = entry
 	m.mu.Unlock()
@@ -148,6 +155,22 @@ func (m *Manager) StartSession(req StartSessionRequest) (*SessionStatus, error) 
 
 	go m.watchSession(entry)
 	return entry.status(), nil
+}
+
+func (m *Manager) childEnv(launchEnv, roleEnv map[string]string) map[string]string {
+	var runtimeEnv map[string]string
+	var configuredPassthrough []string
+	if cfg, err := config.Load(); err == nil && cfg.Runtime != nil {
+		runtimeEnv = cfg.Runtime.Env
+		configuredPassthrough = cfg.Runtime.EnvPassthrough
+	}
+	passthrough := filterAllowed(launchEnv, configuredPassthrough)
+	return ComposeChildEnvMap(ChildEnvSpec{
+		SupervisorEnv:  os.Environ(),
+		RuntimeEnv:     runtimeEnv,
+		RoleEnv:        roleEnv,
+		EnvPassthrough: passthrough,
+	})
 }
 
 func (m *Manager) StopSession(agentName string) error {

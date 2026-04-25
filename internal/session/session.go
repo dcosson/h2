@@ -58,6 +58,9 @@ type Session struct {
 
 	// ExtraEnv holds additional environment variables to pass to the child process.
 	ExtraEnv map[string]string
+	// BaseEnv is the complete non-harness child environment for gateway-managed
+	// sessions. When set, child launch does not inherit os.Environ.
+	BaseEnv map[string]string
 
 	// Daemon holds the networking/attach layer (nil in interactive mode).
 	Daemon    *Daemon
@@ -186,6 +189,27 @@ func (s *Session) setupAgent() error {
 	}
 
 	return nil
+}
+
+func (s *Session) childEnv() map[string]string {
+	if s.BaseEnv == nil {
+		return s.ExtraEnv
+	}
+	env := make(map[string]string, len(s.BaseEnv)+len(s.ExtraEnv))
+	for key, value := range s.BaseEnv {
+		env[key] = value
+	}
+	for key, value := range s.ExtraEnv {
+		env[key] = value
+	}
+	return env
+}
+
+func (s *Session) startChildPTY(rows, cols int) error {
+	if s.BaseEnv != nil {
+		return s.VT.StartPTYWithEnvMap(s.RC.Command, s.childArgs(), rows, cols, s.childEnv())
+	}
+	return s.VT.StartPTY(s.RC.Command, s.childArgs(), rows, cols, s.ExtraEnv)
 }
 
 // childArgs returns the command args, prepending any adapter-supplied args
@@ -419,7 +443,7 @@ func (s *Session) RunDaemon() error {
 	}
 
 	// Start child in a PTY.
-	if err := s.VT.StartPTY(s.RC.Command, s.childArgs(), s.VT.ChildRows, s.VT.Cols, s.ExtraEnv); err != nil {
+	if err := s.startChildPTY(s.VT.ChildRows, s.VT.Cols); err != nil {
 		return err
 	}
 	// Don't forward requests to stdout in daemon mode - there's no terminal.
@@ -505,7 +529,7 @@ func (s *Session) RunInteractive() error {
 	s.ExtraEnv["H2_ACTOR"] = s.Name()
 
 	// Start child in a PTY.
-	if err := s.VT.StartPTY(s.RC.Command, s.childArgs(), s.VT.ChildRows, cols, s.ExtraEnv); err != nil {
+	if err := s.startChildPTY(s.VT.ChildRows, cols); err != nil {
 		return err
 	}
 	s.VT.Vt.ForwardRequests = os.Stdout
@@ -599,7 +623,7 @@ func (s *Session) lifecycleLoop(stopStatus chan struct{}, interactive bool) erro
 				}
 			}
 
-			if err := s.VT.StartPTY(s.RC.Command, s.childArgs(), s.VT.ChildRows, s.VT.Cols, s.ExtraEnv); err != nil {
+			if err := s.startChildPTY(s.VT.ChildRows, s.VT.Cols); err != nil {
 				close(stopStatus)
 				s.Stop()
 				return err
