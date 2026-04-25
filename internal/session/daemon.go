@@ -1,7 +1,6 @@
 package session
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"net"
@@ -11,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"h2/internal/automation"
 	"h2/internal/config"
 	"h2/internal/session/agent/monitor"
 	"h2/internal/session/message"
@@ -20,11 +18,10 @@ import (
 
 // Daemon manages the Unix socket listener and attach protocol for a Session.
 type Daemon struct {
-	Session        *Session
-	Listener       net.Listener
-	StartTime      time.Time
-	TriggerEngine  *automation.TriggerEngine
-	ScheduleEngine *automation.ScheduleEngine
+	Session    *Session
+	Listener   net.Listener
+	StartTime  time.Time
+	Automation *RuntimeAutomation
 }
 
 // sessionEnqueuer adapts a Session's MessageQueue to the automation.MessageEnqueuer interface.
@@ -80,58 +77,27 @@ func RunDaemon(sessionDir string, rc *config.RuntimeConfig, resume bool) error {
 		os.Remove(sockPath)
 	}()
 
-	// Create automation engines with base env vars for conditions and actions.
-	baseEnv := map[string]string{
-		"H2_ACTOR": rc.AgentName,
-	}
-	if rc.RoleName != "" {
-		baseEnv["H2_ROLE"] = rc.RoleName
-	}
-	if sessionDir != "" {
-		baseEnv["H2_SESSION_DIR"] = sessionDir
-	}
-
-	stateProvider := func() (string, string) {
-		st, sub := s.State()
-		return st.String(), sub.String()
-	}
-
-	enqueuer := &sessionEnqueuer{queue: s.Queue, agentName: rc.AgentName}
-	runner := automation.NewActionRunner(enqueuer, baseEnv, rc.CWD)
-	triggerEngine := automation.NewTriggerEngine(runner, stateProvider)
-	scheduleEngine := automation.NewScheduleEngine(runner, automation.WithStateProvider(stateProvider))
-
-	// Subscribe TriggerEngine to monitor events.
-	eventCh := s.monitor.Subscribe()
-
-	d := &Daemon{
-		Session:        s,
-		Listener:       ln,
-		StartTime:      s.StartTime,
-		TriggerEngine:  triggerEngine,
-		ScheduleEngine: scheduleEngine,
-	}
-	s.Daemon = d
-
-	// Load role-defined triggers and schedules from RuntimeConfig.
-	if err := d.loadRoleAutomations(rc); err != nil {
+	automationRuntime, err := newRuntimeAutomation(s, sessionDir, rc)
+	if err != nil {
 		ln.Close()
 		os.Remove(sockPath)
 		return fmt.Errorf("load role automations: %w", err)
 	}
 
-	// Start automation engines.
-	automationCtx, automationCancel := context.WithCancel(context.Background())
-	go triggerEngine.Run(automationCtx, eventCh)
-	go scheduleEngine.Run(automationCtx)
+	d := &Daemon{
+		Session:    s,
+		Listener:   ln,
+		StartTime:  s.StartTime,
+		Automation: automationRuntime,
+	}
+	s.Daemon = d
 
 	// Start socket listener.
 	go d.acceptLoop()
 
 	// Run session in daemon mode (blocks until exit).
 	err = s.RunDaemon()
-	automationCancel()
-	runner.Wait()
+	automationRuntime.Stop()
 	return err
 }
 
@@ -259,74 +225,7 @@ func wireRuntimePersistenceCallbacks(s *Session, sessionDir string, rc *config.R
 // re-registers them from the current RuntimeConfig. Called after configRelaunch
 // to pick up changes to the session metadata.
 func (d *Daemon) ReloadAutomations() error {
-	d.TriggerEngine.Clear()
-	d.ScheduleEngine.Clear()
-	return d.loadRoleAutomations(d.Session.RC)
-}
-
-// loadRoleAutomations registers triggers and schedules from the RuntimeConfig
-// (originally defined in the role YAML). Called during daemon startup.
-func (d *Daemon) loadRoleAutomations(rc *config.RuntimeConfig) error {
-	now := time.Now()
-	for _, ts := range rc.Triggers {
-		t := &automation.Trigger{
-			ID:        ts.ID,
-			Name:      ts.Name,
-			Event:     ts.Event,
-			State:     ts.State,
-			SubState:  ts.SubState,
-			Condition: ts.Condition,
-			Action: automation.Action{
-				Exec:     ts.Exec,
-				Message:  ts.Message,
-				From:     ts.From,
-				Priority: ts.Priority,
-			},
-			MaxFirings: ts.MaxFirings,
-		}
-		if ts.ExpiresAt != "" {
-			parsed, err := automation.ResolveExpiresAt(ts.ExpiresAt, now)
-			if err != nil {
-				return fmt.Errorf("trigger %q: %w", ts.ID, err)
-			}
-			t.ExpiresAt = parsed
-		}
-		if ts.Cooldown != "" {
-			parsed, err := time.ParseDuration(ts.Cooldown)
-			if err != nil {
-				return fmt.Errorf("trigger %q: parse cooldown %q: %w", ts.ID, ts.Cooldown, err)
-			}
-			if parsed < 0 {
-				return fmt.Errorf("trigger %q: cooldown must be non-negative, got %s", ts.ID, parsed)
-			}
-			t.Cooldown = parsed
-		}
-		if !d.TriggerEngine.Add(t) {
-			return fmt.Errorf("duplicate trigger ID %q in role config", ts.ID)
-		}
-	}
-
-	for _, ss := range rc.Schedules {
-		mode, _ := automation.ParseConditionMode(ss.ConditionMode)
-		s := &automation.Schedule{
-			ID:            ss.ID,
-			Name:          ss.Name,
-			Start:         ss.Start,
-			RRule:         ss.RRule,
-			Condition:     ss.Condition,
-			ConditionMode: mode,
-			Action: automation.Action{
-				Exec:     ss.Exec,
-				Message:  ss.Message,
-				From:     ss.From,
-				Priority: ss.Priority,
-			},
-		}
-		if err := d.ScheduleEngine.Add(s); err != nil {
-			return fmt.Errorf("register schedule %q: %w", ss.ID, err)
-		}
-	}
-	return nil
+	return d.Automation.Reload(d.Session.RC)
 }
 
 // AgentInfo returns status information about this daemon.

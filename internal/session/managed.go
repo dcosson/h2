@@ -18,7 +18,8 @@ type ManagedOpts struct {
 // gateway uses this as the process/lifecycle seam while session.Session keeps
 // terminal, queue, monitor, and harness behavior.
 type ManagedRuntime struct {
-	Session *Session
+	Session    *Session
+	Automation *RuntimeAutomation
 
 	done     chan error
 	startMu  sync.Mutex
@@ -40,6 +41,11 @@ func (r *ManagedRuntime) Start(ctx context.Context) error {
 	if r.started {
 		return fmt.Errorf("managed runtime already started")
 	}
+	automationRuntime, err := newRuntimeAutomation(r.Session, r.Session.SessionDir, r.Session.RC)
+	if err != nil {
+		return fmt.Errorf("load role automations: %w", err)
+	}
+	r.Automation = automationRuntime
 	r.started = true
 
 	go func() {
@@ -49,7 +55,9 @@ func (r *ManagedRuntime) Start(ctx context.Context) error {
 			<-stopCtx.Done()
 			r.Stop()
 		}()
-		r.done <- r.Session.RunDaemon()
+		err := r.Session.RunDaemon()
+		automationRuntime.Stop()
+		r.done <- err
 	}()
 	return nil
 }
