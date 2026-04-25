@@ -50,8 +50,10 @@ func TestWriteReadRuntimeConfig_RoundTrip(t *testing.T) {
 				InstructionsBody:  "Review tool calls carefully.",
 			},
 		},
-		Overrides: map[string]string{"worktree_enabled": "true"},
-		StartedAt: "2026-03-05T10:00:00Z",
+		Overrides:          map[string]string{"worktree_enabled": "true"},
+		PassthroughEnvKeys: []string{"OPENAI_API_KEY", "TEAM_CONTEXT"},
+		ResumeEnvWarning:   "launch-scoped env passthrough may not be available for unattended resume: OPENAI_API_KEY",
+		StartedAt:          "2026-03-05T10:00:00Z",
 	}
 
 	if err := WriteRuntimeConfig(dir, rc); err != nil {
@@ -123,6 +125,12 @@ func TestWriteReadRuntimeConfig_RoundTrip(t *testing.T) {
 	}
 	if len(got.Overrides) != 1 || got.Overrides["worktree_enabled"] != "true" {
 		t.Errorf("Overrides = %v, want %v", got.Overrides, rc.Overrides)
+	}
+	if len(got.PassthroughEnvKeys) != len(rc.PassthroughEnvKeys) || got.PassthroughEnvKeys[0] != rc.PassthroughEnvKeys[0] || got.PassthroughEnvKeys[1] != rc.PassthroughEnvKeys[1] {
+		t.Errorf("PassthroughEnvKeys = %v, want %v", got.PassthroughEnvKeys, rc.PassthroughEnvKeys)
+	}
+	if got.ResumeEnvWarning != rc.ResumeEnvWarning {
+		t.Errorf("ResumeEnvWarning = %q, want %q", got.ResumeEnvWarning, rc.ResumeEnvWarning)
 	}
 	if got.StartedAt != rc.StartedAt {
 		t.Errorf("StartedAt = %q, want %q", got.StartedAt, rc.StartedAt)

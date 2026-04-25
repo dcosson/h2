@@ -66,6 +66,11 @@ type RuntimeConfig struct {
 	// Overrides (recorded for display/debugging).
 	Overrides map[string]string `json:"overrides,omitempty"`
 
+	// Gateway-managed environment diagnostics. PassthroughEnvKeys stores key
+	// names only; values may be secrets and must not be persisted here.
+	PassthroughEnvKeys []string `json:"passthrough_env_keys,omitempty"`
+	ResumeEnvWarning   string   `json:"resume_env_warning,omitempty"`
+
 	// Timestamps.
 	StartedAt string `json:"started_at"`
 

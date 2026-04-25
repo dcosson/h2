@@ -18,11 +18,17 @@ const markerFile = ".h2-dir.txt"
 type Config struct {
 	Bridges map[string]*BridgesConfig `yaml:"bridges"` // named bridge configs
 	Users   map[string]*UserConfig    `yaml:"users"`
+	Runtime *RuntimeEnvConfig         `yaml:"runtime,omitempty"`
 }
 
 type UserConfig struct {
 	// UserConfig holds per-user settings (non-bridge).
 	// Bridge configs are now at the top level.
+}
+
+type RuntimeEnvConfig struct {
+	Env            map[string]string `yaml:"env,omitempty"`
+	EnvPassthrough []string          `yaml:"env_passthrough,omitempty"`
 }
 
 type BridgesConfig struct {

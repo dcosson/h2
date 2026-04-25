@@ -78,6 +78,46 @@ users:
 	}
 }
 
+func TestLoadFrom_RuntimeEnvConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	data := `runtime:
+  env:
+    PATH: "/opt/h2/bin:/usr/bin"
+    TEAM: backend
+  env_passthrough:
+    - TEAM_CONTEXT
+    - EXTRA_TOKEN
+`
+	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	if cfg.Runtime == nil {
+		t.Fatal("expected runtime config")
+	}
+	if cfg.Runtime.Env["PATH"] != "/opt/h2/bin:/usr/bin" {
+		t.Errorf("runtime.env.PATH = %q", cfg.Runtime.Env["PATH"])
+	}
+	if cfg.Runtime.Env["TEAM"] != "backend" {
+		t.Errorf("runtime.env.TEAM = %q", cfg.Runtime.Env["TEAM"])
+	}
+	wantPassthrough := []string{"TEAM_CONTEXT", "EXTRA_TOKEN"}
+	if len(cfg.Runtime.EnvPassthrough) != len(wantPassthrough) {
+		t.Fatalf("env_passthrough = %v, want %v", cfg.Runtime.EnvPassthrough, wantPassthrough)
+	}
+	for i, want := range wantPassthrough {
+		if cfg.Runtime.EnvPassthrough[i] != want {
+			t.Errorf("env_passthrough[%d] = %q, want %q", i, cfg.Runtime.EnvPassthrough[i], want)
+		}
+	}
+}
+
 func TestLoadFrom_MissingFile(t *testing.T) {
 	cfg, err := LoadFrom("/nonexistent/path/config.yaml")
 	if err != nil {

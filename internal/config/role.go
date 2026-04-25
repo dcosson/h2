@@ -295,6 +295,7 @@ type Role struct {
 	Heartbeat               *HeartbeatConfig       `yaml:"heartbeat,omitempty"`
 	Triggers                []TriggerYAMLSpec      `yaml:"triggers,omitempty"`
 	Schedules               []ScheduleYAMLSpec     `yaml:"schedules,omitempty"`
+	Env                     map[string]string      `yaml:"env,omitempty"`
 	Hooks                   yaml.Node              `yaml:"hooks,omitempty"`     // passed through as-is to settings.json
 	Settings                yaml.Node              `yaml:"settings,omitempty"`  // extra settings.json keys
 	Variables               map[string]tmpl.VarDef `yaml:"variables,omitempty"` // template variable definitions
