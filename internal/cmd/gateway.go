@@ -22,6 +22,7 @@ func newGatewayCmd() *cobra.Command {
 	}
 	cmd.AddCommand(
 		newGatewayRunCmd(),
+		newGatewayStartCmd(),
 		newGatewayStatusCmd(),
 	)
 	return cmd
@@ -48,6 +49,27 @@ func newGatewayRunCmd() *cobra.Command {
 				return fmt.Errorf("run gateway: %w", err)
 			}
 			return nil
+		},
+	}
+	return cmd
+}
+
+func newGatewayStartCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "start",
+		Short: "Start the h2 gateway in the background if needed",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			health, err := gateway.EnsureRunning(cmd.Context(), gateway.EnsureOpts{
+				H2Dir:      config.ConfigDir(),
+				SocketPath: socketdir.GatewayPath(),
+			})
+			if err != nil {
+				return fmt.Errorf("gateway start: %w", err)
+			}
+			enc := json.NewEncoder(cmd.OutOrStdout())
+			enc.SetIndent("", "  ")
+			return enc.Encode(health)
 		},
 	}
 	return cmd

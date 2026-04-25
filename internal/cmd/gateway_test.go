@@ -59,6 +59,50 @@ func TestGatewayStatusCmd(t *testing.T) {
 	}
 }
 
+func TestGatewayStartCmdUsesExistingGateway(t *testing.T) {
+	h2Root := setupGatewayCmdH2Dir(t)
+	socketPath := socketdir.GatewayPath()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server := gateway.NewServer(gateway.ServerOpts{
+		H2Dir:      h2Root,
+		SocketPath: socketPath,
+		Version:    "test-version",
+	})
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.Run(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-errCh:
+		case <-time.After(2 * time.Second):
+			t.Fatal("gateway server did not stop")
+		}
+	})
+	waitForGatewayCmdHealth(t, socketPath)
+
+	var out bytes.Buffer
+	cmd := newGatewayStartCmd()
+	cmd.SetOut(&out)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("gateway start: %v", err)
+	}
+
+	var health gateway.Health
+	if err := json.Unmarshal(out.Bytes(), &health); err != nil {
+		t.Fatalf("parse start output %q: %v", out.String(), err)
+	}
+	if health.H2Dir != h2Root {
+		t.Errorf("H2Dir = %q, want %q", health.H2Dir, h2Root)
+	}
+	if health.Version != "test-version" {
+		t.Errorf("Version = %q", health.Version)
+	}
+}
+
 func TestGatewayStatusCmdNoGateway(t *testing.T) {
 	setupGatewayCmdH2Dir(t)
 

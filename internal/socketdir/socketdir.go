@@ -136,7 +136,9 @@ func GatewayPath() string {
 	return GatewayPathIn(Dir())
 }
 
-// GatewayPathIn returns the single gateway socket path within dir.
+// GatewayPathIn returns the single gateway socket path within dir. This
+// intentionally does not use Format(TypeGateway, "gateway"): there is only one
+// gateway per h2 dir, so the steady-state socket is gateway.sock.
 func GatewayPathIn(dir string) string {
 	return filepath.Join(dir, "gateway.sock")
 }
