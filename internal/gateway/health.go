@@ -173,6 +173,12 @@ func (s *Server) handleConn(conn net.Conn) {
 			return
 		}
 		writeResponse(enc, Response{OK: true})
+	case "stop_all_sessions":
+		if err := s.manager.StopAllSessions(context.Background()); err != nil {
+			writeResponse(enc, Response{OK: false, Error: err.Error()})
+			return
+		}
+		writeResponse(enc, Response{OK: true})
 	default:
 		writeResponse(enc, Response{OK: false, Error: fmt.Sprintf("unsupported gateway request type %q", req.Type)})
 	}
@@ -265,6 +271,14 @@ func StopSession(ctx context.Context, socketPath, agentName string) error {
 		Version:   ProtocolVersion,
 		Type:      "stop_session",
 		AgentName: agentName,
+	})
+	return err
+}
+
+func StopAllSessions(ctx context.Context, socketPath string) error {
+	_, err := roundTrip(ctx, socketPath, Request{
+		Version: ProtocolVersion,
+		Type:    "stop_all_sessions",
 	})
 	return err
 }

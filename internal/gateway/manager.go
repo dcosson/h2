@@ -171,6 +171,35 @@ func (m *Manager) StopSession(agentName string) error {
 	return nil
 }
 
+func (m *Manager) StopAllSessions(ctx context.Context) error {
+	m.mu.Lock()
+	entries := make([]*managedSession, 0, len(m.sessions))
+	for _, entry := range m.sessions {
+		entry.stopReason = "user_stop"
+		entries = append(entries, entry)
+	}
+	m.mu.Unlock()
+
+	for _, entry := range entries {
+		if err := entry.updateMetadata(func(current *config.RuntimeConfig) {
+			current.GatewayDesiredState = GatewayDesiredStopped
+			current.LastExitReason = "user_stop_all_requested"
+			current.LastStateAt = nowRFC3339()
+		}); err != nil {
+			return err
+		}
+		entry.runtime.Stop()
+	}
+	for _, entry := range entries {
+		select {
+		case <-entry.done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
 func (m *Manager) Status(agentName string) (*SessionStatus, error) {
 	m.mu.Lock()
 	entry := m.sessions[agentName]

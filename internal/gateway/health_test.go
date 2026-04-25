@@ -175,6 +175,63 @@ func TestServerSessionRPCs(t *testing.T) {
 	}
 }
 
+func TestServerStopAllSessionsRPC(t *testing.T) {
+	setupGatewayTestH2Dir(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	socketPath := shortSocketPath(t)
+	manager := NewManager(ManagerOpts{Generation: "rpc-generation"})
+	server := NewServer(ServerOpts{
+		H2Dir:      config.ConfigDir(),
+		SocketPath: socketPath,
+		Manager:    manager,
+	})
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.Run(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("server Run after cancel: %v", err)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("server did not stop after cancel")
+		}
+	})
+	waitForHealth(t, socketPath)
+
+	sessionDirA := filepath.Join(config.ConfigDir(), "sessions", "rpc-stop-all-a")
+	rcA := gatewayTestRC("rpc-stop-all-a", "sh", []string{"-c", "sleep 30"})
+	writeGatewayTestRC(t, sessionDirA, rcA)
+	sessionDirB := filepath.Join(config.ConfigDir(), "sessions", "rpc-stop-all-b")
+	rcB := gatewayTestRC("rpc-stop-all-b", "sh", []string{"-c", "sleep 30"})
+	writeGatewayTestRC(t, sessionDirB, rcB)
+
+	if _, err := StartSession(context.Background(), socketPath, StartSessionRequest{SessionDir: sessionDirA, RuntimeConfig: rcA}); err != nil {
+		t.Fatalf("StartSession A: %v", err)
+	}
+	if _, err := StartSession(context.Background(), socketPath, StartSessionRequest{SessionDir: sessionDirB, RuntimeConfig: rcB}); err != nil {
+		t.Fatalf("StartSession B: %v", err)
+	}
+	waitForRuntimeState(t, sessionDirA, GatewayRuntimeRunning)
+	waitForRuntimeState(t, sessionDirB, GatewayRuntimeRunning)
+
+	if err := StopAllSessions(context.Background(), socketPath); err != nil {
+		t.Fatalf("StopAllSessions: %v", err)
+	}
+	gotA := waitForRuntimeState(t, sessionDirA, GatewayRuntimeStopped)
+	gotB := waitForRuntimeState(t, sessionDirB, GatewayRuntimeStopped)
+	if gotA.GatewayDesiredState != GatewayDesiredStopped || gotB.GatewayDesiredState != GatewayDesiredStopped {
+		t.Fatalf("desired states = %q/%q, want stopped/stopped", gotA.GatewayDesiredState, gotB.GatewayDesiredState)
+	}
+}
+
 func shortSocketPath(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp(os.TempDir(), "h2gt-")

@@ -73,6 +73,45 @@ func TestManagerStopSessionMarksDesiredStopped(t *testing.T) {
 	}
 }
 
+func TestManagerStopAllSessionsMarksDesiredStopped(t *testing.T) {
+	setupGatewayTestH2Dir(t)
+
+	sessionDirA := filepath.Join(config.ConfigDir(), "sessions", "managed-stop-all-a")
+	rcA := gatewayTestRC("managed-stop-all-a", "sh", []string{"-c", "sleep 30"})
+	writeGatewayTestRC(t, sessionDirA, rcA)
+	sessionDirB := filepath.Join(config.ConfigDir(), "sessions", "managed-stop-all-b")
+	rcB := gatewayTestRC("managed-stop-all-b", "sh", []string{"-c", "sleep 30"})
+	writeGatewayTestRC(t, sessionDirB, rcB)
+
+	manager := NewManager(ManagerOpts{Generation: "test-generation"})
+	if _, err := manager.StartSession(StartSessionRequest{SessionDir: sessionDirA, RuntimeConfig: rcA}); err != nil {
+		t.Fatalf("StartSession A: %v", err)
+	}
+	if _, err := manager.StartSession(StartSessionRequest{SessionDir: sessionDirB, RuntimeConfig: rcB}); err != nil {
+		t.Fatalf("StartSession B: %v", err)
+	}
+	waitForRuntimeState(t, sessionDirA, GatewayRuntimeRunning)
+	waitForRuntimeState(t, sessionDirB, GatewayRuntimeRunning)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := manager.StopAllSessions(ctx); err != nil {
+		t.Fatalf("StopAllSessions: %v", err)
+	}
+
+	gotA := waitForRuntimeState(t, sessionDirA, GatewayRuntimeStopped)
+	if gotA.GatewayDesiredState != GatewayDesiredStopped {
+		t.Fatalf("A desired state = %q, want stopped", gotA.GatewayDesiredState)
+	}
+	gotB := waitForRuntimeState(t, sessionDirB, GatewayRuntimeStopped)
+	if gotB.GatewayDesiredState != GatewayDesiredStopped {
+		t.Fatalf("B desired state = %q, want stopped", gotB.GatewayDesiredState)
+	}
+	if len(manager.List()) != 0 {
+		t.Fatalf("manager list length = %d, want 0", len(manager.List()))
+	}
+}
+
 func TestManagerChildExitKeepsDesiredRunning(t *testing.T) {
 	setupGatewayTestH2Dir(t)
 
