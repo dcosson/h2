@@ -139,6 +139,8 @@ func filterAllowed(env map[string]string, configuredAllowlist []string) map[stri
 
 	filtered := make(map[string]string)
 	for key, value := range env {
+		// Denylist wins over allowlist: h2 parent-agent identity must never
+		// leak through passthrough, even if a config allowlist names it.
 		if _, denied := parentAgentEnvDenylist[key]; denied {
 			continue
 		}
