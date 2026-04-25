@@ -66,6 +66,23 @@ type RuntimeConfig struct {
 	// Overrides (recorded for display/debugging).
 	Overrides map[string]string `json:"overrides,omitempty"`
 
+	// Gateway-managed environment diagnostics. PassthroughEnvKeys stores key
+	// names only; values may be secrets and must not be persisted here.
+	PassthroughEnvKeys []string `json:"passthrough_env_keys,omitempty"`
+	ResumeEnvWarning   string   `json:"resume_env_warning,omitempty"`
+
+	// Gateway-managed lifecycle state. These fields are optional so old session
+	// metadata remains readable; when present, GatewayDesiredState is the source
+	// of truth for restart intent.
+	GatewayPID          int    `json:"gateway_pid,omitempty"`
+	GatewayGeneration   string `json:"gateway_generation,omitempty"`
+	GatewayDesiredState string `json:"gateway_desired_state,omitempty"`
+	GatewayRuntimeState string `json:"gateway_runtime_state,omitempty"`
+	ChildPID            int    `json:"child_pid,omitempty"`
+	ChildPGID           int    `json:"child_pgid,omitempty"`
+	LastExitReason      string `json:"last_exit_reason,omitempty"`
+	LastStateAt         string `json:"last_state_at,omitempty"`
+
 	// Timestamps.
 	StartedAt string `json:"started_at"`
 

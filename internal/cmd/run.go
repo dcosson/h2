@@ -238,15 +238,14 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 			}
 
 			colorHints := detectTerminalHints()
-
-			// Fork a daemon process.
-			if err := forkDaemonFunc(sessionDir, session.TerminalHints{
+			hints := session.TerminalHints{
 				OscFg:     colorHints.OscFg,
 				OscBg:     colorHints.OscBg,
 				ColorFGBG: colorHints.ColorFGBG,
 				Term:      colorHints.Term,
 				ColorTerm: colorHints.ColorTerm,
-			}, false); err != nil {
+			}
+			if err := launchAgentSession(sessionDir, rc, hints, false, detach, nil); err != nil {
 				return err
 			}
 
@@ -347,7 +346,7 @@ func runResume(cmd *cobra.Command, args []string, detach bool, dryRun bool) erro
 	}
 
 	// Update started_at for the new daemon instance.
-	origStartedAt := rc.StartedAt
+	origRC := *rc
 	rc.StartedAt = time.Now().UTC().Format(time.RFC3339)
 
 	if err := config.WriteRuntimeConfig(sessionDir, rc); err != nil {
@@ -355,17 +354,18 @@ func runResume(cmd *cobra.Command, args []string, detach bool, dryRun bool) erro
 	}
 
 	colorHints := detectTerminalHints()
-
-	// Fork daemon with --resume flag. If fork fails, restore the original
-	// started_at so the metadata isn't left in a corrupted state.
-	if err := forkDaemonFunc(sessionDir, session.TerminalHints{
+	hints := session.TerminalHints{
 		OscFg:     colorHints.OscFg,
 		OscBg:     colorHints.OscBg,
 		ColorFGBG: colorHints.ColorFGBG,
 		Term:      colorHints.Term,
 		ColorTerm: colorHints.ColorTerm,
-	}, true); err != nil {
-		rc.StartedAt = origStartedAt
+	}
+
+	// Launch with resume semantics. If launch fails, restore the original
+	// started_at so the metadata isn't left in a corrupted state.
+	if err := launchAgentSession(sessionDir, rc, hints, true, detach, nil); err != nil {
+		*rc = origRC
 		_ = config.WriteRuntimeConfig(sessionDir, rc) // best-effort restore
 		return err
 	}

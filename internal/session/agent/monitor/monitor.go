@@ -21,14 +21,14 @@ type AgentMonitor struct {
 	stateChangedAt time.Time
 	stateCh        chan struct{} // closed on state change
 
-	sessionID          string
-	onSessionStarted   func(SessionStartedData)
-	onUsageLimit       func(UsageLimitData)
+	sessionID            string
+	onSessionStarted     func(SessionStartedData)
+	onUsageLimit         func(UsageLimitData)
 	onAuthError          func(AuthErrorData)
 	onAuthErrorCleared   func()
 	onServerError        func(ServerErrorData)
 	onServerErrorCleared func()
-	model              string
+	model                string
 
 	// Accumulated metrics from events.
 	inputTokens     int64
@@ -47,9 +47,9 @@ type AgentMonitor struct {
 
 	usageLimitResetsAt *time.Time
 	usageLimitMessage  string
-	authErrorMessage    string
-	serverErrorMessage  string
-	serverErrorCode     string
+	authErrorMessage   string
+	serverErrorMessage string
+	serverErrorCode    string
 
 	// subscribers receive a copy of every event processed by the monitor.
 	// Protected by subscribersMu (separate from mu to avoid contention).

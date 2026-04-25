@@ -85,6 +85,27 @@ instructions: |
 	}
 }
 
+func TestLoadRoleFrom_Env(t *testing.T) {
+	yaml := `
+role_name: env-role
+env:
+  FEATURE_FLAG: enabled
+  PATH: /opt/role/bin:/usr/bin
+`
+	path := writeTempFile(t, "env-role.yaml", yaml)
+
+	role, err := LoadRoleFrom(path)
+	if err != nil {
+		t.Fatalf("LoadRoleFrom: %v", err)
+	}
+	if role.Env["FEATURE_FLAG"] != "enabled" {
+		t.Errorf("Env[FEATURE_FLAG] = %q", role.Env["FEATURE_FLAG"])
+	}
+	if role.Env["PATH"] != "/opt/role/bin:/usr/bin" {
+		t.Errorf("Env[PATH] = %q", role.Env["PATH"])
+	}
+}
+
 func TestLoadRoleFrom_ValidationError(t *testing.T) {
 	// Missing role_name.
 	yaml := `

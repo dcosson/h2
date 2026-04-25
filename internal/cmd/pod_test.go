@@ -32,6 +32,7 @@ func setupPodTestEnv(t *testing.T) string {
 
 	t.Setenv("HOME", tmpDir)
 	t.Setenv("H2_ROOT_DIR", filepath.Join(tmpDir, ".h2"))
+	t.Setenv("H2_GATEWAY", "0")
 
 	h2Root := filepath.Join(tmpDir, ".h2")
 	os.MkdirAll(filepath.Join(h2Root, "sockets"), 0o700)

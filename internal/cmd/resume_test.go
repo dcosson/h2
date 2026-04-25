@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"h2/internal/config"
+	"h2/internal/gateway"
 	"h2/internal/session"
 	"h2/internal/session/agent/harness"
 )
@@ -251,6 +253,7 @@ func TestRunResume_MissingHarnessSessionID(t *testing.T) {
 
 func TestRunResume_ForksDaemonWithResumeFlag(t *testing.T) {
 	t.Setenv("CLAUDECODE", "")
+	t.Setenv("H2_GATEWAY", "0")
 
 	name := "resume-test-fork"
 	tmpDir := t.TempDir()
@@ -311,6 +314,61 @@ func TestRunResume_ForksDaemonWithResumeFlag(t *testing.T) {
 	}
 	if rc.Pod != "my-pod" {
 		t.Errorf("Pod = %q, want %q", rc.Pod, "my-pod")
+	}
+}
+
+func TestRunResume_DetachedUsesGateway(t *testing.T) {
+	t.Setenv("CLAUDECODE", "")
+	t.Setenv("H2_GATEWAY", "1")
+	t.Setenv("OPENAI_API_KEY", "resume-launch-key")
+
+	name := "resume-test-gateway"
+	tmpDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmpDir, "claude-config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	sessionDir := writeTestRuntimeConfig(t, name, &config.RuntimeConfig{
+		AgentName:               name,
+		SessionID:               "session-uuid",
+		HarnessSessionID:        "session-uuid",
+		Command:                 "claude",
+		HarnessType:             "claude_code",
+		HarnessConfigPathPrefix: tmpDir,
+		Profile:                 "claude-config",
+		CWD:                     tmpDir,
+		StartedAt:               "2024-01-01T00:00:00Z",
+	})
+
+	var ensureCalled bool
+	var resumeReq gateway.StartSessionRequest
+	restore := stubGatewayLaunch(t)
+	defer restore()
+	gatewayEnsureRunningFunc = func(context.Context, gateway.EnsureOpts) (*gateway.Health, error) {
+		ensureCalled = true
+		return &gateway.Health{}, nil
+	}
+	gatewayResumeSessionFunc = func(_ context.Context, _ string, req gateway.StartSessionRequest) (*gateway.SessionStatus, error) {
+		resumeReq = req
+		return &gateway.SessionStatus{}, nil
+	}
+
+	cmd := newRunCmd()
+	cmd.SetArgs([]string{name, "--resume", "--detach"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ensureCalled {
+		t.Fatal("gateway ensure was not called")
+	}
+	if resumeReq.SessionDir != sessionDir {
+		t.Fatalf("SessionDir = %q, want %q", resumeReq.SessionDir, sessionDir)
+	}
+	if !resumeReq.Resume {
+		t.Fatal("Resume flag was not passed to gateway request")
+	}
+	if resumeReq.LaunchEnv["OPENAI_API_KEY"] != "resume-launch-key" {
+		t.Fatalf("OPENAI_API_KEY passthrough = %q", resumeReq.LaunchEnv["OPENAI_API_KEY"])
 	}
 }
 

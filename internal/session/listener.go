@@ -236,7 +236,8 @@ func (d *Daemon) handleHookEvent(conn net.Conn, req *message.Request) {
 func (d *Daemon) handleTriggerAdd(conn net.Conn, req *message.Request) {
 	defer conn.Close()
 
-	if d.TriggerEngine == nil {
+	triggerEngine := d.triggerEngine()
+	if triggerEngine == nil {
 		message.SendResponse(conn, &message.Response{Error: "trigger engine not initialized"})
 		return
 	}
@@ -250,7 +251,7 @@ func (d *Daemon) handleTriggerAdd(conn net.Conn, req *message.Request) {
 		message.SendResponse(conn, &message.Response{Error: err.Error()})
 		return
 	}
-	if !d.TriggerEngine.Add(t) {
+	if !triggerEngine.Add(t) {
 		message.SendResponse(conn, &message.Response{
 			Error: fmt.Sprintf("trigger ID %q already exists", t.ID),
 		})
@@ -263,12 +264,13 @@ func (d *Daemon) handleTriggerAdd(conn net.Conn, req *message.Request) {
 func (d *Daemon) handleTriggerList(conn net.Conn) {
 	defer conn.Close()
 
-	if d.TriggerEngine == nil {
+	triggerEngine := d.triggerEngine()
+	if triggerEngine == nil {
 		message.SendResponse(conn, &message.Response{OK: true})
 		return
 	}
 
-	triggers := d.TriggerEngine.List()
+	triggers := triggerEngine.List()
 	specs := make([]*message.TriggerSpec, len(triggers))
 	for i := range triggers {
 		specs[i] = specFromTrigger(&triggers[i])
@@ -279,7 +281,8 @@ func (d *Daemon) handleTriggerList(conn net.Conn) {
 func (d *Daemon) handleTriggerRemove(conn net.Conn, req *message.Request) {
 	defer conn.Close()
 
-	if d.TriggerEngine == nil {
+	triggerEngine := d.triggerEngine()
+	if triggerEngine == nil {
 		message.SendResponse(conn, &message.Response{Error: "trigger engine not initialized"})
 		return
 	}
@@ -288,7 +291,7 @@ func (d *Daemon) handleTriggerRemove(conn net.Conn, req *message.Request) {
 		return
 	}
 
-	if !d.TriggerEngine.Remove(req.TriggerID) {
+	if !triggerEngine.Remove(req.TriggerID) {
 		message.SendResponse(conn, &message.Response{
 			Error: fmt.Sprintf("trigger %q not found", req.TriggerID),
 		})
@@ -300,7 +303,8 @@ func (d *Daemon) handleTriggerRemove(conn net.Conn, req *message.Request) {
 func (d *Daemon) handleScheduleAdd(conn net.Conn, req *message.Request) {
 	defer conn.Close()
 
-	if d.ScheduleEngine == nil {
+	scheduleEngine := d.scheduleEngine()
+	if scheduleEngine == nil {
 		message.SendResponse(conn, &message.Response{Error: "schedule engine not initialized"})
 		return
 	}
@@ -310,7 +314,7 @@ func (d *Daemon) handleScheduleAdd(conn net.Conn, req *message.Request) {
 	}
 
 	s := scheduleFromSpec(req.Schedule)
-	if err := d.ScheduleEngine.Add(s); err != nil {
+	if err := scheduleEngine.Add(s); err != nil {
 		message.SendResponse(conn, &message.Response{Error: err.Error()})
 		return
 	}
@@ -321,12 +325,13 @@ func (d *Daemon) handleScheduleAdd(conn net.Conn, req *message.Request) {
 func (d *Daemon) handleScheduleList(conn net.Conn) {
 	defer conn.Close()
 
-	if d.ScheduleEngine == nil {
+	scheduleEngine := d.scheduleEngine()
+	if scheduleEngine == nil {
 		message.SendResponse(conn, &message.Response{OK: true})
 		return
 	}
 
-	schedules := d.ScheduleEngine.List()
+	schedules := scheduleEngine.List()
 	specs := make([]*message.ScheduleSpec, len(schedules))
 	for i, s := range schedules {
 		specs[i] = specFromSchedule(s)
@@ -337,7 +342,8 @@ func (d *Daemon) handleScheduleList(conn net.Conn) {
 func (d *Daemon) handleScheduleRemove(conn net.Conn, req *message.Request) {
 	defer conn.Close()
 
-	if d.ScheduleEngine == nil {
+	scheduleEngine := d.scheduleEngine()
+	if scheduleEngine == nil {
 		message.SendResponse(conn, &message.Response{Error: "schedule engine not initialized"})
 		return
 	}
@@ -346,13 +352,27 @@ func (d *Daemon) handleScheduleRemove(conn net.Conn, req *message.Request) {
 		return
 	}
 
-	if !d.ScheduleEngine.Remove(req.ScheduleID) {
+	if !scheduleEngine.Remove(req.ScheduleID) {
 		message.SendResponse(conn, &message.Response{
 			Error: fmt.Sprintf("schedule %q not found", req.ScheduleID),
 		})
 		return
 	}
 	message.SendResponse(conn, &message.Response{OK: true})
+}
+
+func (d *Daemon) triggerEngine() *automation.TriggerEngine {
+	if d.Automation == nil {
+		return nil
+	}
+	return d.Automation.TriggerEngine
+}
+
+func (d *Daemon) scheduleEngine() *automation.ScheduleEngine {
+	if d.Automation == nil {
+		return nil
+	}
+	return d.Automation.ScheduleEngine
 }
 
 // Conversion helpers between wire specs and automation types.
