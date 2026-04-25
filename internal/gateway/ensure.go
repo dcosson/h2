@@ -128,5 +128,8 @@ func StartBackground(ctx context.Context, h2Dir string) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start background gateway: %w", err)
 	}
+	if err := cmd.Process.Release(); err != nil {
+		return fmt.Errorf("release background gateway process: %w", err)
+	}
 	return nil
 }

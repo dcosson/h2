@@ -50,10 +50,18 @@ func TestWriteReadRuntimeConfig_RoundTrip(t *testing.T) {
 				InstructionsBody:  "Review tool calls carefully.",
 			},
 		},
-		Overrides:          map[string]string{"worktree_enabled": "true"},
-		PassthroughEnvKeys: []string{"OPENAI_API_KEY", "TEAM_CONTEXT"},
-		ResumeEnvWarning:   "launch-scoped env passthrough may not be available for unattended resume: OPENAI_API_KEY",
-		StartedAt:          "2026-03-05T10:00:00Z",
+		Overrides:           map[string]string{"worktree_enabled": "true"},
+		PassthroughEnvKeys:  []string{"OPENAI_API_KEY", "TEAM_CONTEXT"},
+		ResumeEnvWarning:    "launch-scoped env passthrough may not be available for unattended resume: OPENAI_API_KEY",
+		GatewayPID:          1234,
+		GatewayGeneration:   "generation-1",
+		GatewayDesiredState: "running",
+		GatewayRuntimeState: "running",
+		ChildPID:            5678,
+		ChildPGID:           5670,
+		LastExitReason:      "child_exit",
+		LastStateAt:         "2026-03-05T10:01:00Z",
+		StartedAt:           "2026-03-05T10:00:00Z",
 	}
 
 	if err := WriteRuntimeConfig(dir, rc); err != nil {
@@ -131,6 +139,30 @@ func TestWriteReadRuntimeConfig_RoundTrip(t *testing.T) {
 	}
 	if got.ResumeEnvWarning != rc.ResumeEnvWarning {
 		t.Errorf("ResumeEnvWarning = %q, want %q", got.ResumeEnvWarning, rc.ResumeEnvWarning)
+	}
+	if got.GatewayPID != rc.GatewayPID {
+		t.Errorf("GatewayPID = %d, want %d", got.GatewayPID, rc.GatewayPID)
+	}
+	if got.GatewayGeneration != rc.GatewayGeneration {
+		t.Errorf("GatewayGeneration = %q, want %q", got.GatewayGeneration, rc.GatewayGeneration)
+	}
+	if got.GatewayDesiredState != rc.GatewayDesiredState {
+		t.Errorf("GatewayDesiredState = %q, want %q", got.GatewayDesiredState, rc.GatewayDesiredState)
+	}
+	if got.GatewayRuntimeState != rc.GatewayRuntimeState {
+		t.Errorf("GatewayRuntimeState = %q, want %q", got.GatewayRuntimeState, rc.GatewayRuntimeState)
+	}
+	if got.ChildPID != rc.ChildPID {
+		t.Errorf("ChildPID = %d, want %d", got.ChildPID, rc.ChildPID)
+	}
+	if got.ChildPGID != rc.ChildPGID {
+		t.Errorf("ChildPGID = %d, want %d", got.ChildPGID, rc.ChildPGID)
+	}
+	if got.LastExitReason != rc.LastExitReason {
+		t.Errorf("LastExitReason = %q, want %q", got.LastExitReason, rc.LastExitReason)
+	}
+	if got.LastStateAt != rc.LastStateAt {
+		t.Errorf("LastStateAt = %q, want %q", got.LastStateAt, rc.LastStateAt)
 	}
 	if got.StartedAt != rc.StartedAt {
 		t.Errorf("StartedAt = %q, want %q", got.StartedAt, rc.StartedAt)
