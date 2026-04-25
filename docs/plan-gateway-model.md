@@ -175,6 +175,21 @@ graph TD
 
 `internal/session` must not import `internal/gateway`. It receives dependencies through interfaces so the session package can still be unit-tested independently.
 
+## Connected Components
+
+| Component | Gateway boundary | Contract |
+| --- | --- | --- |
+| CLI commands | `internal/gateway.Client` | `EnsureRunning(opts)`, `Request(ctx, *gateway.Request)`, and `Attach(ctx, name, opts, conn)` replace direct `net.Dial("unix", agent.sock)` and `net.Dial("unix", bridge.sock)` call sites. |
+| Session runtime | `SessionRuntime` wrapping `session.Session` | `RunManaged(ctx, ManagedOpts)`, `AttachConn(ctx, conn, AttachOpts)`, `Send(SendSpec)`, `Status() *message.AgentInfo`, `Stop(ctx)`, `Relaunch(ctx, RelaunchOpts)`. |
+| Agent harnesses | Existing `harness.Harness` interface | Gateway does not call harnesses directly except through `session.Session`; `RuntimeConfig` remains the serialized contract for launch arguments and environment. |
+| Bridge service | `BridgeRouter` injected into `bridgeservice.Service` | `SendToAgent(ctx, agentName, from, body, opts)`, `FirstAvailableAgent(ctx)`, and `AgentState(ctx, agentName)` replace bridge-side socket dialing. |
+| Socket directory | `socketdir.TypeGateway` | `socketdir.Path(socketdir.TypeGateway, "gateway")` is the only steady-state runtime socket path. Legacy agent and bridge socket parsing remains only for startup cleanup during migration. |
+| Runtime metadata | `config.RuntimeConfig` | Existing fields remain valid. Optional gateway diagnostic fields must be omitted from validation and must not be required for resume. |
+| Automation | Existing trigger and schedule engines per session | Gateway routes trigger and schedule RPCs to the owning `SessionRuntime`; automation execution still enqueues into that session queue. |
+| Event and activity logs | Existing session log files | Gateway lifecycle events are added in `<H2_DIR>/logs/gateway-events.jsonl`; per-session `events.jsonl` and activity logs remain unchanged. |
+
+The most important contract is that the gateway owns discovery and process lifetime while `session.Session` still owns per-agent terminal behavior. This keeps the migration from turning `internal/gateway` into a replacement terminal multiplexer.
+
 ## Gateway Lifecycle
 
 ### Commands
