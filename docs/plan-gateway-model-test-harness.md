@@ -104,7 +104,7 @@ CI: Nightly/on-demand.
 
 Test:
 
-1. Start three resumable fake harness sessions and mark them live in runtime metadata.
+1. Start three resumable fake harness sessions and mark `gateway_desired_state: "running"` plus `gateway_runtime_state: "running"` in runtime metadata.
 2. Kill the gateway with SIGKILL.
 3. Start a new gateway with `h2 gateway start` or a gateway-starting CLI command.
 4. Verify any orphaned child process groups are detected and terminated.
@@ -121,7 +121,7 @@ CI: PR
 
 Test:
 
-1. Create fake runtime metadata with `gateway_generation`, `gateway_state: "running"`, `child_pid`, and `child_pgid`.
+1. Create fake runtime metadata with `gateway_generation`, `gateway_desired_state: "running"`, `gateway_runtime_state: "running"`, `child_pid`, and `child_pgid`.
 2. Launch a long-running fake child in that process group without a live gateway.
 3. Start gateway recovery.
 4. Verify recovery terminates the process group before automatic resume.
@@ -138,11 +138,27 @@ CI: PR
 
 Test:
 
-1. Create four session metadata files: two `gateway_state: "running"`, one `gateway_state: "stopped"`, and one exited due to child exit.
+1. Create four session metadata files: two `gateway_desired_state: "running"`, one `gateway_desired_state: "stopped"`, and one `gateway_desired_state: "running"` with `gateway_runtime_state: "exited"` due to child exit.
 2. Start gateway recovery.
-3. Verify only the two running sessions are automatically resumed.
-4. Verify stopped/exited sessions remain stopped and appear only in stopped metadata output.
+3. Verify the two running sessions and the desired-running/exited session are automatically resumed.
+4. Verify the stopped session remains stopped and appears only in stopped metadata output.
 5. Verify failed auto-resume marks that session exited with `last_exit_reason: "gateway_resume_failed"` and does not block recovery of other sessions.
+
+### Intentional stop discrimination
+
+Location: `internal/gateway/recovery_test.go`
+
+Runner: `make test`
+
+CI: PR
+
+Test:
+
+1. Start two fake sessions.
+2. Stop one through `StopSession`, leaving `gateway_desired_state: "stopped"`.
+3. Kill the gateway before stopping the other, leaving `gateway_desired_state: "running"`.
+4. Restart the gateway.
+5. Verify only the desired-running session resumes and the intentionally stopped session does not.
 
 ### Bridge provider failures
 

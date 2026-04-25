@@ -187,7 +187,7 @@ graph TD
 | Agent harnesses | Existing `harness.Harness` interface | Gateway does not call harnesses directly except through `session.Session`; `RuntimeConfig` remains the serialized contract for launch arguments and environment. |
 | Bridge service | `BridgeRouter` injected into `bridgeservice.Service` | `SendToAgent(ctx, agentName, from, body, opts)`, `FirstAvailableAgent(ctx)`, and `AgentState(ctx, agentName)` replace bridge-side socket dialing. |
 | Socket directory | `socketdir.TypeGateway` | `socketdir.Path(socketdir.TypeGateway, "gateway")` is the only steady-state runtime socket path. Legacy agent and bridge socket parsing remains only for startup cleanup during migration. |
-| Runtime metadata | `config.RuntimeConfig` | Existing fields remain valid. Optional gateway diagnostic fields must be omitted from validation and must not be required for resume. |
+| Runtime metadata | `config.RuntimeConfig` | Existing user-facing fields remain valid. Gateway-managed lifecycle fields are internal, optional for backward compatibility, and authoritative for restart intent once present. |
 | Automation | Existing trigger and schedule engines per session | Gateway routes trigger and schedule RPCs to the owning `SessionRuntime`; automation execution still enqueues into that session queue. |
 | Event and activity logs | Existing session log files | Gateway lifecycle events are added in `<H2_DIR>/logs/gateway-events.jsonl`; per-session `events.jsonl` and activity logs remain unchanged. |
 
@@ -265,20 +265,21 @@ On startup, the gateway scans:
 | `<H2_DIR>/sessions/*/session.metadata.json` | Discover resumable sessions and recent metadata. |
 | `<H2_DIR>/sockets/agent.*.sock` and `bridge.*.sock` | Detect stale legacy socket files and remove only if probing confirms they are dead. |
 | `<H2_DIR>/logs/gateway.log` | Append structured lifecycle events. |
-| Optional per-session child PID/PGID metadata | Distinguish cleanly stopped sessions from sessions that were live in the previous gateway generation and may need orphan cleanup plus automatic resume. |
+| Per-session gateway lifecycle metadata | Distinguish agents the user wants running from agents intentionally stopped before a gateway crash or restart. This replaces agent sockets as the authoritative restart-intent signal. |
 
-The gateway does not automatically resume every historical stopped session. It automatically resumes only sessions marked live in the previous gateway generation and explicitly stopped neither by `h2 stop` nor by normal child exit. Sessions that were stopped before gateway shutdown remain stopped and visible through `h2 list --include-stopped`.
+The gateway does not automatically resume every historical stopped session. It automatically resumes only sessions whose persisted `GatewayDesiredState` is `running`. Sessions whose `GatewayDesiredState` is `stopped` remain stopped and visible through `h2 list --include-stopped`.
 
-Gateway recovery must not assume child agent processes died with the gateway. Each `SessionRuntime` starts its child in a distinct process group where the platform supports it and records the child PID, process group ID, live-state marker, and harness resume ID in optional runtime metadata. On startup, after acquiring `gateway.lock`, the gateway scans sessions whose previous state was `running`. For each one, it terminates any orphaned previous process group that is still alive, then starts a new `SessionRuntime` with `ResumeSessionID` set from `HarnessSessionID`. This restores every previously live agent automatically while preventing abandoned Claude/Codex processes from continuing to consume tokens.
+Gateway recovery must not assume child agent processes died with the gateway. Each `SessionRuntime` starts its child in a distinct process group where the platform supports it and records the child PID, process group ID, desired state, observed runtime state, and harness resume ID in runtime metadata. On startup, after acquiring `gateway.lock`, the gateway scans sessions whose desired state is `running`. For each one, it terminates any orphaned previous process group that is still alive, then starts a new `SessionRuntime` with `ResumeSessionID` set from `HarnessSessionID`. This restores every desired-running agent automatically while preventing abandoned Claude/Codex processes from continuing to consume tokens.
 
 Automatic resume ordering:
 
 1. Recover gateway identity and acquire `gateway.lock`.
 2. Remove stale gateway socket if no live gateway responds.
-3. Scan runtime metadata for `GatewayState: "running"` from an older gateway generation.
+3. Scan runtime metadata for `GatewayDesiredState: "running"`.
 4. For each candidate, terminate any recorded orphan process group.
 5. Start the session with resume semantics and preserve its agent name, role, pod, profile, CWD, and queue/event metadata.
-6. Mark sessions that cannot resume as `exited` with `LastExitReason: "gateway_resume_failed"` and include them in `h2 list` with a visible error state.
+6. If resume succeeds, write `GatewayRuntimeState: "running"` and the new child PID/PGID.
+7. If resume fails, keep `GatewayDesiredState: "running"`, write `GatewayRuntimeState: "resume_failed"` plus `LastExitReason: "gateway_resume_failed"`, and include the session in `h2 list` with a visible error state so the next gateway restart or explicit retry can try again.
 
 ## Runtime Model
 
@@ -457,7 +458,7 @@ Request types:
 | `h2 attach <name>` | Dial `gateway.sock`, send `attach_session` with name and terminal hints, then use existing framed attach stream. |
 | `h2 send <name>` | Dial gateway and call `send_session`. `--expects-response` trigger registration becomes one gateway transaction to prevent orphan triggers. |
 | `h2 send --closes` | Dial gateway for sender trigger removal and optional response send. |
-| `h2 list` | If `gateway.sock` is live, call `list_runtime` for live state. If no gateway is running but metadata contains sessions marked `GatewayState: "running"`, auto-start the gateway so recovery can resume those agents before listing. If no gateway is running and no recovery is pending, use a no-start metadata fast path that reports stopped sessions without forking a gateway. `--include-stopped` works in all paths. |
+| `h2 list` | If `gateway.sock` is live, call `list_runtime` for live state. If no gateway is running but metadata contains sessions marked `GatewayDesiredState: "running"`, auto-start the gateway so recovery can resume those agents before listing. If no gateway is running and no recovery is pending, use a no-start metadata fast path that reports stopped sessions without forking a gateway. `--include-stopped` works in all paths. |
 | `h2 status <name>` | Call `session_status`. |
 | `h2 stop <name>` | Call `stop_session` or `stop_bridge` after gateway resolves the name. Ambiguous agent/bridge names return a deterministic error. |
 | `h2 bridge create` | Call `start_bridge`; if concierge launch is requested, call `start_session` for `concierge`. |
@@ -480,13 +481,24 @@ No user-facing config changes are required.
 ```go
 GatewayPID        int    `json:"gateway_pid,omitempty"`
 GatewayGeneration string `json:"gateway_generation,omitempty"`
-GatewayState      string `json:"gateway_state,omitempty"` // "running", "stopped", "exited"
+GatewayDesiredState string `json:"gateway_desired_state,omitempty"` // "running", "stopped"
+GatewayRuntimeState string `json:"gateway_runtime_state,omitempty"` // "starting", "running", "exited", "stopped", "resume_failed"
 ChildPID          int    `json:"child_pid,omitempty"`
 ChildPGID         int    `json:"child_pgid,omitempty"`
 LastExitReason    string `json:"last_exit_reason,omitempty"`
+LastStateAt       string `json:"last_state_at,omitempty"` // RFC3339
 ```
 
-These are diagnostic fields, not user configuration. They must not be required by `Validate`, because older session metadata must remain readable.
+These are internal runtime fields, not user configuration. They must not be required by `Validate`, because older session metadata must remain readable. For new gateway-managed sessions, `GatewayDesiredState` is the authoritative restart-intent field:
+
+| Event | Metadata write |
+| --- | --- |
+| Session launch accepted | `GatewayDesiredState: "running"`, `GatewayRuntimeState: "starting"`, new `GatewayGeneration`, `LastStateAt`. |
+| Child PTY started | `GatewayRuntimeState: "running"`, `ChildPID`, `ChildPGID`, `LastStateAt`. |
+| User runs `h2 stop <agent>` or pod stop targets the agent | `GatewayDesiredState: "stopped"`, then `GatewayRuntimeState: "stopped"` after child exit. |
+| Child exits without explicit stop | Keep `GatewayDesiredState: "running"` for restart continuity, set `GatewayRuntimeState: "exited"` and `LastExitReason` to the child exit reason. Gateway policy may auto-relaunch immediately or resume during next recovery. |
+| Gateway process receives SIGTERM for restart | Do not mark agent sessions stopped. Preserve `GatewayDesiredState: "running"` so the replacement gateway resumes them. |
+| Gateway process is intentionally stopped with a stop-all-sessions option | Mark each targeted session `GatewayDesiredState: "stopped"` before child termination. |
 
 Bridge config remains in `config.yaml` exactly as today. `bridgeservice.FromConfig` remains the bridge construction point.
 
@@ -499,13 +511,13 @@ The gateway is the parent process for every agent child. It is responsible for:
 | Start | Resolve role/config in the CLI, write runtime config, ask gateway to start. Gateway reads the same file and starts the PTY child. |
 | Stop | `stop_session` sets `Session.Quit`, kills the child PTY if needed, drains shutdown hooks, and removes the session from the live registry. |
 | Relaunch | `relaunch_session` uses the existing `Session` lifecycle loop behavior, but the request enters through gateway. |
-| Gateway shutdown | Default graceful stop sends stop to bridge receivers, then stops agent children. A later feature can add `--leave-children`, but the initial gateway model should not orphan agent PTYs. |
-| Gateway crash/restart | The next gateway startup detects sessions marked `GatewayState: "running"` from the previous generation, terminates any remaining orphaned child process groups, and automatically restarts those agents with resume. |
+| Gateway shutdown/restart | Default gateway shutdown stops bridge receivers and child processes but does not change agent `GatewayDesiredState`; replacement gateway resumes every desired-running agent. A separate explicit stop-all-sessions mode marks sessions stopped before termination. |
+| Gateway crash/restart | The next gateway startup detects sessions marked `GatewayDesiredState: "running"`, terminates any remaining orphaned child process groups, and automatically restarts those agents with resume. |
 
 Child process discipline:
 
 1. Every agent child is launched in its own process group.
-2. `RuntimeConfig` records optional `GatewayGeneration`, `GatewayState`, `ChildPID`, and `ChildPGID` values after successful PTY start.
+2. `RuntimeConfig` records `GatewayGeneration`, `GatewayDesiredState`, `GatewayRuntimeState`, `ChildPID`, and `ChildPGID` values after successful PTY start.
 3. Graceful stop sends the same terminal/PTY shutdown used today, waits for the child, then escalates to process-group termination if the child does not exit within the configured timeout.
 4. Hard gateway crash recovery treats recorded child process groups as orphan candidates and terminates them before automatically resuming a new session with the same name.
 5. Platform-specific process-group behavior lives in `internal/gateway/supervisor_*.go` or shared session process helpers, with Darwin/Linux covered in the initial implementation.
@@ -585,7 +597,7 @@ The legacy bypass is a development and rollback tool only. It must not become us
 | Foreground supervised gateway | Run `h2 gateway run` in one terminal. In another terminal run `h2 run test-agent --role default --detach`, `h2 send test-agent "hello"`, and `h2 stop test-agent`. | The existing foreground gateway handles all commands; no background gateway is forked. |
 | Attach through gateway | Start an agent. Run `h2 attach <agent>`, resize the terminal, send input, toggle passthrough, detach by closing attach. Reattach. | The same terminal behavior works through `gateway.sock`, including resize frames and persisted VT scrollback. |
 | Bridge routing through gateway | Configure Telegram test bridge or fake bridge. Run `h2 bridge create --bridge test --set-concierge <agent>`. Send inbound provider messages with and without explicit agent prefixes. | Bridge provider runs inside gateway, inbound messages reach the selected session without dialing agent sockets, outbound replies are tagged as before. |
-| Gateway restart after crash | Start multiple agents, verify they are marked running, kill the gateway process with SIGKILL, then run any gateway-starting command such as `h2 list` or `h2 gateway start`. | Stale `gateway.sock` is removed, a new gateway starts, orphan child process groups are cleaned up, and every previously live agent is automatically restarted with harness resume metadata without per-agent user commands. |
+| Gateway restart after crash | Start multiple agents, verify `GatewayDesiredState: "running"`, kill the gateway process with SIGKILL, then run any gateway-starting command such as `h2 list` or `h2 gateway start`. | Stale `gateway.sock` is removed, a new gateway starts, orphan child process groups are cleaned up, and every desired-running agent is automatically restarted with harness resume metadata without per-agent user commands. |
 | Pod launch | Run `h2 pod launch <pod>` for a pod with multiple agents and optional bridge. Run `h2 list --pod <pod>`. Stop the pod. | One gateway owns all pod agents and bridge runtime; pod ordering and stop behavior match current CLI semantics. |
 | Hook delivery | Launch a Claude agent with hooks enabled. Trigger tool-use and permission hooks. | `h2 handle-hook` sends hook events to gateway and the correct session monitor updates state and activity logs. |
 | No-gateway list fast path | Gracefully stop all sessions and the gateway, then run `h2 list --include-stopped`. | h2 does not start a gateway just to list stopped metadata when no sessions are marked running; it reports stopped sessions from disk and no live agents. |
@@ -608,10 +620,10 @@ All tests must follow the project rule: never use `config.ConfigDir()` against t
 
 | Commitment | Implementation | Test |
 | --- | --- | --- |
-| Atomic session metadata remains the source of truth for resume | Keep `config.WriteRuntimeConfig` atomic writes and add gateway generation/state fields only as optional diagnostics. | Existing `internal/config/runtime_config_test.go` plus new crash-recovery tests in `internal/gateway/recovery_test.go`. |
+| Atomic session metadata remains the source of truth for resume | Keep `config.WriteRuntimeConfig` atomic writes and add gateway desired/runtime state fields as internal lifecycle metadata. | Existing `internal/config/runtime_config_test.go` plus new crash-recovery tests in `internal/gateway/recovery_test.go`. |
 | Single-transaction expects-response delivery | Gateway `send_session` registers the reminder trigger and message enqueue under one session operation; if enqueue fails, the trigger is removed before response. | `internal/gateway/manager_test.go` validates no orphan triggers for injected send failure. |
 | Deterministic stale socket cleanup | Gateway startup probes old `agent.*.sock`, `bridge.*.sock`, and `gateway.sock`; removes only dead sockets. | `internal/gateway/recovery_test.go` creates live and stale Unix sockets and verifies only stale files are removed. |
-| Orphan child cleanup and automatic resume | Gateway records child PID/PGID and startup recovery terminates orphaned process groups from a dead gateway generation before automatically resuming every session whose gateway state was running. | `internal/gateway/recovery_test.go` launches fake child process groups, simulates a missing gateway owner, and verifies cleanup plus automatic resume. |
+| Orphan child cleanup and automatic resume | Gateway records child PID/PGID and startup recovery terminates orphaned process groups from a dead gateway generation before automatically resuming every session whose desired state is running. | `internal/gateway/recovery_test.go` launches fake child process groups, simulates a missing gateway owner, and verifies cleanup plus automatic resume. |
 | Single gateway startup lock | `EnsureRunning` serializes probe/fork/readiness with `<H2_DIR>/gateway.lock`. | `tests/external/gateway_fault_test.go` runs concurrent first-use commands and asserts one gateway process. |
 | Runtime invariant checker | Add `Gateway.CheckInvariants()` asserting unique names, registry/session metadata agreement for live sessions, no nil cancel/done handles, and bridge concierge references are either empty or known/stopped-explicit. | Unit property tests and external smoke test call `gateway debug-invariants` or internal test helper after lifecycle operations. |
 | Structured lifecycle journal | Gateway writes JSONL events for start, stop, child exit, bridge start/stop, stale cleanup, and crash recovery to `<H2_DIR>/logs/gateway-events.jsonl`. | `internal/gateway/state_test.go` verifies event schema and ordering for deterministic lifecycle actions. |
@@ -655,7 +667,7 @@ No advanced mathematical or research technique is required for the first gateway
 | --- | --- |
 | Should gateway shutdown stop all child agents? | Yes for explicit graceful gateway stop. For gateway crash/restart, the new gateway automatically resumes every session that was live in the previous generation. |
 | Should per-agent sockets exist as aliases? | No in steady state. The goal is one central channel. CLI transparency comes from updating commands to call gateway. |
-| Should gateway auto-start for read-only commands like `h2 list`? | `h2 list` should auto-start when metadata shows a prior gateway generation had live sessions, because recovery must resume those agents. If no recovery is pending, it can show stopped sessions with `--include-stopped` by reading metadata directly. |
+| Should gateway auto-start for read-only commands like `h2 list`? | `h2 list` should auto-start when metadata shows desired-running sessions, because recovery must resume those agents. If no recovery is pending, it can show stopped sessions with `--include-stopped` by reading metadata directly. |
 | Can multiple gateways run for different h2 dirs? | Yes. The socket path is derived from `H2_DIR`, so each h2 directory has its own gateway. |
 
 ## Review Disposition
