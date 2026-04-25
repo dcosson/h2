@@ -23,6 +23,7 @@ The user-facing configuration should not change. Existing role YAML, bridge conf
 | R6 | External bridge integrations are managed centrally and route through the same runtime registry. | Must-have |
 | R7 | Existing attach, send, list, stop, trigger, schedule, rotate, bridge, pod, and hook behaviors remain user-transparent. | Must-have |
 | R8 | Gateway crash and restart behavior is explicit, testable, and does not corrupt session metadata. | Must-have |
+| R9 | Gateway restart automatically brings every previously live agent back up with resume, without requiring per-agent user commands. | Must-have |
 
 ### Shapes Considered
 
@@ -45,6 +46,7 @@ The user-facing configuration should not change. Existing role YAML, bridge conf
 | R6 | External bridge integrations are managed centrally and route through the same runtime registry. | Must-have | No | Yes | Yes |
 | R7 | Existing attach, send, list, stop, trigger, schedule, rotate, bridge, pod, and hook behaviors remain user-transparent. | Must-have | Yes | Yes | Yes |
 | R8 | Gateway crash and restart behavior is explicit, testable, and does not corrupt session metadata. | Must-have | No | Yes | No |
+| R9 | Gateway restart automatically brings every previously live agent back up with resume, without requiring per-agent user commands. | Must-have | No | Yes | No |
 
 Shape B is selected. Shape A is a useful transitional implementation strategy only if needed to reduce risk, but it does not satisfy the core goal because runtime ownership stays distributed. Shape C improves bridge routing but leaves process management split.
 
@@ -136,6 +138,7 @@ internal/gateway/
   bridge_runtime.go   # adapter around bridgeservice.Service
   supervisor.go       # child process supervision, shutdown, restart policy
   recovery.go         # startup scan and stale metadata reconciliation
+  lock.go             # cross-process startup lock for one gateway per H2_DIR
   state.go            # exported snapshots for list/status
 ```
 
@@ -180,7 +183,7 @@ graph TD
 | Component | Gateway boundary | Contract |
 | --- | --- | --- |
 | CLI commands | `internal/gateway.Client` | `EnsureRunning(opts)`, `Request(ctx, *gateway.Request)`, and `Attach(ctx, name, opts, conn)` replace direct `net.Dial("unix", agent.sock)` and `net.Dial("unix", bridge.sock)` call sites. |
-| Session runtime | `SessionRuntime` wrapping `session.Session` | `RunManaged(ctx, ManagedOpts)`, `AttachConn(ctx, conn, AttachOpts)`, `Send(SendSpec)`, `Status() *message.AgentInfo`, `Stop(ctx)`, `Relaunch(ctx, RelaunchOpts)`. |
+| Session runtime | `SessionRuntime` wrapping `session.Session` | `RunManaged(ctx, ManagedOpts)`, `Attach(ctx, conn, AttachOpts)`, `Send(SendSpec)`, `Status() *message.AgentInfo`, `Stop(ctx)`, `Relaunch(ctx, RelaunchOpts)`. |
 | Agent harnesses | Existing `harness.Harness` interface | Gateway does not call harnesses directly except through `session.Session`; `RuntimeConfig` remains the serialized contract for launch arguments and environment. |
 | Bridge service | `BridgeRouter` injected into `bridgeservice.Service` | `SendToAgent(ctx, agentName, from, body, opts)`, `FirstAvailableAgent(ctx)`, and `AgentState(ctx, agentName)` replace bridge-side socket dialing. |
 | Socket directory | `socketdir.TypeGateway` | `socketdir.Path(socketdir.TypeGateway, "gateway")` is the only steady-state runtime socket path. Legacy agent and bridge socket parsing remains only for startup cleanup during migration. |
@@ -201,6 +204,8 @@ The most important contract is that the gateway owns discovery and process lifet
 | `h2 gateway status` | Dial `gateway.sock`, print gateway PID, uptime, session count, bridge count, and foreground/background mode as JSON by default. |
 | `h2 gateway stop` | Ask the gateway to gracefully stop bridges, stop or detach agent children according to policy, remove `gateway.sock`, and exit. |
 
+Foreground `h2 gateway run` installs SIGINT and SIGTERM handlers that call the same graceful `Gateway.Shutdown` path as `gateway_stop`. This is required for launchd/systemd/tmux supervision where SIGTERM is the normal stop signal.
+
 ### Auto-start
 
 `h2 run`, `h2 bridge create`, `h2 pod launch`, and any command that requires a live runtime call:
@@ -215,13 +220,41 @@ client, err := gateway.EnsureRunning(gateway.EnsureOpts{
 `EnsureRunning`:
 
 1. Resolves `H2_DIR`.
-2. Probes `gateway.sock`.
-3. If live, returns a client.
-4. If stale, removes it.
-5. If missing, re-execs the h2 binary with hidden `_gateway --background`.
-6. Waits for `gateway.sock` readiness with an explicit health check.
+2. Acquires `<H2_DIR>/gateway.lock` with an OS file lock for the probe/start/readiness critical section.
+3. Probes `gateway.sock`.
+4. If live, returns a client.
+5. If stale, removes it.
+6. If missing, re-execs the h2 binary with hidden `_gateway --background`.
+7. Waits for `gateway.sock` readiness with an explicit health check.
+8. Releases `gateway.lock`.
+
+The startup lock is required because concurrent first-use commands can all observe a missing socket before any one background gateway finishes listening. The external startup-race test must fail without this lock.
 
 `h2 gateway run` uses the same `Gateway.Run(ctx)` code path but skips forking and keeps stdio attached.
+
+### Shutdown Order
+
+Gateway shutdown is ordered so long-lived attach streams and bridge receivers cannot race new work into sessions that are being stopped:
+
+```mermaid
+sequenceDiagram
+    participant CLI as h2 gateway stop / SIGTERM
+    participant G as Gateway
+    participant B as BridgeRuntime
+    participant A as AttachRuntime
+    participant S as SessionRuntime
+    participant C as Child process
+
+    CLI->>G: gateway_stop or signal
+    G->>G: close listener; reject new RPCs
+    G->>B: stop receivers
+    G->>A: cancel attach contexts and close attach conns
+    G->>S: stop sessions
+    S->>C: graceful PTY stop, then process-group kill on timeout
+    G->>G: remove gateway.sock
+```
+
+Active attach connections are tracked by the gateway and each `SessionRuntime`. Canceling the attach context causes the attach frame loop to close the connection and remove the client before the child PTY is stopped. This produces a clean terminal disconnect instead of relying on broken pipes during child shutdown.
 
 ### Startup Recovery
 
@@ -232,8 +265,20 @@ On startup, the gateway scans:
 | `<H2_DIR>/sessions/*/session.metadata.json` | Discover resumable sessions and recent metadata. |
 | `<H2_DIR>/sockets/agent.*.sock` and `bridge.*.sock` | Detect stale legacy socket files and remove only if probing confirms they are dead. |
 | `<H2_DIR>/logs/gateway.log` | Append structured lifecycle events. |
+| Optional per-session child PID/PGID metadata | Distinguish cleanly stopped sessions from sessions that were live in the previous gateway generation and may need orphan cleanup plus automatic resume. |
 
-The gateway does not automatically resume every historical stopped session. It only starts sessions requested through `h2 run`, `h2 run --resume`, pod launch, or bridge concierge launch. Recovery exists to avoid corrupt metadata, clean stale sockets, and expose stopped sessions in `h2 list --include-stopped`.
+The gateway does not automatically resume every historical stopped session. It automatically resumes only sessions marked live in the previous gateway generation and explicitly stopped neither by `h2 stop` nor by normal child exit. Sessions that were stopped before gateway shutdown remain stopped and visible through `h2 list --include-stopped`.
+
+Gateway recovery must not assume child agent processes died with the gateway. Each `SessionRuntime` starts its child in a distinct process group where the platform supports it and records the child PID, process group ID, live-state marker, and harness resume ID in optional runtime metadata. On startup, after acquiring `gateway.lock`, the gateway scans sessions whose previous state was `running`. For each one, it terminates any orphaned previous process group that is still alive, then starts a new `SessionRuntime` with `ResumeSessionID` set from `HarnessSessionID`. This restores every previously live agent automatically while preventing abandoned Claude/Codex processes from continuing to consume tokens.
+
+Automatic resume ordering:
+
+1. Recover gateway identity and acquire `gateway.lock`.
+2. Remove stale gateway socket if no live gateway responds.
+3. Scan runtime metadata for `GatewayState: "running"` from an older gateway generation.
+4. For each candidate, terminate any recorded orphan process group.
+5. Start the session with resume semantics and preserve its agent name, role, pod, profile, CWD, and queue/event metadata.
+6. Mark sessions that cannot resume as `exited` with `LastExitReason: "gateway_resume_failed"` and include them in `h2 list` with a visible error state.
 
 ## Runtime Model
 
@@ -297,6 +342,29 @@ func (r *SessionRuntime) Snapshot() AgentSnapshot
 
 `SessionRuntime.Start` calls `session.NewFromConfig`, wires automation and monitor callbacks, then starts the child PTY directly. There is no `_daemon` re-exec. `SessionRuntime.Attach` creates a `client.Client` and reuses the existing framed attach protocol over the gateway connection after the gateway has selected the target session.
 
+#### Attach Handoff
+
+Attach is not proxied. After the gateway decodes an `attach_session` request and validates the target agent, it transfers ownership of the raw `net.Conn` to `SessionRuntime.Attach(ctx, conn, opts)`.
+
+Attach handoff rules:
+
+1. `Gateway.ServeConn` must not read from or write to the connection after handoff.
+2. The goroutine serving that connection is consumed for the lifetime of the attach session and returns only after detach, context cancellation, or connection error.
+3. `SessionRuntime.Attach` sends the initial OK response, creates a session client, then runs the existing framed data/control protocol directly on that connection.
+4. Gateway shutdown cancels the attach context and closes tracked attach conns so the attach loop unblocks and removes its client.
+5. Multi-client resize and passthrough ownership remain in `session.Session`; all attached clients still share one in-process session object.
+
+#### Session Concurrency Audit
+
+The gateway can dispatch `Send`, `Attach`, `Stop`, `Relaunch`, hook, trigger, and schedule RPCs for the same session from different connection goroutines. Phase 2 must audit every `session.Session` field touched by current listener handlers and either keep access behind existing locks or add synchronization.
+
+Concrete required changes:
+
+1. Replace `Session.Quit bool` with `atomic.Bool` or guard it with a session lifecycle mutex.
+2. Audit `relaunchWithSetup`, `relaunchIsRotate`, and `relaunchOldProfile`; protect them with the same lifecycle mutex or convert them to an immutable relaunch request sent over `relaunchCh`.
+3. Keep channel sends to `quitCh` and `relaunchCh` non-blocking, but ensure all accompanying state writes happen under the lifecycle synchronization.
+4. Add `go test -race` coverage for concurrent `Send`, `Attach`, `Stop`, and `Relaunch` against a managed fake session.
+
 ### BridgeRuntime
 
 ```go
@@ -322,6 +390,7 @@ The gateway socket uses the same JSON request/response handshake for simple comm
 
 ```go
 type Request struct {
+    Version int `json:"version"`
     Type string `json:"type"`
 
     AgentName  string `json:"agent_name,omitempty"`
@@ -336,6 +405,23 @@ type Request struct {
     Relaunch     *RelaunchSpec     `json:"relaunch,omitempty"`
 }
 ```
+
+The initial protocol version is `1`. `health` returns the gateway protocol version and h2 build version. CLI requests with an incompatible major protocol version fail with a clear error instructing the user to restart the gateway so the CLI and gateway binary match.
+
+`SendSpec` carries expects-response trigger data so trigger registration and message enqueue can be one session operation:
+
+```go
+type SendSpec struct {
+    Priority        string       `json:"priority,omitempty"`
+    From            string       `json:"from,omitempty"`
+    Body            string       `json:"body,omitempty"`
+    Raw             bool         `json:"raw,omitempty"`
+    ExpectsResponse bool         `json:"expects_response,omitempty"`
+    ERTrigger       *TriggerSpec `json:"er_trigger,omitempty"`
+}
+```
+
+When `ERTrigger` is present, `SessionRuntime.Send` registers the trigger and enqueues the message under one session-level critical section. If enqueue fails after trigger registration, the trigger is removed before returning. CLI and bridge callers no longer make separate trigger and send RPCs for expects-response delivery.
 
 Request types:
 
@@ -371,13 +457,19 @@ Request types:
 | `h2 attach <name>` | Dial `gateway.sock`, send `attach_session` with name and terminal hints, then use existing framed attach stream. |
 | `h2 send <name>` | Dial gateway and call `send_session`. `--expects-response` trigger registration becomes one gateway transaction to prevent orphan triggers. |
 | `h2 send --closes` | Dial gateway for sender trigger removal and optional response send. |
-| `h2 list` | Call `list_runtime`; stopped session scanning moves into gateway or a shared helper used by both gateway and tests. |
+| `h2 list` | If `gateway.sock` is live, call `list_runtime` for live state. If no gateway is running but metadata contains sessions marked `GatewayState: "running"`, auto-start the gateway so recovery can resume those agents before listing. If no gateway is running and no recovery is pending, use a no-start metadata fast path that reports stopped sessions without forking a gateway. `--include-stopped` works in all paths. |
 | `h2 status <name>` | Call `session_status`. |
 | `h2 stop <name>` | Call `stop_session` or `stop_bridge` after gateway resolves the name. Ambiguous agent/bridge names return a deterministic error. |
 | `h2 bridge create` | Call `start_bridge`; if concierge launch is requested, call `start_session` for `concierge`. |
 | `h2 bridge stop/set-concierge/remove-concierge` | Call gateway bridge RPCs. |
 | `h2 trigger`, `h2 schedule`, `h2 rotate`, `h2 session restart`, `h2 peek`, `h2 stats` | Replace direct socket calls with gateway client calls. File-based event and runtime metadata reads can stay as-is where they do not require live state. |
 | `h2 handle-hook` | Use `H2_ACTOR` or `H2_SESSION_DIR` to address `hook_event` through gateway. |
+
+### Hook Delivery
+
+`h2 handle-hook` continues to run as a child hook command launched by the underlying harness. It still reads `H2_SESSION_DIR` to load `RuntimeConfig`, role permission-review config, DCG policy, and AI reviewer instructions locally in the hook process. The gateway does not own permission-review decision logic.
+
+Only the event delivery transport changes. `sendHookEvent` dials `gateway.sock` instead of `agent.<name>.sock` and sends `hook_event` with `agent_name` resolved from `H2_ACTOR`; if `H2_ACTOR` is missing, it resolves the agent name from `H2_SESSION_DIR` metadata before sending. Best-effort semantics remain: hook event send failures are logged or ignored exactly as today so hook commands do not break the underlying harness. Permission review still sends `permission_decision` as another `hook_event` through the same gateway path.
 
 ## Metadata and Config
 
@@ -388,6 +480,9 @@ No user-facing config changes are required.
 ```go
 GatewayPID        int    `json:"gateway_pid,omitempty"`
 GatewayGeneration string `json:"gateway_generation,omitempty"`
+GatewayState      string `json:"gateway_state,omitempty"` // "running", "stopped", "exited"
+ChildPID          int    `json:"child_pid,omitempty"`
+ChildPGID         int    `json:"child_pgid,omitempty"`
 LastExitReason    string `json:"last_exit_reason,omitempty"`
 ```
 
@@ -405,7 +500,15 @@ The gateway is the parent process for every agent child. It is responsible for:
 | Stop | `stop_session` sets `Session.Quit`, kills the child PTY if needed, drains shutdown hooks, and removes the session from the live registry. |
 | Relaunch | `relaunch_session` uses the existing `Session` lifecycle loop behavior, but the request enters through gateway. |
 | Gateway shutdown | Default graceful stop sends stop to bridge receivers, then stops agent children. A later feature can add `--leave-children`, but the initial gateway model should not orphan agent PTYs. |
-| Gateway crash | Child PTYs die with the gateway on normal OS process semantics. Sessions remain resumable through metadata if the harness supports resume. |
+| Gateway crash/restart | The next gateway startup detects sessions marked `GatewayState: "running"` from the previous generation, terminates any remaining orphaned child process groups, and automatically restarts those agents with resume. |
+
+Child process discipline:
+
+1. Every agent child is launched in its own process group.
+2. `RuntimeConfig` records optional `GatewayGeneration`, `GatewayState`, `ChildPID`, and `ChildPGID` values after successful PTY start.
+3. Graceful stop sends the same terminal/PTY shutdown used today, waits for the child, then escalates to process-group termination if the child does not exit within the configured timeout.
+4. Hard gateway crash recovery treats recorded child process groups as orphan candidates and terminates them before automatically resuming a new session with the same name.
+5. Platform-specific process-group behavior lives in `internal/gateway/supervisor_*.go` or shared session process helpers, with Darwin/Linux covered in the initial implementation.
 
 Foreground supervisors should run `h2 gateway run`. Background auto-start should use a detached `_gateway` hidden command with stderr redirected to `<H2_DIR>/logs/gateway.log`.
 
@@ -447,9 +550,32 @@ Move `attach`, `send`, `show`, `status`, `stop`, `trigger`, `schedule`, `rotate`
 
 Refactor `bridgeservice.Service` to accept a `BridgeRouter`. Change `h2 bridge create/stop/set-concierge/remove-concierge` to call gateway. Remove `_bridge-service`, `bridgeservice.ForkBridge`, and bridge socket creation.
 
+Concrete bridge socket-dial replacements:
+
+| Current bridge call site | Current behavior | Gateway replacement |
+| --- | --- | --- |
+| `Service.sendToAgent` | Dials `agent.<name>.sock`, optionally registers expects-response trigger, then sends message. | Calls `BridgeRouter.SendToAgent` with `SendSpec.ERTrigger`; manager routes to `SessionRuntime.Send`. |
+| `Service.handleSetConcierge` | Probes `agent.<name>.sock` to set initial concierge liveness. | Calls `BridgeRouter.AgentState` or `BridgeRouter.HasAgent` and stores the returned liveness. |
+| `Service.runTypingLoop` / `queryAgentStateFn` | Queries target agent state through socket status calls. | Calls `BridgeRouter.AgentState` directly against the gateway registry. |
+| `Service.resolveDefaultTarget` / `firstAvailableAgent` | Lists agent sockets to choose a fallback target. | Calls `BridgeRouter.FirstAvailableAgent`, which reads live session snapshots from the manager. |
+
 ### Phase 5: Cleanup and compatibility boundary removal
 
 Remove old per-agent and per-bridge socket discovery from normal commands. Keep `socketdir` only for `gateway.sock` path resolution and stale legacy cleanup. Update docs and README runtime directory descriptions.
+
+### Cutover Strategy
+
+Gateway migration uses a temporary runtime switch while both old and new paths coexist:
+
+| Phase | Default path | Legacy bypass | Deletion criteria |
+| --- | --- | --- | --- |
+| Phase 1 | Legacy per-agent/per-bridge daemons. Gateway health commands only. | Not needed. | Gateway health/start/stop tests pass. |
+| Phase 2 | Gateway start/resume for agent sessions when `H2_GATEWAY` is unset or `1`. | `H2_GATEWAY=0` forces `session.ForkDaemon` for `h2 run`, `run --resume`, and pod launch. | Managed session tests, external run/attach/send smoke tests, and race tests pass. |
+| Phase 3 | Gateway RPCs for agent commands. | `H2_GATEWAY=0` keeps legacy socket calls for agent command paths during development. | All agent command tests pass through gateway and no P0/P1 regressions remain. |
+| Phase 4 | Gateway bridge runtime. | `H2_GATEWAY=0` keeps `_bridge-service` only until bridge tests pass. | Bridge provider tests and external bridge smoke tests pass. |
+| Phase 5 | Gateway only. | Removed. | No normal command path forks `_daemon` or `_bridge-service`; legacy bypass and dead code are deleted in the same phase. |
+
+The legacy bypass is a development and rollback tool only. It must not become user-facing configuration and must be removed before the gateway migration is considered complete.
 
 ## Acceptance Criteria
 
@@ -459,9 +585,10 @@ Remove old per-agent and per-bridge socket discovery from normal commands. Keep 
 | Foreground supervised gateway | Run `h2 gateway run` in one terminal. In another terminal run `h2 run test-agent --role default --detach`, `h2 send test-agent "hello"`, and `h2 stop test-agent`. | The existing foreground gateway handles all commands; no background gateway is forked. |
 | Attach through gateway | Start an agent. Run `h2 attach <agent>`, resize the terminal, send input, toggle passthrough, detach by closing attach. Reattach. | The same terminal behavior works through `gateway.sock`, including resize frames and persisted VT scrollback. |
 | Bridge routing through gateway | Configure Telegram test bridge or fake bridge. Run `h2 bridge create --bridge test --set-concierge <agent>`. Send inbound provider messages with and without explicit agent prefixes. | Bridge provider runs inside gateway, inbound messages reach the selected session without dialing agent sockets, outbound replies are tagged as before. |
-| Gateway restart after crash | Start a resumable agent, kill the gateway process with SIGKILL, then run `h2 run <agent> --resume --detach`. | Stale `gateway.sock` is removed, a new gateway starts, metadata remains readable, and the agent resumes using existing harness session metadata. |
+| Gateway restart after crash | Start multiple agents, verify they are marked running, kill the gateway process with SIGKILL, then run any gateway-starting command such as `h2 list` or `h2 gateway start`. | Stale `gateway.sock` is removed, a new gateway starts, orphan child process groups are cleaned up, and every previously live agent is automatically restarted with harness resume metadata without per-agent user commands. |
 | Pod launch | Run `h2 pod launch <pod>` for a pod with multiple agents and optional bridge. Run `h2 list --pod <pod>`. Stop the pod. | One gateway owns all pod agents and bridge runtime; pod ordering and stop behavior match current CLI semantics. |
 | Hook delivery | Launch a Claude agent with hooks enabled. Trigger tool-use and permission hooks. | `h2 handle-hook` sends hook events to gateway and the correct session monitor updates state and activity logs. |
+| No-gateway list fast path | Gracefully stop all sessions and the gateway, then run `h2 list --include-stopped`. | h2 does not start a gateway just to list stopped metadata when no sessions are marked running; it reports stopped sessions from disk and no live agents. |
 
 ## Testing
 
@@ -481,11 +608,31 @@ All tests must follow the project rule: never use `config.ConfigDir()` against t
 
 | Commitment | Implementation | Test |
 | --- | --- | --- |
-| Atomic session metadata remains the source of truth for resume | Keep `config.WriteRuntimeConfig` atomic writes and add gateway generation fields only as optional diagnostics. | Existing `internal/config/runtime_config_test.go` plus new crash-recovery tests in `internal/gateway/recovery_test.go`. |
+| Atomic session metadata remains the source of truth for resume | Keep `config.WriteRuntimeConfig` atomic writes and add gateway generation/state fields only as optional diagnostics. | Existing `internal/config/runtime_config_test.go` plus new crash-recovery tests in `internal/gateway/recovery_test.go`. |
 | Single-transaction expects-response delivery | Gateway `send_session` registers the reminder trigger and message enqueue under one session operation; if enqueue fails, the trigger is removed before response. | `internal/gateway/manager_test.go` validates no orphan triggers for injected send failure. |
 | Deterministic stale socket cleanup | Gateway startup probes old `agent.*.sock`, `bridge.*.sock`, and `gateway.sock`; removes only dead sockets. | `internal/gateway/recovery_test.go` creates live and stale Unix sockets and verifies only stale files are removed. |
+| Orphan child cleanup and automatic resume | Gateway records child PID/PGID and startup recovery terminates orphaned process groups from a dead gateway generation before automatically resuming every session whose gateway state was running. | `internal/gateway/recovery_test.go` launches fake child process groups, simulates a missing gateway owner, and verifies cleanup plus automatic resume. |
+| Single gateway startup lock | `EnsureRunning` serializes probe/fork/readiness with `<H2_DIR>/gateway.lock`. | `tests/external/gateway_fault_test.go` runs concurrent first-use commands and asserts one gateway process. |
 | Runtime invariant checker | Add `Gateway.CheckInvariants()` asserting unique names, registry/session metadata agreement for live sessions, no nil cancel/done handles, and bridge concierge references are either empty or known/stopped-explicit. | Unit property tests and external smoke test call `gateway debug-invariants` or internal test helper after lifecycle operations. |
 | Structured lifecycle journal | Gateway writes JSONL events for start, stop, child exit, bridge start/stop, stale cleanup, and crash recovery to `<H2_DIR>/logs/gateway-events.jsonl`. | `internal/gateway/state_test.go` verifies event schema and ordering for deterministic lifecycle actions. |
+
+Gateway lifecycle journal schema:
+
+```go
+type GatewayEvent struct {
+    Timestamp         time.Time      `json:"timestamp"`
+    EventType         string         `json:"event_type"`
+    GatewayPID        int            `json:"gateway_pid"`
+    GatewayGeneration string         `json:"gateway_generation"`
+    AgentName         string         `json:"agent_name,omitempty"`
+    BridgeName        string         `json:"bridge_name,omitempty"`
+    ChildPID          int            `json:"child_pid,omitempty"`
+    ChildPGID         int            `json:"child_pgid,omitempty"`
+    Detail            map[string]any `json:"detail,omitempty"`
+}
+```
+
+Required event types: `gateway_start`, `gateway_stop`, `session_start`, `session_stop`, `session_child_exit`, `session_auto_resume`, `session_auto_resume_failed`, `bridge_start`, `bridge_stop`, `stale_socket_removed`, `orphan_child_terminated`, and `recovery_complete`.
 
 ## Extreme Optimization
 
@@ -495,7 +642,7 @@ Measurement:
 
 | Benchmark | Location | Runner | Target |
 | --- | --- | --- | --- |
-| Gateway send dispatch | `internal/gateway/bench_test.go` | `go test -bench GatewaySend ./internal/gateway` | Median in-process dispatch below current socket-based bridge-to-agent dispatch by at least 30% on the same machine. |
+| Gateway send dispatch | `internal/gateway/bench_test.go` | `go test -bench GatewaySend ./internal/gateway` | Median in-process dispatch under 100 microseconds with a fake session queue on a developer laptop; record legacy socket comparison while the old path still exists. |
 | List snapshot with 100 sessions | `internal/gateway/bench_test.go` | `go test -bench GatewayList ./internal/gateway` | Snapshot allocation count remains bounded and no per-session socket dial occurs. |
 
 ## Alien Artifacts
@@ -506,7 +653,27 @@ No advanced mathematical or research technique is required for the first gateway
 
 | Question | Proposed answer |
 | --- | --- |
-| Should gateway shutdown stop all child agents? | Yes for the initial gateway model. Child PTYs are owned by gateway and should not be orphaned. Resume handles recovery. |
+| Should gateway shutdown stop all child agents? | Yes for explicit graceful gateway stop. For gateway crash/restart, the new gateway automatically resumes every session that was live in the previous generation. |
 | Should per-agent sockets exist as aliases? | No in steady state. The goal is one central channel. CLI transparency comes from updating commands to call gateway. |
-| Should gateway auto-start for read-only commands like `h2 list`? | `h2 list` should auto-start only when needed for live runtime inspection. If no gateway exists, it can still show stopped sessions with `--include-stopped` by reading metadata directly or through a short-lived helper path. |
+| Should gateway auto-start for read-only commands like `h2 list`? | `h2 list` should auto-start when metadata shows a prior gateway generation had live sessions, because recovery must resume those agents. If no recovery is pending, it can show stopped sessions with `--include-stopped` by reading metadata directly. |
 | Can multiple gateways run for different h2 dirs? | Yes. The socket path is derived from `H2_DIR`, so each h2 directory has its own gateway. |
+
+## Review Disposition
+
+| # | Reviewer | Severity | Summary | Disposition | Notes |
+| --- | --- | --- | --- | --- | --- |
+| 1 | wise-snow | P0 | Attach stream ownership transfer underspecified | Incorporated | Added Attach Handoff and shutdown attach-draining rules. |
+| 2 | wise-snow | P0 | Hook delivery address resolution incomplete | Incorporated | Added Hook Delivery section documenting gateway dial path and local permission review. |
+| 3 | wise-snow | P0 | Expects-response trigger and send atomicity not concrete | Incorporated | Added `SendSpec.ERTrigger` and single critical-section registration/enqueue semantics. |
+| 4 | wise-snow | P1 | Bridge socket-dial migration call sites unclear | Incorporated | Phase 4 now maps each bridge socket call site to `BridgeRouter`. |
+| 5 | wise-snow | P1 | Gateway shutdown vs long-lived attach connections | Incorporated | Added ordered shutdown sequence and attach cancellation semantics. |
+| 6 | wise-snow | P1 | `h2 list` behavior without running gateway contradictory | Incorporated | CLI changes and acceptance criteria now define no-start metadata fast path. |
+| 7 | wise-snow | P1 | Missing rollback/phased cutover strategy | Incorporated | Added temporary `H2_GATEWAY=0` cutover strategy and deletion criteria. |
+| 8 | wise-snow | P1 | `session.Session` concurrency assumptions change | Incorporated | Added Session Concurrency Audit with required synchronization changes. |
+| 9 | wise-snow | P2 | Gateway protocol needs versioning | Incorporated | Added `Request.Version` and health protocol version behavior. |
+| 10 | wise-snow | P2 | Lifecycle journal schema unspecified | Incorporated | Added `GatewayEvent` schema and required event types. |
+| 11 | wise-snow | P2 | EnsureRunning startup race | Incorporated | Added `gateway.lock` startup critical section and tests. |
+| 12 | wise-snow | P2 | Legacy comparison oracle may be impractical | Incorporated | Test harness now keeps legacy comparison on-demand and adds golden fixtures. |
+| 13 | wise-snow | P3 | Attach method naming inconsistent | Incorporated | Standardized on `Attach` in connected-components contract. |
+| 14 | wise-snow | P3 | Foreground gateway signal handling missing | Incorporated | Added SIGINT/SIGTERM foreground handling. |
+| 15 | wise-snow | P3 | Benchmark target only relative to legacy path | Incorporated | Added absolute send-dispatch target and kept legacy comparison as temporary measurement. |

@@ -2,7 +2,7 @@
 
 ## Summary
 
-This test harness verifies that the gateway migration changes the internal process model without regressing user-visible h2 behavior. The harness must prove there is one gateway process per `H2_DIR`, that agent and bridge runtimes are owned by the gateway, that all CLI commands route through `gateway.sock`, and that crash/restart behavior preserves session metadata and resume paths.
+This test harness verifies that the gateway migration changes the internal process model without regressing user-visible h2 behavior. The harness must prove there is one gateway process per `H2_DIR`, that agent and bridge runtimes are owned by the gateway, that all CLI commands route through `gateway.sock`, and that gateway restart automatically restores every previously live agent through harness resume.
 
 ## Test Matrix
 
@@ -76,6 +76,7 @@ Test:
 3. Assert exactly one gateway process is live.
 4. Assert every successfully started agent is visible in `h2 list`.
 5. Assert stale or duplicate `gateway.sock` files do not remain after stop.
+6. Assert the test fails if the gateway startup lock is disabled in a test build tag or injected option.
 
 ### Child crash containment
 
@@ -103,11 +104,45 @@ CI: Nightly/on-demand.
 
 Test:
 
-1. Start a resumable fake harness session.
+1. Start three resumable fake harness sessions and mark them live in runtime metadata.
 2. Kill the gateway with SIGKILL.
-3. Verify child agent processes are gone.
-4. Run `h2 run <name> --resume --detach`.
-5. Verify stale `gateway.sock` cleanup, metadata parse, and resumed runtime.
+3. Start a new gateway with `h2 gateway start` or a gateway-starting CLI command.
+4. Verify any orphaned child process groups are detected and terminated.
+5. Verify all three sessions are automatically restarted with `ResumeSessionID` set from `HarnessSessionID`.
+6. Verify no per-agent `h2 run --resume` command is required.
+
+### Orphan process recovery
+
+Location: `internal/gateway/recovery_test.go`
+
+Runner: `make test`
+
+CI: PR
+
+Test:
+
+1. Create fake runtime metadata with `gateway_generation`, `gateway_state: "running"`, `child_pid`, and `child_pgid`.
+2. Launch a long-running fake child in that process group without a live gateway.
+3. Start gateway recovery.
+4. Verify recovery terminates the process group before automatic resume.
+5. Verify the session is started with resume arguments derived from `HarnessSessionID`.
+6. Verify missing or already-exited PIDs are treated as clean stale metadata, not fatal startup errors.
+
+### Automatic live-session resume
+
+Location: `internal/gateway/recovery_test.go`
+
+Runner: `make test`
+
+CI: PR
+
+Test:
+
+1. Create four session metadata files: two `gateway_state: "running"`, one `gateway_state: "stopped"`, and one exited due to child exit.
+2. Start gateway recovery.
+3. Verify only the two running sessions are automatically resumed.
+4. Verify stopped/exited sessions remain stopped and appear only in stopped metadata output.
+5. Verify failed auto-resume marks that session exited with `last_exit_reason: "gateway_resume_failed"` and does not block recovery of other sessions.
 
 ### Bridge provider failures
 
@@ -126,18 +161,18 @@ Use fake bridge providers that fail send, fail start, block on receive, and retu
 
 ## Comparison Oracle Tests
 
-### Legacy behavior oracle
+### CLI golden fixtures
 
 Location: `tests/external/gateway_oracle_test.go`
 
 Runner: `go test ./tests/external -run GatewayOracle`
 
-CI: On-demand until the old daemon path is deleted; then archive expected fixtures.
+CI: PR for golden fixtures; legacy binary comparison is on-demand while the old path still exists.
 
 Mechanism:
 
-1. Build the current pre-gateway binary as `h2-legacy` before migration milestones where practical.
-2. Run scripted scenarios against `h2-legacy` and `h2` using the same fake harness commands.
+1. Store normalized expected CLI output fixtures under `tests/external/testdata/gateway-golden/`.
+2. Run scripted scenarios against the gateway-enabled `h2` using fake harness commands.
 3. Compare normalized CLI output for:
    - `run --detach`
    - `list`
@@ -146,6 +181,7 @@ Mechanism:
    - `trigger add/list/remove`
    - `schedule add/list/remove`
    - `bridge create/status/stop` with fake providers
+4. While the legacy daemon path still exists, optionally build `h2-legacy` and regenerate/compare these fixtures on-demand to catch migration drift.
 
 Normalization removes PIDs, durations, generated UUIDs, timestamps, and generated message IDs.
 
@@ -257,8 +293,9 @@ Manual checks:
 1. Run `h2 gateway run` in foreground and launch Claude and Codex agents from another terminal. Confirm process tree shows gateway as parent of both agent app processes.
 2. Use `h2 attach` from two terminals against one agent. Exercise passthrough lock, resize, scroll, relaunch, and quit.
 3. Configure a real Telegram bridge and verify unaddressed messages, `agent: message` prefixes, reply-to routing, typing indicator, concierge switch, and shutdown messages.
-4. Kill the foreground gateway with Ctrl+C and verify shutdown leaves the terminal clean, removes `gateway.sock`, and stops child agents.
-5. Start through auto-background mode from inside an agent session and verify `CLAUDECODE` or similar parent-agent environment markers do not leak into new child agents.
+4. Kill the foreground gateway with Ctrl+C and verify graceful shutdown leaves the terminal clean, removes `gateway.sock`, and stops child agents.
+5. Kill a background gateway with SIGKILL, restart it, and verify all previously live agents come back automatically with resumed harness sessions.
+6. Start through auto-background mode from inside an agent session and verify `CLAUDECODE` or similar parent-agent environment markers do not leak into new child agents.
 
 ## CI Tier Mapping
 
@@ -277,7 +314,8 @@ Implementation is complete only when:
 1. No normal command path forks `_daemon` or `_bridge-service`.
 2. `h2 list` and process inspection show one gateway process plus direct child agent app processes.
 3. No per-agent or per-bridge sockets are created during normal operation.
-4. `make check`, `make test`, and `make test-external` pass.
-5. Gateway fault tests pass at least once before release.
-6. Manual QA in `qa/plans/gateway-manual.md` is completed and recorded.
-7. Documentation updates describe `h2 gateway run` for supervisors and preserve existing user-facing run/bridge instructions.
+4. Killing and restarting the gateway automatically resumes all sessions that were live in the prior gateway generation.
+5. `make check`, `make test`, and `make test-external` pass.
+6. Gateway fault tests pass at least once before release.
+7. Manual QA in `qa/plans/gateway-manual.md` is completed and recorded.
+8. Documentation updates describe `h2 gateway run` for supervisors and preserve existing user-facing run/bridge instructions.
