@@ -734,6 +734,73 @@ func (s *Session) StateDuration() time.Duration {
 	return s.monitor.StateDuration()
 }
 
+// AgentInfo returns status information for this session using the provided
+// runtime start time and pod value from the owning runtime.
+func (s *Session) AgentInfo(startTime time.Time, pod string) *message.AgentInfo {
+	uptime := time.Since(startTime)
+	st, sub := s.State()
+	activity := s.ActivitySnapshot()
+	var toolName string
+	if st == monitor.StateActive {
+		toolName = activity.LastToolName
+	}
+	info := &message.AgentInfo{
+		Name:             s.Name(),
+		Command:          s.RC.Command,
+		SessionID:        s.RC.SessionID,
+		Profile:          s.RC.Profile,
+		RoleName:         s.RC.RoleName,
+		Pod:              pod,
+		PodIndex:         s.RC.PodIndex,
+		Uptime:           virtualterminal.FormatIdleDuration(uptime),
+		State:            st.String(),
+		SubState:         sub.String(),
+		StateDisplayText: monitor.FormatStateLabel(st.String(), sub.String(), toolName),
+		StateDuration:    virtualterminal.FormatIdleDuration(s.StateDuration()),
+		QueuedCount:      s.Queue.PendingCount(),
+	}
+	if !activity.LastActivityAt.IsZero() {
+		info.LastActivity = virtualterminal.FormatIdleDuration(time.Since(activity.LastActivityAt))
+	}
+
+	// Pull from OTEL collector if active.
+	m := s.Metrics()
+	if m.EventsReceived {
+		info.InputTokens = m.InputTokens
+		info.OutputTokens = m.OutputTokens
+		info.TotalTokens = m.TotalTokens
+		info.TotalCostUSD = m.TotalCostUSD
+		info.ToolCounts = m.ToolCounts
+	}
+
+	// Point-in-time git stats.
+	if gs := gitStats(); gs != nil {
+		info.GitFilesChanged = gs.FilesChanged
+		info.GitLinesAdded = gs.LinesAdded
+		info.GitLinesRemoved = gs.LinesRemoved
+	}
+
+	info.LastToolUse = activity.LastToolName
+	info.ToolUseCount = activity.ToolUseCount
+	info.BlockedOnPermission = activity.BlockedOnPermission
+	info.BlockedToolName = activity.BlockedToolName
+
+	if resetsAt := s.UsageLimitResetsAt(); resetsAt != nil {
+		info.UsageLimitResetsAt = resetsAt.Format(time.RFC3339)
+	}
+	if usageMsg := s.UsageLimitMessage(); usageMsg != "" {
+		info.UsageLimitMessage = usageMsg
+	}
+	if authMsg := s.AuthErrorMessage(); authMsg != "" {
+		info.AuthErrorMessage = authMsg
+	}
+	if serverMsg := s.ServerErrorMessage(); serverMsg != "" {
+		info.ServerErrorMessage = serverMsg
+	}
+
+	return info
+}
+
 // HandleOutput signals that the child process has produced output.
 // Delegates to the Agent's harness (e.g. generic harness feeds output collector).
 func (s *Session) HandleOutput() {

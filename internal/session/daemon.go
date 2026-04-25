@@ -15,7 +15,6 @@ import (
 	"h2/internal/config"
 	"h2/internal/session/agent/monitor"
 	"h2/internal/session/message"
-	"h2/internal/session/virtualterminal"
 	"h2/internal/socketdir"
 )
 
@@ -58,15 +57,97 @@ type TerminalHints struct {
 // used by the launcher (not reconstructed from agent name) to ensure
 // consistency across symlinks, worktrees, and custom paths.
 func RunDaemon(sessionDir string, rc *config.RuntimeConfig, resume bool) error {
+	s := newRuntimeSession(sessionDir, rc, resume)
+
+	// Create socket directory.
+	if err := os.MkdirAll(socketdir.Dir(), 0o700); err != nil {
+		return fmt.Errorf("create socket dir: %w", err)
+	}
+
+	sockPath := socketdir.Path(socketdir.TypeAgent, rc.AgentName)
+
+	if err := socketdir.ProbeSocket(sockPath, fmt.Sprintf("agent %q", rc.AgentName)); err != nil {
+		return err
+	}
+
+	// Create Unix socket.
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		return fmt.Errorf("listen on socket: %w", err)
+	}
+	defer func() {
+		ln.Close()
+		os.Remove(sockPath)
+	}()
+
+	// Create automation engines with base env vars for conditions and actions.
+	baseEnv := map[string]string{
+		"H2_ACTOR": rc.AgentName,
+	}
+	if rc.RoleName != "" {
+		baseEnv["H2_ROLE"] = rc.RoleName
+	}
+	if sessionDir != "" {
+		baseEnv["H2_SESSION_DIR"] = sessionDir
+	}
+
+	stateProvider := func() (string, string) {
+		st, sub := s.State()
+		return st.String(), sub.String()
+	}
+
+	enqueuer := &sessionEnqueuer{queue: s.Queue, agentName: rc.AgentName}
+	runner := automation.NewActionRunner(enqueuer, baseEnv, rc.CWD)
+	triggerEngine := automation.NewTriggerEngine(runner, stateProvider)
+	scheduleEngine := automation.NewScheduleEngine(runner, automation.WithStateProvider(stateProvider))
+
+	// Subscribe TriggerEngine to monitor events.
+	eventCh := s.monitor.Subscribe()
+
+	d := &Daemon{
+		Session:        s,
+		Listener:       ln,
+		StartTime:      s.StartTime,
+		TriggerEngine:  triggerEngine,
+		ScheduleEngine: scheduleEngine,
+	}
+	s.Daemon = d
+
+	// Load role-defined triggers and schedules from RuntimeConfig.
+	if err := d.loadRoleAutomations(rc); err != nil {
+		ln.Close()
+		os.Remove(sockPath)
+		return fmt.Errorf("load role automations: %w", err)
+	}
+
+	// Start automation engines.
+	automationCtx, automationCancel := context.WithCancel(context.Background())
+	go triggerEngine.Run(automationCtx, eventCh)
+	go scheduleEngine.Run(automationCtx)
+
+	// Start socket listener.
+	go d.acceptLoop()
+
+	// Run session in daemon mode (blocks until exit).
+	err = s.RunDaemon()
+	automationCancel()
+	runner.Wait()
+	return err
+}
+
+func newRuntimeSession(sessionDir string, rc *config.RuntimeConfig, resume bool) *Session {
 	if resume {
 		rc.ResumeSessionID = rc.HarnessSessionID
 	}
 
 	s := NewFromConfig(rc)
-
 	s.StartTime = time.Now()
 	s.SessionDir = sessionDir
+	wireRuntimePersistenceCallbacks(s, sessionDir, rc)
+	return s
+}
 
+func wireRuntimePersistenceCallbacks(s *Session, sessionDir string, rc *config.RuntimeConfig) {
 	// Track whether NativeLogPathSuffix has been persisted to disk.
 	// PrepareForLaunch sets it in memory but the initial WriteRuntimeConfig
 	// (done by the launcher) may not include it.
@@ -94,7 +175,6 @@ func RunDaemon(sessionDir string, rc *config.RuntimeConfig, resume bool) error {
 				log.Printf("warning: update runtime config: %v", err)
 			}
 		}
-
 	})
 
 	// Wire OnUsageLimit callback to persist rate limit info to the profile's
@@ -173,81 +253,6 @@ func RunDaemon(sessionDir string, rc *config.RuntimeConfig, resume bool) error {
 			log.Printf("warning: clear server error info: %v", err)
 		}
 	})
-
-	// Create socket directory.
-	if err := os.MkdirAll(socketdir.Dir(), 0o700); err != nil {
-		return fmt.Errorf("create socket dir: %w", err)
-	}
-
-	sockPath := socketdir.Path(socketdir.TypeAgent, rc.AgentName)
-
-	if err := socketdir.ProbeSocket(sockPath, fmt.Sprintf("agent %q", rc.AgentName)); err != nil {
-		return err
-	}
-
-	// Create Unix socket.
-	ln, err := net.Listen("unix", sockPath)
-	if err != nil {
-		return fmt.Errorf("listen on socket: %w", err)
-	}
-	defer func() {
-		ln.Close()
-		os.Remove(sockPath)
-	}()
-
-	// Create automation engines with base env vars for conditions and actions.
-	baseEnv := map[string]string{
-		"H2_ACTOR": rc.AgentName,
-	}
-	if rc.RoleName != "" {
-		baseEnv["H2_ROLE"] = rc.RoleName
-	}
-	if sessionDir != "" {
-		baseEnv["H2_SESSION_DIR"] = sessionDir
-	}
-
-	stateProvider := func() (string, string) {
-		st, sub := s.State()
-		return st.String(), sub.String()
-	}
-
-	enqueuer := &sessionEnqueuer{queue: s.Queue, agentName: rc.AgentName}
-	runner := automation.NewActionRunner(enqueuer, baseEnv, rc.CWD)
-	triggerEngine := automation.NewTriggerEngine(runner, stateProvider)
-	scheduleEngine := automation.NewScheduleEngine(runner, automation.WithStateProvider(stateProvider))
-
-	// Subscribe TriggerEngine to monitor events.
-	eventCh := s.monitor.Subscribe()
-
-	d := &Daemon{
-		Session:        s,
-		Listener:       ln,
-		StartTime:      s.StartTime,
-		TriggerEngine:  triggerEngine,
-		ScheduleEngine: scheduleEngine,
-	}
-	s.Daemon = d
-
-	// Load role-defined triggers and schedules from RuntimeConfig.
-	if err := d.loadRoleAutomations(rc); err != nil {
-		ln.Close()
-		os.Remove(sockPath)
-		return fmt.Errorf("load role automations: %w", err)
-	}
-
-	// Start automation engines.
-	automationCtx, automationCancel := context.WithCancel(context.Background())
-	go triggerEngine.Run(automationCtx, eventCh)
-	go scheduleEngine.Run(automationCtx)
-
-	// Start socket listener.
-	go d.acceptLoop()
-
-	// Run session in daemon mode (blocks until exit).
-	err = s.RunDaemon()
-	automationCancel()
-	runner.Wait()
-	return err
 }
 
 // ReloadAutomations clears existing role-defined triggers/schedules and
@@ -326,63 +331,7 @@ func (d *Daemon) loadRoleAutomations(rc *config.RuntimeConfig) error {
 
 // AgentInfo returns status information about this daemon.
 func (d *Daemon) AgentInfo() *message.AgentInfo {
-	s := d.Session
-	uptime := time.Since(d.StartTime)
-	st, sub := s.State()
-	activity := s.ActivitySnapshot()
-	var toolName string
-	if st == monitor.StateActive {
-		toolName = activity.LastToolName
-	}
-	info := &message.AgentInfo{
-		Name:             s.Name(),
-		Command:          s.RC.Command,
-		SessionID:        s.RC.SessionID,
-		Profile:          s.RC.Profile,
-		RoleName:         s.RC.RoleName,
-		Pod:              os.Getenv("H2_POD"),
-		PodIndex:         s.RC.PodIndex,
-		Uptime:           virtualterminal.FormatIdleDuration(uptime),
-		State:            st.String(),
-		SubState:         sub.String(),
-		StateDisplayText: monitor.FormatStateLabel(st.String(), sub.String(), toolName),
-		StateDuration:    virtualterminal.FormatIdleDuration(s.StateDuration()),
-		QueuedCount:      s.Queue.PendingCount(),
-	}
-	if !activity.LastActivityAt.IsZero() {
-		info.LastActivity = virtualterminal.FormatIdleDuration(time.Since(activity.LastActivityAt))
-	}
-
-	// Pull from OTEL collector if active.
-	m := s.Metrics()
-	if m.EventsReceived {
-		info.InputTokens = m.InputTokens
-		info.OutputTokens = m.OutputTokens
-		info.TotalTokens = m.TotalTokens
-		info.TotalCostUSD = m.TotalCostUSD
-		info.ToolCounts = m.ToolCounts
-	}
-
-	// Point-in-time git stats.
-	if gs := gitStats(); gs != nil {
-		info.GitFilesChanged = gs.FilesChanged
-		info.GitLinesAdded = gs.LinesAdded
-		info.GitLinesRemoved = gs.LinesRemoved
-	}
-
-	info.LastToolUse = activity.LastToolName
-	info.ToolUseCount = activity.ToolUseCount
-	info.BlockedOnPermission = activity.BlockedOnPermission
-	info.BlockedToolName = activity.BlockedToolName
-
-	if resetsAt := s.UsageLimitResetsAt(); resetsAt != nil {
-		info.UsageLimitResetsAt = resetsAt.Format(time.RFC3339)
-	}
-	info.UsageLimitMessage = s.UsageLimitMessage()
-	info.AuthErrorMessage = s.AuthErrorMessage()
-	info.ServerErrorMessage = s.ServerErrorMessage()
-
-	return info
+	return d.Session.AgentInfo(d.StartTime, os.Getenv("H2_POD"))
 }
 
 // gitDiffStats holds parsed git diff --numstat output.
