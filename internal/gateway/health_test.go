@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"h2/internal/config"
 )
 
 func TestServerHealth(t *testing.T) {
@@ -98,6 +100,78 @@ func TestHealthRejectsIncompatibleProtocol(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "protocol version") {
 		t.Fatalf("error = %q, want protocol version", err.Error())
+	}
+}
+
+func TestServerSessionRPCs(t *testing.T) {
+	setupGatewayTestH2Dir(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	socketPath := shortSocketPath(t)
+	manager := NewManager(ManagerOpts{Generation: "rpc-generation"})
+	server := NewServer(ServerOpts{
+		H2Dir:      config.ConfigDir(),
+		SocketPath: socketPath,
+		Manager:    manager,
+	})
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.Run(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("server Run after cancel: %v", err)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("server did not stop after cancel")
+		}
+	})
+	waitForHealth(t, socketPath)
+
+	sessionDir := filepath.Join(config.ConfigDir(), "sessions", "rpc-agent")
+	rc := gatewayTestRC("rpc-agent", "sh", []string{"-c", "sleep 30"})
+	writeGatewayTestRC(t, sessionDir, rc)
+
+	status, err := StartSession(context.Background(), socketPath, StartSessionRequest{
+		SessionDir:    sessionDir,
+		RuntimeConfig: rc,
+	})
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if status.Agent.Name != "rpc-agent" {
+		t.Fatalf("status agent = %q, want rpc-agent", status.Agent.Name)
+	}
+	waitForRuntimeState(t, sessionDir, GatewayRuntimeRunning)
+
+	list, err := ListRuntime(context.Background(), socketPath)
+	if err != nil {
+		t.Fatalf("ListRuntime: %v", err)
+	}
+	if len(list) != 1 || list[0].Agent.Name != "rpc-agent" {
+		t.Fatalf("list = %+v, want rpc-agent", list)
+	}
+
+	status, err = SessionStatusFor(context.Background(), socketPath, "rpc-agent")
+	if err != nil {
+		t.Fatalf("SessionStatusFor: %v", err)
+	}
+	if status.Agent.Name != "rpc-agent" {
+		t.Fatalf("status agent = %q, want rpc-agent", status.Agent.Name)
+	}
+
+	if err := StopSession(context.Background(), socketPath, "rpc-agent"); err != nil {
+		t.Fatalf("StopSession: %v", err)
+	}
+	got := waitForRuntimeState(t, sessionDir, GatewayRuntimeStopped)
+	if got.GatewayDesiredState != GatewayDesiredStopped {
+		t.Fatalf("desired state = %q, want stopped", got.GatewayDesiredState)
 	}
 }
 
