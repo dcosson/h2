@@ -24,6 +24,7 @@ The user-facing configuration should not change. Existing role YAML, bridge conf
 | R7 | Existing attach, send, list, stop, trigger, schedule, rotate, bridge, pod, and hook behaviors remain user-transparent. | Must-have |
 | R8 | Gateway crash and restart behavior is explicit, testable, and does not corrupt session metadata. | Must-have |
 | R9 | Gateway restart automatically brings every previously live agent back up with resume, without requiring per-agent user commands. | Must-have |
+| R10 | Agent child environment is deterministic for supervised and remote operation, with explicit passthrough only for approved launch-scoped variables. | Must-have |
 
 ### Shapes Considered
 
@@ -47,6 +48,7 @@ The user-facing configuration should not change. Existing role YAML, bridge conf
 | R7 | Existing attach, send, list, stop, trigger, schedule, rotate, bridge, pod, and hook behaviors remain user-transparent. | Must-have | Yes | Yes | Yes |
 | R8 | Gateway crash and restart behavior is explicit, testable, and does not corrupt session metadata. | Must-have | No | Yes | No |
 | R9 | Gateway restart automatically brings every previously live agent back up with resume, without requiring per-agent user commands. | Must-have | No | Yes | No |
+| R10 | Agent child environment is deterministic for supervised and remote operation, with explicit passthrough only for approved launch-scoped variables. | Must-have | No | Yes | No |
 
 Shape B is selected. Shape A is a useful transitional implementation strategy only if needed to reduce risk, but it does not satisfy the core goal because runtime ownership stays distributed. Shape C improves bridge routing but leaves process management split.
 
@@ -409,6 +411,18 @@ type Request struct {
 
 The initial protocol version is `1`. `health` returns the gateway protocol version and h2 build version. CLI requests with an incompatible major protocol version fail with a clear error instructing the user to restart the gateway so the CLI and gateway binary match.
 
+`start_session` carries launch-scoped environment inputs separately from the persisted runtime config:
+
+```go
+type StartSessionSpec struct {
+    SessionDir string `json:"session_dir"`
+    EnvPassthrough map[string]string `json:"env_passthrough,omitempty"`
+    EnvOverrides map[string]string `json:"env_overrides,omitempty"`
+}
+```
+
+`EnvPassthrough` is populated by local CLI callers from the caller process environment after filtering through the configured allowlist. Remote launchers may also supply these values explicitly, but they are still treated as launch-scoped inputs. `EnvOverrides` is reserved for explicit RPC callers that need to provide non-secret per-launch values without relying on local shell inheritance. Neither map replaces the stable environment sources required for unattended gateway restart.
+
 `SendSpec` carries expects-response trigger data so trigger registration and message enqueue can be one session operation:
 
 ```go
@@ -466,6 +480,8 @@ Request types:
 | `h2 trigger`, `h2 schedule`, `h2 rotate`, `h2 session restart`, `h2 peek`, `h2 stats` | Replace direct socket calls with gateway client calls. File-based event and runtime metadata reads can stay as-is where they do not require live state. |
 | `h2 handle-hook` | Use `H2_ACTOR` or `H2_SESSION_DIR` to address `hook_event` through gateway. |
 
+Local `h2 run` does not serialize the caller's full environment. It extracts only allowlisted passthrough keys into `StartSessionSpec.EnvPassthrough`, then the gateway composes the child environment using the deterministic contract below.
+
 ### Hook Delivery
 
 `h2 handle-hook` continues to run as a child hook command launched by the underlying harness. It still reads `H2_SESSION_DIR` to load `RuntimeConfig`, role permission-review config, DCG policy, and AI reviewer instructions locally in the hook process. The gateway does not own permission-review decision logic.
@@ -474,7 +490,52 @@ Only the event delivery transport changes. `sendHookEvent` dials `gateway.sock` 
 
 ## Metadata and Config
 
-No user-facing config changes are required.
+No mandatory user-facing config changes are required. Optional environment config is added for supervised and remote operation.
+
+In `config.yaml`:
+
+```yaml
+runtime:
+  env:
+    PATH: /opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin
+  env_passthrough:
+    - MY_TEAM_CONTEXT
+```
+
+In role YAML:
+
+```yaml
+role_name: coder
+env:
+  FEATURE_FLAG: enabled
+```
+
+`runtime.env` is a stable gateway-wide child environment overlay. `role.env` is a stable per-role child environment overlay. `runtime.env_passthrough` extends the built-in passthrough allowlist; it does not replace it.
+
+Implementation adds `Runtime *RuntimeEnvConfig` to `config.Config` and `Env map[string]string` to `config.Role`. These fields are optional and omitted from existing configs without changing current launch behavior except for the built-in passthrough allowlist.
+
+Built-in passthrough allowlist:
+
+| Variable | Purpose |
+| --- | --- |
+| `ANTHROPIC_API_KEY` | Anthropic API key for local CLI convenience. |
+| `ANTHROPIC_AUTH_TOKEN` | Anthropic auth token for local CLI convenience. |
+| `ANTHROPIC_BASE_URL` | Anthropic-compatible endpoint override. |
+| `OPENROUTER_API_KEY` | OpenRouter API key. |
+| `OPENAI_API_KEY` | OpenAI API key. |
+| `AI_GATEWAY_API_KEY` | AI Gateway API key. |
+
+Child environment composition is deterministic and does not inherit arbitrary `os.Environ()` from whichever process happens to own the gateway:
+
+1. Start with the gateway supervisor environment after removing h2 parent-agent contamination keys such as `H2_ACTOR`, `H2_ROLE`, `H2_POD`, `H2_SESSION_DIR`, and `CLAUDECODE`.
+2. Overlay `runtime.env`.
+3. Overlay `role.env`.
+4. Overlay `StartSessionSpec.EnvPassthrough` values that match the built-in or configured passthrough allowlist.
+5. Overlay `StartSessionSpec.EnvOverrides` for explicit remote launch values.
+6. Overlay h2 internal variables: `H2_DIR`, `H2_ACTOR`, `H2_ROLE`, `H2_SESSION_DIR`, and `H2_POD` when applicable.
+7. Overlay harness variables from `PrepareForLaunch` and `BuildCommandEnvVars`, including `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, and OTEL capture variables.
+
+Passthrough variables are a local-launch convenience, not the unattended recovery contract. The gateway records passthrough key names for diagnostics but does not persist passthrough values in `session.metadata.json` by default, because the built-in passthrough list includes secrets. Any variable required for fully remote launch or gateway-crash resume must come from the supervisor environment, `runtime.env`, `role.env`, harness auth directories, or a later explicit secret-store integration. If a session starts with passthrough values that are not also available from a stable source, `h2 list` and `h2 gateway status` should expose a resume-environment warning instead of silently implying crash-resume is fully credential-stable.
 
 `config.RuntimeConfig` keeps its current role, harness, profile, CWD, session ID, and automation fields. Add internal-only fields only if implementation needs them:
 
@@ -487,6 +548,8 @@ ChildPID          int    `json:"child_pid,omitempty"`
 ChildPGID         int    `json:"child_pgid,omitempty"`
 LastExitReason    string `json:"last_exit_reason,omitempty"`
 LastStateAt       string `json:"last_state_at,omitempty"` // RFC3339
+PassthroughEnvKeys []string `json:"passthrough_env_keys,omitempty"` // diagnostic key names only, not values
+ResumeEnvWarning string `json:"resume_env_warning,omitempty"`
 ```
 
 These are internal runtime fields, not user configuration. They must not be required by `Validate`, because older session metadata must remain readable. For new gateway-managed sessions, `GatewayDesiredState` is the authoritative restart-intent field:
@@ -508,7 +571,7 @@ The gateway is the parent process for every agent child. It is responsible for:
 
 | Responsibility | Design |
 | --- | --- |
-| Start | Resolve role/config in the CLI, write runtime config, ask gateway to start. Gateway reads the same file and starts the PTY child. |
+| Start | Resolve role/config in the CLI, write runtime config, extract allowlisted env passthrough from the caller if present, and ask gateway to start. Gateway reads the same file, composes the child environment from stable sources plus launch-scoped passthrough, and starts the PTY child. |
 | Stop | `stop_session` sets `Session.Quit`, kills the child PTY if needed, drains shutdown hooks, and removes the session from the live registry. |
 | Relaunch | `relaunch_session` uses the existing `Session` lifecycle loop behavior, but the request enters through gateway. |
 | Gateway shutdown/restart | Default gateway shutdown stops bridge receivers and child processes but does not change agent `GatewayDesiredState`; replacement gateway resumes every desired-running agent. A separate explicit stop-all-sessions mode marks sessions stopped before termination. |
@@ -552,7 +615,7 @@ Add `internal/gateway`, `socketdir.TypeGateway`, hidden `_gateway`, and public `
 
 ### Phase 2: Start sessions through gateway
 
-Refactor `session.RunDaemon` into `Session.RunManaged(ctx, opts)` and `SessionRuntime`. Change `h2 run`, `h2 run --resume`, and `h2 pod launch` to call gateway `start_session`/`resume_session`. Delete the call path to `session.ForkDaemon` after tests pass.
+Refactor `session.RunDaemon` into `Session.RunManaged(ctx, opts)` and `SessionRuntime`. Change `h2 run`, `h2 run --resume`, and `h2 pod launch` to call gateway `start_session`/`resume_session`. Add deterministic child environment composition, built-in passthrough extraction, optional `runtime.env`, optional `role.env`, and resume-environment diagnostics in this phase so gateway-managed children never depend on arbitrary supervisor or local shell inheritance. Delete the call path to `session.ForkDaemon` after tests pass.
 
 ### Phase 3: Move agent command RPCs
 
@@ -595,6 +658,7 @@ The legacy bypass is a development and rollback tool only. It must not become us
 | --- | --- | --- |
 | Transparent first launch | Stop all h2 runtime processes. Run `h2 run test-agent --role default --detach`. Run `h2 gateway status`. Run `h2 list`. | `h2 run` starts one gateway process in the background, starts one agent child, and `h2 list` shows the agent without any per-agent daemon process. |
 | Foreground supervised gateway | Run `h2 gateway run` in one terminal. In another terminal run `h2 run test-agent --role default --detach`, `h2 send test-agent "hello"`, and `h2 stop test-agent`. | The existing foreground gateway handles all commands; no background gateway is forked. |
+| Deterministic child env | Run a supervised gateway with minimal env plus `runtime.env`. Launch one agent locally with `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, and `AI_GATEWAY_API_KEY` in the caller env, plus unrelated variables. Launch another agent through a remote-style `start_session` request. | Only built-in and configured passthrough keys are included from the local caller; unrelated caller env is not inherited; remote launch succeeds from stable gateway/config env; resume warnings appear for sessions that depend only on launch-scoped passthrough. |
 | Attach through gateway | Start an agent. Run `h2 attach <agent>`, resize the terminal, send input, toggle passthrough, detach by closing attach. Reattach. | The same terminal behavior works through `gateway.sock`, including resize frames and persisted VT scrollback. |
 | Bridge routing through gateway | Configure Telegram test bridge or fake bridge. Run `h2 bridge create --bridge test --set-concierge <agent>`. Send inbound provider messages with and without explicit agent prefixes. | Bridge provider runs inside gateway, inbound messages reach the selected session without dialing agent sockets, outbound replies are tagged as before. |
 | Gateway restart after crash | Start multiple agents, verify `GatewayDesiredState: "running"`, kill the gateway process with SIGKILL, then run any gateway-starting command such as `h2 list` or `h2 gateway start`. | Stale `gateway.sock` is removed, a new gateway starts, orphan child process groups are cleaned up, and every desired-running agent is automatically restarted with harness resume metadata without per-agent user commands. |
@@ -608,6 +672,7 @@ The legacy bypass is a development and rollback tool only. It must not become us
 | --- | --- | --- | --- |
 | Gateway protocol unit tests | `internal/gateway/*_test.go` | `make test` | PR |
 | Gateway manager concurrency tests | `internal/gateway/manager_test.go` | `make test` | PR |
+| Child environment composition tests | `internal/gateway/env_test.go` | `make test` | PR |
 | Session managed runtime tests | `internal/session/*_test.go`, new `internal/gateway/session_runtime_test.go` | `make test` | PR |
 | Bridge router tests | `internal/bridgeservice/*_test.go`, new `internal/gateway/bridge_runtime_test.go` | `make test` | PR |
 | CLI command tests | `internal/cmd/*_test.go` | `make test` | PR |
@@ -623,6 +688,7 @@ All tests must follow the project rule: never use `config.ConfigDir()` against t
 | Atomic session metadata remains the source of truth for resume | Keep `config.WriteRuntimeConfig` atomic writes and add gateway desired/runtime state fields as internal lifecycle metadata. | Existing `internal/config/runtime_config_test.go` plus new crash-recovery tests in `internal/gateway/recovery_test.go`. |
 | Single-transaction expects-response delivery | Gateway `send_session` registers the reminder trigger and message enqueue under one session operation; if enqueue fails, the trigger is removed before response. | `internal/gateway/manager_test.go` validates no orphan triggers for injected send failure. |
 | Deterministic stale socket cleanup | Gateway startup probes old `agent.*.sock`, `bridge.*.sock`, and `gateway.sock`; removes only dead sockets. | `internal/gateway/recovery_test.go` creates live and stale Unix sockets and verifies only stale files are removed. |
+| Deterministic child environment | Gateway child launch uses an explicit composition pipeline with stable config overlays, default passthrough allowlist, parent-agent denylist, and resume-environment warnings for launch-scoped secrets. | `internal/gateway/env_test.go` covers precedence, denylist, built-in passthrough keys, non-persistence of passthrough values, and stable-env resume behavior. |
 | Orphan child cleanup and automatic resume | Gateway records child PID/PGID and startup recovery terminates orphaned process groups from a dead gateway generation before automatically resuming every session whose desired state is running. | `internal/gateway/recovery_test.go` launches fake child process groups, simulates a missing gateway owner, and verifies cleanup plus automatic resume. |
 | Single gateway startup lock | `EnsureRunning` serializes probe/fork/readiness with `<H2_DIR>/gateway.lock`. | `tests/external/gateway_fault_test.go` runs concurrent first-use commands and asserts one gateway process. |
 | Runtime invariant checker | Add `Gateway.CheckInvariants()` asserting unique names, registry/session metadata agreement for live sessions, no nil cancel/done handles, and bridge concierge references are either empty or known/stopped-explicit. | Unit property tests and external smoke test call `gateway debug-invariants` or internal test helper after lifecycle operations. |

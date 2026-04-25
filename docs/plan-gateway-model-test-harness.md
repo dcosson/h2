@@ -2,13 +2,14 @@
 
 ## Summary
 
-This test harness verifies that the gateway migration changes the internal process model without regressing user-visible h2 behavior. The harness must prove there is one gateway process per `H2_DIR`, that agent and bridge runtimes are owned by the gateway, that all CLI commands route through `gateway.sock`, and that gateway restart automatically restores every previously live agent through harness resume.
+This test harness verifies that the gateway migration changes the internal process model without regressing user-visible h2 behavior. The harness must prove there is one gateway process per `H2_DIR`, that agent and bridge runtimes are owned by the gateway, that all CLI commands route through `gateway.sock`, that agent child environments are composed deterministically for supervised and remote launch, and that gateway restart automatically restores every previously live agent through harness resume.
 
 ## Test Matrix
 
 | Test area | Location | Runner | CI tier |
 | --- | --- | --- | --- |
 | Unit and protocol tests | `internal/gateway/*_test.go` | `make test` | PR |
+| Child environment tests | `internal/gateway/env_test.go` | `make test` | PR |
 | Session runtime component tests | `internal/gateway/session_runtime_test.go`, `internal/session/*_test.go` | `make test` | PR |
 | Bridge routing component tests | `internal/gateway/bridge_runtime_test.go`, `internal/bridgeservice/*_test.go` | `make test` | PR |
 | CLI integration tests | `tests/external/gateway_test.go` | `make test-external` | PR |
@@ -159,6 +160,54 @@ Test:
 3. Kill the gateway before stopping the other, leaving `gateway_desired_state: "running"`.
 4. Restart the gateway.
 5. Verify only the desired-running session resumes and the intentionally stopped session does not.
+
+### Child environment composition
+
+Location: `internal/gateway/env_test.go`
+
+Runner: `make test`
+
+CI: PR
+
+Test:
+
+1. Create a fake gateway supervisor environment containing stable keys, parent-agent contamination keys, and default API-key passthrough candidates.
+2. Create runtime config with `runtime.env`, role env, explicit `EnvPassthrough`, explicit `EnvOverrides`, h2 internal vars, and fake harness vars.
+3. Compose the child environment.
+4. Verify precedence order is supervisor env, `runtime.env`, role env, passthrough, explicit overrides, h2 internal vars, then harness vars.
+5. Verify parent-agent contamination keys such as `CLAUDECODE`, stale `H2_ACTOR`, stale `H2_ROLE`, stale `H2_POD`, and stale `H2_SESSION_DIR` are removed before overlays.
+6. Verify `PATH` and `HOME` come from stable supervisor or `runtime.env`, not from an arbitrary local `h2 run` caller unless explicitly configured.
+
+### Default passthrough allowlist
+
+Location: `internal/gateway/env_test.go`
+
+Runner: `make test`
+
+CI: PR
+
+Test:
+
+1. Run the CLI-side passthrough extractor with caller env containing `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `AI_GATEWAY_API_KEY`, and unrelated variables.
+2. Verify only built-in allowlisted keys and configured `runtime.env_passthrough` additions are sent in `StartSessionSpec.EnvPassthrough`.
+3. Verify unrelated variables and h2 parent-agent variables are not serialized into the start request.
+4. Verify `session.metadata.json` records passthrough key names for diagnostics but never records passthrough values.
+
+### Stable environment resume
+
+Location: `internal/gateway/recovery_test.go`
+
+Runner: `make test`
+
+CI: PR
+
+Test:
+
+1. Start a fake session with required provider env supplied from stable gateway supervisor env or `runtime.env`.
+2. Kill and restart the gateway with the same stable env.
+3. Verify automatic resume launches the child with the same required provider env.
+4. Start a second fake session using only launch-scoped passthrough for a provider key.
+5. Verify metadata and status expose a resume-environment warning for the second session rather than claiming it is credential-stable across crash recovery.
 
 ### Bridge provider failures
 
@@ -312,6 +361,7 @@ Manual checks:
 4. Kill the foreground gateway with Ctrl+C and verify graceful shutdown leaves the terminal clean, removes `gateway.sock`, and stops child agents.
 5. Kill a background gateway with SIGKILL, restart it, and verify all previously live agents come back automatically with resumed harness sessions.
 6. Start through auto-background mode from inside an agent session and verify `CLAUDECODE` or similar parent-agent environment markers do not leak into new child agents.
+7. Run a supervised foreground gateway with a minimal environment plus stable provider credentials. Launch one agent remotely through h2 messaging and one agent locally with default passthrough variables. Verify both initial launches receive the expected child env, and verify only the stable-env session is reported as credential-stable for unattended resume.
 
 ## CI Tier Mapping
 
@@ -335,3 +385,4 @@ Implementation is complete only when:
 6. Gateway fault tests pass at least once before release.
 7. Manual QA in `qa/plans/gateway-manual.md` is completed and recorded.
 8. Documentation updates describe `h2 gateway run` for supervisors and preserve existing user-facing run/bridge instructions.
+9. Child env tests prove default passthrough keys are allowlisted, arbitrary caller env is not inherited, and unattended resume uses stable configured env sources.
