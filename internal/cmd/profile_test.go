@@ -60,6 +60,19 @@ func TestProfileCreate_SymlinkShared(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(h2Dir, "claude-config", srcProfile, ".claude.json"), []byte(`{"auth":true}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Runtime state in the source must NOT leak into the new profile.
+	if err := os.WriteFile(filepath.Join(h2Dir, "claude-config", srcProfile, "ratelimit.json"), []byte(`{"resets_at":"2099-01-01T00:00:00Z"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(h2Dir, "claude-config", srcProfile, "history.jsonl"), []byte(`{"x":1}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(h2Dir, "claude-config", srcProfile, "projects", "some-project"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(h2Dir, "claude-config", srcProfile, "projects", "some-project", "session.jsonl"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := os.MkdirAll(filepath.Join(h2Dir, "codex-config", srcProfile), 0o755); err != nil {
 		t.Fatal(err)
@@ -71,6 +84,9 @@ func TestProfileCreate_SymlinkShared(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(h2Dir, "codex-config", srcProfile, "auth.json"), []byte(`{"auth":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(h2Dir, "codex-config", srcProfile, "ratelimit.json"), []byte(`{"resets_at":"2099-01-01T00:00:00Z"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -122,6 +138,29 @@ func TestProfileCreate_SymlinkShared(t *testing.T) {
 		t.Fatalf("codex AGENTS.md target = %q, want %q", codexTarget, want)
 	}
 
+	// Runtime state from the source must not be copied into the new profile.
+	for _, leaked := range []string{
+		filepath.Join(h2Dir, "claude-config", "new", "ratelimit.json"),
+		filepath.Join(h2Dir, "claude-config", "new", "history.jsonl"),
+		filepath.Join(h2Dir, "claude-config", "new", "projects"),
+		filepath.Join(h2Dir, "codex-config", "new", "ratelimit.json"),
+	} {
+		if _, err := os.Stat(leaked); !os.IsNotExist(err) {
+			t.Fatalf("expected %s to not exist (runtime state should not leak), err=%v", leaked, err)
+		}
+	}
+
+	// settings.json should be the fresh template, not a copy of the source's contents.
+	gotClaudeSettings, err := os.ReadFile(filepath.Join(h2Dir, "claude-config", "new", "settings.json"))
+	if err != nil {
+		t.Fatalf("read claude settings: %v", err)
+	}
+	if string(gotClaudeSettings) == `{"ok":true}` {
+		t.Fatalf("claude settings.json was copied from source instead of templated")
+	}
+	if string(gotClaudeSettings) != config.ClaudeSettingsTemplate("opinionated") {
+		t.Fatalf("claude settings.json was not the opinionated template")
+	}
 }
 
 func TestProfileCreate_CopyFlagRemoved(t *testing.T) {

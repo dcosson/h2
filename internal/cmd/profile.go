@@ -602,7 +602,7 @@ func createOrUpdateProfile(h2Dir, name, style, symlinkSharedFrom, harnessType st
 	}
 
 	if symlinkSharedFrom != "" {
-		return createProfileWithSharedSymlink(h2Dir, name, symlinkSharedFrom, harnessType, out)
+		return createProfileWithSharedSymlink(h2Dir, name, symlinkSharedFrom, style, harnessType, out)
 	}
 	return scaffoldProfile(h2Dir, name, style, harnessType, out, announce)
 }
@@ -672,7 +672,13 @@ func scaffoldProfile(h2Dir, name, style, harnessType string, out io.Writer, anno
 	return nil
 }
 
-func createProfileWithSharedSymlink(h2Dir, name, sourceProfile, harnessType string, out io.Writer) error {
+// createProfileWithSharedSymlink creates a new profile whose profiles-shared/
+// directory is a symlink to an existing source profile, while harness configs
+// (claude-config, codex-config) are scaffolded fresh from templates. The
+// harness configs are intentionally NOT copied from the source: each profile
+// needs its own auth, and the source's runtime state (sessions, history,
+// caches, ratelimit, etc.) must not leak into the new profile.
+func createProfileWithSharedSymlink(h2Dir, name, sourceProfile, style, harnessType string, out io.Writer) error {
 	srcShared := filepath.Join(h2Dir, "profiles-shared", sourceProfile)
 	dstShared := filepath.Join(h2Dir, "profiles-shared", name)
 
@@ -691,57 +697,21 @@ func createProfileWithSharedSymlink(h2Dir, name, sourceProfile, harnessType stri
 	fmt.Fprintf(out, "  Symlinked profiles-shared/%s -> profiles-shared/%s\n", name, sourceProfile)
 
 	if harnessType == profileHarnessAll || harnessType == profileHarnessClaude {
-		srcClaude := filepath.Join(h2Dir, "claude-config", sourceProfile)
-		dstClaude := filepath.Join(h2Dir, "claude-config", name)
-		if _, err := os.Stat(srcClaude); err != nil {
-			if os.IsNotExist(err) {
-				return fmt.Errorf("symlink source profile %q missing claude config: %s", sourceProfile, srcClaude)
-			}
-			return fmt.Errorf("stat source claude config: %w", err)
-		}
-		fmt.Fprintf(out, "  Copying claude-config/%s -> claude-config/%s ...", sourceProfile, name)
-		if err := copyPathFiltered(srcClaude, dstClaude, func(_ string, info os.FileInfo) bool {
-			return !info.IsDir() && info.Name() == ".claude.json"
-		}); err != nil {
-			return fmt.Errorf("copy claude profile: %w", err)
-		}
-		fmt.Fprintln(out, " Done")
-		if err := ensureClaudeProfileLinks(dstClaude, name, out); err != nil {
+		claudeDir := filepath.Join(h2Dir, "claude-config", name)
+		if err := ensureClaudeProfileScaffold(claudeDir, name, style, out); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "  Copied claude-config/%s -> claude-config/%s\n", sourceProfile, name)
-		fmt.Fprintf(out, "  Skipped claude auth file: claude-config/%s/.claude.json\n", sourceProfile)
 	}
 
 	if harnessType == profileHarnessAll || harnessType == profileHarnessCodex {
-		srcCodex := filepath.Join(h2Dir, "codex-config", sourceProfile)
-		dstCodex := filepath.Join(h2Dir, "codex-config", name)
-		if _, err := os.Stat(srcCodex); err != nil {
-			if os.IsNotExist(err) {
-				return fmt.Errorf("symlink source profile %q missing codex config: %s", sourceProfile, srcCodex)
-			}
-			return fmt.Errorf("stat source codex config: %w", err)
-		}
-		fmt.Fprintf(out, "  Copying codex-config/%s -> codex-config/%s ...", sourceProfile, name)
-		if err := copyPathFiltered(srcCodex, dstCodex, func(_ string, info os.FileInfo) bool {
-			return !info.IsDir() && info.Name() == "auth.json"
-		}); err != nil {
-			return fmt.Errorf("copy codex profile: %w", err)
-		}
-		fmt.Fprintln(out, " Done")
-		if err := ensureCodexProfileLinks(dstCodex, name, out); err != nil {
+		codexDir := filepath.Join(h2Dir, "codex-config", name)
+		if err := ensureCodexProfileScaffold(codexDir, name, style, out); err != nil {
 			return err
 		}
-		fmt.Fprintf(out, "  Copied codex-config/%s -> codex-config/%s\n", sourceProfile, name)
-		fmt.Fprintf(out, "  Skipped codex auth file: codex-config/%s/auth.json\n", sourceProfile)
 	}
 
 	fmt.Fprintf(out, "Created profile %q from shared profile symlink to %q\n", name, sourceProfile)
 	return nil
-}
-
-func copyPathFiltered(src, dst string, skip func(rel string, info os.FileInfo) bool) error {
-	return copyPathFilteredRel(src, dst, "", skip)
 }
 
 func writeManagedSkillsTemplateNonDestructive(style, targetDir string) error {
@@ -892,49 +862,6 @@ func managedSharedSkillScriptRelativePaths(style string) ([]string, error) {
 	}
 	sort.Strings(paths)
 	return paths, nil
-}
-
-func copyPathFilteredRel(src, dst, rel string, skip func(rel string, info os.FileInfo) bool) error {
-	info, err := os.Lstat(src)
-	if err != nil {
-		return err
-	}
-	if skip != nil && skip(rel, info) {
-		return nil
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		target, err := os.Readlink(src)
-		if err != nil {
-			return err
-		}
-		return os.Symlink(target, dst)
-	}
-	if !info.IsDir() {
-		data, err := os.ReadFile(src)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(dst, data, info.Mode().Perm())
-	}
-	if err := os.MkdirAll(dst, info.Mode().Perm()); err != nil {
-		return err
-	}
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		srcChild := filepath.Join(src, entry.Name())
-		dstChild := filepath.Join(dst, entry.Name())
-		childRel := entry.Name()
-		if rel != "" {
-			childRel = filepath.Join(rel, entry.Name())
-		}
-		if err := copyPathFilteredRel(srcChild, dstChild, childRel, skip); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func ensurePathMissing(path, label string) error {
