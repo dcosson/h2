@@ -63,7 +63,7 @@ instructions_body: |
 schedules:
   - name: check-agents-and-beads
     rrule: "FREQ=MINUTELY;INTERVAL=10"
-    condition: 'command -v bd >/dev/null 2>&1 && bd list --status open,in_progress --type task,feature,chore --json 2>/dev/null | grep -q "{"'
+    condition: 'command -v bd >/dev/null 2>&1 && bd list --status open,in_progress --type task,bug,feature,chore --json 2>/dev/null | grep -q "{"'
     condition_mode: run_if
     priority: idle
     message: "DO NOT ACKNOWLEDGE THIS MESSAGE WITHOUT DOING ANYTHING. Run h2 list, check each agent's status. ANY agent showing Idle needs a nudge — agents do not resume on their own. Send each idle agent a message asking for status and nudging them to continue their assigned work."
