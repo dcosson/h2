@@ -117,8 +117,8 @@ func TestEventHandler_APIError_429_UsageLimit(t *testing.T) {
 		t.Fatalf("event[1].Type = %v, want EventUsageLimitInfo", got[1].Type)
 	}
 	ul := got[1].Data.(monitor.UsageLimitData)
-	if ul.ResetsAt.IsZero() {
-		t.Fatal("ResetsAt should not be zero for usage-limit 429")
+	if !ul.ResetsAt.IsZero() {
+		t.Fatalf("ResetsAt = %v, want zero when Claude provides no reset time", ul.ResetsAt)
 	}
 	if !strings.Contains(ul.Message, "usage limit") {
 		t.Fatalf("unexpected message: %q", ul.Message)
@@ -589,7 +589,6 @@ func TestEventHandler_OnSessionLogLine_UsageLimitNoResetTime(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
 	h := NewEventHandler(events, nil)
 
-	before := time.Now()
 	line, _ := json.Marshal(map[string]any{
 		"type": "assistant",
 		"message": map[string]any{
@@ -614,10 +613,8 @@ func TestEventHandler_OnSessionLogLine_UsageLimitNoResetTime(t *testing.T) {
 		t.Fatalf("event[1].Type = %v, want EventUsageLimitInfo", got[1].Type)
 	}
 	data := got[1].Data.(monitor.UsageLimitData)
-	minReset := before.Add(unknownUsageLimitResetDelay - time.Minute)
-	maxReset := before.Add(unknownUsageLimitResetDelay + time.Minute)
-	if data.ResetsAt.Before(minReset) || data.ResetsAt.After(maxReset) {
-		t.Fatalf("ResetsAt = %v, want roughly %v after now", data.ResetsAt, unknownUsageLimitResetDelay)
+	if !data.ResetsAt.IsZero() {
+		t.Fatalf("ResetsAt = %v, want zero when Claude provides no reset time", data.ResetsAt)
 	}
 	if data.Message != "You've hit your org's monthly usage limit" {
 		t.Fatalf("Message = %q", data.Message)

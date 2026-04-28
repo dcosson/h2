@@ -375,7 +375,7 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 	info.BlockedOnPermission = activity.BlockedOnPermission
 	info.BlockedToolName = activity.BlockedToolName
 
-	if resetsAt := s.UsageLimitResetsAt(); resetsAt != nil {
+	if resetsAt := s.UsageLimitResetsAt(); resetsAt != nil && !resetsAt.IsZero() {
 		info.UsageLimitResetsAt = resetsAt.Format(time.RFC3339)
 	}
 	info.UsageLimitMessage = s.UsageLimitMessage()

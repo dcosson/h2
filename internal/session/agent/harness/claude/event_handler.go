@@ -127,10 +127,7 @@ func (h *EventHandler) processLogRecord(eventName string, lr otelLogRecord, ts t
 		if statusCode == "429" {
 			h.emitStateChange(ts, monitor.StateIdle, monitor.SubStateUsageLimit)
 			if isUsageLimitMessage(errMsg) {
-				resetsAt, ok := parseResetsAt(errMsg, ts)
-				if !ok {
-					resetsAt = ts.Add(unknownUsageLimitResetDelay)
-				}
+				resetsAt, _ := parseResetsAt(errMsg, ts)
 				h.emit(monitor.AgentEvent{
 					Type:      monitor.EventUsageLimitInfo,
 					Timestamp: ts,
@@ -455,15 +452,6 @@ func isAuthErrorMessage(content string) bool {
 		strings.Contains(content, "OAuth token has expired")
 }
 
-// unknownUsageLimitResetDelay is used when Claude Code reports an account
-// usage cap without a reset timestamp, for example:
-// "You've hit your org's monthly usage limit".
-//
-// The exact reset is not available in the session JSONL, but h2 still needs a
-// finite ratelimit.json window so profile rotation and status surfaces can
-// treat the profile as temporarily unavailable.
-const unknownUsageLimitResetDelay = 6 * time.Hour
-
 // isUsageLimitMessage returns true when an API error message indicates an
 // account usage cap. It intentionally excludes short-term service throttles
 // such as "temporarily limiting requests (not your usage limit)".
@@ -530,9 +518,6 @@ func parseSessionLine(line []byte) ([]monitor.AgentEvent, bool) {
 	// "org's monthly usage limit" wording used for personal-account extra usage
 	// caps.
 	if (entry.Error == "rate_limit" || entry.IsApiErrorMessage || entry.ApiErrorStatus == 429) && isUsageLimit {
-		if !hasReset {
-			resetsAt = now.Add(unknownUsageLimitResetDelay)
-		}
 		events = append(events, monitor.AgentEvent{
 			Type:      monitor.EventStateChange,
 			Timestamp: now,

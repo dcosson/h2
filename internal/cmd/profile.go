@@ -881,16 +881,15 @@ type profileInfo struct {
 	AuthErrorMap   map[string]*config.AuthErrorInfo // harness -> auth error info (nil if no error)
 }
 
-// formatHarnessLabels builds a comma-separated harness list, appending
-// red "rate limited until <time>" for any harness that is currently limited.
+// formatHarnessLabels builds a comma-separated harness list, appending rate
+// limit state for any harness that is currently limited.
 func formatHarnessLabels(p profileInfo) string {
 	labels := make([]string, len(p.Harnesses))
 	for i, h := range p.Harnesses {
 		if ae, ok := p.AuthErrorMap[h]; ok && ae != nil {
 			labels[i] = termstyle.Red(h + " auth error: run /login")
 		} else if rl, ok := p.RateLimitedMap[h]; ok && rl != nil {
-			resetStr := rl.ResetsAt.Local().Format("Jan 2 3:04 PM")
-			labels[i] = termstyle.Red(h + " rate limited until " + resetStr)
+			labels[i] = termstyle.Red(formatRateLimitLabel(h, rl))
 		} else {
 			labels[i] = h
 		}
@@ -906,13 +905,20 @@ func formatHarnessLabelsPlain(p profileInfo) string {
 		if ae, ok := p.AuthErrorMap[h]; ok && ae != nil {
 			labels[i] = h + " auth error: run /login"
 		} else if rl, ok := p.RateLimitedMap[h]; ok && rl != nil {
-			resetStr := rl.ResetsAt.Local().Format("Jan 2 3:04 PM")
-			labels[i] = h + " rate limited until " + resetStr
+			labels[i] = formatRateLimitLabel(h, rl)
 		} else {
 			labels[i] = h
 		}
 	}
 	return strings.Join(labels, ", ")
+}
+
+func formatRateLimitLabel(harness string, rl *config.RateLimitInfo) string {
+	if rl == nil || rl.ResetsAt.IsZero() {
+		return harness + " rate limited"
+	}
+	resetStr := rl.ResetsAt.Local().Format("Jan 2 3:04 PM")
+	return harness + " rate limited until " + resetStr
 }
 
 // discoverProfilesWithHarness scans harness-specific config directories

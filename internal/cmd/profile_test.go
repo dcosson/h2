@@ -708,3 +708,18 @@ func TestFormatHarnessLabels_WithRateLimit(t *testing.T) {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
+
+func TestFormatHarnessLabels_WithIndefiniteRateLimit(t *testing.T) {
+	p := profileInfo{
+		Name:      "test",
+		Harnesses: []string{"claude_code", "codex"},
+		RateLimitedMap: map[string]*config.RateLimitInfo{
+			"claude_code": {},
+		},
+	}
+	got := formatHarnessLabelsPlain(p)
+	want := "claude_code rate limited, codex"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}

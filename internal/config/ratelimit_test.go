@@ -68,6 +68,25 @@ func TestIsProfileRateLimited_Active(t *testing.T) {
 	}
 }
 
+func TestIsProfileRateLimited_Indefinite(t *testing.T) {
+	dir := t.TempDir()
+	info := &RateLimitInfo{
+		Message:    "You've hit your org's monthly usage limit",
+		RecordedAt: time.Now(),
+	}
+	if err := WriteRateLimit(dir, info); err != nil {
+		t.Fatal(err)
+	}
+
+	got := IsProfileRateLimited(dir)
+	if got == nil {
+		t.Fatal("expected zero-resets_at rate limit to be active")
+	}
+	if !got.ResetsAt.IsZero() {
+		t.Fatalf("ResetsAt = %v, want zero", got.ResetsAt)
+	}
+}
+
 func TestIsProfileRateLimited_Expired(t *testing.T) {
 	dir := t.TempDir()
 	info := &RateLimitInfo{

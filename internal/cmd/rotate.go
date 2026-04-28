@@ -76,8 +76,12 @@ argument order.`,
 
 			candidates, skipped := filterRateLimited(candidates, rc.HarnessConfigPathPrefix)
 			for _, s := range skipped {
-				fmt.Fprintf(cmd.OutOrStderr(), "Skipping profile %q (rate limited until %s)\n",
-					s.name, s.resetsAt.Local().Format("Jan 2 3:04 PM"))
+				if s.resetsAt.IsZero() {
+					fmt.Fprintf(cmd.OutOrStderr(), "Skipping profile %q (rate limited)\n", s.name)
+				} else {
+					fmt.Fprintf(cmd.OutOrStderr(), "Skipping profile %q (rate limited until %s)\n",
+						s.name, s.resetsAt.Local().Format("Jan 2 3:04 PM"))
+				}
 			}
 
 			candidates, authSkipped := filterAuthErrored(candidates, rc.HarnessConfigPathPrefix)

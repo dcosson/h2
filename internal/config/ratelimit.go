@@ -49,12 +49,16 @@ func ReadRateLimit(profileDir string) (*RateLimitInfo, error) {
 }
 
 // IsProfileRateLimited checks if a profile is currently rate limited.
-// Returns the RateLimitInfo if the limit is still active (resets_at is in
-// the future), or nil if not limited or the file doesn't exist.
+// Returns the RateLimitInfo if the limit is still active. A zero resets_at is
+// treated as an indefinite limit because some harness errors do not include a
+// reset timestamp.
 func IsProfileRateLimited(profileDir string) *RateLimitInfo {
 	info, err := ReadRateLimit(profileDir)
 	if err != nil || info == nil {
 		return nil
+	}
+	if info.ResetsAt.IsZero() {
+		return info
 	}
 	if time.Now().Before(info.ResetsAt) {
 		return info

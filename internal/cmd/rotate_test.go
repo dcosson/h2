@@ -824,6 +824,27 @@ func TestFilterRateLimited(t *testing.T) {
 	}
 }
 
+func TestFilterRateLimited_Indefinite(t *testing.T) {
+	configPrefix := t.TempDir()
+	os.MkdirAll(filepath.Join(configPrefix, "a"), 0o755)
+
+	rl := &config.RateLimitInfo{
+		Message:    "You've hit your org's monthly usage limit",
+		RecordedAt: time.Now(),
+	}
+	if err := config.WriteRateLimit(filepath.Join(configPrefix, "a"), rl); err != nil {
+		t.Fatal(err)
+	}
+
+	filtered, skipped := filterRateLimited([]string{"a"}, configPrefix)
+	if len(filtered) != 0 {
+		t.Errorf("filtered = %v, want empty", filtered)
+	}
+	if len(skipped) != 1 || skipped[0].name != "a" || !skipped[0].resetsAt.IsZero() {
+		t.Errorf("skipped = %+v, want one indefinite skip for a", skipped)
+	}
+}
+
 func TestFilterRateLimited_ExpiredNotFiltered(t *testing.T) {
 	configPrefix := t.TempDir()
 	os.MkdirAll(filepath.Join(configPrefix, "a"), 0o755)
