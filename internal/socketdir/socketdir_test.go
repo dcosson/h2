@@ -68,6 +68,15 @@ func TestPath(t *testing.T) {
 	}
 }
 
+func TestGatewayPathIn(t *testing.T) {
+	dir := t.TempDir()
+	got := GatewayPathIn(dir)
+	want := filepath.Join(dir, "gateway.sock")
+	if got != want {
+		t.Errorf("GatewayPathIn(%q) = %q, want %q", dir, got, want)
+	}
+}
+
 func TestFind(t *testing.T) {
 	dir := t.TempDir()
 

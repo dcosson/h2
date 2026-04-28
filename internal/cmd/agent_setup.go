@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,14 +10,19 @@ import (
 	"github.com/google/uuid"
 
 	"h2/internal/config"
+	"h2/internal/gateway"
 	"h2/internal/git"
 	"h2/internal/session"
 	"h2/internal/session/agent/harness"
+	"h2/internal/socketdir"
 )
 
 // forkDaemonFunc is the function used to fork daemon processes.
 // Tests override this to avoid spawning real processes.
 var forkDaemonFunc func(string, session.TerminalHints, bool) error = session.ForkDaemon
+var gatewayEnsureRunningFunc = gateway.EnsureRunning
+var gatewayStartSessionFunc = gateway.StartSession
+var gatewayResumeSessionFunc = gateway.ResumeSession
 
 // buildRoleRuntimeConfig builds a minimal RuntimeConfig from a Role, suitable
 // for pre-launch harness resolution (command name, config dir validation).
@@ -208,15 +214,15 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 	}
 
 	colorHints := detectTerminalHints()
-
-	// Fork the daemon.
-	if err := forkDaemonFunc(sessionDir, session.TerminalHints{
+	hints := session.TerminalHints{
 		OscFg:     colorHints.OscFg,
 		OscBg:     colorHints.OscBg,
 		ColorFGBG: colorHints.ColorFGBG,
 		Term:      colorHints.Term,
 		ColorTerm: colorHints.ColorTerm,
-	}, false); err != nil {
+	}
+
+	if err := launchAgentSession(sessionDir, rc, hints, false, detach, role.Env); err != nil {
 		return err
 	}
 
@@ -231,6 +237,74 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 		fmt.Fprintf(os.Stderr, "Agent %q started. Attaching...\n", name)
 	}
 	return doAttach(name)
+}
+
+func launchAgentSession(sessionDir string, rc *config.RuntimeConfig, hints session.TerminalHints, resume bool, detach bool, roleEnv map[string]string) error {
+	if !useGatewayLaunch(detach) {
+		return forkDaemonFunc(sessionDir, hints, resume)
+	}
+
+	if err := annotateGatewayLaunchEnv(rc, roleEnv); err != nil {
+		return err
+	}
+	if err := config.WriteRuntimeConfig(sessionDir, rc); err != nil {
+		return fmt.Errorf("write runtime config: %w", err)
+	}
+
+	ctx := context.Background()
+	if _, err := gatewayEnsureRunningFunc(ctx, gateway.EnsureOpts{
+		H2Dir:      config.ConfigDir(),
+		SocketPath: socketdir.GatewayPath(),
+	}); err != nil {
+		return err
+	}
+
+	req := gateway.StartSessionRequest{
+		SessionDir:    sessionDir,
+		RuntimeConfig: rc,
+		Resume:        resume,
+		LaunchEnv:     launchPassthroughEnv(),
+		RoleEnv:       roleEnv,
+	}
+	if resume {
+		_, err := gatewayResumeSessionFunc(ctx, socketdir.GatewayPath(), req)
+		return err
+	}
+	_, err := gatewayStartSessionFunc(ctx, socketdir.GatewayPath(), req)
+	return err
+}
+
+func useGatewayLaunch(detach bool) bool {
+	return detach && os.Getenv("H2_GATEWAY") == "1"
+}
+
+func launchPassthroughEnv() map[string]string {
+	return gateway.ExtractEnvPassthrough(os.Environ(), configuredEnvPassthrough())
+}
+
+func configuredEnvPassthrough() []string {
+	cfg, err := config.Load()
+	if err != nil || cfg.Runtime == nil {
+		return nil
+	}
+	return cfg.Runtime.EnvPassthrough
+}
+
+func annotateGatewayLaunchEnv(rc *config.RuntimeConfig, roleEnv map[string]string) error {
+	passthrough := launchPassthroughEnv()
+	rc.PassthroughEnvKeys = gateway.PassthroughEnvKeys(passthrough)
+
+	stableEnv := make(map[string]string)
+	if cfg, err := config.Load(); err == nil && cfg.Runtime != nil {
+		for key, value := range cfg.Runtime.Env {
+			stableEnv[key] = value
+		}
+	}
+	for key, value := range roleEnv {
+		stableEnv[key] = value
+	}
+	rc.ResumeEnvWarning = gateway.ResumeEnvWarning(passthrough, stableEnv)
+	return nil
 }
 
 // heartbeatIntervalFromDuration converts a Go duration string (e.g. "30s") to

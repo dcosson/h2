@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	TypeAgent  = "agent"
-	TypeBridge = "bridge"
+	TypeAgent   = "agent"
+	TypeBridge  = "bridge"
+	TypeGateway = "gateway"
 
 	// maxSocketPathLen is the conservative limit for Unix domain socket paths.
 	// macOS has sizeof(sockaddr_un.sun_path) = 104.
@@ -128,6 +129,18 @@ func ProbeSocket(sockPath, label string) error {
 // Path returns the full socket path for a given type and name.
 func Path(socketType, name string) string {
 	return filepath.Join(Dir(), Format(socketType, name))
+}
+
+// GatewayPath returns the single gateway socket path for the active h2 dir.
+func GatewayPath() string {
+	return GatewayPathIn(Dir())
+}
+
+// GatewayPathIn returns the single gateway socket path within dir. This
+// intentionally does not use Format(TypeGateway, "gateway"): there is only one
+// gateway per h2 dir, so the steady-state socket is gateway.sock.
+func GatewayPathIn(dir string) string {
+	return filepath.Join(dir, "gateway.sock")
 }
 
 // Find globs for *.{name}.sock in the default socket directory

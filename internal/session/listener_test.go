@@ -65,9 +65,11 @@ func newTestDaemonWithEngines(t *testing.T) *Daemon {
 
 	runner := automation.NewActionRunner(&noopEnqueuer{}, nil, "")
 	return &Daemon{
-		Session:        s,
-		TriggerEngine:  automation.NewTriggerEngine(runner),
-		ScheduleEngine: automation.NewScheduleEngine(runner),
+		Session: s,
+		Automation: &RuntimeAutomation{
+			TriggerEngine:  automation.NewTriggerEngine(runner),
+			ScheduleEngine: automation.NewScheduleEngine(runner),
+		},
 	}
 }
 
@@ -109,7 +111,7 @@ func TestHandleTriggerAdd_DuplicateID(t *testing.T) {
 	d := newTestDaemonWithEngines(t)
 
 	// Add first trigger directly.
-	d.TriggerEngine.Add(&automation.Trigger{ID: "t1", Event: "state_change"})
+	d.Automation.TriggerEngine.Add(&automation.Trigger{ID: "t1", Event: "state_change"})
 
 	server, client := net.Pipe()
 	defer server.Close()
@@ -135,7 +137,7 @@ func TestHandleTriggerAdd_DuplicateID(t *testing.T) {
 
 func TestHandleTriggerList(t *testing.T) {
 	d := newTestDaemonWithEngines(t)
-	d.TriggerEngine.Add(&automation.Trigger{
+	d.Automation.TriggerEngine.Add(&automation.Trigger{
 		ID: "t1", Name: "test", Event: "state_change",
 		Action: automation.Action{Exec: "echo"},
 	})
@@ -163,7 +165,7 @@ func TestHandleTriggerList(t *testing.T) {
 
 func TestHandleTriggerRemove_Success(t *testing.T) {
 	d := newTestDaemonWithEngines(t)
-	d.TriggerEngine.Add(&automation.Trigger{ID: "t1", Event: "state_change"})
+	d.Automation.TriggerEngine.Add(&automation.Trigger{ID: "t1", Event: "state_change"})
 
 	server, client := net.Pipe()
 	defer server.Close()
@@ -234,7 +236,7 @@ func TestHandleScheduleAdd_Success(t *testing.T) {
 
 func TestHandleScheduleList(t *testing.T) {
 	d := newTestDaemonWithEngines(t)
-	d.ScheduleEngine.Add(&automation.Schedule{
+	d.Automation.ScheduleEngine.Add(&automation.Schedule{
 		ID: "s1", Name: "test", RRule: "FREQ=SECONDLY;INTERVAL=30",
 		Action: automation.Action{Exec: "echo"},
 	})
