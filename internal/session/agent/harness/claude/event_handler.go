@@ -126,6 +126,20 @@ func (h *EventHandler) processLogRecord(eventName string, lr otelLogRecord, ts t
 		errMsg := getAttr(lr.Attributes, "error")
 		if statusCode == "429" {
 			h.emitStateChange(ts, monitor.StateIdle, monitor.SubStateUsageLimit)
+			if isUsageLimitMessage(errMsg) {
+				resetsAt, ok := parseResetsAt(errMsg, ts)
+				if !ok {
+					resetsAt = ts.Add(unknownUsageLimitResetDelay)
+				}
+				h.emit(monitor.AgentEvent{
+					Type:      monitor.EventUsageLimitInfo,
+					Timestamp: ts,
+					Data: monitor.UsageLimitData{
+						ResetsAt: resetsAt,
+						Message:  errMsg,
+					},
+				})
+			}
 			return true, fmt.Sprintf("usage_limit status=%s error=%q", statusCode, errMsg)
 		}
 		if statusCode == "401" {
@@ -393,6 +407,7 @@ type sessionLogEntry struct {
 	Message           json.RawMessage `json:"message,omitempty"`
 	Error             string          `json:"error,omitempty"`
 	IsApiErrorMessage bool            `json:"isApiErrorMessage,omitempty"`
+	ApiErrorStatus    int             `json:"apiErrorStatus,omitempty"`
 }
 
 // sessionMessage handles Claude's message format where content can be
@@ -440,6 +455,31 @@ func isAuthErrorMessage(content string) bool {
 		strings.Contains(content, "OAuth token has expired")
 }
 
+// unknownUsageLimitResetDelay is used when Claude Code reports an account
+// usage cap without a reset timestamp, for example:
+// "You've hit your org's monthly usage limit".
+//
+// The exact reset is not available in the session JSONL, but h2 still needs a
+// finite ratelimit.json window so profile rotation and status surfaces can
+// treat the profile as temporarily unavailable.
+const unknownUsageLimitResetDelay = 6 * time.Hour
+
+// isUsageLimitMessage returns true when an API error message indicates an
+// account usage cap. It intentionally excludes short-term service throttles
+// such as "temporarily limiting requests (not your usage limit)".
+func isUsageLimitMessage(content string) bool {
+	lower := strings.ToLower(content)
+	if strings.Contains(lower, "not your usage limit") ||
+		strings.Contains(lower, "temporarily limiting requests") {
+		return false
+	}
+	return strings.Contains(lower, "usage_limit_reached") ||
+		strings.Contains(lower, "usage limit reached") ||
+		strings.Contains(lower, "you've hit your usage limit") ||
+		strings.Contains(lower, "you've hit your org's monthly usage limit") ||
+		strings.Contains(lower, "you've hit your limit")
+}
+
 // isServerErrorMessage returns true if the message content indicates an
 // API server error (5xx). Matches patterns like "Internal server error",
 // "API Error: 500", or the Anthropic error type "api_error".
@@ -482,18 +522,30 @@ func parseSessionLine(line []byte) ([]monitor.AgentEvent, bool) {
 	now := time.Now()
 	var events []monitor.AgentEvent
 
-	// Check for rate limit synthetic messages.
-	if entry.Error == "rate_limit" || entry.IsApiErrorMessage {
-		if resetsAt, ok := parseResetsAt(content, now); ok {
-			events = append(events, monitor.AgentEvent{
-				Type:      monitor.EventUsageLimitInfo,
-				Timestamp: now,
-				Data: monitor.UsageLimitData{
-					ResetsAt: resetsAt,
-					Message:  content,
-				},
-			})
+	resetsAt, hasReset := parseResetsAt(content, now)
+	isUsageLimit := hasReset || isUsageLimitMessage(content)
+
+	// Check for account usage-cap synthetic messages. Claude Code stores these
+	// as synthetic assistant messages in the session JSONL, including the
+	// "org's monthly usage limit" wording used for personal-account extra usage
+	// caps.
+	if (entry.Error == "rate_limit" || entry.IsApiErrorMessage || entry.ApiErrorStatus == 429) && isUsageLimit {
+		if !hasReset {
+			resetsAt = now.Add(unknownUsageLimitResetDelay)
 		}
+		events = append(events, monitor.AgentEvent{
+			Type:      monitor.EventStateChange,
+			Timestamp: now,
+			Data:      monitor.StateChangeData{State: monitor.StateIdle, SubState: monitor.SubStateUsageLimit},
+		})
+		events = append(events, monitor.AgentEvent{
+			Type:      monitor.EventUsageLimitInfo,
+			Timestamp: now,
+			Data: monitor.UsageLimitData{
+				ResetsAt: resetsAt,
+				Message:  content,
+			},
+		})
 	}
 
 	// Check for auth error messages (expired OAuth token, 401).
@@ -508,7 +560,7 @@ func parseSessionLine(line []byte) ([]monitor.AgentEvent, bool) {
 
 	// Check for server error messages (5xx). An API error message that isn't
 	// a rate limit or auth error is treated as a server error.
-	isRateLimit := entry.Error == "rate_limit" || (entry.IsApiErrorMessage && resetsPattern.MatchString(content))
+	isRateLimit := entry.Error == "rate_limit" || isUsageLimit
 	if entry.IsApiErrorMessage && !isAuth && !isRateLimit && isServerErrorMessage(content) {
 		events = append(events, monitor.AgentEvent{
 			Type:      monitor.EventServerErrorInfo,

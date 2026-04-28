@@ -102,9 +102,9 @@ func TestEventHandler_APIError_429_UsageLimit(t *testing.T) {
 	body, _ := json.Marshal(payload)
 	h.OnLogs(body)
 
-	got := drainEvents(events, 1)
-	if len(got) != 1 {
-		t.Fatalf("expected 1 event, got %d", len(got))
+	got := drainEvents(events, 2)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(got))
 	}
 	if got[0].Type != monitor.EventStateChange {
 		t.Fatalf("Type = %v, want EventStateChange", got[0].Type)
@@ -112,6 +112,16 @@ func TestEventHandler_APIError_429_UsageLimit(t *testing.T) {
 	state := got[0].Data.(monitor.StateChangeData)
 	if state.State != monitor.StateIdle || state.SubState != monitor.SubStateUsageLimit {
 		t.Errorf("state = (%v,%v), want (Idle,UsageLimit)", state.State, state.SubState)
+	}
+	if got[1].Type != monitor.EventUsageLimitInfo {
+		t.Fatalf("event[1].Type = %v, want EventUsageLimitInfo", got[1].Type)
+	}
+	ul := got[1].Data.(monitor.UsageLimitData)
+	if ul.ResetsAt.IsZero() {
+		t.Fatal("ResetsAt should not be zero for usage-limit 429")
+	}
+	if !strings.Contains(ul.Message, "usage limit") {
+		t.Fatalf("unexpected message: %q", ul.Message)
 	}
 }
 
@@ -539,16 +549,23 @@ func TestEventHandler_OnSessionLogLine_RateLimitWithResetTime(t *testing.T) {
 	})
 	h.OnSessionLogLine(line)
 
-	got := drainEvents(events, 2)
-	if len(got) < 2 {
-		t.Fatalf("expected 2 events (usage_limit_info + agent_message), got %d", len(got))
+	got := drainEvents(events, 3)
+	if len(got) < 3 {
+		t.Fatalf("expected 3 events (state_change + usage_limit_info + agent_message), got %d", len(got))
 	}
 
-	// First event should be usage limit info.
-	if got[0].Type != monitor.EventUsageLimitInfo {
-		t.Fatalf("event[0].Type = %v, want EventUsageLimitInfo", got[0].Type)
+	if got[0].Type != monitor.EventStateChange {
+		t.Fatalf("event[0].Type = %v, want EventStateChange", got[0].Type)
 	}
-	data := got[0].Data.(monitor.UsageLimitData)
+	state := got[0].Data.(monitor.StateChangeData)
+	if state.State != monitor.StateIdle || state.SubState != monitor.SubStateUsageLimit {
+		t.Fatalf("state = (%v,%v), want (Idle,UsageLimit)", state.State, state.SubState)
+	}
+
+	if got[1].Type != monitor.EventUsageLimitInfo {
+		t.Fatalf("event[1].Type = %v, want EventUsageLimitInfo", got[1].Type)
+	}
+	data := got[1].Data.(monitor.UsageLimitData)
 	if data.ResetsAt.IsZero() {
 		t.Fatal("ResetsAt should not be zero")
 	}
@@ -563,29 +580,69 @@ func TestEventHandler_OnSessionLogLine_RateLimitWithResetTime(t *testing.T) {
 		t.Fatalf("expected 12:00 PM LA time, got %v", inLA)
 	}
 
-	// Second event should be the agent message.
-	if got[1].Type != monitor.EventAgentMessage {
-		t.Fatalf("event[1].Type = %v, want EventAgentMessage", got[1].Type)
+	if got[2].Type != monitor.EventAgentMessage {
+		t.Fatalf("event[2].Type = %v, want EventAgentMessage", got[2].Type)
 	}
 }
 
-func TestEventHandler_OnSessionLogLine_RateLimitNoResetTime(t *testing.T) {
+func TestEventHandler_OnSessionLogLine_UsageLimitNoResetTime(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
 	h := NewEventHandler(events, nil)
 
-	// Rate limit message without the "resets Xpm (TZ)" pattern.
+	before := time.Now()
 	line, _ := json.Marshal(map[string]any{
 		"type": "assistant",
 		"message": map[string]any{
 			"role":    "assistant",
-			"content": []map[string]string{{"type": "text", "text": "You've hit your limit"}},
+			"content": []map[string]string{{"type": "text", "text": "You've hit your org's monthly usage limit"}},
 		},
 		"error":             "rate_limit",
 		"isApiErrorMessage": true,
+		"apiErrorStatus":    429,
 	})
 	h.OnSessionLogLine(line)
 
-	// Should only get the agent message, no usage limit info.
+	got := drainEvents(events, 3)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 events, got %d", len(got))
+	}
+	state := got[0].Data.(monitor.StateChangeData)
+	if state.State != monitor.StateIdle || state.SubState != monitor.SubStateUsageLimit {
+		t.Fatalf("state = (%v,%v), want (Idle,UsageLimit)", state.State, state.SubState)
+	}
+	if got[1].Type != monitor.EventUsageLimitInfo {
+		t.Fatalf("event[1].Type = %v, want EventUsageLimitInfo", got[1].Type)
+	}
+	data := got[1].Data.(monitor.UsageLimitData)
+	minReset := before.Add(unknownUsageLimitResetDelay - time.Minute)
+	maxReset := before.Add(unknownUsageLimitResetDelay + time.Minute)
+	if data.ResetsAt.Before(minReset) || data.ResetsAt.After(maxReset) {
+		t.Fatalf("ResetsAt = %v, want roughly %v after now", data.ResetsAt, unknownUsageLimitResetDelay)
+	}
+	if data.Message != "You've hit your org's monthly usage limit" {
+		t.Fatalf("Message = %q", data.Message)
+	}
+	if got[2].Type != monitor.EventAgentMessage {
+		t.Fatalf("event[2].Type = %v, want EventAgentMessage", got[2].Type)
+	}
+}
+
+func TestEventHandler_OnSessionLogLine_TemporaryRateLimitNotUsageLimit(t *testing.T) {
+	events := make(chan monitor.AgentEvent, 64)
+	h := NewEventHandler(events, nil)
+
+	line, _ := json.Marshal(map[string]any{
+		"type": "assistant",
+		"message": map[string]any{
+			"role":    "assistant",
+			"content": []map[string]string{{"type": "text", "text": "API Error: Server is temporarily limiting requests (not your usage limit) · Rate limited"}},
+		},
+		"error":             "rate_limit",
+		"isApiErrorMessage": true,
+		"apiErrorStatus":    429,
+	})
+	h.OnSessionLogLine(line)
+
 	got := drainEvents(events, 1)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(got))
