@@ -102,6 +102,28 @@ At each seam boundary, verify the following categories. For each category, compa
 - Timeout values are compatible — a caller's timeout is not shorter than the callee's expected processing time
 - Partial failure semantics — if one side can return partial results, does the other side handle them?
 
+### Cross-Doc Duplication
+
+Verbosity at the corpus level: the same concept defined independently in multiple docs, the same Background/Context section restated in adjacent plans, or the same contract specified in 3 places without one being canonical. This is different from intra-doc verbosity (handled by `plan-review`); seam-review sees both sides at once and is the only review pass that can spot it.
+
+Specific patterns:
+- **Independent definitions of the same concept**: doc A defines "RunScope" with fields {a, b, c}; doc B defines "ExecutionContext" with fields {a, b, c, d} that means the same thing. One should be canonical, the other should reference.
+- **Repeated Background/Motivation**: docs that share a parent shaping doc each restate its key points instead of referencing.
+- **Restated contracts**: the same wire format / interface signature spelled out in 3 different docs without one being the source of truth.
+- **Parallel acceptance criteria**: docs A and B both have acceptance tests that exercise the same end-to-end path with identical setup — likely belongs in one place (probably the doc that owns the entry point).
+
+When found, recommend the canonical home (typically the doc that owns the producing side of the seam) and replace the duplicates with one-line cross-references. Severity: P2 in most cases (causes drift over time as the duplicates diverge); P1 if the duplicates already disagree (then it's also a real interface mismatch under the matching categories below).
+
+### Cross-Doc Design Complexity
+
+Plans can be individually-reasonable but collectively over-engineered. Two adjacent docs each pulling in their own helper layers, their own caching strategy, their own retry policy, can result in 4-5 abstractions where 2 would suffice across the seam. Look for:
+- **Parallel abstractions**: each doc independently invents its own version of a pattern (e.g., both sides have their own "lifecycle manager") instead of agreeing on one shared one.
+- **Translation layers**: an adapter/bridge between two docs where the docs could just agree on the same shape.
+- **Coordinated complexity**: distributed locking, multi-step protocols, or compensation logic spread across the seam — verify the simpler shape (e.g., owning side handles it locally) was actually ruled out, not just unconsidered.
+- **Configuration coordination**: the same config keys re-derived on both sides; or a config schema with broad surface area where consumers only need a narrow subset.
+
+Severity: P1 if a simpler cross-doc shape is identifiable and would meaningfully reduce the implementation surface; P2 if complexity is defensible but worth flagging for awareness.
+
 ### Interface Surface Area
 
 For each interface defined at the seam, audit whether it is wider than the consumers actually need.
@@ -152,6 +174,8 @@ Write `docs/plans/seam-review-{mode}-{seam-spec}-{reviewer-id}.md` with this str
 | Lifecycle ordering | PASS/FAIL | {details} |
 | Configuration contracts | PASS/FAIL | {details} |
 | Error handling | PASS/FAIL | {details} |
+| Cross-doc duplication | PASS/FAIL | {repeated concepts, restated contracts, candidate canonical home} |
+| Cross-doc design complexity | PASS/FAIL | {parallel abstractions, translation layers, simpler shape if any} |
 | Interface surface area | PASS/FAIL | {utilization ratio, unused members, speculative slots} |
 
 ---
