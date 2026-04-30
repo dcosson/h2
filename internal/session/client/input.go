@@ -806,14 +806,21 @@ func (c *Client) ClampScrollOffset() {
 }
 
 // scrollbackBottomRow returns the effective last row in scrollback.
-// Uses Cursor.Y rather than len(Content) because AutoResizeY grows Content
-// via ensureHeight but never shrinks it, so len(Content) can be massively
-// inflated for TUI apps that reposition the cursor.
+// Returns the higher of (a) ScrollbackMaxY — a watermark of the highest
+// Cursor.Y observed after each write in pipeChunk — and (b) the live
+// Cursor.Y. Neither value alone is reliable: len(Content)/Height get
+// inflated by absolute cursor positioning (e.g. \033[100;1H), and live
+// Cursor.Y collapses to 0 when a TUI sends \033[H, which would otherwise
+// drop the user at the oldest content on scroll-mode entry and pin
+// scrollMaxOffset to 0 (stuck scroll mode).
 func (c *Client) scrollbackBottomRow() int {
 	if c.VT == nil || c.VT.Scrollback == nil {
 		return 0
 	}
 	y := c.VT.Scrollback.Cursor.Y
+	if c.VT.ScrollbackMaxY > y {
+		y = c.VT.ScrollbackMaxY
+	}
 	if y < 0 {
 		return 0
 	}

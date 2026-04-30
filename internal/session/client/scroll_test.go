@@ -94,6 +94,53 @@ func TestClampScrollOffset_Negative(t *testing.T) {
 	}
 }
 
+// Regression for "scroll mode stuck" and "skips back to old content" bugs:
+// when a TUI moves the cursor to row 0 (e.g. via \033[H) before entering
+// scroll mode, scrollbackBottomRow used to collapse to Cursor.Y, dropping
+// the anchor at the very top of Scrollback and pinning maxOffset to 0.
+// The watermark in VT.ScrollbackMaxY survives the cursor reset.
+func TestScrollbackBottomRow_SurvivesCursorReposition(t *testing.T) {
+	o := newTestClient(10, 80)
+	// Simulate pipeChunk having processed 50 lines of content.
+	for i := 0; i < 50; i++ {
+		o.VT.Scrollback.Write([]byte("line\n"))
+	}
+	if y := o.VT.Scrollback.Cursor.Y; y > o.VT.ScrollbackMaxY {
+		o.VT.ScrollbackMaxY = y
+	}
+	highMark := o.VT.ScrollbackMaxY
+	if highMark < 50 {
+		t.Fatalf("setup: expected high watermark >= 50, got %d", highMark)
+	}
+
+	// TUI sends a cursor-home reposition. Cursor.Y collapses, but the
+	// watermark must persist so scroll mode anchors at recent content.
+	o.VT.Scrollback.Cursor.Y = 0
+
+	got := o.scrollbackBottomRow()
+	if got != highMark {
+		t.Fatalf("expected scrollbackBottomRow=%d (high watermark), got %d", highMark, got)
+	}
+
+	// Entering scroll mode now should give a usable maxOffset (not 0),
+	// so the user can actually scroll up rather than getting stuck.
+	o.EnterScrollMode()
+	maxOffset, ok := o.scrollMaxOffset()
+	if !ok {
+		t.Fatal("scrollMaxOffset returned !ok")
+	}
+	wantMax := highMark - o.VT.ChildRows + 1
+	if wantMax < 0 {
+		wantMax = 0
+	}
+	if maxOffset != wantMax {
+		t.Fatalf("expected maxOffset=%d after cursor reset, got %d", wantMax, maxOffset)
+	}
+	if maxOffset == 0 {
+		t.Fatal("maxOffset is 0 — user would be stuck in scroll mode (bug 2 regression)")
+	}
+}
+
 func TestClampScrollOffset_UsesCursorYNotContentLen(t *testing.T) {
 	o := newTestClient(10, 80)
 	for i := 0; i < 40; i++ {
