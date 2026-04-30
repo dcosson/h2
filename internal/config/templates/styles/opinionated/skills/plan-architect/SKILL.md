@@ -90,6 +90,22 @@ Group sub-plans into batches by dependency order (foundation first, then layers 
 
 Commit the plan index.
 
+## Phase 5.5: Audit Usage (Counter-Bias Pass)
+
+Before finalizing, do an empirical audit of the architecture to catch additive bias before it ships. Plans tend to grow ceremony around hypothetical needs; this phase forces the architect to justify every named-thing with a real consumer.
+
+For each named-thing in the architecture (component, interface, primitive, role, slot, field, feature):
+
+1. **Who calls this?** List the actual current consumers — by component or path that exists in this architecture, not "future code that might need this."
+2. **If the answer is zero or speculative**, mark it for deletion or replacement with the simpler shape that real consumers actually need. "Forward-looking" alone is not a justification.
+3. **If multiple things converge on the same usage shape**, collapse them. Two interfaces serving identical patterns under different names is duplication, not abstraction.
+4. **For each interface**, count how many of its methods/fields the consumers will actually use. If only a subset is used, narrow the interface to match real usage. Over-specified surface area is friction without payoff.
+5. **For feature flags, version coexistence, backwards-compat layers**: is there a real migration constraint forcing this, or is it ceremony for a hypothetical scenario? Per the CLAUDE.md no-fallbacks-for-hypotheticals rule, cut anything that isn't forced.
+
+Document the audit results inline in the architecture doc as a brief "Surface area audit" subsection — what was kept, what was collapsed, what was dropped, and one-line empirical justification for each. This becomes a durable record that prevents future review rounds from re-introducing the deleted scope.
+
+The discipline this phase enforces: shape the architecture around actual production usage, not anticipated production usage. If a real consumer materializes later, add the named-thing then with a concrete shape that fits the real call site — not a speculative shape that hopes to fit.
+
 ## Phase 6: Validate
 
 Present the result to the user for approval (inline in your response text, or via `h2 send`):

@@ -160,6 +160,32 @@ If a review round reveals a missing component that needs its own plan doc:
 4. Incorporate the catch-up review findings
 5. The new doc then joins the regular round cycle going forward
 
+## Phase 3.5: Simplification Pass
+
+Multi-agent review rounds bias toward addition. Each reviewer's incentive is to find something to add ("have you considered X?"), and incorporators tend to land additions because rejecting a reviewer's suggestion requires explicit justification that adding it does not. The cumulative effect across rounds is plans that grow larger and more elaborate than the actual problem requires.
+
+This phase is the explicit counterweight. After Phase 3 converges and before Phase 4 sign-off, a single agent — ideally one who did NOT participate in the review rounds — reads the full plan corpus plus all disposition tables and asks empirical, deletion-oriented questions:
+
+1. **Audit named concepts.** Enumerate every named-thing the plan introduces (component, interface, slot, field, feature, primitive, role). For each: who is the actual current consumer? "Forward-looking" or "for future extensibility" is not a consumer. Concepts with zero current callers are candidates for deletion — rebuild later when a real consumer appears.
+2. **Audit growth.** For each major section, check the disposition tables: did this section grow round-over-round? Was the growth driven by real production gaps or by reviewer "have you considered X" findings? Flag scope added in response to hypotheticals.
+3. **Audit interface surface area.** For each interface defined, count how many of its methods/fields are actually called by current consumers. Interfaces where consumers use a small subset are over-specified — narrow the contract.
+4. **Audit duplication.** Are two or more concepts doing the same job under different names (e.g., a "messages" channel and an "observe" stream that both carry message events)? Collapse if the production usage is one shape, not two.
+5. **Audit ceremony.** Are there feature flags, fallback paths, version coexistence layers, or backwards-compat shims for hypothetical scenarios? Per CLAUDE.md (no fallbacks for hypotheticals), these should be cut unless there is a real migration constraint forcing them.
+
+The simplification agent produces a `docs/plans/00-simplification-pass.md` with proposed deletions and a one-line empirical justification for each (the actual production usage that proves the concept can go). Each proposed deletion is rated:
+
+- **D0**: Strong delete. Zero current consumers, zero pinned future requirement, no production constraint forcing keep.
+- **D1**: Likely delete. Has a weak/speculative consumer or a vague future-extension argument; would simplify the plan substantively.
+- **D2**: Defensible keep. Has a real (if limited) current use; flagged for awareness but probably stays.
+
+Then route through `plan-incorporate` to apply the D0/D1 deletions to the plan docs. D2 items are documented in the simplification doc but no plan changes are made.
+
+After incorporation, jump directly to Phase 4 sign-off — do NOT re-run a full review round on the simplified plans (which would just trigger another wave of additive findings). A focused re-check by the simplification agent on the affected sections is sufficient to confirm the deletions did not break internal consistency.
+
+### When to skip this phase
+
+If the plan corpus stayed under ~1500 lines total and the convergence trajectory shows monotonically *decreasing* findings without growth in scope, the simplification pass can be skipped. The phase is most valuable when total plan size grew or held steady across review rounds — that growth is the signal of the additive bias this phase counteracts.
+
 ## Phase 4: Plan Review Sign-Off
 
 When the review cycle has converged, the orchestrator verifies and stamps each plan doc before declaring it approved.

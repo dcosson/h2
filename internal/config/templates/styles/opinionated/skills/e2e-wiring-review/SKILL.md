@@ -144,6 +144,19 @@ The path nominally works but uses hardcoded values, no-op implementations, place
 - Where the stub is (file:line)
 - Severity: P2 (user-visible incorrectness) or P3 (internal shortcut, not user-visible)
 
+### Stubbed and Unconsumed (Delete Candidates)
+Code that exists in isolation, has no current consumer in any traced path, and is not specified as a near-term commitment elsewhere. This includes helper functions/classes/interfaces that are imported only by tests, "library" code that no production caller uses, broadcast/notification primitives nothing fires, and feature scaffolding for hypothetical scenarios that never materialized.
+
+**Default disposition for this category is DELETION**, not a tracker bead for future wiring. The empirical evidence (zero consumers in the audit) is the justification: rebuild the surface when a real consumer appears, with a shape that fits the actual call site rather than a speculative shape that hopes to fit.
+
+For each:
+- What the unconsumed code is (file:line, class/function name)
+- Why it appears to exist (best guess: forward-looking, leftover from prior design, etc.)
+- What gets deleted with it (downstream dependencies)
+- Recommendation: **Delete** (default), or **Keep** with explicit current-state justification (e.g., a near-term plan doc with a real consumer about to land, or a constraint requiring keep-as-stub)
+
+This category is the wiring audit's counter-bias to "things may be useful later." Plans tend to accumulate scaffolding that survives multiple review rounds without ever being wired; this section makes deletion the default outcome rather than expansion.
+
 ### Deferred / Out of Scope
 Features explicitly deferred or not in scope for the current milestone. Note these so they don't get flagged as missing.
 
@@ -164,6 +177,7 @@ Write the audit to `docs/reviews/{component}-e2e-wiring-audit.md`:
 - **Fully wired paths:** {count}
 - **Not wired (critical):** {count}
 - **Stubbed / partial:** {count}
+- **Stubbed and unconsumed (delete candidates):** {count}
 - **Deferred / out of scope:** {count}
 
 ## Entry Points

@@ -102,6 +102,17 @@ At each seam boundary, verify the following categories. For each category, compa
 - Timeout values are compatible — a caller's timeout is not shorter than the callee's expected processing time
 - Partial failure semantics — if one side can return partial results, does the other side handle them?
 
+### Interface Surface Area
+
+For each interface defined at the seam, audit whether it is wider than the consumers actually need.
+
+- **Method/field utilization**: Count how many methods or fields the producer exposes vs. how many the consumer actually calls or reads. If consumers only use a subset, the interface is over-specified — narrow the contract to match real usage.
+- **Multiple-consumer divergence**: If two consumers use the same interface for genuinely different needs, that may justify breadth. If they use overlapping subsets, consider splitting into two narrower interfaces (or one shared interface that fits both, with the unused parts dropped).
+- **Speculative slots**: Flag interface members that exist for "future flexibility" without a current caller. Per the no-hypothetical-scope rule, these should be deleted and re-added when a real consumer appears.
+- **Mode/flag combinatorics**: If an interface takes mode/option/flag parameters with combinations that no consumer exercises, flag the unused combinations as removable.
+
+This is the counterweight to the rest of seam review (which focuses on whether interfaces *match*). Matching wide-but-unused interfaces is still a problem — maintenance burden, harder migrations, more places for inconsistency to hide. A seam where both sides agree on a 6-method protocol when consumers only use 2 is a P2 finding even if compatibility is perfect.
+
 ### Acceptance Criteria Cross-Reference
 
 Each plan doc should have acceptance criteria — end-user-facing scenarios that define "done." For each acceptance criterion:
@@ -141,6 +152,7 @@ Write `docs/plans/seam-review-{mode}-{seam-spec}-{reviewer-id}.md` with this str
 | Lifecycle ordering | PASS/FAIL | {details} |
 | Configuration contracts | PASS/FAIL | {details} |
 | Error handling | PASS/FAIL | {details} |
+| Interface surface area | PASS/FAIL | {utilization ratio, unused members, speculative slots} |
 
 ---
 
