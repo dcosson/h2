@@ -251,7 +251,7 @@ Report all Contractual and Missing deviations to the orchestrating agent via `h2
 
 As agents report back, the orchestrating agent:
 
-1. **For Complete signoffs**: The signoff task bead stays open until the code is verified working in production (merged, CI green, no regressions). Only close signoff beads when the implementation is fully done and merged — a Complete signoff means the verification passed, but the bead tracks the full lifecycle.
+1. **For Complete signoffs**: Close the signoff task bead once reviews are approved and all available test suites pass. Do NOT keep the bead open waiting on production deployment, manual QA, or staging verification — those are tracked separately (e.g. a release/shipping checklist, a manual QA tracking doc, or per-QA-item beads). The signoff bead's job is to verify the *code* matches the *plan*; once that's done and reviewed, close it. Production verification belongs to a different mechanism.
 2. **For Partial signoffs**: Evaluate each Contractual and Missing deviation:
    - Is it real missing work, or intentional future scope?
    - If real: Create a new task bead for the follow-up work, assign to an available agent
