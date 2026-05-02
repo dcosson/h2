@@ -55,8 +55,15 @@ Pass through the doc and tag candidates by pattern. **Do NOT edit yet** — buil
 - Migration ordering steps
 - Decision rationale where the rejected alternative is non-obvious and a future reader or reviewer might independently re-propose it
 - All `## Review Disposition` / `## Round N Review Disposition` tables — audit history, never edit or reorder
-- Mermaid diagrams (visual context is hard to recover from prose)
 - File:line references to the existing codebase (these anchor the plan to reality)
+
+### Mermaid diagrams — evaluate, don't auto-preserve
+
+Diagrams are *usually* load-bearing because visual structure is hard to recover from prose, but some are noise. Evaluate each one:
+
+- **Usually keep**: top-level component / box diagrams (architecture overview), sequence diagrams for non-trivial multi-actor flows, state diagrams when the lifecycle has ≥3 non-obvious transitions.
+- **Candidates to cut**: class diagrams that just re-render an inline code block's types, ER diagrams that duplicate a schema table, flowcharts of straight-line procedural code, sequence diagrams of a 2-step "client calls server, server replies" interaction, gantt/timeline diagrams of work that's already covered in a Migration section, multiple variants of the same diagram showing minor states.
+- **Test**: if removing the diagram leaves the section equally clear because the prose / table / code already conveys the structure, cut it. If it's the only place the cross-component shape is visible, keep it.
 
 ## Phase 3: Estimate Reduction
 
