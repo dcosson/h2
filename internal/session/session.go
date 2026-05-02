@@ -207,6 +207,15 @@ func (s *Session) NewClient() *client.Client {
 
 	// Wire lifecycle callbacks.
 	cl.OnRelaunch = func() {
+		// User pressed Enter after the child exited. Default to resume so
+		// the next child picks up the same session. Without this, claude
+		// would re-receive --session-id <already-used-id> and fail with
+		// "Session ID is already in use" because the previous run wrote
+		// a session file on disk. handleRelaunch (rotate/restart RPC)
+		// manages ResumeSessionID itself, so we only set it here.
+		if s.harness != nil && s.harness.SupportsResume() && s.RC.HarnessSessionID != "" {
+			s.RC.ResumeSessionID = s.RC.HarnessSessionID
+		}
 		select {
 		case s.relaunchCh <- struct{}{}:
 		default:
