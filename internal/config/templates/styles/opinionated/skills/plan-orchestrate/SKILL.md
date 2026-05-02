@@ -180,11 +180,39 @@ The simplification agent produces a `docs/plans/00-simplification-pass.md` with 
 
 Then route through `plan-incorporate` to apply the D0/D1 deletions to the plan docs. D2 items are documented in the simplification doc but no plan changes are made.
 
-After incorporation, jump directly to Phase 4 sign-off — do NOT re-run a full review round on the simplified plans (which would just trigger another wave of additive findings). A focused re-check by the simplification agent on the affected sections is sufficient to confirm the deletions did not break internal consistency.
+After incorporation, proceed to Phase 3.6 — do NOT re-run a full review round on the simplified plans (which would just trigger another wave of additive findings). A focused re-check by the simplification agent on the affected sections is sufficient to confirm the deletions did not break internal consistency.
 
 ### When to skip this phase
 
 If the plan corpus stayed under ~1500 lines total and the convergence trajectory shows monotonically *decreasing* findings without growth in scope, the simplification pass can be skipped. The phase is most valuable when total plan size grew or held steady across review rounds — that growth is the signal of the additive bias this phase counteracts.
+
+## Phase 3.6: Tightening Pass
+
+Phase 3.5 cuts *what* the plan covers (unjustified scope). This phase cuts *how* it's written (verbosity, restated rationale, review residue, illustrative code that prose+signature already covers, redundant adjacent sections). The two are complementary and run sequentially.
+
+### Why not per-round
+
+Tightening is deliberately not part of the review loop:
+
+- Cuts made between rounds may be re-added by the next reviewer, wasting work.
+- A tightened doc can hide context that a fresh reviewer would have flagged or affirmed; reading the bloated version once is cheap.
+- Convergence is measured by ↓finding count round-over-round; mixing in line-count drops from style polish muddies that signal.
+
+Run once at the end, against the post-simplification corpus.
+
+### What runs
+
+Assign agents to run `plan-tighten` against every approved plan doc and every companion test harness doc. Parallelize across agents — each invocation is on a single doc and produces one commit. Plan-tighten itself self-skips with no commit when <10% reduction is available, so most already-tight docs cost only a read pass.
+
+Beads granularity: one bead per agent, listing the doc set assigned to them (e.g., "Tighten: 01a, 01b-wal, 01b-tlaplus, 01a-test-harness, 01b-wal-test-harness"). Plan-tighten's preconditions (clean working tree, no uncommitted reviews) are already enforced by the skill itself.
+
+### Do NOT re-review after
+
+This phase changes only writing style, not technical decisions, scope, or interfaces. Do not trigger another `plan-review` round in response to tighten commits. Proceed directly to Phase 4 sign-off, which will stamp the tightened version.
+
+### When to skip this phase
+
+If every plan doc came out of Phase 3.5 already under ~400 lines AND the corpus shows no signs of review residue (parenthetical R-N references, restated motivation across summary/why-X-over-Y/decision-log), the tightening pass adds little. Plan-tighten will mostly report "already tight" anyway — but you can save the orchestration cost by skipping. When in doubt, run it; the self-skip floor makes it cheap.
 
 ## Phase 4: Plan Review Sign-Off
 
@@ -295,6 +323,8 @@ Epic: "Planning: {project-name}"
   ├── Task: "R1 Summarize" (plan-summarize)
   ├── Task: "R2 Review: 05a, 05b, ... (rotated)" (plan-review, batch)
   ├── ...
+  ├── Task: "Simplification Pass" (Phase 3.5)
+  ├── Task: "Tighten: {batch}" (plan-tighten, Phase 3.6)
   ├── Task: "Planning Sign-Off"
   ├── Task: "Seam Review: {batch}" (plan-seam-review)
   └── Task: "Implementation Guide: {batch}" (Phase 4.75)
