@@ -613,7 +613,6 @@ func (s *Session) lifecycleLoop(stopStatus chan struct{}, interactive bool) erro
 			s.VT.Scrollback = midterm.NewTerminal(s.VT.ChildRows, s.VT.Cols)
 			s.VT.Scrollback.AutoResizeY = true
 			s.VT.Scrollback.AppendOnly = true
-			s.VT.ScrollbackMaxY = 0
 			s.VT.ResetScanState()
 			s.VT.ResetScrollHistory()
 

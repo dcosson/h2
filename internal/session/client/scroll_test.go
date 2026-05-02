@@ -98,28 +98,25 @@ func TestClampScrollOffset_Negative(t *testing.T) {
 // when a TUI moves the cursor to row 0 (e.g. via \033[H) before entering
 // scroll mode, scrollbackBottomRow used to collapse to Cursor.Y, dropping
 // the anchor at the very top of Scrollback and pinning maxOffset to 0.
-// The watermark in VT.ScrollbackMaxY survives the cursor reset.
+// midterm's Screen.MaxY is updated per painted character, so it survives
+// the cursor reset.
 func TestScrollbackBottomRow_SurvivesCursorReposition(t *testing.T) {
 	o := newTestClient(10, 80)
-	// Simulate pipeChunk having processed 50 lines of content.
 	for i := 0; i < 50; i++ {
 		o.VT.Scrollback.Write([]byte("line\n"))
 	}
-	if y := o.VT.Scrollback.Cursor.Y; y > o.VT.ScrollbackMaxY {
-		o.VT.ScrollbackMaxY = y
-	}
-	highMark := o.VT.ScrollbackMaxY
-	if highMark < 50 {
-		t.Fatalf("setup: expected high watermark >= 50, got %d", highMark)
+	highMark := o.VT.Scrollback.MaxY
+	if highMark < 49 {
+		t.Fatalf("setup: expected MaxY >= 49, got %d", highMark)
 	}
 
-	// TUI sends a cursor-home reposition. Cursor.Y collapses, but the
-	// watermark must persist so scroll mode anchors at recent content.
+	// TUI sends a cursor-home reposition. Cursor.Y collapses, but MaxY
+	// must persist so scroll mode anchors at recent content.
 	o.VT.Scrollback.Cursor.Y = 0
 
 	got := o.scrollbackBottomRow()
 	if got != highMark {
-		t.Fatalf("expected scrollbackBottomRow=%d (high watermark), got %d", highMark, got)
+		t.Fatalf("expected scrollbackBottomRow=%d (MaxY), got %d", highMark, got)
 	}
 
 	// Entering scroll mode now should give a usable maxOffset (not 0),
@@ -137,29 +134,83 @@ func TestScrollbackBottomRow_SurvivesCursorReposition(t *testing.T) {
 		t.Fatalf("expected maxOffset=%d after cursor reset, got %d", wantMax, maxOffset)
 	}
 	if maxOffset == 0 {
-		t.Fatal("maxOffset is 0 — user would be stuck in scroll mode (bug 2 regression)")
+		t.Fatal("maxOffset is 0 — user would be stuck in scroll mode (regression)")
 	}
 }
 
-func TestClampScrollOffset_UsesCursorYNotContentLen(t *testing.T) {
+// Regression for the chunk-level "skip back" bug: a TUI redraw cycle
+// arrives in a single Write — content advances Cursor.Y high, then \033[H
+// resets the cursor, then a small redraw paints the active screen. After
+// this, Cursor.Y is small but the high rows are populated in Content.
+// The previous post-write watermark sampled Cursor.Y at end-of-chunk,
+// missing the high rows entirely. midterm's Screen.MaxY is updated
+// per-paint inside the Write, so it correctly captures the high water mark.
+func TestScrollbackBottomRow_TracksWritesWithinSingleChunk(t *testing.T) {
+	o := newTestClient(10, 80)
+
+	// One PTY chunk that: scrolls 60 lines into scrollback, jumps cursor
+	// home, then redraws an active screen of 10 lines starting at row 0.
+	var chunk []byte
+	for i := 0; i < 60; i++ {
+		chunk = append(chunk, []byte("line\n")...)
+	}
+	chunk = append(chunk, []byte("\033[H")...) // cursor home
+	for i := 0; i < 10; i++ {
+		chunk = append(chunk, []byte("redraw\r\n")...)
+	}
+	o.VT.Scrollback.Write(chunk)
+
+	// After the chunk, Cursor.Y is somewhere small (around the redraw).
+	// Scrollback.MaxY must reflect the high-water mark of painted rows
+	// (row 59 — the 60th "line" was painted there before the newline
+	// advanced the cursor), not the cursor position.
+	const wantHigh = 59
+	if o.VT.Scrollback.MaxY < wantHigh {
+		t.Fatalf("expected MaxY>=%d after chunk, got %d (cursorY=%d)",
+			wantHigh, o.VT.Scrollback.MaxY, o.VT.Scrollback.Cursor.Y)
+	}
+
+	bottom := o.scrollbackBottomRow()
+	if bottom < wantHigh {
+		t.Fatalf("scrollbackBottomRow=%d should reflect painted high-water mark (cursorY=%d, MaxY=%d)",
+			bottom, o.VT.Scrollback.Cursor.Y, o.VT.Scrollback.MaxY)
+	}
+
+	// Entering scroll mode should anchor at the high-water row, not at
+	// the post-redraw cursor position. Otherwise the user lands in old
+	// content and "skips" the recent rows above the active screen.
+	o.EnterScrollMode()
+	if o.ScrollAnchorY < wantHigh {
+		t.Fatalf("ScrollAnchorY=%d skipped the recent content (expected >=%d)",
+			o.ScrollAnchorY, wantHigh)
+	}
+}
+
+func TestClampScrollOffset_UsesMaxYNotContentLen(t *testing.T) {
 	o := newTestClient(10, 80)
 	for i := 0; i < 40; i++ {
 		o.VT.Scrollback.Write([]byte("line\n"))
 	}
-	// Simulate a TUI where Content is inflated (AutoResizeY grew it)
-	// but cursor is at a reasonable position.
-	o.VT.Scrollback.Cursor.Y = 20
+	// Force Content to be larger than MaxY+1, simulating the historic
+	// "AutoResizeY inflated Content past the painted region" failure mode.
+	// Scroll bounds must derive from MaxY (highest painted row), not
+	// len(Content), and not the live Cursor.Y (which a TUI may reset).
+	for len(o.VT.Scrollback.Content) < 100 {
+		o.VT.Scrollback.Content = append(o.VT.Scrollback.Content, make([]rune, 80))
+	}
+	o.VT.Scrollback.Cursor.Y = 5 // simulate a post-redraw cursor reset
 
+	maxY := o.VT.Scrollback.MaxY
 	o.ScrollOffset = 999
 	o.ClampScrollOffset()
 
-	// maxOffset should be based on Cursor.Y, not len(Content).
-	want := 20 - o.VT.ChildRows + 1
+	want := maxY - o.VT.ChildRows + 1
 	if want < 0 {
 		want = 0
 	}
 	if o.ScrollOffset != want {
-		t.Fatalf("expected offset %d based on Cursor.Y, got %d", want, o.ScrollOffset)
+		t.Fatalf("expected offset %d based on MaxY=%d, got %d (Cursor.Y=%d, len(Content)=%d)",
+			want, maxY, o.ScrollOffset, o.VT.Scrollback.Cursor.Y, len(o.VT.Scrollback.Content))
 	}
 }
 

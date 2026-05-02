@@ -62,14 +62,6 @@ type VT struct {
 	ScrollHistory    []string
 	scrollHistoryMax int
 
-	// ScrollbackMaxY is the highest cursor row ever reached in Scrollback
-	// after a write. Updated eagerly in pipeChunk so it survives apps that
-	// reposition the cursor via \033[H or absolute moves; without this, the
-	// scroll-mode anchor would collapse to the cursor's reset position and
-	// drop the user at the oldest content (or pin maxOffset to 0). Reset to
-	// 0 only when Scrollback is replaced (child relaunch).
-	ScrollbackMaxY int
-
 	// scanState tracks the ANSI parser state for ScanPTYOutput.
 	scanState         int
 	scanCSIPrivateNum int // accumulates mode number during CSI ? <num> h/l parsing
@@ -181,9 +173,6 @@ func (vt *VT) pipeChunk(data []byte, onData func()) {
 	vt.Vt.Write(data)
 	if vt.Scrollback != nil {
 		vt.Scrollback.Write(data)
-		if y := vt.Scrollback.Cursor.Y; y > vt.ScrollbackMaxY {
-			vt.ScrollbackMaxY = y
-		}
 	}
 	vt.ScanPTYOutput(data)
 	if !vt.SyncOutputActive {
