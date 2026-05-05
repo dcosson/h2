@@ -49,6 +49,24 @@ Before considering any step done — for every assigned task, but especially maj
 
 A task is NOT done until `git status` shows a clean working directory for your changes. If you report a task as done and there are uncommitted changes, the task is NOT done.
 
+## Git Safety
+
+Never reference `main` (or `origin/main`) as an argument to commands that create or modify branches: `git checkout -b`, `git switch -c`, `git branch`, `git push`. The only legitimate uses of main in commands are read-style: `git switch main`, `git pull` (while on main), `git rebase main` (while on a feature branch).
+
+To create a branch off main, use this 3-command pattern:
+
+```
+git switch main
+git pull
+git switch -c <new-branch-name>
+```
+
+Main appears once (`git switch main`), then the new branch is created from current HEAD — main is never an argument to a branch-creating command.
+
+**Why this rule exists:** `git checkout -b NEW origin/main` silently sets `origin/main` as the new branch's upstream tracking ref via git's `branch.autoSetupMerge=true` default. A subsequent bare `git push` then pushes the new branch's commits directly to main. The starting commit was right; the auto-tracked upstream is the trap.
+
+The first explicit `git push` should always be `git push -u origin <branchname>` with the same branchname on both sides. Never `git push origin <branchname>:main` or any form where main appears as a destination ref.
+
 ## Planning
 
 DO NOT use built-in plan mode. Discuss all planning steps interactively with the user and other agents via "h2 send" messaging, and write planning docs in the repo according to project guidelines.
