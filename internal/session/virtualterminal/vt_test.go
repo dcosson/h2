@@ -573,6 +573,62 @@ func TestClampLiveVtHeight_NoVtNoCrash(t *testing.T) {
 	(&VT{ChildRows: 10}).clampLiveVtHeight()
 }
 
+// TestPipeChunk_SurvivesShrinkMidSession reproduces the codex-after-monitor-
+// unplug freeze. A TUI on a tall screen with a scroll region (codex pattern)
+// has its cursor far down the screen. A sudden shrink resize must not leave
+// midterm in a state where the next chunk panics inside Screen.paint with an
+// out-of-range Content index — that panic would be swallowed by pipeChunk's
+// recovery and the chunk's data would be lost, producing the "frozen window,
+// no PTY output, redraw does nothing" symptom users see.
+//
+// midterm's resizeY now clamps Cursor.Y / SavedCursor.Y / ScrollRegion to
+// the new bounds; this test exercises the full pipeChunk path to lock that
+// guarantee in at the integration boundary, not just inside midterm.
+func TestPipeChunk_SurvivesShrinkMidSession(t *testing.T) {
+	vt := &VT{
+		Rows:      50,
+		Cols:      100,
+		ChildRows: 48,
+		Vt:        midterm.NewTerminal(48, 100),
+		Output:    io.Discard,
+	}
+
+	// Codex-like setup: scroll region reserving bottom rows, content fills it.
+	vt.pipeChunk([]byte("\033[1;45r"), func() {})
+	var initial []byte
+	for i := 0; i < 30; i++ {
+		initial = append(initial, []byte("line ")...)
+		initial = append(initial, []byte("xxxxxxxxxx\r\n")...)
+	}
+	vt.pipeChunk(initial, func() {})
+
+	// User unplugs monitor: terminal shrinks to 25 rows (childRows=23).
+	vt.Resize(25, 100, 23)
+
+	// Acid test: write more data. Before the midterm clamp fix, this panicked
+	// inside Screen.paint with `index out of range [N] with length 23`,
+	// pipeChunk's recover() swallowed it, and the chunk's render was lost —
+	// repeatedly, for every chunk until kill+restart.
+	rendered := 0
+	vt.pipeChunk([]byte("after resize: should render\r\n"), func() { rendered++ })
+
+	// The render callback must fire — confirming no swallowed panic dropped
+	// the chunk. Vt.Height must be within bounds. Cursor must be within bounds.
+	if rendered == 0 {
+		t.Fatal("render callback did not fire — pipeChunk likely panicked and recovered silently")
+	}
+	if vt.Vt.Height > 23 {
+		t.Fatalf("Vt.Height=%d exceeds ChildRows=23", vt.Vt.Height)
+	}
+	if vt.Vt.Cursor.Y >= vt.Vt.Height {
+		t.Fatalf("Cursor.Y=%d out of bounds for Height=%d", vt.Vt.Cursor.Y, vt.Vt.Height)
+	}
+	if vt.Vt.ScrollRegion != nil && vt.Vt.ScrollRegion.End >= vt.Vt.Height {
+		t.Fatalf("ScrollRegion.End=%d out of bounds for Height=%d",
+			vt.Vt.ScrollRegion.End, vt.Vt.Height)
+	}
+}
+
 func assertMutexAvailable(t *testing.T, mu *sync.Mutex) {
 	t.Helper()
 	locked := make(chan struct{})
