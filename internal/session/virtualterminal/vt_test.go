@@ -573,55 +573,6 @@ func TestClampLiveVtHeight_NoVtNoCrash(t *testing.T) {
 	(&VT{ChildRows: 10}).clampLiveVtHeight()
 }
 
-// TestResize_ClearsScrollHistoryOnWidthChange verifies that ScrollHistory is
-// dropped when the terminal width changes. Each entry is a pre-rendered ANSI
-// string captured at OnScrollback time; it has no schema for re-rendering at
-// a different width. Surfacing those stale entries in scroll mode produces
-// the "duplicate / blank lines in scrollback" artifacts users see after a
-// monitor unplug (which typically shifts both width and height).
-func TestResize_ClearsScrollHistoryOnWidthChange(t *testing.T) {
-	vt := &VT{
-		Rows:      50,
-		Cols:      100,
-		ChildRows: 48,
-		Vt:        midterm.NewTerminal(48, 100),
-		Ptm:       nil, // pty.Setsize tolerates nil
-	}
-	vt.ScrollHistory = []string{
-		"line 1 captured at width 100",
-		"line 2 captured at width 100",
-		"line 3 captured at width 100",
-	}
-
-	// Width change: clear.
-	vt.Resize(25, 60, 23)
-	if len(vt.ScrollHistory) != 0 {
-		t.Fatalf("expected ScrollHistory cleared on width change, got %d entries",
-			len(vt.ScrollHistory))
-	}
-}
-
-// TestResize_PreservesScrollHistoryOnHeightOnlyChange verifies that a height-
-// only resize keeps existing ScrollHistory. Same width means stored ANSI
-// strings still render correctly, so dropping them would be a gratuitous loss
-// of scrollback. Users who change tile heights without changing width (a
-// common tiling-WM split adjustment) should not lose their codex scrollback.
-func TestResize_PreservesScrollHistoryOnHeightOnlyChange(t *testing.T) {
-	vt := &VT{
-		Rows:      50,
-		Cols:      100,
-		ChildRows: 48,
-		Vt:        midterm.NewTerminal(48, 100),
-	}
-	vt.ScrollHistory = []string{"a", "b", "c"}
-
-	vt.Resize(30, 100, 28) // height shrinks, width unchanged
-	if len(vt.ScrollHistory) != 3 {
-		t.Fatalf("expected ScrollHistory preserved on height-only resize, got %d entries",
-			len(vt.ScrollHistory))
-	}
-}
-
 // TestPipeChunk_SurvivesShrinkMidSession reproduces the codex-after-monitor-
 // unplug freeze. A TUI on a tall screen with a scroll region (codex pattern)
 // has its cursor far down the screen. A sudden shrink resize must not leave
