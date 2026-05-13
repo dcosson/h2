@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,6 +30,17 @@ func newTestClient(childRows, cols int) *Client {
 		VT:     vt,
 		Output: io.Discard,
 		Mode:   ModeNormal,
+	}
+}
+
+// historyEntry constructs a default-formatted ScrollHistoryEntry from a string.
+// Convenience for tests that don't care about format runs — just want some
+// distinguishable text in scrollback.
+func historyEntry(s string) virtualterminal.ScrollHistoryEntry {
+	runes := []rune(s)
+	return virtualterminal.ScrollHistoryEntry{
+		Content: runes,
+		Runs:    []virtualterminal.FormatRun{{Size: len(runes), Format: midterm.Format{}}},
 	}
 }
 
@@ -512,13 +524,13 @@ func TestRenderScrollView_UsesScrollHistoryWhenAvailable(t *testing.T) {
 	// Mark that scroll regions are used (e.g. codex).
 	o.VT.ScrollRegionUsed = true
 	// Populate ScrollHistory with captured lines.
-	o.VT.ScrollHistory = []string{
-		"history-line-0",
-		"history-line-1",
-		"history-line-2",
-		"history-line-3",
-		"history-line-4",
-		"history-target",
+	o.VT.ScrollHistory = []virtualterminal.ScrollHistoryEntry{
+		historyEntry("history-line-0"),
+		historyEntry("history-line-1"),
+		historyEntry("history-line-2"),
+		historyEntry("history-line-3"),
+		historyEntry("history-line-4"),
+		historyEntry("history-target"),
 	}
 
 	o.EnterScrollMode()
@@ -1887,9 +1899,9 @@ func TestScrollMaxOffset_WithScrollHistory(t *testing.T) {
 	o.VT.ScrollRegionUsed = true
 	// With 25 ScrollHistory lines, max offset should be 25
 	// (total = 25 history + 10 live = 35, max = 35 - 10 = 25).
-	o.VT.ScrollHistory = make([]string, 25)
+	o.VT.ScrollHistory = make([]virtualterminal.ScrollHistoryEntry, 25)
 	for i := range o.VT.ScrollHistory {
-		o.VT.ScrollHistory[i] = "line"
+		o.VT.ScrollHistory[i] = historyEntry("line")
 	}
 	maxOff, ok := o.scrollMaxOffset()
 	if !ok {
@@ -1903,9 +1915,9 @@ func TestScrollMaxOffset_WithScrollHistory(t *testing.T) {
 func TestScrollHistoryAnchor_FrozenInScrollMode(t *testing.T) {
 	o := newTestClient(10, 80)
 	o.VT.ScrollRegionUsed = true
-	o.VT.ScrollHistory = make([]string, 20)
+	o.VT.ScrollHistory = make([]virtualterminal.ScrollHistoryEntry, 20)
 	for i := range o.VT.ScrollHistory {
-		o.VT.ScrollHistory[i] = "line"
+		o.VT.ScrollHistory[i] = historyEntry("line")
 	}
 
 	o.EnterScrollMode()
@@ -1914,12 +1926,101 @@ func TestScrollHistoryAnchor_FrozenInScrollMode(t *testing.T) {
 	}
 
 	// New lines arrive after entering scroll mode.
-	o.VT.ScrollHistory = append(o.VT.ScrollHistory, "new1", "new2", "new3")
+	o.VT.ScrollHistory = append(o.VT.ScrollHistory,
+		historyEntry("new1"), historyEntry("new2"), historyEntry("new3"))
 
 	// scrollHistoryLen should use the frozen anchor, not live length.
 	got := o.scrollHistoryLen()
 	if got != 20 {
 		t.Fatalf("expected frozen scrollHistoryLen 20, got %d", got)
+	}
+}
+
+// TestRenderHistoryEntry_AdaptsToCurrentWidth verifies the headline
+// motivation for storing ScrollHistory in RLE form: an entry captured at
+// width A renders cleanly at width B without truncation/wrap artifacts.
+//
+// The user-visible regression that motivated this was codex sessions showing
+// duplicate-looking and blank-padded rows in scrollback after a monitor
+// unplug. The old representation (pre-rendered ANSI string frozen at capture
+// width) couldn't adapt — entries wider than current Cols wrapped onto the
+// next physical row and collided with whatever rendered there. Now we
+// truncate at render time.
+func TestRenderHistoryEntry_AdaptsToCurrentWidth(t *testing.T) {
+	cases := []struct {
+		name        string
+		captureCols int
+		renderCols  int
+		text        string
+		wantSubstr  string
+		wantNoWrap  bool
+	}{
+		{
+			name:        "captured wider than current — truncates to current Cols",
+			captureCols: 200,
+			renderCols:  40,
+			text:        "abcdefghij" + strings.Repeat("k", 60) + "X-tail-should-be-cut",
+			wantSubstr:  "abcdefghij",
+			wantNoWrap:  true,
+		},
+		{
+			name:        "captured narrower than current — renders short, no garbage",
+			captureCols: 20,
+			renderCols:  80,
+			text:        "short",
+			wantSubstr:  "short",
+			wantNoWrap:  true,
+		},
+		{
+			name:        "captured equal — straight passthrough",
+			captureCols: 40,
+			renderCols:  40,
+			text:        "exact-fit-line",
+			wantSubstr:  "exact-fit-line",
+			wantNoWrap:  true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			o := newTestClient(5, tc.renderCols)
+			var out bytes.Buffer
+			o.Output = &out
+
+			runes := []rune(tc.text)
+			// Pad runes to the capture width — mirrors how OnScrollback hands
+			// us a row's worth of cells, blanks included.
+			for len(runes) < tc.captureCols {
+				runes = append(runes, ' ')
+			}
+			o.VT.ScrollRegionUsed = true
+			o.VT.ScrollHistory = []virtualterminal.ScrollHistoryEntry{
+				{
+					Content: runes,
+					Runs: []virtualterminal.FormatRun{
+						{Size: len(runes), Format: midterm.Format{}},
+					},
+				},
+			}
+
+			o.EnterScrollMode()
+			o.ScrollUp(1)
+			o.RenderScreen()
+
+			out_s := out.String()
+			if !strings.Contains(out_s, tc.wantSubstr) {
+				t.Fatalf("expected output to contain %q\ngot:\n%q", tc.wantSubstr, out_s)
+			}
+			// Sanity check: the cursor-positioning escapes for our 5
+			// child rows should each be followed by content for that row only;
+			// the wider-than-cols case must not let the captured string spill
+			// content past the cut.
+			if tc.captureCols > tc.renderCols {
+				if strings.Contains(out_s, "X-tail-should-be-cut") {
+					t.Fatalf("expected too-wide content to be truncated, got tail in output:\n%q", out_s)
+				}
+			}
+		})
 	}
 }
 
@@ -1930,10 +2031,10 @@ func TestRenderScrollViewHistory_ShowsHistoryAndLive(t *testing.T) {
 
 	o.VT.ScrollRegionUsed = true
 	// Populate ScrollHistory.
-	o.VT.ScrollHistory = []string{
-		"scroll-line-0",
-		"scroll-line-1",
-		"scroll-line-2",
+	o.VT.ScrollHistory = []virtualterminal.ScrollHistoryEntry{
+		historyEntry("scroll-line-0"),
+		historyEntry("scroll-line-1"),
+		historyEntry("scroll-line-2"),
 	}
 	// Write some content to the live terminal.
 	o.VT.Vt.Write([]byte("live-content\r\n"))
@@ -1953,9 +2054,9 @@ func TestScrollHistory_IgnoredWithoutScrollRegion(t *testing.T) {
 	// When ScrollRegionUsed is false (e.g. Claude Code), ScrollHistory
 	// should NOT be used even if it has content.
 	o := newTestClient(10, 80)
-	o.VT.ScrollHistory = make([]string, 25)
+	o.VT.ScrollHistory = make([]virtualterminal.ScrollHistoryEntry, 25)
 	for i := range o.VT.ScrollHistory {
-		o.VT.ScrollHistory[i] = "line"
+		o.VT.ScrollHistory[i] = historyEntry("line")
 	}
 	// ScrollRegionUsed is false (default).
 	if o.hasScrollHistory() {

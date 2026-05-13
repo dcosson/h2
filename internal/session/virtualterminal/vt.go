@@ -56,10 +56,18 @@ type VT struct {
 	// that cause flickering in apps like Claude Code.
 	SyncOutputActive bool
 
-	// ScrollHistory stores ANSI-formatted lines that scrolled off the top of
-	// VT.Vt via midterm's OnScrollback callback. This captures scrollback from
-	// apps that use scroll regions (e.g. codex inline viewport).
-	ScrollHistory    []string
+	// ScrollHistory stores lines that scrolled off the top of VT.Vt via
+	// midterm's OnScrollback callback, kept in RLE form (Content runes +
+	// FormatRuns) so they can be re-rendered to the current terminal width
+	// at scroll-mode time. Captures scrollback for apps that use scroll
+	// regions (e.g. codex inline viewport).
+	//
+	// We previously stored each entry as a pre-rendered ANSI string. That
+	// froze the column width at capture time — a later resize then either
+	// truncated entries mid-content (narrower) or let them wrap and collide
+	// with the next row (wider). Storing the structured form lets the render
+	// path size each entry to the current Cols.
+	ScrollHistory    []ScrollHistoryEntry
 	scrollHistoryMax int
 
 	// scanState tracks the ANSI parser state for ScanPTYOutput.
@@ -67,17 +75,33 @@ type VT struct {
 	scanCSIPrivateNum int // accumulates mode number during CSI ? <num> h/l parsing
 }
 
+// ScrollHistoryEntry is a single line that scrolled off the top of the live
+// viewport. Stored in RLE form (Content + FormatRuns) so callers can re-render
+// it sized to whatever the current terminal width happens to be — the previous
+// pre-rendered-ANSI representation froze column count at capture time.
+type ScrollHistoryEntry struct {
+	Content []rune
+	Runs    []FormatRun
+}
+
+// FormatRun is a contiguous span of cells sharing one Format. The sum of all
+// Sizes across an entry's Runs equals the column count at capture time.
+type FormatRun struct {
+	Size   int
+	Format midterm.Format
+}
+
 // SetupScrollCapture installs the OnScrollback callback on VT.Vt so that
-// lines scrolling off the top of the visible screen are captured with ANSI
-// formatting into ScrollHistory. Must be called after VT.Vt is created.
+// lines scrolling off the top of the visible screen are captured into
+// ScrollHistory as structured (Content + RLE Format) entries. Must be called
+// after VT.Vt is created.
 func (vt *VT) SetupScrollCapture() {
 	if vt.scrollHistoryMax <= 0 {
-		vt.scrollHistoryMax = 50000
+		vt.scrollHistoryMax = 20000
 	}
 	vt.Vt.OnScrollback(func(line midterm.Line) {
 		// Guard against Content/Format length mismatch in midterm: wide
-		// characters or resize races can cause the two slices to diverge,
-		// leading to an index-out-of-range panic in Line.Display().
+		// characters or resize races can cause the two slices to diverge.
 		if len(line.Format) < len(line.Content) {
 			padded := make([]midterm.Format, len(line.Content))
 			copy(padded, line.Format)
@@ -85,13 +109,38 @@ func (vt *VT) SetupScrollCapture() {
 		} else if len(line.Format) > len(line.Content) {
 			line.Format = line.Format[:len(line.Content)]
 		}
-		rendered := line.Display() + "\033[0m"
-		vt.ScrollHistory = append(vt.ScrollHistory, rendered)
+		entry := ScrollHistoryEntry{
+			Content: append([]rune(nil), line.Content...),
+			Runs:    coalesceFormatRuns(line.Format),
+		}
+		vt.ScrollHistory = append(vt.ScrollHistory, entry)
 		if len(vt.ScrollHistory) > vt.scrollHistoryMax {
 			trim := len(vt.ScrollHistory) - vt.scrollHistoryMax
 			vt.ScrollHistory = vt.ScrollHistory[trim:]
 		}
 	})
+}
+
+// coalesceFormatRuns RLE-encodes a per-cell []Format into spans of adjacent
+// cells sharing a Format. Most TUI rows have a small handful of runs (often
+// one — all default), so this typically shrinks Format storage by 50-100×
+// compared to the dense per-cell representation midterm hands us.
+func coalesceFormatRuns(formats []midterm.Format) []FormatRun {
+	if len(formats) == 0 {
+		return nil
+	}
+	runs := make([]FormatRun, 0, 4)
+	cur := FormatRun{Size: 1, Format: formats[0]}
+	for i := 1; i < len(formats); i++ {
+		if formats[i] == cur.Format {
+			cur.Size++
+			continue
+		}
+		runs = append(runs, cur)
+		cur = FormatRun{Size: 1, Format: formats[i]}
+	}
+	runs = append(runs, cur)
+	return runs
 }
 
 // ResetScrollHistory clears the captured scroll history.

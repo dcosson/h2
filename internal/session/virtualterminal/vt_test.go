@@ -444,6 +444,49 @@ func TestSetupScrollCapture_CapturesScrolledLines(t *testing.T) {
 	if len(vt.ScrollHistory) == 0 {
 		t.Fatal("expected scroll history to capture at least one line")
 	}
+	// Captured entry must carry Content (the line's text) and at least one
+	// run covering it — proves the RLE capture wired up correctly.
+	first := vt.ScrollHistory[0]
+	if len(first.Content) == 0 {
+		t.Fatalf("captured entry has no Content")
+	}
+	if len(first.Runs) == 0 {
+		t.Fatalf("captured entry has no Runs (Format compression broken)")
+	}
+}
+
+func TestCoalesceFormatRuns(t *testing.T) {
+	def := midterm.Format{}
+	red := midterm.Format{}
+	red.SetBold(true)
+
+	tests := []struct {
+		name     string
+		input    []midterm.Format
+		wantRuns int
+		wantSize int
+	}{
+		{"empty", nil, 0, 0},
+		{"single cell", []midterm.Format{def}, 1, 1},
+		{"all same", []midterm.Format{def, def, def, def, def}, 1, 5},
+		{"two runs", []midterm.Format{def, def, red, red, red}, 2, 5},
+		{"alternating", []midterm.Format{def, red, def, red}, 4, 4},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			runs := coalesceFormatRuns(tc.input)
+			if len(runs) != tc.wantRuns {
+				t.Fatalf("got %d runs, want %d", len(runs), tc.wantRuns)
+			}
+			total := 0
+			for _, r := range runs {
+				total += r.Size
+			}
+			if total != tc.wantSize {
+				t.Fatalf("got total size %d, want %d", total, tc.wantSize)
+			}
+		})
+	}
 }
 
 // --- pipeChunk panic recovery ---

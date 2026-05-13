@@ -123,11 +123,8 @@ func (c *Client) renderScrollViewHistory(buf *bytes.Buffer) {
 		row := startRow + i
 		if row >= 0 && row < totalRows {
 			if row < histLen {
-				// Render from ScrollHistory (ANSI-formatted string).
-				line := c.VT.ScrollHistory[row]
-				buf.WriteString(line)
+				c.renderHistoryEntry(buf, c.VT.ScrollHistory[row])
 			} else {
-				// Render from live VT.Vt content.
 				vtRow := row - histLen
 				c.RenderLineFrom(buf, c.VT.Vt, vtRow)
 			}
@@ -135,6 +132,47 @@ func (c *Client) renderScrollViewHistory(buf *bytes.Buffer) {
 		buf.WriteString("\033[0m\033[K")
 	}
 	c.renderScrollIndicator(buf)
+}
+
+// renderHistoryEntry emits one ScrollHistoryEntry to buf, sized to the current
+// terminal width. Entries captured at a wider width are truncated; entries
+// captured at a narrower width render short (the surrounding \033[0m\033[K
+// erases the tail). This is the width-adaptation that the old "pre-rendered
+// ANSI string" representation couldn't do — resizes no longer produce wrap
+// collisions or stale-width artifacts in scrollback.
+func (c *Client) renderHistoryEntry(buf *bytes.Buffer, entry virtualterminal.ScrollHistoryEntry) {
+	cols := c.VT.Cols
+	if cols <= 0 {
+		return
+	}
+	var pos int
+	var lastFormat midterm.Format
+	first := true
+	for _, run := range entry.Runs {
+		if pos >= cols {
+			break
+		}
+		end := pos + run.Size
+		if end > cols {
+			end = cols
+		}
+		f := run.Format
+		if first || f != lastFormat {
+			buf.WriteString("\033[0m")
+			buf.WriteString(f.Render())
+			lastFormat = f
+			first = false
+		}
+		contentEnd := end
+		if contentEnd > len(entry.Content) {
+			contentEnd = len(entry.Content)
+		}
+		if pos < contentEnd {
+			buf.WriteString(string(entry.Content[pos:contentEnd]))
+		}
+		pos = end
+	}
+	buf.WriteString("\033[0m")
 }
 
 // renderScrollIndicator draws the "(scrolling)" indicator at row 1, right-aligned.
