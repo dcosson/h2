@@ -474,7 +474,7 @@ func TestCoalesceFormatRuns(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			runs := coalesceFormatRuns(tc.input)
+			runs := coalesceFormatRuns(tc.input, nil)
 			if len(runs) != tc.wantRuns {
 				t.Fatalf("got %d runs, want %d", len(runs), tc.wantRuns)
 			}

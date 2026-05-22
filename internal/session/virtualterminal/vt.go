@@ -84,11 +84,15 @@ type ScrollHistoryEntry struct {
 	Runs    []FormatRun
 }
 
-// FormatRun is a contiguous span of cells sharing one Format. The sum of all
-// Sizes across an entry's Runs equals the column count at capture time.
+// FormatRun is a contiguous span of cells sharing one Format and (optionally)
+// one OSC 8 hyperlink. The sum of all Sizes across an entry's Runs equals the
+// column count at capture time. URL is the URI string for the link, resolved
+// from the midterm Terminal's URL table at capture time so the entry is
+// self-contained even after the table changes.
 type FormatRun struct {
 	Size   int
 	Format midterm.Format
+	URL    string
 }
 
 // SetupScrollCapture installs the OnScrollback callback on VT.Vt so that
@@ -109,9 +113,14 @@ func (vt *VT) SetupScrollCapture() {
 		} else if len(line.Format) > len(line.Content) {
 			line.Format = line.Format[:len(line.Content)]
 		}
+		// Resolve per-cell URL IDs to URI strings at capture time so the
+		// history entry is self-contained — the midterm URL table is owned
+		// by the live Terminal and we don't want scrollback to depend on it
+		// (avoids late lookups during render and decouples lifetime).
+		urls := resolveLineURLs(line.URLIDs, len(line.Content), vt.Vt.URL)
 		entry := ScrollHistoryEntry{
 			Content: append([]rune(nil), line.Content...),
-			Runs:    coalesceFormatRuns(line.Format),
+			Runs:    coalesceFormatRuns(line.Format, urls),
 		}
 		vt.ScrollHistory = append(vt.ScrollHistory, entry)
 		if len(vt.ScrollHistory) > vt.scrollHistoryMax {
@@ -121,26 +130,62 @@ func (vt *VT) SetupScrollCapture() {
 	})
 }
 
-// coalesceFormatRuns RLE-encodes a per-cell []Format into spans of adjacent
-// cells sharing a Format. Most TUI rows have a small handful of runs (often
-// one — all default), so this typically shrinks Format storage by 50-100×
-// compared to the dense per-cell representation midterm hands us.
-func coalesceFormatRuns(formats []midterm.Format) []FormatRun {
+// coalesceFormatRuns RLE-encodes per-cell []Format (and parallel per-cell
+// URLs, if non-nil) into spans where adjacent cells share both Format and
+// URL. Most TUI rows have a small handful of runs (often one — all default),
+// so this typically shrinks storage by 50-100× compared to the dense per-cell
+// representation. urls may be nil, in which case every run gets URL="".
+func coalesceFormatRuns(formats []midterm.Format, urls []string) []FormatRun {
 	if len(formats) == 0 {
 		return nil
 	}
+	urlAt := func(i int) string {
+		if i < len(urls) {
+			return urls[i]
+		}
+		return ""
+	}
 	runs := make([]FormatRun, 0, 4)
-	cur := FormatRun{Size: 1, Format: formats[0]}
+	cur := FormatRun{Size: 1, Format: formats[0], URL: urlAt(0)}
 	for i := 1; i < len(formats); i++ {
-		if formats[i] == cur.Format {
+		u := urlAt(i)
+		if formats[i] == cur.Format && u == cur.URL {
 			cur.Size++
 			continue
 		}
 		runs = append(runs, cur)
-		cur = FormatRun{Size: 1, Format: formats[i]}
+		cur = FormatRun{Size: 1, Format: formats[i], URL: u}
 	}
 	runs = append(runs, cur)
 	return runs
+}
+
+// resolveLineURLs converts a per-cell []uint32 of URL IDs (as captured from
+// midterm.Line.URLIDs) into a parallel per-cell []string of URI strings. nil
+// IDs (no link on the line) returns nil. lookup is typically (*Terminal).URL.
+func resolveLineURLs(ids []uint32, n int, lookup func(uint32) string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	if n > len(ids) {
+		n = len(ids)
+	}
+	out := make([]string, n)
+	cache := make(map[uint32]string, 2)
+	for i := 0; i < n; i++ {
+		id := ids[i]
+		if id == 0 {
+			continue
+		}
+		if s, ok := cache[id]; ok {
+			out[i] = s
+			continue
+		}
+		s := lookup(id)
+		cache[id] = s
+		out[i] = s
+	}
+	return out
 }
 
 // ResetScrollHistory clears the captured scroll history.

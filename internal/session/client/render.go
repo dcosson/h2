@@ -147,6 +147,7 @@ func (c *Client) renderHistoryEntry(buf *bytes.Buffer, entry virtualterminal.Scr
 	}
 	var pos int
 	var lastFormat midterm.Format
+	var lastURL string
 	first := true
 	for _, run := range entry.Runs {
 		if pos >= cols {
@@ -163,6 +164,10 @@ func (c *Client) renderHistoryEntry(buf *bytes.Buffer, entry virtualterminal.Scr
 			lastFormat = f
 			first = false
 		}
+		if run.URL != lastURL {
+			writeOSC8BoundaryStr(buf, lastURL, run.URL)
+			lastURL = run.URL
+		}
 		contentEnd := end
 		if contentEnd > len(entry.Content) {
 			contentEnd = len(entry.Content)
@@ -172,7 +177,24 @@ func (c *Client) renderHistoryEntry(buf *bytes.Buffer, entry virtualterminal.Scr
 		}
 		pos = end
 	}
+	if lastURL != "" {
+		buf.WriteString("\033]8;;\033\\")
+	}
 	buf.WriteString("\033[0m")
+}
+
+// writeOSC8BoundaryStr mirrors writeOSC8Boundary but takes URL strings directly
+// (scrollback entries store resolved URLs so they don't need to consult the
+// live midterm Terminal's URL table at render time).
+func writeOSC8BoundaryStr(buf *bytes.Buffer, prev, next string) {
+	if prev != "" {
+		buf.WriteString("\033]8;;\033\\")
+	}
+	if next != "" {
+		buf.WriteString("\033]8;;")
+		buf.WriteString(next)
+		buf.WriteString("\033\\")
+	}
 }
 
 // renderScrollIndicator draws the "(scrolling)" indicator at row 1, right-aligned.
@@ -211,7 +233,10 @@ func (c *Client) renderScrollIndicator(buf *bytes.Buffer) {
 // RenderLineFrom writes one row of the given terminal to buf.
 // This uses explicit SGR resets between format regions to prevent
 // background colors from bleeding across regions (midterm's RenderLine
-// does not reset between regions).
+// does not reset between regions). OSC 8 hyperlinks are emitted around
+// runs of cells sharing a URL ID — opened on entry, closed on exit, so
+// each row stands alone (the next row will reopen if its first run is
+// still linked).
 func (c *Client) RenderLineFrom(buf *bytes.Buffer, vt *midterm.Terminal, row int) {
 	if row >= len(vt.Content) {
 		return
@@ -219,12 +244,17 @@ func (c *Client) RenderLineFrom(buf *bytes.Buffer, vt *midterm.Terminal, row int
 	line := vt.Content[row]
 	var pos int
 	var lastFormat midterm.Format
+	var lastURLID uint32
 	for region := range vt.Format.Regions(row) {
 		f := region.F
 		if f != lastFormat {
 			buf.WriteString("\033[0m")
 			buf.WriteString(f.Render())
 			lastFormat = f
+		}
+		if region.URLID != lastURLID {
+			writeOSC8Boundary(buf, vt, lastURLID, region.URLID)
+			lastURLID = region.URLID
 		}
 		end := pos + region.Size
 		if pos < len(line) {
@@ -236,7 +266,26 @@ func (c *Client) RenderLineFrom(buf *bytes.Buffer, vt *midterm.Terminal, row int
 		}
 		pos = end
 	}
+	if lastURLID != 0 {
+		buf.WriteString("\033]8;;\033\\")
+	}
 	buf.WriteString("\033[0m")
+}
+
+// writeOSC8Boundary emits the OSC 8 transitions between prev and next URL IDs.
+// A close (\033]8;;\033\\) is sent before opening a new link, even when prev
+// was non-zero, so terminals don't get a nested-open sequence — OSC 8 has no
+// stack, and the explicit close lets the outer terminal start the new URL
+// cleanly.
+func writeOSC8Boundary(buf *bytes.Buffer, vt *midterm.Terminal, prev, next uint32) {
+	if prev != 0 {
+		buf.WriteString("\033]8;;\033\\")
+	}
+	if next != 0 {
+		buf.WriteString("\033]8;;")
+		buf.WriteString(vt.URL(next))
+		buf.WriteString("\033\\")
+	}
 }
 
 // RenderLine writes one row of the primary virtual terminal to buf.

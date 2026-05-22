@@ -17,7 +17,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-replace github.com/vito/midterm v0.2.3 => github.com/dcosson/midterm v0.2.4-0.20260511235854-99f47ec830a4
+replace github.com/vito/midterm v0.2.3 => /Users/dcosson/h2home/projects/midterm
 
 require (
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
