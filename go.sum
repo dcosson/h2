@@ -16,8 +16,8 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/dcosson/destructive-command-guard-go v0.2.3 h1:JKgtpXtleRjzRZFTGBM83pSxT3mkKfujrPb5AC+7oeo=
 github.com/dcosson/destructive-command-guard-go v0.2.3/go.mod h1:5HJPETCjVmyQ5IiF1EKnJzlngxXUDlJVbMYCHsAmoDo=
-github.com/dcosson/midterm v0.2.4-0.20260511235854-99f47ec830a4 h1:d0m8RWqLI3lQF3Rv2vinCpno6/bbyh55nImT6qF2X+c=
-github.com/dcosson/midterm v0.2.4-0.20260511235854-99f47ec830a4/go.mod h1:WkbqZBIhH4jfxXkE2bjhosM1BdF/dCp7sR4x9wQB6fA=
+github.com/dcosson/midterm v0.2.4-0.20260522040034-c5eaa9b4a2cc h1:6kZSzTEiE0Z56/fE5YMkMCPGCkKhKi9xzZF0JI/qFUE=
+github.com/dcosson/midterm v0.2.4-0.20260522040034-c5eaa9b4a2cc/go.mod h1:WkbqZBIhH4jfxXkE2bjhosM1BdF/dCp7sR4x9wQB6fA=
 github.com/dcosson/treesitter-go v0.1.0 h1:E+tXGxZTJT7wPlAAANLMbejaNhreemIKiZgxj4oXV5I=
 github.com/dcosson/treesitter-go v0.1.0/go.mod h1:ROuyUNRSakznobALBQA2dhJXIEn9JvfG9CGSg6utrpE=
 github.com/gofrs/flock v0.13.0 h1:95JolYOvGMqeH31+FC7D2+uULf6mG61mEZ/A8dRYMzw=

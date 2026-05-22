@@ -114,6 +114,57 @@ func TestRenderHistoryEntry_EmitsOSC8(t *testing.T) {
 	}
 }
 
+// Note: midterm's OSC parser uses ESC and BEL as OSC terminators, so it
+// truncates URIs at those bytes before they ever reach our URL table — making
+// the live render path naturally safe against the most obvious injection. The
+// renderer's own sanitizer is defense in depth against future parser changes,
+// and the history path (which can carry arbitrary URL strings via FormatRun)
+// is where we exercise it end-to-end below.
+
+func TestRenderHistoryEntry_RejectsMaliciousURI(t *testing.T) {
+	c := newTestClient(2, 20)
+	bad := "https://evil\x07injected"
+	entry := virtualterminal.ScrollHistoryEntry{
+		Content: []rune("hi"),
+		Runs: []virtualterminal.FormatRun{
+			{Size: 2, Format: midterm.Format{}, URL: bad},
+		},
+	}
+	var buf bytes.Buffer
+	c.renderHistoryEntry(&buf, entry)
+	got := buf.String()
+	if strings.Contains(got, bad) || strings.Contains(got, "injected") {
+		t.Fatalf("malicious URI leaked through history render: %q", got)
+	}
+	if strings.Contains(got, "\x1b]8;;https") {
+		t.Fatalf("rejected URI must not produce an OSC 8 open: %q", got)
+	}
+}
+
+func TestSanitizeOSC8URL(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"", ""},
+		{"https://example.com", "https://example.com"},
+		{"https://example.com/a?b=c&d=e", "https://example.com/a?b=c&d=e"},
+		{"https://example.com/\x1bevil", ""},               // ESC
+		{"https://example.com/\x07bell", ""},               // BEL
+		{"https://example.com/\nnewline", ""},              // LF
+		{"https://example.com/\x00null", ""},               // NUL
+		{"https://example.com/\x7fdel", ""},                // DEL
+		{"https://example.com/π", "https://example.com/π"}, // UTF-8 OK
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			got := sanitizeOSC8URL(tc.in)
+			if got != tc.want {
+				t.Fatalf("sanitizeOSC8URL(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRenderHistoryEntry_NoOSC8WhenAllRunsUnlinked(t *testing.T) {
 	c := newTestClient(2, 20)
 	entry := virtualterminal.ScrollHistoryEntry{

@@ -183,18 +183,48 @@ func (c *Client) renderHistoryEntry(buf *bytes.Buffer, entry virtualterminal.Scr
 	buf.WriteString("\033[0m")
 }
 
-// writeOSC8BoundaryStr mirrors writeOSC8Boundary but takes URL strings directly
-// (scrollback entries store resolved URLs so they don't need to consult the
-// live midterm Terminal's URL table at render time).
+// writeOSC8BoundaryStr emits the OSC 8 close/open transitions between two
+// URLs. An explicit close precedes any open — OSC 8 has no stack and a
+// "new open inside an old open" can confuse terminals, so we always reset.
+// next is sanitized against terminator-equivalent control bytes (ESC, BEL,
+// C0/DEL) before emission; an unsafe input drops the link entirely rather
+// than risk re-injecting attacker bytes into the outer terminal.
 func writeOSC8BoundaryStr(buf *bytes.Buffer, prev, next string) {
 	if prev != "" {
 		buf.WriteString("\033]8;;\033\\")
 	}
-	if next != "" {
-		buf.WriteString("\033]8;;")
-		buf.WriteString(next)
-		buf.WriteString("\033\\")
+	if next == "" {
+		return
 	}
+	safe := sanitizeOSC8URL(next)
+	if safe == "" {
+		return
+	}
+	buf.WriteString("\033]8;;")
+	buf.WriteString(safe)
+	buf.WriteString("\033\\")
+}
+
+// sanitizeOSC8URL rejects URLs containing any byte that could break out of an
+// OSC 8 sequence on the outer terminal: ESC (0x1B) is the ST half, BEL (0x07)
+// is the alternate terminator, and other C0 controls / DEL can lead to
+// terminal state corruption. The xterm OSC 8 spec restricts URIs to printable
+// ASCII anyway. Returns "" to signal "drop this link" — callers treat that
+// as no-link rather than attempting partial recovery.
+func sanitizeOSC8URL(s string) string {
+	if s == "" {
+		return ""
+	}
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		// Reject anything below 0x20 (C0 controls including ESC, BEL, NUL,
+		// CR, LF, etc.) and 0x7F (DEL). Bytes >= 0x80 are UTF-8 continuation
+		// bytes; most terminals accept UTF-8 in OSC parameters.
+		if b < 0x20 || b == 0x7F {
+			return ""
+		}
+	}
+	return s
 }
 
 // renderScrollIndicator draws the "(scrolling)" indicator at row 1, right-aligned.
@@ -244,6 +274,7 @@ func (c *Client) RenderLineFrom(buf *bytes.Buffer, vt *midterm.Terminal, row int
 	line := vt.Content[row]
 	var pos int
 	var lastFormat midterm.Format
+	var lastURL string
 	var lastURLID uint32
 	for region := range vt.Format.Regions(row) {
 		f := region.F
@@ -252,10 +283,21 @@ func (c *Client) RenderLineFrom(buf *bytes.Buffer, vt *midterm.Terminal, row int
 			buf.WriteString(f.Render())
 			lastFormat = f
 		}
-		if region.URLID != lastURLID {
-			writeOSC8Boundary(buf, vt, lastURLID, region.URLID)
-			lastURLID = region.URLID
+		// Resolve+sanitize URLs once per ID; cache via lastURLID so multiple
+		// adjacent regions with the same ID skip the lookup.
+		var curURL string
+		if region.URLID != 0 {
+			if region.URLID == lastURLID {
+				curURL = lastURL
+			} else {
+				curURL = sanitizeOSC8URL(vt.URL(region.URLID))
+			}
 		}
+		if curURL != lastURL {
+			writeOSC8BoundaryStr(buf, lastURL, curURL)
+			lastURL = curURL
+		}
+		lastURLID = region.URLID
 		end := pos + region.Size
 		if pos < len(line) {
 			contentEnd := end
@@ -266,26 +308,10 @@ func (c *Client) RenderLineFrom(buf *bytes.Buffer, vt *midterm.Terminal, row int
 		}
 		pos = end
 	}
-	if lastURLID != 0 {
+	if lastURL != "" {
 		buf.WriteString("\033]8;;\033\\")
 	}
 	buf.WriteString("\033[0m")
-}
-
-// writeOSC8Boundary emits the OSC 8 transitions between prev and next URL IDs.
-// A close (\033]8;;\033\\) is sent before opening a new link, even when prev
-// was non-zero, so terminals don't get a nested-open sequence — OSC 8 has no
-// stack, and the explicit close lets the outer terminal start the new URL
-// cleanly.
-func writeOSC8Boundary(buf *bytes.Buffer, vt *midterm.Terminal, prev, next uint32) {
-	if prev != 0 {
-		buf.WriteString("\033]8;;\033\\")
-	}
-	if next != 0 {
-		buf.WriteString("\033]8;;")
-		buf.WriteString(vt.URL(next))
-		buf.WriteString("\033\\")
-	}
 }
 
 // RenderLine writes one row of the primary virtual terminal to buf.
