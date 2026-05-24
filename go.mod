@@ -4,7 +4,7 @@ go 1.24.4
 
 require (
 	github.com/creack/pty v1.1.24
-	github.com/dcosson/destructive-command-guard-go v0.2.3
+	github.com/dcosson/destructive-command-guard-go v0.2.4
 	github.com/gofrs/flock v0.13.0
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/google/uuid v1.6.0
