@@ -39,7 +39,7 @@ If you reach the cap without converging, surface that to the user and stop. Do n
 
 ## Phase 2: What to do on each wakeup
 
-Each 5-minute wakeup, do **every** step in order. Do not skip steps. If a step has no new work (e.g. no new comments since last tick), you can move through it quickly, but you must still check.
+Each 5-minute wakeup, do **every** step in order. Do not skip steps. Even when a step has no new work, you must run the commands and show their output. The user needs to see that you checked, not just hear "nothing new." A step with no output shown is indistinguishable from a step you skipped.
 
 ### Step 2a — Check for merge conflicts
 
@@ -143,13 +143,13 @@ Each bot has its own trigger phrase — the convention is `@<botname> review` fo
 
 ### Step 2g — End turn
 
-Output a one-paragraph summary of what you did this tick (CI status, comments addressed, fixes pushed, bots re-tagged), then end the turn. The next scheduled wakeup will arrive in 5 minutes.
+Output a structured summary for this tick. For each step (2a–2f), one line: what you checked and what you found. Then a final line: what action you took (pushed a fix, flagged user, or "no action needed"). The user should be able to read your summary and know exactly what state the PR is in without clicking through to GitHub.
 
 ## Phase 3: Exit when clean
 
 The PR is "clean" when:
 
-- `mergeStateStatus` is NOT `BLOCKED`. Check with `gh pr view <pr> --json mergeStateStatus`. If it's `BLOCKED`, the PR is not done — branch protection requirements (required reviews, required checks, unresolved conversations) are not yet met. Keep the schedule alive and keep polling. The user may need to resolve conversations or approve the PR from the GitHub UI.
+- `mergeStateStatus` is NOT `BLOCKED`. Check with `gh pr view <pr> --json mergeStateStatus`. If it's `BLOCKED`, diagnose why: check for required reviews (`gh pr view <pr> --json reviewDecision`), unresolved conversations, or failing required checks. Report the specific blocker in your summary. If the blocker is something only a human can fix (e.g. required approval), say so explicitly on the first tick you detect it and keep polling. Do not repeat the same "waiting on approval" message every tick — after the first report, just confirm "still blocked on human approval" in one line.
 - The PR is mergeable (no merge conflicts with the base branch).
 - All CI checks pass (use `gh run list`, not `gh pr checks`).
 - No outstanding bot comments are unresolved (either you resolved a false positive, or you pushed a fix AND the bot re-reviewed and found no new issues).
