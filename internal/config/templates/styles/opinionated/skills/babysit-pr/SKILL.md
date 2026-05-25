@@ -12,6 +12,16 @@ You have an open PR that needs ongoing attention as CI runs, review bots post co
 
 This skill ends when the PR is green and review is clean. **It NEVER merges the PR** — see the bottom of this doc.
 
+## Prerequisites: know your review bots
+
+Before starting the loop, identify which review bots are active on this PR and how each one is triggered for re-review. **Do not assume any bot auto-re-reviews on push.** Most do not. Look up the bot's behavior before your first tick — not mid-loop when you've already pushed a fix and need to know.
+
+### Known bots
+
+- **Cursor Bugbot (`@cursor`)** — Runs automatically on PR open and on `ready_for_review`. Does **not** re-run on push. To re-request review after pushing a fix: `gh pr comment <pr> --body "@cursor review"`. Always re-tag explicitly after any fix push.
+
+- **Other bots** — Check the bot's docs or past PR comments to learn its trigger. When in doubt, re-tag explicitly — a redundant review request costs nothing; a missed review cycle costs a whole tick.
+
 ## Inputs
 
 - `$0`: PR number or full URL (e.g. `123` or `https://github.com/org/repo/pull/123`).
@@ -131,15 +141,12 @@ For each human comment that isn't already addressed:
 
 ### Step 2f — Re-request bot reviews
 
-If you pushed any fixes in 2d or 2e, re-request the relevant bot reviews so they see the new code:
+If you pushed any fixes in 2d or 2e, re-request review from every active bot. Always do this — do not assume any bot auto-re-reviews on push (see Prerequisites above).
 
 ```bash
-gh pr comment <pr-number> --body "@bugbot review"
-gh pr comment <pr-number> --body "@claude review"
+gh pr comment <pr-number> --body "@cursor review"
 # etc. for whichever bots are reviewing this PR
 ```
-
-Each bot has its own trigger phrase — the convention is `@<botname> review` for the most common ones. If you're not sure, look at how previous turns triggered the bot on this PR.
 
 ### Step 2g — End turn
 
@@ -188,11 +195,7 @@ If you find yourself about to type `gh pr merge`, stop. That's not what this ski
 
 3. **When to stop early.** If the same comment keeps coming back after you've pushed multiple fixes the bot disagrees with, stop and flag the user. You're likely in a loop where you and the bot disagree about what "fixed" means — escalate rather than ping-pong.
 
-4. **What "re-request review" means for each bot.** Conventions differ:
-   - Some bots auto-re-review on any push (no comment needed).
-   - Some require an explicit `@<bot> review` comment.
-   - Some have custom slash commands (`/review`, `/recheck`).
-   Check past comments on this PR to see how the bot was triggered before, and use that.
+4. **What "re-request review" means for each bot.** See the Prerequisites section at the top for known bots. For unknown bots, always re-tag explicitly — a redundant review request is free; a missed review cycle wastes a tick.
 
 ## Anti-patterns
 
