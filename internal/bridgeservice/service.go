@@ -163,7 +163,7 @@ func (s *Service) handleConn(conn net.Conn) {
 
 	switch req.Type {
 	case "send":
-		if err := s.sendOutbound(req.From, req.Body); err != nil {
+		if err := s.sendOutbound(req.From, req.Body, req.Format); err != nil {
 			message.SendResponse(conn, &message.Response{Error: err.Error()})
 		} else {
 			message.SendResponse(conn, &message.Response{OK: true})
@@ -299,9 +299,11 @@ func (s *Service) handleRemoveConcierge() *message.Response {
 
 // sendOutbound sends a message from an agent to all Sender bridges.
 // Messages from non-concierge agents are tagged with [agent-name] so that
-// replies can be routed back to the correct agent.
+// replies can be routed back to the correct agent. If format is non-empty,
+// the message is delivered via bridge.FormattedSender; bridges that do not
+// implement FormattedSender produce a hard error (no silent fallback).
 // Returns an error if any bridge fails to deliver the message.
-func (s *Service) sendOutbound(from, body string) error {
+func (s *Service) sendOutbound(from, body, format string) error {
 	s.mu.Lock()
 	s.lastSender = from
 	s.messagesSent++
@@ -309,7 +311,9 @@ func (s *Service) sendOutbound(from, body string) error {
 	concierge := s.concierge
 	s.mu.Unlock()
 
-	// Tag messages from non-concierge agents so reply routing works.
+	// Tag messages from non-concierge agents so reply routing works. The
+	// tag stays as plain text outside any formatted body so that HTML or
+	// MarkdownV2 parsers don't have to consider it.
 	tagged := body
 	if from != "" && from != concierge {
 		tagged = bridge.FormatAgentTag(from, body)
@@ -318,11 +322,25 @@ func (s *Service) sendOutbound(from, body string) error {
 	ctx := context.Background()
 	var errs []string
 	for _, b := range s.bridges {
-		if sender, ok := b.(bridge.Sender); ok {
-			if err := sender.Send(ctx, tagged); err != nil {
-				log.Printf("bridge: send via %s: %v", b.Name(), err)
+		sender, ok := b.(bridge.Sender)
+		if !ok {
+			continue
+		}
+		if format != "" {
+			fs, fok := b.(bridge.FormattedSender)
+			if !fok {
+				errs = append(errs, fmt.Sprintf("%s: does not support --format", b.Name()))
+				continue
+			}
+			if err := fs.SendFormatted(ctx, tagged, format); err != nil {
+				log.Printf("bridge: send formatted via %s: %v", b.Name(), err)
 				errs = append(errs, fmt.Sprintf("%s: %v", b.Name(), err))
 			}
+			continue
+		}
+		if err := sender.Send(ctx, tagged); err != nil {
+			log.Printf("bridge: send via %s: %v", b.Name(), err)
+			errs = append(errs, fmt.Sprintf("%s: %v", b.Name(), err))
 		}
 	}
 	if len(errs) > 0 {
