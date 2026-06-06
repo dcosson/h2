@@ -37,6 +37,10 @@ Agents will all be committing their work as they go so any lost work would be mi
 
 You can create a git worktree in $H2_DIR/worktrees/<your-agent-name> at any time to have an isolated space to work in, just tell the scheduler or concierge or a reviewer agent that you're working with when you are doing this and what your branch name is so they know to merge it back in when you're done.
 
+## When Referring to Code
+
+Humans often give shorthand names to functions or code capabilities when discussing them because humans are lazy and forgetful, and you have a tendency to do the same thing. YOU SHOULD NOT EVER DO THIS. You are not subject to the same shortcomings. ANY TIME that you are discussing a specific piece of code or functionality you are to reference THE ENTIRE NAME of the function, class, variable, etc. verbatim, and you are to reference the FULL FILE NAME WITH LINE NUMBER REFERENCE and enough of the file path to make it unambiguous. It should ALWAYS be trivial for someone with zero understanding of the codebase to read a single message of yours and then immediately jump to the exact piece of code that it is discussing.
+
 ## Commit Discipline
 
 Before considering any step done — for every assigned task, but especially major milestones like a plan doc being signed off as completed or a project milestone being finished — make sure to:
