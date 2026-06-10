@@ -152,6 +152,18 @@ func (h *EventHandler) processLogRecord(eventName string, lr otelLogRecord, ts t
 			})
 			return true, fmt.Sprintf("server_error status=%s error=%q", statusCode, errMsg)
 		}
+		// Connection-level failures carry no HTTP status code, so they fall
+		// through the status branches above. Treat them like a server error so
+		// the agent leaves its prior Active sub-state instead of appearing stuck.
+		if isNetworkErrorMessage(errMsg) {
+			h.emitStateChange(ts, monitor.StateIdle, monitor.SubStateServerError)
+			h.emit(monitor.AgentEvent{
+				Type:      monitor.EventServerErrorInfo,
+				Timestamp: ts,
+				Data:      monitor.ServerErrorData{StatusCode: statusCode, Message: errMsg},
+			})
+			return true, fmt.Sprintf("network_error status=%s error=%q", statusCode, errMsg)
+		}
 		return false, fmt.Sprintf("api_error status=%s", statusCode)
 
 	case "tool_result":
@@ -478,6 +490,22 @@ func isServerErrorMessage(content string) bool {
 		strings.Contains(lower, "api error: 5")
 }
 
+// isNetworkErrorMessage returns true when the content indicates a
+// network/connection-level failure reaching the API — i.e. no HTTP response
+// was received, so there is no status code to key on. Claude Code surfaces
+// these as synthetic api-error messages such as
+// "API Error: Unable to connect to API (ConnectionRefused)" (also
+// FailedToOpenSocket, generic "Connection error."). These are transient and,
+// like server errors, auto-clear on the next successful turn.
+func isNetworkErrorMessage(content string) bool {
+	lower := strings.ToLower(content)
+	return strings.Contains(lower, "unable to connect to api") ||
+		strings.Contains(lower, "connectionrefused") ||
+		strings.Contains(lower, "failedtoopensocket") ||
+		strings.Contains(lower, "connection refused") ||
+		strings.Contains(lower, "connection error")
+}
+
 // resetsPattern matches Claude Code's synthetic rate limit message format:
 //
 //	"resets 12pm (America/Los_Angeles)"
@@ -543,10 +571,31 @@ func parseSessionLine(line []byte) ([]monitor.AgentEvent, bool) {
 		})
 	}
 
-	// Check for server error messages (5xx). An API error message that isn't
-	// a rate limit or auth error is treated as a server error.
 	isRateLimit := entry.Error == "rate_limit" || isUsageLimit
-	if entry.IsApiErrorMessage && !isAuth && !isRateLimit && isServerErrorMessage(content) {
+
+	// Check for network/connection failures. When the API is unreachable,
+	// Claude Code exhausts its retries and writes a synthetic give-up message
+	// but fires no Stop hook, so the agent would otherwise stay frozen in its
+	// prior Active sub-state. Drive it to idle (server_error sub-state, which
+	// auto-clears on the next successful turn) directly from this line, since
+	// the OTEL api_error path may not observe a connection-level failure.
+	isNetwork := entry.IsApiErrorMessage && !isAuth && !isRateLimit && isNetworkErrorMessage(content)
+	if isNetwork {
+		events = append(events, monitor.AgentEvent{
+			Type:      monitor.EventStateChange,
+			Timestamp: now,
+			Data:      monitor.StateChangeData{State: monitor.StateIdle, SubState: monitor.SubStateServerError},
+		})
+		events = append(events, monitor.AgentEvent{
+			Type:      monitor.EventServerErrorInfo,
+			Timestamp: now,
+			Data:      monitor.ServerErrorData{Message: content},
+		})
+	}
+
+	// Check for server error messages (5xx). An API error message that isn't
+	// a rate limit, auth error, or network error is treated as a server error.
+	if entry.IsApiErrorMessage && !isAuth && !isRateLimit && !isNetwork && isServerErrorMessage(content) {
 		events = append(events, monitor.AgentEvent{
 			Type:      monitor.EventServerErrorInfo,
 			Timestamp: now,

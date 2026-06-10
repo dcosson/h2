@@ -884,6 +884,103 @@ func TestIsServerErrorMessage(t *testing.T) {
 	}
 }
 
+func TestIsNetworkErrorMessage(t *testing.T) {
+	tests := []struct {
+		content string
+		want    bool
+	}{
+		{"API Error: Unable to connect to API (ConnectionRefused)", true},
+		{"API Error: Unable to connect to API (FailedToOpenSocket)", true},
+		{"Connection error.", true},
+		{"connection refused", true},
+		{`API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}`, false},
+		{"OAuth token has expired. Please obtain a new token.", false},
+		{"normal assistant message", false},
+	}
+	for _, tt := range tests {
+		if got := isNetworkErrorMessage(tt.content); got != tt.want {
+			t.Errorf("isNetworkErrorMessage(%q) = %v, want %v", tt.content, got, tt.want)
+		}
+	}
+}
+
+// TestEventHandler_OnSessionLogLine_NetworkError covers the concierge-leaf
+// failure mode: a synthetic connection-error message with no HTTP status code
+// and no following Stop hook. The agent must be driven to idle (server_error)
+// rather than left frozen in its prior Active sub-state.
+func TestEventHandler_OnSessionLogLine_NetworkError(t *testing.T) {
+	events := make(chan monitor.AgentEvent, 64)
+	h := NewEventHandler(events, nil)
+
+	line, _ := json.Marshal(map[string]any{
+		"type": "assistant",
+		"message": map[string]any{
+			"role":    "assistant",
+			"model":   "<synthetic>",
+			"content": []map[string]any{{"type": "text", "text": "API Error: Unable to connect to API (ConnectionRefused)"}},
+		},
+		"isApiErrorMessage": true,
+		"error":             "unknown",
+	})
+	h.OnSessionLogLine(line)
+
+	got := drainEvents(events, 3)
+	if len(got) < 3 {
+		t.Fatalf("expected 3 events (state_change + server_error_info + agent_message), got %d", len(got))
+	}
+	if got[0].Type != monitor.EventStateChange {
+		t.Fatalf("event[0].Type = %v, want EventStateChange", got[0].Type)
+	}
+	state := got[0].Data.(monitor.StateChangeData)
+	if state.State != monitor.StateIdle || state.SubState != monitor.SubStateServerError {
+		t.Errorf("state = (%v,%v), want (Idle,ServerError)", state.State, state.SubState)
+	}
+	if got[1].Type != monitor.EventServerErrorInfo {
+		t.Fatalf("event[1].Type = %v, want EventServerErrorInfo", got[1].Type)
+	}
+	data := got[1].Data.(monitor.ServerErrorData)
+	if !strings.Contains(data.Message, "ConnectionRefused") {
+		t.Errorf("expected 'ConnectionRefused' in message, got %q", data.Message)
+	}
+	if got[2].Type != monitor.EventAgentMessage {
+		t.Fatalf("event[2].Type = %v, want EventAgentMessage", got[2].Type)
+	}
+}
+
+// TestEventHandler_APIError_ConnectionRefused covers the OTEL api_error path
+// for a connection-level failure: no status_code, network error message.
+func TestEventHandler_APIError_ConnectionRefused(t *testing.T) {
+	events := make(chan monitor.AgentEvent, 64)
+	h := NewEventHandler(events, nil)
+
+	payload := otelLogsPayload{
+		ResourceLogs: []otelResourceLogs{{
+			ScopeLogs: []otelScopeLogs{{
+				LogRecords: []otelLogRecord{{
+					Attributes: []otelAttribute{
+						{Key: "event.name", Value: otelAttrValue{StringValue: "api_error"}},
+						{Key: "error", Value: otelAttrValue{StringValue: "Connection error."}},
+					},
+				}},
+			}},
+		}},
+	}
+	body, _ := json.Marshal(payload)
+	h.OnLogs(body)
+
+	got := drainEvents(events, 2)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 events (state_change + server_error_info), got %d", len(got))
+	}
+	state := got[0].Data.(monitor.StateChangeData)
+	if state.State != monitor.StateIdle || state.SubState != monitor.SubStateServerError {
+		t.Errorf("state = (%v,%v), want (Idle,ServerError)", state.State, state.SubState)
+	}
+	if got[1].Type != monitor.EventServerErrorInfo {
+		t.Fatalf("event[1].Type = %v, want EventServerErrorInfo", got[1].Type)
+	}
+}
+
 func TestIsAuthErrorMessage(t *testing.T) {
 	tests := []struct {
 		content string
