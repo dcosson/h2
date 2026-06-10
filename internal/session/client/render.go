@@ -427,7 +427,7 @@ func (c *Client) RenderStatusBar() {
 	// --- Separator line ---
 	fmt.Fprintf(&buf, "\033[%d;1H\033[2K", sepRow)
 
-	var style, label string
+	var style, label, right string
 	if c.VT.ChildExited {
 		style = "\033[7m\033[31m" // red inverse
 		if c.IsScrollMode() {
@@ -435,56 +435,18 @@ func (c *Client) RenderStatusBar() {
 		} else {
 			label = " " + c.exitMessage() + " | [Enter] relaunch \u00b7 [q] quit"
 		}
-	} else {
-		style = c.ModeBarStyle()
-		help := c.HelpLabel()
-		label = " " + c.ModeStatusLabel()
-
-		if c.Mode != ModeMenu {
-			status := c.StatusLabel()
-			label += " | " + status
-			if c.WorkingDir != nil {
-				if wd := strings.TrimSpace(c.WorkingDir()); wd != "" {
-					label += " | " + c.formatWorkingDirForBar(wd)
-				}
-			}
-
-			// OTEL metrics (tokens and cost)
-			if c.OtelMetrics != nil {
-				inTok, outTok, cost, connected, port := c.OtelMetrics()
-				if connected {
-					label += " | " + monitor.FormatTokens(inTok) + "/" + monitor.FormatTokens(outTok) + " " + monitor.FormatCost(cost)
-				} else {
-					label += fmt.Sprintf(" | [otel:%d]", port)
-				}
-			}
-
-		}
-
-		if help != "" {
-			label += " | " + help
-		}
-	}
-
-	right := ""
-	if c.AgentName != "" {
-		right = c.AgentName + " "
-	}
-
-	if len(label)+len(right) > c.VT.Cols {
-		if !c.VT.ChildExited {
-			// Tight on space - drop help first, then right-align.
-			label = " " + c.ModeStatusLabel()
-			if c.Mode != ModeMenu {
-				label += " | " + c.StatusLabel()
-			}
+		if c.AgentName != "" {
+			right = c.AgentName + " "
 		}
 		if len(label)+len(right) > c.VT.Cols {
+			right = ""
 			if len(label) > c.VT.Cols {
 				label = label[:c.VT.Cols]
 			}
-			right = ""
 		}
+	} else {
+		style = c.ModeBarStyle()
+		label, right = c.fitStatusBarSections()
 	}
 
 	buf.WriteString(style)
@@ -501,6 +463,73 @@ func (c *Client) RenderStatusBar() {
 	c.OutputMu.Lock()
 	c.Output.Write(buf.Bytes())
 	c.OutputMu.Unlock()
+}
+
+// fitStatusBarSections assembles the left status-bar label and the
+// right-aligned agent name, dropping sections one at a time when the bar
+// is too narrow. Drop order: tokens, help, mode, agent name, working dir.
+// The activity status is kept until nothing else fits, then hard-truncated
+// as a last resort.
+func (c *Client) fitStatusBarSections() (label, right string) {
+	if c.AgentName != "" {
+		right = c.AgentName + " "
+	}
+
+	mode := c.ModeStatusLabel()
+	var status, wd, tokens string
+	if c.Mode != ModeMenu {
+		status = c.StatusLabel()
+		if c.WorkingDir != nil {
+			if w := strings.TrimSpace(c.WorkingDir()); w != "" {
+				wd = c.formatWorkingDirForBar(w)
+			}
+		}
+		// OTEL metrics (tokens and cost)
+		if c.OtelMetrics != nil {
+			inTok, outTok, cost, connected, port := c.OtelMetrics()
+			if connected {
+				tokens = monitor.FormatTokens(inTok) + "/" + monitor.FormatTokens(outTok) + " " + monitor.FormatCost(cost)
+			} else {
+				tokens = fmt.Sprintf("[otel:%d]", port)
+			}
+		}
+	}
+	help := c.HelpLabel()
+
+	join := func() string {
+		var b strings.Builder
+		for _, part := range []string{mode, status, wd, tokens, help} {
+			if part == "" {
+				continue
+			}
+			if b.Len() == 0 {
+				b.WriteString(" ")
+			} else {
+				b.WriteString(" | ")
+			}
+			b.WriteString(part)
+		}
+		return b.String()
+	}
+
+	drops := []*string{&tokens, &help, &mode, &right, &wd}
+	if c.Mode == ModeMenu {
+		// The menu items are the whole bar — keep them and drop help,
+		// then the agent name.
+		drops = []*string{&help, &right}
+	}
+	label = join()
+	for _, drop := range drops {
+		if len(label)+len(right) <= c.VT.Cols {
+			return label, right
+		}
+		*drop = ""
+		label = join()
+	}
+	if len(label) > c.VT.Cols {
+		label = label[:c.VT.Cols]
+	}
+	return label, right
 }
 
 // RenderInputBar draws the input prompt, text, cursor, and debug line.
