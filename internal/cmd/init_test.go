@@ -882,6 +882,36 @@ func TestInitCmd_Minimal_LeavesSharedSkillsEmpty(t *testing.T) {
 	}
 }
 
+func TestInitCmd_Opinionated_CodexGitHubAppApprovesAllExceptMerge(t *testing.T) {
+	fakeHome := setupFakeHome(t)
+	dir := filepath.Join(fakeHome, "myh2-op-codex-apps")
+
+	cmd := newInitCmd()
+	cmd.SetArgs([]string{dir, "--style", "opinionated"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init --style opinionated failed: %v", err)
+	}
+
+	codexConfigPath := filepath.Join(dir, "codex-config", "default", "config.toml")
+	codexConfig, err := os.ReadFile(codexConfigPath)
+	if err != nil {
+		t.Fatalf("read codex config.toml: %v", err)
+	}
+	configText := string(codexConfig)
+
+	wantSnippets := []string{
+		`[apps.connector_76869538009648d5b282a4bb21c3d157]`,
+		`default_tools_approval_mode = "approve"`,
+		`[apps.connector_76869538009648d5b282a4bb21c3d157.tools."github.merge_pull_request"]`,
+		`enabled = false`,
+	}
+	for _, want := range wantSnippets {
+		if !strings.Contains(configText, want) {
+			t.Fatalf("codex config missing %q; config:\n%s", want, configText)
+		}
+	}
+}
+
 func TestInitCmd_Minimal_CommandPolicyMatchesBetweenClaudeAndCodex(t *testing.T) {
 	fakeHome := setupFakeHome(t)
 	dir := filepath.Join(fakeHome, "myh2-min-policy")

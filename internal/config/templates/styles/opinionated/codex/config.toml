@@ -3,3 +3,12 @@
 
 [notice]
 hide_rate_limit_model_nudge = true
+
+# Trust the scoped GitHub Codex App credentials for all GitHub app tools by default.
+# Keep the merge tool disabled so agents can open/update PRs without manual approval,
+# but cannot merge pull requests through the app connector.
+[apps.connector_76869538009648d5b282a4bb21c3d157]
+default_tools_approval_mode = "approve"
+
+[apps.connector_76869538009648d5b282a4bb21c3d157.tools."github.merge_pull_request"]
+enabled = false
