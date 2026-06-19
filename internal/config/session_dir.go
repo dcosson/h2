@@ -28,13 +28,34 @@ func FindSessionDirByAgentName(agentName string) string {
 	return dir
 }
 
-// FindSessionDirByID returns the session directory whose RuntimeConfig contains
-// the given session ID. Empty string means not found.
+// FindSessionDirByID returns the session directory whose RuntimeConfig has the
+// given h2 SessionID. Empty string means not found.
 func FindSessionDirByID(sessionID string) string {
 	if sessionID == "" {
 		return ""
 	}
+	return findSessionDirMatching(func(rc *RuntimeConfig) bool {
+		return rc.SessionID == sessionID
+	})
+}
 
+// FindSessionDirByHarnessSessionID returns the session directory whose
+// RuntimeConfig has the given HarnessSessionID — the session ID as known by the
+// underlying harness (Claude Code's session UUID, Codex's conversation id).
+// Empty string means not found.
+func FindSessionDirByHarnessSessionID(harnessSessionID string) string {
+	if harnessSessionID == "" {
+		return ""
+	}
+	return findSessionDirMatching(func(rc *RuntimeConfig) bool {
+		return rc.HarnessSessionID == harnessSessionID
+	})
+}
+
+// findSessionDirMatching scans the session directories and returns the first one
+// whose RuntimeConfig satisfies pred. Directories with missing or invalid
+// metadata are skipped. Empty string means no match.
+func findSessionDirMatching(pred func(*RuntimeConfig) bool) string {
 	root := SessionsDir()
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -45,7 +66,7 @@ func FindSessionDirByID(sessionID string) string {
 			continue
 		}
 		dir := filepath.Join(root, entry.Name())
-		if rc, err := ReadRuntimeConfig(dir); err == nil && rc.SessionID == sessionID {
+		if rc, err := ReadRuntimeConfig(dir); err == nil && pred(rc) {
 			return dir
 		}
 	}

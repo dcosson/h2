@@ -314,6 +314,111 @@ func TestRunResume_ForksDaemonWithResumeFlag(t *testing.T) {
 	}
 }
 
+// setupFakeHomeForResume sets H2_DIR to an isolated temp dir so session-dir
+// scans don't touch the real ~/.h2 directory.
+func setupFakeHomeForResume(t *testing.T) {
+	t.Helper()
+	h2dir := t.TempDir()
+	if err := config.WriteMarker(h2dir); err != nil {
+		t.Fatalf("WriteMarker: %v", err)
+	}
+	t.Setenv("H2_DIR", h2dir)
+	config.ResetResolveCache()
+	t.Cleanup(config.ResetResolveCache)
+}
+
+func TestRunResumeFromSessionID_NotFound(t *testing.T) {
+	t.Setenv("CLAUDECODE", "")
+	setupFakeHomeForResume(t)
+
+	cmd := newRunCmd()
+	cmd.SetArgs([]string{"--resume-from-session-id", "no-such-harness-id", "--detach"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for unknown harness session id")
+	}
+	if !strings.Contains(err.Error(), "no h2 session found with harness session id") {
+		t.Errorf("error = %q, want containing 'no h2 session found with harness session id'", err.Error())
+	}
+}
+
+func TestRunResumeFromSessionID_RejectsNameArg(t *testing.T) {
+	t.Setenv("CLAUDECODE", "")
+	setupFakeHomeForResume(t)
+
+	cmd := newRunCmd()
+	cmd.SetArgs([]string{"some-name", "--resume-from-session-id", "abc-123", "--detach"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for name arg with --resume-from-session-id")
+	}
+	if !strings.Contains(err.Error(), "does not take an agent name argument") {
+		t.Errorf("error = %q, want containing 'does not take an agent name argument'", err.Error())
+	}
+}
+
+func TestRunResumeFromSessionID_MutuallyExclusiveWithResume(t *testing.T) {
+	t.Setenv("CLAUDECODE", "")
+	setupFakeHomeForResume(t)
+
+	cmd := newRunCmd()
+	cmd.SetArgs([]string{"--resume", "--resume-from-session-id", "abc-123", "--detach"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for --resume with --resume-from-session-id")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("error = %q, want containing 'mutually exclusive'", err.Error())
+	}
+}
+
+func TestRunResumeFromSessionID_ForksDaemonWithResumeFlag(t *testing.T) {
+	t.Setenv("CLAUDECODE", "")
+	setupFakeHomeForResume(t)
+
+	name := "codex-resume-by-id"
+	tmpDir := t.TempDir()
+
+	// Codex-style: internal SessionID differs from the harness session id.
+	sessionDir := writeTestRuntimeConfig(t, name, &config.RuntimeConfig{
+		AgentName:               name,
+		SessionID:               "internal-session-id",
+		HarnessSessionID:        "codex-conv-id-xyz",
+		Command:                 "codex",
+		HarnessType:             "codex",
+		HarnessConfigPathPrefix: tmpDir,
+		Profile:                 "codex-config",
+		CWD:                     tmpDir,
+		StartedAt:               "2024-01-01T00:00:00Z",
+	})
+	if err := os.MkdirAll(filepath.Join(tmpDir, "codex-config"), 0o755); err != nil {
+		t.Fatalf("mkdir codex-config: %v", err)
+	}
+
+	var capturedSessionDir string
+	var capturedResume bool
+	origFork := forkDaemonFunc
+	forkDaemonFunc = func(sd string, hints session.TerminalHints, resume bool) error {
+		capturedSessionDir = sd
+		capturedResume = resume
+		return nil
+	}
+	defer func() { forkDaemonFunc = origFork }()
+
+	cmd := newRunCmd()
+	cmd.SetArgs([]string{"--resume-from-session-id", "codex-conv-id-xyz", "--detach"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if capturedSessionDir != sessionDir {
+		t.Errorf("SessionDir = %q, want %q", capturedSessionDir, sessionDir)
+	}
+	if !capturedResume {
+		t.Error("ForkDaemon should be called with resume=true")
+	}
+}
+
 func TestClaudeHarness_BuildCommandArgs_Resume(t *testing.T) {
 	rc := &config.RuntimeConfig{
 		AgentName:       "test",

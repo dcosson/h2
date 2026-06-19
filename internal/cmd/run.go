@@ -23,6 +23,7 @@ func newRunCmd() *cobra.Command {
 	var detach bool
 	var dryRun bool
 	var resume bool
+	var resumeFromSessionID string
 	var roleName string
 	var agentType string
 	var command string
@@ -44,7 +45,10 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
                                 Use a specific role with explicit agent name
   h2 run --agent-type claude    Run an agent type without a role
   h2 run --command "vim"        Run an explicit command
-  h2 run coder-1 --resume       Resume a previous agent session`,
+  h2 run coder-1 --resume       Resume a previous agent session
+  h2 run --resume-from-session-id <id>
+                                Resume the h2 session with the given underlying
+                                claude/codex session id (no agent name needed)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Auto-detach when stdin is not a terminal (e.g. running
 			// through a bridge, pipe, or inside a Claude Code session).
@@ -67,19 +71,52 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 			if resume {
 				modeFlags++
 			}
+			if resumeFromSessionID != "" {
+				modeFlags++
+			}
 			if modeFlags > 1 {
-				return fmt.Errorf("--role, --agent-type, --command, and --resume are mutually exclusive")
+				return fmt.Errorf("--role, --agent-type, --command, --resume, and --resume-from-session-id are mutually exclusive")
 			}
 
-			// Handle --resume mode — it's a separate path from normal run.
-			if resume {
+			// Handle resume modes — a separate path from normal run. The session
+			// to resume can be identified by agent name (--resume <name>) or by
+			// its underlying harness session id (--resume-from-session-id <id>).
+			if resume || resumeFromSessionID != "" {
+				resumeFlagName := "--resume"
+				if resumeFromSessionID != "" {
+					resumeFlagName = "--resume-from-session-id"
+				}
 				// Reject flags that don't apply to resume.
 				for _, flag := range []string{"var", "override", "pod"} {
 					if cmd.Flags().Changed(flag) {
-						return fmt.Errorf("--%s cannot be used with --resume", flag)
+						return fmt.Errorf("--%s cannot be used with %s", flag, resumeFlagName)
 					}
 				}
-				return runResume(cmd, args, detach, dryRun)
+
+				var resumeName string
+				if resumeFromSessionID != "" {
+					if len(args) > 0 {
+						return fmt.Errorf("--resume-from-session-id does not take an agent name argument")
+					}
+					sessionDir := config.FindSessionDirByHarnessSessionID(resumeFromSessionID)
+					if sessionDir == "" {
+						return fmt.Errorf("no h2 session found with harness session id %q", resumeFromSessionID)
+					}
+					rc, err := config.ReadRuntimeConfig(sessionDir)
+					if err != nil {
+						return fmt.Errorf("session config for harness session id %q is invalid: %w", resumeFromSessionID, err)
+					}
+					resumeName = rc.AgentName
+				} else {
+					if len(args) == 0 {
+						return fmt.Errorf("--resume requires an agent name (e.g. h2 run <name> --resume)")
+					}
+					if len(args) > 1 {
+						return fmt.Errorf("--resume accepts exactly one agent name, got %d", len(args))
+					}
+					resumeName = args[0]
+				}
+				return runResume(cmd, resumeName, detach, dryRun)
 			}
 
 			// Validate pod name if provided.
@@ -263,6 +300,7 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 	cmd.Flags().BoolVar(&detach, "detach", false, "Don't auto-attach after starting")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show resolved config without launching")
 	cmd.Flags().BoolVar(&resume, "resume", false, "Resume a previous agent session")
+	cmd.Flags().StringVar(&resumeFromSessionID, "resume-from-session-id", "", "Resume the h2 session with this underlying claude/codex session id (no name needed)")
 	cmd.Flags().StringVar(&roleName, "role", "", "Role to use (defaults to 'default')")
 	cmd.Flags().StringVar(&agentType, "agent-type", "", "Agent type to run without a role (e.g. claude)")
 	cmd.Flags().StringVar(&command, "command", "", "Explicit command to run without a role")
@@ -273,19 +311,12 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 	return cmd
 }
 
-// runResume handles the `h2 run <name> --resume` flow. It reads the
+// runResume handles the resume flow for an already-resolved agent name (from
+// either `--resume <name>` or `--resume-from-session-id <id>`). It reads the
 // RuntimeConfig from a previous run, checks the agent isn't still alive,
 // resolves the harness (to verify resume support), and forks a new daemon
 // that passes --resume <session-id> to Claude Code instead of starting fresh.
-func runResume(cmd *cobra.Command, args []string, detach bool, dryRun bool) error {
-	if len(args) == 0 {
-		return fmt.Errorf("--resume requires an agent name (e.g. h2 run <name> --resume)")
-	}
-	if len(args) > 1 {
-		return fmt.Errorf("--resume accepts exactly one agent name, got %d", len(args))
-	}
-	name := args[0]
-
+func runResume(cmd *cobra.Command, name string, detach bool, dryRun bool) error {
 	// Read RuntimeConfig from the previous run.
 	sessionDir := config.SessionDir(name)
 	rc, err := config.ReadRuntimeConfig(sessionDir)

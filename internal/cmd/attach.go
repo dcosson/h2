@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"h2/internal/config"
 	"h2/internal/session/message"
 	"h2/internal/socketdir"
 )
@@ -19,6 +20,7 @@ import (
 func newAttachCmd() *cobra.Command {
 	var tile bool
 	var dryRun bool
+	var resumeFromSessionID string
 
 	cmd := &cobra.Command{
 		Use:   "attach <name>",
@@ -29,10 +31,25 @@ With --tile, open Ghostty splits for multiple agents at once.
 Name can be a pod name, a single agent name, or a comma-separated list.
 If a pod and agent share the same name, the pod takes priority.
 
+With --resume-from-session-id <id>, identify the agent by its underlying
+claude/codex session id instead of by name (no name argument needed).
+
 With --dry-run (requires --tile), show the computed layout and script
 without executing anything.`,
-		Args: cobra.ExactArgs(1),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if resumeFromSessionID != "" {
+				if len(args) > 0 {
+					return fmt.Errorf("--resume-from-session-id does not take an agent name argument")
+				}
+				if tile {
+					return fmt.Errorf("--tile cannot be used with --resume-from-session-id")
+				}
+				return doAttachBySessionID(resumeFromSessionID)
+			}
+			if len(args) != 1 {
+				return fmt.Errorf("attach requires an agent name (or --resume-from-session-id <id>)")
+			}
 			if dryRun && !tile {
 				return fmt.Errorf("--dry-run requires --tile")
 			}
@@ -45,7 +62,29 @@ without executing anything.`,
 
 	cmd.Flags().BoolVar(&tile, "tile", false, "Tile agents in Ghostty splits")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show layout and script without executing (requires --tile)")
+	cmd.Flags().StringVar(&resumeFromSessionID, "resume-from-session-id", "", "Attach to the agent with this underlying claude/codex session id (no name needed)")
 	return cmd
+}
+
+// doAttachBySessionID resolves an agent by its underlying harness session id and
+// attaches to it. It errors with a helpful message if no h2 session matches or
+// if the matching session's daemon is not currently running.
+func doAttachBySessionID(harnessSessionID string) error {
+	sessionDir := config.FindSessionDirByHarnessSessionID(harnessSessionID)
+	if sessionDir == "" {
+		return fmt.Errorf("no running session with id %q", harnessSessionID)
+	}
+	rc, err := config.ReadRuntimeConfig(sessionDir)
+	if err != nil {
+		return fmt.Errorf("session config for harness session id %q is invalid: %w", harnessSessionID, err)
+	}
+	// ensureAgentSocketAvailable returns nil when no live daemon is running
+	// (and prunes a stale socket); a non-nil error means the agent is alive.
+	if err := ensureAgentSocketAvailable(rc.AgentName); err == nil {
+		return fmt.Errorf("no running session with id %q (agent %q is not running); resume it with: h2 run --resume-from-session-id %s",
+			harnessSessionID, rc.AgentName, harnessSessionID)
+	}
+	return doAttach(rc.AgentName)
 }
 
 // doAttach connects to a running daemon and proxies terminal I/O.
