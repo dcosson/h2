@@ -20,7 +20,7 @@ import (
 func newAttachCmd() *cobra.Command {
 	var tile bool
 	var dryRun bool
-	var resumeFromSessionID string
+	var sessionID string
 
 	cmd := &cobra.Command{
 		Use:   "attach <name>",
@@ -31,24 +31,24 @@ With --tile, open Ghostty splits for multiple agents at once.
 Name can be a pod name, a single agent name, or a comma-separated list.
 If a pod and agent share the same name, the pod takes priority.
 
-With --resume-from-session-id <id>, identify the agent by its underlying
-claude/codex session id instead of by name (no name argument needed).
+With --session-id <id>, identify the agent by its underlying claude/codex
+session id instead of by name (no name argument needed).
 
 With --dry-run (requires --tile), show the computed layout and script
 without executing anything.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if resumeFromSessionID != "" {
+			if sessionID != "" {
 				if len(args) > 0 {
-					return fmt.Errorf("--resume-from-session-id does not take an agent name argument")
+					return fmt.Errorf("--session-id does not take an agent name argument")
 				}
 				if tile {
-					return fmt.Errorf("--tile cannot be used with --resume-from-session-id")
+					return fmt.Errorf("--tile cannot be used with --session-id")
 				}
-				return doAttachBySessionID(resumeFromSessionID)
+				return doAttachBySessionID(sessionID)
 			}
 			if len(args) != 1 {
-				return fmt.Errorf("attach requires an agent name (or --resume-from-session-id <id>)")
+				return fmt.Errorf("attach requires an agent name (or --session-id <id>)")
 			}
 			if dryRun && !tile {
 				return fmt.Errorf("--dry-run requires --tile")
@@ -62,7 +62,7 @@ without executing anything.`,
 
 	cmd.Flags().BoolVar(&tile, "tile", false, "Tile agents in Ghostty splits")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show layout and script without executing (requires --tile)")
-	cmd.Flags().StringVar(&resumeFromSessionID, "resume-from-session-id", "", "Attach to the agent with this underlying claude/codex session id (no name needed)")
+	cmd.Flags().StringVar(&sessionID, "session-id", "", "Attach to the agent with this underlying claude/codex session id (no name needed)")
 	return cmd
 }
 

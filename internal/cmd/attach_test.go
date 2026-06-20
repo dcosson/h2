@@ -11,7 +11,7 @@ func TestAttachResumeFromSessionID_NoSession(t *testing.T) {
 	setupFakeHomeForResume(t)
 
 	cmd := newAttachCmd()
-	cmd.SetArgs([]string{"--resume-from-session-id", "unknown-id"})
+	cmd.SetArgs([]string{"--session-id", "unknown-id"})
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("expected error for unknown harness session id")
@@ -36,7 +36,7 @@ func TestAttachResumeFromSessionID_SessionExistsButNotRunning(t *testing.T) {
 	})
 
 	cmd := newAttachCmd()
-	cmd.SetArgs([]string{"--resume-from-session-id", "codex-conv-dead"})
+	cmd.SetArgs([]string{"--session-id", "codex-conv-dead"})
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("expected error attaching to a session whose daemon is not running")
@@ -54,10 +54,10 @@ func TestAttachResumeFromSessionID_RejectsNameArg(t *testing.T) {
 	setupFakeHomeForResume(t)
 
 	cmd := newAttachCmd()
-	cmd.SetArgs([]string{"some-agent", "--resume-from-session-id", "abc-123"})
+	cmd.SetArgs([]string{"some-agent", "--session-id", "abc-123"})
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected error for name arg with --resume-from-session-id")
+		t.Fatal("expected error for name arg with --session-id")
 	}
 	if !strings.Contains(err.Error(), "does not take an agent name argument") {
 		t.Errorf("error = %q, want containing 'does not take an agent name argument'", err.Error())
