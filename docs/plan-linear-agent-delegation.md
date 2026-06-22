@@ -187,15 +187,22 @@ The branch is rewritten in place, not abandoned.
 
 ## Phasing
 
-1. **MVP — receive & ack & spawn.** Relay (or webhook for dev), OAuth token in
-   config, `created` event → `thought` ack → spawn an agent with issue context →
-   single terminal `response` when the agent finishes. Proves the loop.
-2. **Live activity.** Wire the reporter so thoughts/actions stream during the
-   run (reusing the monitor observer).
-3. **Interactivity.** Follow-up comments route to the agent; `elicitation` for
-   permission-blocks/questions with replies routed back.
-4. **Polish.** Per-team roles, agent guidance ingestion, session resume across
-   daemon restarts, multiple concurrent sessions, uninstall/cleanup.
+1. **MVP — receive & ack & spawn.** ✅ Done. Webhook source (signature-
+   verified) + OAuth token, `created` event → `thought` ack → spawn an agent
+   with issue context → terminal `response`. (`internal/linearagent`, `h2 linear
+   serve`.)
+2. **Live activity.** ✅ Done. `AgentHandle.Activities()` streams thoughts/
+   actions from the agent's state transitions; the service forwards each to
+   Linear during the run.
+3. **Interactivity.** ✅ Done. A session map routes follow-up (`prompted`)
+   events to the running agent (`Deliver`), with `DeliverTo` + the persistent
+   store resuming sessions after a service restart; permission-blocks surface as
+   `elicitation`.
+4. **Polish.** Partial. ✅ Persistent session map (`FileStore`), worktree
+   support (inherited from the chosen role's `worktree_enabled`). ⏳ Remaining:
+   per-team role mapping, agent-guidance ingestion, verbatim response capture
+   (currently a pointer-back summary — needs the agent to emit an explicit
+   outbound message), the outbound-dialed relay transport.
 
 ## Security
 

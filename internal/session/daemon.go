@@ -240,11 +240,6 @@ func RunDaemon(sessionDir string, rc *config.RuntimeConfig, resume bool) error {
 	go triggerEngine.Run(automationCtx, eventCh)
 	go scheduleEngine.Run(automationCtx)
 
-	// Start the Linear attachment watcher (inert unless an issue is linked and
-	// a token is configured). Fully isolated: runs off the agent's hot path and
-	// swallows all errors so Linear never affects the agent or the daemon.
-	startLinearWatcher(automationCtx, s, rc)
-
 	// Start socket listener.
 	go d.acceptLoop()
 

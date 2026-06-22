@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -85,7 +86,8 @@ inbound webhook secret. For dev, expose this receiver to Linear with a tunnel
 			reporter := linear.NewOAuthClient(lc.OAuthToken)
 			source := linearagent.NewWebhookSource(secret, path)
 			runner := &cmdAgentRunner{role: role}
-			svc := linearagent.New(source, reporter, runner)
+			store := linearagent.NewFileStore(filepath.Join(config.ConfigDir(), "linear-sessions.json"))
+			svc := linearagent.New(source, reporter, runner, store)
 
 			ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer cancel()
@@ -143,9 +145,19 @@ func (r *cmdAgentRunner) Spawn(ctx context.Context, req linearagent.SpawnRequest
 	// Deliver the issue context as the agent's task once its socket is up.
 	go deliverPromptWhenReady(name, req.Prompt)
 
-	h := &cmdAgentHandle{name: name, issueRef: req.Issue.Identifier, done: make(chan struct{})}
+	h := &cmdAgentHandle{
+		name:     name,
+		issueRef: req.Issue.Identifier,
+		done:     make(chan struct{}),
+		acts:     make(chan linear.AgentActivity, 16),
+	}
 	go h.watch(ctx)
 	return h, nil
+}
+
+// DeliverTo routes a follow-up prompt to an already-running agent by name.
+func (r *cmdAgentRunner) DeliverTo(_ context.Context, agentName, text string) error {
+	return deliverToAgent(agentName, "linear", text)
 }
 
 // agentNameForIssue derives a stable, lowercase agent name from an issue
@@ -173,31 +185,48 @@ func deliverPromptWhenReady(name, prompt string) {
 	}
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
-		if sockPath, err := socketdir.Find(name); err == nil {
-			if conn, err := net.Dial("unix", sockPath); err == nil {
-				req := &message.Request{Type: "send", From: "linear", Body: prompt}
-				if err := message.SendRequest(conn, req); err == nil {
-					message.ReadResponse(conn)
-					conn.Close()
-					return
-				}
-				conn.Close()
-			}
+		if err := deliverToAgent(name, "linear", prompt); err == nil {
+			return
 		}
 		time.Sleep(time.Second)
 	}
 }
 
-// cmdAgentHandle tracks a spawned agent and signals completion.
+// deliverToAgent sends a message to a running agent over its socket.
+func deliverToAgent(name, from, body string) error {
+	if strings.TrimSpace(body) == "" {
+		return nil
+	}
+	sockPath, err := socketdir.Find(name)
+	if err != nil {
+		return err
+	}
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if err := message.SendRequest(conn, &message.Request{Type: "send", From: from, Body: body}); err != nil {
+		return err
+	}
+	message.ReadResponse(conn)
+	return nil
+}
+
+// cmdAgentHandle tracks a spawned agent, streams its progress as activities,
+// and signals completion.
 type cmdAgentHandle struct {
 	name     string
 	issueRef string
 	done     chan struct{}
+	acts     chan linear.AgentActivity
 	mu       sync.Mutex
 	result   string
 }
 
-func (h *cmdAgentHandle) Done() <-chan struct{} { return h.done }
+func (h *cmdAgentHandle) Name() string                            { return h.name }
+func (h *cmdAgentHandle) Done() <-chan struct{}                   { return h.done }
+func (h *cmdAgentHandle) Activities() <-chan linear.AgentActivity { return h.acts }
 
 func (h *cmdAgentHandle) Result() string {
 	h.mu.Lock()
@@ -205,13 +234,20 @@ func (h *cmdAgentHandle) Result() string {
 	return h.result
 }
 
-// watch polls the agent's state and closes done when the agent's turn appears
-// complete: it has been active and then settled into idle, or it exited.
+// Deliver routes a follow-up prompt to this running agent.
+func (h *cmdAgentHandle) Deliver(_ context.Context, text string) error {
+	return deliverToAgent(h.name, "linear", text)
+}
+
+// watch polls the agent's state, emits an activity on each coarse-status change,
+// and closes the streams when the agent's turn appears complete: it has been
+// active and then settled into idle, or it exited.
 func (h *cmdAgentHandle) watch(ctx context.Context) {
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 	seenActive := false
 	idleStreak := 0
+	lastStatus := ""
 	for {
 		select {
 		case <-ctx.Done():
@@ -223,6 +259,11 @@ func (h *cmdAgentHandle) watch(ctx context.Context) {
 				// Socket gone => agent exited/cleaned up.
 				h.finish(h.summary())
 				return
+			}
+			// Emit an activity when the coarse status changes.
+			if a, key, ok := activityForState(info.State, info.SubState); ok && key != lastStatus {
+				h.emit(a)
+				lastStatus = key
 			}
 			switch info.State {
 			case "active":
@@ -242,6 +283,35 @@ func (h *cmdAgentHandle) watch(ctx context.Context) {
 				return
 			}
 		}
+	}
+}
+
+// activityForState maps an agent (state, subState) to a streamed activity. The
+// returned key is used to suppress duplicates while the status is unchanged.
+func activityForState(state, sub string) (linear.AgentActivity, string, bool) {
+	switch sub {
+	case "blocked_on_permission":
+		return linear.AgentActivity{
+			Type: linear.ActivityElicitation,
+			Body: "I need approval to proceed. Approve the pending permission request in the agent (`h2 attach`).",
+		}, "blocked_permission", true
+	case "tool_use":
+		return linear.AgentActivity{Type: linear.ActivityAction, Action: "Running a tool"}, "tool", true
+	case "thinking":
+		return linear.AgentActivity{Type: linear.ActivityThought, Body: "Thinking…"}, "thinking", true
+	case "compacting":
+		return linear.AgentActivity{Type: linear.ActivityThought, Body: "Compacting context…"}, "compacting", true
+	}
+	if state == "active" {
+		return linear.AgentActivity{Type: linear.ActivityThought, Body: "Working…"}, "working", true
+	}
+	return linear.AgentActivity{}, "", false
+}
+
+func (h *cmdAgentHandle) emit(a linear.AgentActivity) {
+	select {
+	case h.acts <- a:
+	default: // never block the watcher on a slow reporter
 	}
 }
 
@@ -267,6 +337,7 @@ func (h *cmdAgentHandle) finish(result string) {
 	select {
 	case <-h.done:
 	default:
+		close(h.acts)
 		close(h.done)
 	}
 }
