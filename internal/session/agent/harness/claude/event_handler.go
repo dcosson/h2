@@ -480,16 +480,6 @@ func isUsageLimitMessage(content string) bool {
 		strings.Contains(lower, "you've hit your limit")
 }
 
-// isServerErrorMessage returns true if the message content indicates an
-// API server error (5xx). Matches patterns like "Internal server error",
-// "API Error: 500", or the Anthropic error type "api_error".
-func isServerErrorMessage(content string) bool {
-	lower := strings.ToLower(content)
-	return strings.Contains(lower, "internal server error") ||
-		strings.Contains(lower, "\"type\":\"api_error\"") ||
-		strings.Contains(lower, "api error: 5")
-}
-
 // isNetworkErrorMessage returns true when the content indicates a
 // network/connection-level failure reaching the API — i.e. no HTTP response
 // was received, so there is no status code to key on. Claude Code surfaces
@@ -573,14 +563,21 @@ func parseSessionLine(line []byte) ([]monitor.AgentEvent, bool) {
 
 	isRateLimit := entry.Error == "rate_limit" || isUsageLimit
 
-	// Check for network/connection failures. When the API is unreachable,
-	// Claude Code exhausts its retries and writes a synthetic give-up message
-	// but fires no Stop hook, so the agent would otherwise stay frozen in its
-	// prior Active sub-state. Drive it to idle (server_error sub-state, which
-	// auto-clears on the next successful turn) directly from this line, since
-	// the OTEL api_error path may not observe a connection-level failure.
-	isNetwork := entry.IsApiErrorMessage && !isAuth && !isRateLimit && isNetworkErrorMessage(content)
-	if isNetwork {
+	// Any synthetic api-error give-up message that isn't a usage limit or auth
+	// error means Claude Code exhausted its retries and ended the turn WITHOUT
+	// firing a Stop hook — so the agent would otherwise stay frozen in its prior
+	// Active sub-state. This covers 5xx server errors (e.g. "529 Overloaded"),
+	// connection failures ("Unable to connect to API (ConnectionRefused)"), and
+	// any other API error code. Drive the agent to idle directly; the
+	// server_error sub-state auto-clears on the next successful turn. We must not
+	// rely on the OTEL api_error path alone, since it does not reliably observe
+	// every failure (connection-level errors carry no status code, and the final
+	// post-retry give-up is only recorded in the session JSONL).
+	if entry.IsApiErrorMessage && !isAuth && !isRateLimit {
+		statusCode := ""
+		if entry.ApiErrorStatus != 0 {
+			statusCode = strconv.Itoa(entry.ApiErrorStatus)
+		}
 		events = append(events, monitor.AgentEvent{
 			Type:      monitor.EventStateChange,
 			Timestamp: now,
@@ -589,17 +586,7 @@ func parseSessionLine(line []byte) ([]monitor.AgentEvent, bool) {
 		events = append(events, monitor.AgentEvent{
 			Type:      monitor.EventServerErrorInfo,
 			Timestamp: now,
-			Data:      monitor.ServerErrorData{Message: content},
-		})
-	}
-
-	// Check for server error messages (5xx). An API error message that isn't
-	// a rate limit, auth error, or network error is treated as a server error.
-	if entry.IsApiErrorMessage && !isAuth && !isRateLimit && !isNetwork && isServerErrorMessage(content) {
-		events = append(events, monitor.AgentEvent{
-			Type:      monitor.EventServerErrorInfo,
-			Timestamp: now,
-			Data:      monitor.ServerErrorData{Message: content},
+			Data:      monitor.ServerErrorData{StatusCode: statusCode, Message: content},
 		})
 	}
 

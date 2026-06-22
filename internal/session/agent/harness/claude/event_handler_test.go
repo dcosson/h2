@@ -847,40 +847,76 @@ func TestEventHandler_OnSessionLogLine_ServerError(t *testing.T) {
 	})
 	h.OnSessionLogLine(line)
 
-	got := drainEvents(events, 2)
-	if len(got) < 2 {
-		t.Fatalf("expected 2 events (server_error_info + agent_message), got %d", len(got))
+	got := drainEvents(events, 3)
+	if len(got) < 3 {
+		t.Fatalf("expected 3 events (state_change + server_error_info + agent_message), got %d", len(got))
 	}
 
-	if got[0].Type != monitor.EventServerErrorInfo {
-		t.Fatalf("event[0].Type = %v, want EventServerErrorInfo", got[0].Type)
+	if got[0].Type != monitor.EventStateChange {
+		t.Fatalf("event[0].Type = %v, want EventStateChange", got[0].Type)
 	}
-	data := got[0].Data.(monitor.ServerErrorData)
+	state := got[0].Data.(monitor.StateChangeData)
+	if state.State != monitor.StateIdle || state.SubState != monitor.SubStateServerError {
+		t.Errorf("state = (%v,%v), want (Idle,ServerError)", state.State, state.SubState)
+	}
+
+	if got[1].Type != monitor.EventServerErrorInfo {
+		t.Fatalf("event[1].Type = %v, want EventServerErrorInfo", got[1].Type)
+	}
+	data := got[1].Data.(monitor.ServerErrorData)
 	if !strings.Contains(data.Message, "Internal server error") {
 		t.Errorf("expected 'Internal server error' in message, got %q", data.Message)
 	}
 
-	if got[1].Type != monitor.EventAgentMessage {
-		t.Fatalf("event[1].Type = %v, want EventAgentMessage", got[1].Type)
+	if got[2].Type != monitor.EventAgentMessage {
+		t.Fatalf("event[2].Type = %v, want EventAgentMessage", got[2].Type)
 	}
 }
 
-func TestIsServerErrorMessage(t *testing.T) {
-	tests := []struct {
-		content string
-		want    bool
-	}{
-		{`API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}`, true},
-		{`API Error: {"type":"error","error":{"type":"api_error","message":"Internal server error"}}`, true},
-		{"API Error: 529 overloaded", true},
-		{"OAuth token has expired. Please obtain a new token.", false},
-		{"authentication_error: invalid credentials", false},
-		{"normal assistant message", false},
+// TestEventHandler_OnSessionLogLine_Overloaded529 covers the concierge-fog
+// failure mode: a synthetic "529 Overloaded" give-up message (isApiErrorMessage
+// with apiErrorStatus 529) and no following Stop hook. The agent must be driven
+// to idle (server_error) rather than left frozen at "Active (thinking)".
+func TestEventHandler_OnSessionLogLine_Overloaded529(t *testing.T) {
+	events := make(chan monitor.AgentEvent, 64)
+	h := NewEventHandler(events, nil)
+
+	line, _ := json.Marshal(map[string]any{
+		"type": "assistant",
+		"message": map[string]any{
+			"role":    "assistant",
+			"model":   "<synthetic>",
+			"content": []map[string]any{{"type": "text", "text": "API Error: 529 Overloaded. This is a server-side issue, usually temporary — try again in a moment. If it persists, check https://status.claude.com."}},
+		},
+		"isApiErrorMessage": true,
+		"apiErrorStatus":    529,
+		"error":             "server_error",
+	})
+	h.OnSessionLogLine(line)
+
+	got := drainEvents(events, 3)
+	if len(got) < 3 {
+		t.Fatalf("expected 3 events (state_change + server_error_info + agent_message), got %d", len(got))
 	}
-	for _, tt := range tests {
-		if got := isServerErrorMessage(tt.content); got != tt.want {
-			t.Errorf("isServerErrorMessage(%q) = %v, want %v", tt.content, got, tt.want)
-		}
+	if got[0].Type != monitor.EventStateChange {
+		t.Fatalf("event[0].Type = %v, want EventStateChange", got[0].Type)
+	}
+	state := got[0].Data.(monitor.StateChangeData)
+	if state.State != monitor.StateIdle || state.SubState != monitor.SubStateServerError {
+		t.Errorf("state = (%v,%v), want (Idle,ServerError)", state.State, state.SubState)
+	}
+	if got[1].Type != monitor.EventServerErrorInfo {
+		t.Fatalf("event[1].Type = %v, want EventServerErrorInfo", got[1].Type)
+	}
+	data := got[1].Data.(monitor.ServerErrorData)
+	if data.StatusCode != "529" {
+		t.Errorf("StatusCode = %q, want \"529\"", data.StatusCode)
+	}
+	if !strings.Contains(data.Message, "529 Overloaded") {
+		t.Errorf("expected '529 Overloaded' in message, got %q", data.Message)
+	}
+	if got[2].Type != monitor.EventAgentMessage {
+		t.Fatalf("event[2].Type = %v, want EventAgentMessage", got[2].Type)
 	}
 }
 
