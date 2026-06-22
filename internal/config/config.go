@@ -18,6 +18,7 @@ const markerFile = ".h2-dir.txt"
 type Config struct {
 	Bridges map[string]*BridgesConfig `yaml:"bridges"` // named bridge configs
 	Users   map[string]*UserConfig    `yaml:"users"`
+	Linear  *LinearConfig             `yaml:"linear,omitempty"` // optional Linear attachment integration
 }
 
 type UserConfig struct {
@@ -39,6 +40,14 @@ type TelegramConfig struct {
 
 type MacOSNotifyConfig struct {
 	Enabled bool `yaml:"enabled"`
+}
+
+// LinearConfig holds credentials for the outbound Linear attachment
+// integration. When absent (or APIToken empty), the integration is inert and
+// h2 makes no Linear calls. This is not a bridge: it has no inbound routing and
+// Linear is not a message channel.
+type LinearConfig struct {
+	APIToken string `yaml:"api_token"` // Linear personal API key
 }
 
 // IsH2Dir checks if dir contains a valid .h2-dir.txt marker file.

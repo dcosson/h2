@@ -56,7 +56,7 @@ func TestDoSetupAndForkAgent_FailsWhenProfileMissing(t *testing.T) {
 		ClaudePermissionMode: "",
 	}
 
-	err := doSetupAndForkAgent("missing-profile-test", role, true, "", 0, nil, true)
+	err := doSetupAndForkAgent("missing-profile-test", role, true, "", 0, nil, "", true)
 	if err == nil {
 		t.Fatal("expected error for missing profile")
 	}

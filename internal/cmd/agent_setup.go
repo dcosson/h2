@@ -71,14 +71,14 @@ func buildCommandRuntimeConfig(command string) *config.RuntimeConfig {
 // setupAndForkAgentQuiet is like setupAndForkAgent but suppresses output.
 // Used by pod launch which handles its own output.
 func setupAndForkAgentQuiet(name string, role *config.Role, pod string, podIndex int, overrides []string) error {
-	return doSetupAndForkAgent(name, role, true, pod, podIndex, overrides, true)
+	return doSetupAndForkAgent(name, role, true, pod, podIndex, overrides, "", true)
 }
 
-func setupAndForkAgent(name string, role *config.Role, detach bool, pod string, podIndex int, overrides []string) error {
-	return doSetupAndForkAgent(name, role, detach, pod, podIndex, overrides, false)
+func setupAndForkAgent(name string, role *config.Role, detach bool, pod string, podIndex int, overrides []string, linearIssue string) error {
+	return doSetupAndForkAgent(name, role, detach, pod, podIndex, overrides, linearIssue, false)
 }
 
-func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string, podIndex int, overrides []string, quiet bool) error {
+func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string, podIndex int, overrides []string, linearIssue string, quiet bool) error {
 	if name == "" {
 		name = session.GenerateName()
 	}
@@ -181,6 +181,7 @@ func doSetupAndForkAgent(name string, role *config.Role, detach bool, pod string
 		PermissionReview:     role.PermissionReview,
 		AdditionalDirs:       additionalDirs,
 		Overrides:            overrideMap,
+		LinearIssue:          linearIssue,
 		StartedAt:            time.Now().UTC().Format(time.RFC3339),
 	}
 
