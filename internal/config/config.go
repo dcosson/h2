@@ -42,12 +42,46 @@ type MacOSNotifyConfig struct {
 	Enabled bool `yaml:"enabled"`
 }
 
-// LinearConfig holds credentials for the outbound Linear attachment
-// integration. When absent (or APIToken empty), the integration is inert and
-// h2 makes no Linear calls. This is not a bridge: it has no inbound routing and
-// Linear is not a message channel.
+// LinearConfig holds credentials and settings for the Linear agent
+// integration. When absent the integration is inert and h2 makes no Linear
+// calls.
+//
+// h2 registers as a Linear agent (an OAuth app authorized with actor=app).
+// Users delegate or @mention issues to it; Linear delivers AgentSession events
+// to h2 (currently via an inbound webhook), and h2 reports progress back as
+// agent-session activities.
 type LinearConfig struct {
-	APIToken string `yaml:"api_token"` // Linear personal API key
+	// OAuthToken is the actor=app access token used for all agent-session
+	// GraphQL calls (posting activities, queries).
+	OAuthToken string `yaml:"oauth_token,omitempty"`
+	// AppID is the agent's identity in the workspace (viewer.id under the app
+	// token). Recorded so h2 can recognize its own activities/mentions.
+	AppID string `yaml:"app_id,omitempty"`
+
+	// Inbound configures how Linear AgentSession events reach h2.
+	Inbound *LinearInboundConfig `yaml:"inbound,omitempty"`
+
+	// Agent configures how delegated issues are turned into h2 agents.
+	Agent *LinearAgentConfig `yaml:"agent,omitempty"`
+
+	// APIToken is a personal API key retained as a fallback for non-agent
+	// GraphQL calls. Optional.
+	APIToken string `yaml:"api_token,omitempty"`
+}
+
+// LinearInboundConfig configures the inbound event transport. Mode "webhook"
+// runs a local HTTP receiver (for dev / self-hosting). Mode "relay" (future)
+// dials out to a hosted relay so no inbound port is needed.
+type LinearInboundConfig struct {
+	Mode    string `yaml:"mode"`              // "webhook" (default) | "relay"
+	Address string `yaml:"address,omitempty"` // webhook listen address, e.g. ":4747"
+	Path    string `yaml:"path,omitempty"`    // webhook path, e.g. "/linear/webhook"
+	Secret  string `yaml:"secret,omitempty"`  // webhook signing secret for verification
+}
+
+// LinearAgentConfig controls how a delegated issue is turned into an h2 agent.
+type LinearAgentConfig struct {
+	Role string `yaml:"role,omitempty"` // h2 role used to spawn agents for delegated issues
 }
 
 // IsH2Dir checks if dir contains a valid .h2-dir.txt marker file.

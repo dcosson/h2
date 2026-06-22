@@ -22,21 +22,31 @@ import (
 // DefaultAPIURL is Linear's GraphQL endpoint.
 const DefaultAPIURL = "https://api.linear.app/graphql"
 
-// Client is a minimal Linear GraphQL client covering only the operations the
-// attachment integration needs. It is safe for concurrent use.
+// Client is a minimal Linear GraphQL client. It is safe for concurrent use.
 type Client struct {
-	token  string
-	apiURL string
-	http   *http.Client
+	token      string
+	authScheme string // "" for personal API keys, "Bearer" for OAuth tokens
+	apiURL     string
+	http       *http.Client
 }
 
-// NewClient returns a Client authenticated with a Linear personal API key.
+// NewClient returns a Client authenticated with a Linear personal API key,
+// which is sent in the Authorization header directly (no scheme prefix).
 func NewClient(token string) *Client {
 	return &Client{
 		token:  token,
 		apiURL: DefaultAPIURL,
 		http:   &http.Client{Timeout: 15 * time.Second},
 	}
+}
+
+// NewOAuthClient returns a Client authenticated with an OAuth access token
+// (actor=app), sent as "Authorization: Bearer <token>". This is the client the
+// agent integration uses for agent-session activity calls.
+func NewOAuthClient(token string) *Client {
+	c := NewClient(token)
+	c.authScheme = "Bearer"
+	return c
 }
 
 // AttachmentInput is the data used to create (upsert) an attachment.
@@ -166,9 +176,13 @@ func (c *Client) do(ctx context.Context, query string, vars map[string]any, out 
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	// Linear personal API keys are sent in the Authorization header directly
-	// (no "Bearer" prefix).
-	req.Header.Set("Authorization", c.token)
+	// Personal API keys go in the Authorization header directly; OAuth tokens
+	// use the "Bearer" scheme.
+	if c.authScheme != "" {
+		req.Header.Set("Authorization", c.authScheme+" "+c.token)
+	} else {
+		req.Header.Set("Authorization", c.token)
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {

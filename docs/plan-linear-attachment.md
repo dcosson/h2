@@ -1,5 +1,13 @@
 # Plan: Linear Issue Attachment (outbound agent status)
 
+> **SUPERSEDED** by [plan-linear-agent-delegation.md](plan-linear-agent-delegation.md).
+> The attachment *model* was rejected in favour of a native Linear **agent
+> delegation** integration (delegate/@mention an issue to h2 → h2 spawns an
+> agent → progress streams to a Linear agent session). The reusable parts of
+> this plan — monitor-state observation, the GraphQL client, and the config
+> plumbing — are repurposed there as the "report progress back" half. Kept for
+> rationale/history.
+
 ## Goal
 
 When an h2 agent is linked to a Linear issue, surface the agent's live status on
