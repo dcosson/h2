@@ -69,6 +69,27 @@ func (c *Client) Viewer(ctx context.Context) (string, error) {
 	return resp.Viewer.ID, nil
 }
 
+// Organization returns the workspace (organization) ID for the authenticated
+// token. The relay routes inbound webhooks (which carry organizationId) to the
+// daemon paired with that workspace.
+func (c *Client) Organization(ctx context.Context) (string, error) {
+	const query = `query Org { viewer { organization { id } } }`
+	var resp struct {
+		Viewer struct {
+			Organization struct {
+				ID string `json:"id"`
+			} `json:"organization"`
+		} `json:"viewer"`
+	}
+	if err := c.do(ctx, query, nil, &resp); err != nil {
+		return "", err
+	}
+	if resp.Viewer.Organization.ID == "" {
+		return "", fmt.Errorf("linear: empty organization id")
+	}
+	return resp.Viewer.Organization.ID, nil
+}
+
 // CreateAgentActivity posts an activity to an agent session.
 func (c *Client) CreateAgentActivity(ctx context.Context, sessionID string, a AgentActivity) error {
 	const mutation = `mutation AgentActivityCreate($input: AgentActivityCreateInput!) {

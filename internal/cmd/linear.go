@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"h2/internal/config"
 	"h2/internal/linear"
 	"h2/internal/linearagent"
+	"h2/internal/linearrelay"
 	"h2/internal/session"
 	"h2/internal/session/message"
 	"h2/internal/socketdir"
@@ -30,6 +32,7 @@ func newLinearCmd() *cobra.Command {
 		Long:  "Run h2 as a Linear agent: delegate or @mention issues to h2 and it spawns agents to work them.",
 	}
 	cmd.AddCommand(newLinearServeCmd())
+	cmd.AddCommand(newLinearRelayCmd())
 	return cmd
 }
 
@@ -53,52 +56,77 @@ inbound webhook secret. For dev, expose this receiver to Linear with a tunnel
 				return fmt.Errorf("load config: %w", err)
 			}
 			lc := cfg.Linear
-			if lc == nil || lc.OAuthToken == "" {
-				return fmt.Errorf("linear.oauth_token not configured in ~/.h2/config.yaml")
+			if lc == nil {
+				return fmt.Errorf("no 'linear' block in ~/.h2/config.yaml (see docs/linear-agent-setup.md)")
 			}
 
-			mode := "webhook"
-			path := "/linear/webhook"
-			secret := ""
-			if lc.Inbound != nil {
-				if lc.Inbound.Mode != "" {
-					mode = lc.Inbound.Mode
-				}
-				if lc.Inbound.Path != "" {
-					path = lc.Inbound.Path
-				}
-				secret = lc.Inbound.Secret
-				if addr == "" && lc.Inbound.Address != "" {
-					addr = lc.Inbound.Address
-				}
-			}
-			if mode != "webhook" {
-				return fmt.Errorf("inbound mode %q not supported yet (only 'webhook')", mode)
-			}
-			if addr == "" {
-				addr = ":4747"
+			mode := "relay"
+			if lc.Inbound != nil && lc.Inbound.Mode != "" {
+				mode = lc.Inbound.Mode
 			}
 
 			role := "default"
 			if lc.Agent != nil && lc.Agent.Role != "" {
 				role = lc.Agent.Role
 			}
-
-			reporter := linear.NewOAuthClient(lc.OAuthToken)
-			source := linearagent.NewWebhookSource(secret, path)
-			source.Debug = debug
 			runner := &cmdAgentRunner{role: role}
 			store := linearagent.NewFileStore(filepath.Join(config.ConfigDir(), "linear-sessions.json"))
-			svc := linearagent.New(source, reporter, runner, store)
 
 			ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer cancel()
-
 			errCh := make(chan error, 2)
-			go func() { errCh <- source.Serve(ctx, addr) }()
+
+			var source linearagent.Source
+			var reporter linearagent.Reporter
+
+			switch mode {
+			case "relay":
+				in := lc.Inbound
+				if in == nil || in.PairingToken == "" {
+					return fmt.Errorf("relay mode needs linear.inbound.pairing_token (get it by authorizing h2; see docs/linear-agent-setup.md)")
+				}
+				relayURL := in.RelayURL
+				if relayURL == "" {
+					relayURL = defaultRelayURL
+				}
+				rs := linearagent.NewRelaySource(relayURL, in.PairingToken)
+				source = rs
+				reporter = linearagent.NewRelayReporter(relayURL, in.PairingToken)
+				go func() { errCh <- rs.Run(ctx) }()
+				fmt.Fprintf(os.Stderr, "h2 linear agent connected via relay %s (role=%q)\n", relayURL, role)
+
+			case "webhook":
+				if lc.OAuthToken == "" {
+					return fmt.Errorf("webhook mode needs linear.oauth_token")
+				}
+				path := "/linear/webhook"
+				if lc.Inbound != nil && lc.Inbound.Path != "" {
+					path = lc.Inbound.Path
+				}
+				if addr == "" && lc.Inbound != nil && lc.Inbound.Address != "" {
+					addr = lc.Inbound.Address
+				}
+				if addr == "" {
+					addr = ":4747"
+				}
+				secret := ""
+				if lc.Inbound != nil {
+					secret = lc.Inbound.Secret
+				}
+				ws := linearagent.NewWebhookSource(secret, path)
+				ws.Debug = debug
+				source = ws
+				reporter = linear.NewOAuthClient(lc.OAuthToken)
+				go func() { errCh <- ws.Serve(ctx, addr) }()
+				fmt.Fprintf(os.Stderr, "h2 linear agent listening on %s%s (role=%q)\n", addr, path, role)
+
+			default:
+				return fmt.Errorf("unknown inbound mode %q (want 'relay' or 'webhook')", mode)
+			}
+
+			svc := linearagent.New(source, reporter, runner, store)
 			go func() { errCh <- svc.Run(ctx) }()
 
-			fmt.Fprintf(os.Stderr, "h2 linear agent listening on %s%s (role=%q)\n", addr, path, role)
 			err = <-errCh
 			cancel()
 			if err != nil && err != context.Canceled {
@@ -107,8 +135,77 @@ inbound webhook secret. For dev, expose this receiver to Linear with a tunnel
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&addr, "addr", "", "Webhook listen address (overrides config; default :4747)")
-	cmd.Flags().BoolVar(&debug, "debug", false, "Log raw inbound webhook payloads (for confirming Linear's payload shape)")
+	cmd.Flags().StringVar(&addr, "addr", "", "Webhook listen address for webhook mode (default :4747)")
+	cmd.Flags().BoolVar(&debug, "debug", false, "Log raw inbound webhook payloads (webhook mode)")
+	return cmd
+}
+
+// defaultRelayURL is the hosted relay used when relay_url is not configured.
+const defaultRelayURL = "https://relay.h2.dev"
+
+// newLinearRelayCmd runs the hosted relay server (operated by the h2 project,
+// not end users).
+func newLinearRelayCmd() *cobra.Command {
+	var addr string
+	cmd := &cobra.Command{
+		Use:   "relay",
+		Short: "Run the hosted Linear relay server",
+		Long: `Run the relay that lets users plug h2 into Linear with one click.
+
+The relay is the single public endpoint for a published Linear OAuth app: it
+handles the OAuth install, holds each workspace's token, receives all
+agent-session webhooks, and routes events to each user's local h2 daemon over an
+outbound long-poll connection (so users need no inbound port or tunnel).
+
+Requires a 'linear.relay' block in ~/.h2/config.yaml with the OAuth app
+client_id/client_secret, the webhook signing secret, and the public base_url.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+			if cfg.Linear == nil || cfg.Linear.Relay == nil {
+				return fmt.Errorf("no 'linear.relay' block in ~/.h2/config.yaml")
+			}
+			rc := cfg.Linear.Relay
+			if rc.ClientID == "" || rc.ClientSecret == "" {
+				return fmt.Errorf("linear.relay.client_id and client_secret are required")
+			}
+			if rc.BaseURL == "" {
+				return fmt.Errorf("linear.relay.base_url is required (public URL for the OAuth redirect)")
+			}
+			if addr == "" {
+				addr = rc.Address
+			}
+			if addr == "" {
+				addr = ":8080"
+			}
+
+			srv := linearrelay.New(linearrelay.Config{
+				BaseURL:       rc.BaseURL,
+				ClientID:      rc.ClientID,
+				ClientSecret:  rc.ClientSecret,
+				WebhookSecret: rc.WebhookSecret,
+			}, nil, nil)
+
+			ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+			defer cancel()
+
+			httpSrv := &http.Server{Addr: addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
+			go func() {
+				<-ctx.Done()
+				sd, c := context.WithTimeout(context.Background(), 5*time.Second)
+				defer c()
+				httpSrv.Shutdown(sd)
+			}()
+			fmt.Fprintf(os.Stderr, "h2 linear relay listening on %s (install URL: %s/oauth/authorize)\n", addr, rc.BaseURL)
+			if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				return err
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&addr, "addr", "", "Listen address (default :8080 or linear.relay.address)")
 	return cmd
 }
 

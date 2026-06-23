@@ -2,9 +2,6 @@ package linearagent
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log"
@@ -127,18 +124,11 @@ func (s *WebhookSource) handle(w http.ResponseWriter, r *http.Request) {
 
 // verify checks the hex HMAC-SHA256 signature against the raw body. When no
 // secret is configured, verification is skipped (dev convenience) and a warning
-// is logged once per call.
+// is logged.
 func (s *WebhookSource) verify(sig string, body []byte) bool {
 	if len(s.secret) == 0 {
 		log.Printf("linear: WARNING webhook signature verification disabled (no secret configured)")
 		return true
 	}
-	mac := hmac.New(sha256.New, s.secret)
-	mac.Write(body)
-	want := mac.Sum(nil)
-	got, err := hex.DecodeString(sig)
-	if err != nil {
-		return false
-	}
-	return hmac.Equal(got, want)
+	return VerifySignature(string(s.secret), sig, body)
 }
