@@ -81,3 +81,54 @@ func TestFindSessionDirByID_IgnoresBadMetadata(t *testing.T) {
 		t.Fatalf("FindSessionDirByID(sid-ok) = %q, want %q", got, validDir)
 	}
 }
+
+func TestFindSessionDirByHarnessSessionID(t *testing.T) {
+	h2dir := t.TempDir()
+	if err := WriteMarker(h2dir); err != nil {
+		t.Fatalf("WriteMarker: %v", err)
+	}
+	t.Setenv("H2_DIR", h2dir)
+	ResetResolveCache()
+	defer ResetResolveCache()
+
+	// Codex-style session: internal SessionID differs from HarnessSessionID.
+	codexDir := SessionDir("codex-agent")
+	// Claude-style session: SessionID == HarnessSessionID.
+	claudeDir := SessionDir("claude-agent")
+	for _, d := range []string{codexDir, claudeDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+
+	if err := WriteRuntimeConfig(codexDir, &RuntimeConfig{
+		AgentName: "codex-agent", SessionID: "internal-id", HarnessSessionID: "codex-conv-id",
+		HarnessType: "codex", Command: "codex", CWD: "/tmp", StartedAt: "2024-01-01T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("write codex config: %v", err)
+	}
+	if err := WriteRuntimeConfig(claudeDir, &RuntimeConfig{
+		AgentName: "claude-agent", SessionID: "claude-uuid", HarnessSessionID: "claude-uuid",
+		HarnessType: "claude_code", Command: "claude", CWD: "/tmp", StartedAt: "2024-01-01T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("write claude config: %v", err)
+	}
+
+	// Matches on the harness session id, not the internal h2 session id.
+	if got := FindSessionDirByHarnessSessionID("codex-conv-id"); got != codexDir {
+		t.Fatalf("FindSessionDirByHarnessSessionID(codex-conv-id) = %q, want %q", got, codexDir)
+	}
+	if got := FindSessionDirByHarnessSessionID("claude-uuid"); got != claudeDir {
+		t.Fatalf("FindSessionDirByHarnessSessionID(claude-uuid) = %q, want %q", got, claudeDir)
+	}
+	// The internal h2 session id must NOT match via the harness lookup.
+	if got := FindSessionDirByHarnessSessionID("internal-id"); got != "" {
+		t.Fatalf("FindSessionDirByHarnessSessionID(internal-id) = %q, want empty", got)
+	}
+	if got := FindSessionDirByHarnessSessionID("missing"); got != "" {
+		t.Fatalf("FindSessionDirByHarnessSessionID(missing) = %q, want empty", got)
+	}
+	if got := FindSessionDirByHarnessSessionID(""); got != "" {
+		t.Fatalf("FindSessionDirByHarnessSessionID(\"\") = %q, want empty", got)
+	}
+}
