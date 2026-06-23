@@ -198,11 +198,32 @@ The branch is rewritten in place, not abandoned.
    events to the running agent (`Deliver`), with `DeliverTo` + the persistent
    store resuming sessions after a service restart; permission-blocks surface as
    `elicitation`.
-4. **Polish.** Partial. ✅ Persistent session map (`FileStore`), worktree
-   support (inherited from the chosen role's `worktree_enabled`). ⏳ Remaining:
-   per-team role mapping, agent-guidance ingestion, verbatim response capture
+4. **Polish.** Mostly done. ✅ Persistent session map (`FileStore`), worktree
+   support (inherited from the chosen role's `worktree_enabled`), and the
+   **outbound-dialed relay** (`internal/linearrelay` + `RelaySource`/
+   `RelayReporter`) for one-click plug-and-play install. ⏳ Remaining: per-team
+   role mapping, agent-guidance ingestion, and verbatim response capture
    (currently a pointer-back summary — needs the agent to emit an explicit
-   outbound message), the outbound-dialed relay transport.
+   outbound message).
+
+## Relay (plug-and-play transport)
+
+The relay (`internal/linearrelay`, run via `h2 linear relay`) is the single
+public endpoint for a *published* Linear OAuth app, so end users install with one
+"Authorize h2" click — no app creation, webhook config, tunnel, or Linear token
+on their machine.
+
+- **Install:** `/oauth/authorize` → Linear (`actor=app`) → `/oauth/callback`
+  exchanges the code, stores the workspace token, and shows a **pairing token**.
+- **Inbound:** Linear → `/webhook` (signature-verified) → routed by
+  `organizationId` to a per-workspace queue.
+- **Daemon link:** the local daemon (`mode: relay`, `pairing_token`) long-polls
+  `/poll` (outbound only) and posts activities to `/activity`, which the relay
+  forwards to Linear with the stored token. **The OAuth token never leaves the
+  relay.**
+- Transport is HTTP long-poll (zero new deps); `RelaySource` reconnects with
+  backoff. The `Source`/`Reporter` interfaces mean the service is identical
+  across relay and webhook modes.
 
 ## Security
 

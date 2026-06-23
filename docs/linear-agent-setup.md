@@ -4,8 +4,70 @@ Run h2 as a Linear **agent**: delegate or `@mention` an issue to `h2` and it
 spawns an agent to work it, reporting progress back to the issue's agent-session
 activity feed.
 
-This guide covers the **webhook** transport (for dev / self-hosting). Design
-details live in [plan-linear-agent-delegation.md](plan-linear-agent-delegation.md).
+There are two transports:
+
+- **Relay (recommended, plug-and-play)** — connect to a hosted relay; the only
+  thing you provide is a pairing token you get by clicking "Authorize h2". No
+  OAuth app, no webhook config, no tunnel, no Linear token on your machine. See
+  [Quick start](#quick-start-relay).
+- **Webhook (dev / self-host)** — you register your own OAuth app and run a
+  public webhook receiver. See [Self-host with webhook](#self-host-with-webhook).
+
+Design details live in
+[plan-linear-agent-delegation.md](plan-linear-agent-delegation.md).
+
+## Quick start (relay)
+
+For end users, once an h2 relay is running and its Linear app is published:
+
+1. Open the relay's install URL (`https://<relay-host>/oauth/authorize`) and
+   authorize **h2** into your workspace.
+2. Copy the **pairing token** from the confirmation page into
+   `~/.h2/config.yaml`:
+   ```yaml
+   linear:
+     inbound:
+       mode: relay
+       relay_url: "https://<relay-host>"   # omit to use the built-in default
+       pairing_token: "<from the authorize page>"
+     agent:
+       role: "default"                      # an existing h2 role
+   ```
+3. Run it:
+   ```bash
+   h2 linear serve
+   ```
+4. Delegate an issue to **h2** in Linear. That's it — no tunnel, no secrets.
+
+The rest of this doc is for **operators** (running the relay) and **dev /
+self-host** (webhook transport).
+
+## Running the relay (operator)
+
+The relay is the single public endpoint for a published Linear OAuth app. Run it
+on a host with a public URL.
+
+1. Register one OAuth app (see [below](#self-host-with-webhook) for the field
+   details), enable webhooks + **Agent session events**, scopes
+   `read`/`write`/`app:assignable`/`app:mentionable`. Set its **redirect URI**
+   to `https://<relay-host>/oauth/callback` and its **webhook URL** to
+   `https://<relay-host>/webhook`.
+2. Config on the relay host:
+   ```yaml
+   linear:
+     relay:
+       address: ":8080"
+       base_url: "https://<relay-host>"
+       client_id: "<oauth client id>"
+       client_secret: "<oauth client secret>"
+       webhook_secret: "<webhook signing secret>"
+   ```
+3. `h2 linear relay`
+
+Each user then follows [Quick start](#quick-start-relay). Workspace OAuth tokens
+are held only by the relay; user daemons dial out and never receive the token.
+
+## Self-host with webhook
 
 ## 1. Register the Linear OAuth app
 
