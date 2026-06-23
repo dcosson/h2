@@ -89,6 +89,22 @@ func TestWebhook_NonAgentEventIgnored(t *testing.T) {
 	}
 }
 
+func TestWebhook_PromptTextPrefersPromptContext(t *testing.T) {
+	ev := AgentSessionEvent{
+		Type:          TypeAgentSession,
+		Action:        ActionCreated,
+		PromptContext: "  formatted context from Linear  ",
+		AgentSession: AgentSession{
+			ID:      "s",
+			Issue:   Issue{Title: "T", Description: "D"},
+			Comment: &Comment{Body: "a comment"},
+		},
+	}
+	if got := ev.PromptText(); got != "formatted context from Linear" {
+		t.Errorf("PromptText = %q, want promptContext", got)
+	}
+}
+
 func TestWebhook_PromptTextPrefersComment(t *testing.T) {
 	ev := AgentSessionEvent{
 		Type:   TypeAgentSession,

@@ -26,6 +26,9 @@ type AgentSessionEvent struct {
 	Action         string       `json:"action"`
 	OrganizationID string       `json:"organizationId"`
 	AgentSession   AgentSession `json:"agentSession"`
+	// PromptContext is a pre-formatted context string Linear provides to seed
+	// the agent (the recommended input). Preferred over issue/comment fields.
+	PromptContext string `json:"promptContext"`
 	// Webhook delivery timestamp (epoch ms); used for replay protection.
 	WebhookTimestamp int64 `json:"webhookTimestamp"`
 }
@@ -52,9 +55,12 @@ type Comment struct {
 }
 
 // PromptText returns the best available natural-language context to seed the
-// agent: the triggering comment if present, otherwise the issue title and
-// description.
+// agent: Linear's pre-formatted promptContext if present, then the triggering
+// comment, then the issue title and description.
 func (e AgentSessionEvent) PromptText() string {
+	if p := strings.TrimSpace(e.PromptContext); p != "" {
+		return p
+	}
 	if e.AgentSession.Comment != nil {
 		if b := strings.TrimSpace(e.AgentSession.Comment.Body); b != "" {
 			return b

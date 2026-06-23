@@ -35,6 +35,7 @@ func newLinearCmd() *cobra.Command {
 
 func newLinearServeCmd() *cobra.Command {
 	var addr string
+	var debug bool
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Run the Linear agent webhook receiver",
@@ -85,6 +86,7 @@ inbound webhook secret. For dev, expose this receiver to Linear with a tunnel
 
 			reporter := linear.NewOAuthClient(lc.OAuthToken)
 			source := linearagent.NewWebhookSource(secret, path)
+			source.Debug = debug
 			runner := &cmdAgentRunner{role: role}
 			store := linearagent.NewFileStore(filepath.Join(config.ConfigDir(), "linear-sessions.json"))
 			svc := linearagent.New(source, reporter, runner, store)
@@ -106,6 +108,7 @@ inbound webhook secret. For dev, expose this receiver to Linear with a tunnel
 		},
 	}
 	cmd.Flags().StringVar(&addr, "addr", "", "Webhook listen address (overrides config; default :4747)")
+	cmd.Flags().BoolVar(&debug, "debug", false, "Log raw inbound webhook payloads (for confirming Linear's payload shape)")
 	return cmd
 }
 

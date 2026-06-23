@@ -37,6 +37,11 @@ type WebhookSource struct {
 	path   string
 	events chan AgentSessionEvent
 	srv    *http.Server
+
+	// Debug, when true, logs each raw inbound payload (and signature header).
+	// Useful for confirming Linear's exact payload shape on first integration.
+	// Off by default since payloads may contain issue content.
+	Debug bool
 }
 
 // NewWebhookSource creates a WebhookSource. secret is the webhook signing
@@ -91,6 +96,10 @@ func (s *WebhookSource) handle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "read error", http.StatusBadRequest)
 		return
+	}
+	if s.Debug {
+		sigPresent := r.Header.Get(signatureHeader) != ""
+		log.Printf("linear: [debug] inbound webhook (signature_present=%t):\n%s", sigPresent, string(body))
 	}
 	if !s.verify(r.Header.Get(signatureHeader), body) {
 		http.Error(w, "invalid signature", http.StatusUnauthorized)
