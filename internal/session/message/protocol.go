@@ -19,6 +19,7 @@ type Request struct {
 	Raw             bool   `json:"raw,omitempty"`              // send body directly to PTY without prefix
 	ExpectsResponse bool   `json:"expects_response,omitempty"` // sender expects a response (adds annotation)
 	ERTriggerID     string `json:"er_trigger_id,omitempty"`    // trigger ID for expects-response annotation
+	Format          string `json:"format,omitempty"`           // bridge parse mode hint: "HTML" or "MarkdownV2"
 
 	// attach fields
 	Cols      int    `json:"cols,omitempty"`
