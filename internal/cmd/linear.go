@@ -321,7 +321,9 @@ func deliverPromptWhenReady(name, prompt string) {
 				return
 			}
 		}
-		time.Sleep(time.Second)
+		// Poll at 500ms so the task is delivered promptly once the agent is
+		// ready (the agent's own boot dominates this latency, not the poll).
+		time.Sleep(500 * time.Millisecond)
 	}
 	// Fallback: the agent never reported idle; try once anyway.
 	deliverToAgent(name, "linear", prompt)
@@ -378,7 +380,10 @@ func (h *cmdAgentHandle) Deliver(_ context.Context, text string) error {
 // and closes the streams when the agent's turn appears complete: it has been
 // active and then settled into idle, or it exited.
 func (h *cmdAgentHandle) watch(ctx context.Context) {
-	ticker := time.NewTicker(3 * time.Second)
+	// 2s poll keeps streamed activities and completion detection responsive
+	// without hammering the socket; the idle-confirmation streak below guards
+	// against transient idle between the agent's tool calls.
+	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	seenActive := false
 	idleStreak := 0
@@ -407,8 +412,10 @@ func (h *cmdAgentHandle) watch(ctx context.Context) {
 			case "idle":
 				if seenActive {
 					idleStreak++
-					// ~3 consecutive idle polls (~9s) => turn complete.
-					if idleStreak >= 3 {
+					// ~2 consecutive idle polls (~4s) => turn complete. Tuned
+					// down from 9s after live testing; still long enough to ride
+					// out brief idle between tool calls.
+					if idleStreak >= 2 {
 						h.finish(h.summary())
 						return
 					}
