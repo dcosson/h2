@@ -305,19 +305,26 @@ func agentNameForIssue(identifier string) string {
 	return n
 }
 
-// deliverPromptWhenReady waits for the agent socket to come up and delivers the
-// prompt as a normal message. Best-effort.
+// deliverPromptWhenReady waits until the agent is up AND idle (its TUI has
+// finished booting and is ready for input) before delivering the prompt.
+// Delivering during boot races the harness's startup screens and can be lost,
+// so we gate on the idle state. Best-effort with a fallback send.
 func deliverPromptWhenReady(name, prompt string) {
 	if strings.TrimSpace(prompt) == "" {
 		return
 	}
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(90 * time.Second)
 	for time.Now().Before(deadline) {
-		if err := deliverToAgent(name, "linear", prompt); err == nil {
-			return
+		if sockPath, err := socketdir.Find(name); err == nil {
+			if info := queryAgent(sockPath); info != nil && info.State == "idle" {
+				deliverToAgent(name, "linear", prompt)
+				return
+			}
 		}
 		time.Sleep(time.Second)
 	}
+	// Fallback: the agent never reported idle; try once anyway.
+	deliverToAgent(name, "linear", prompt)
 }
 
 // deliverToAgent sends a message to a running agent over its socket.
@@ -334,7 +341,7 @@ func deliverToAgent(name, from, body string) error {
 		return err
 	}
 	defer conn.Close()
-	if err := message.SendRequest(conn, &message.Request{Type: "send", From: from, Body: body}); err != nil {
+	if err := message.SendRequest(conn, &message.Request{Type: "send", Priority: "normal", From: from, Body: body}); err != nil {
 		return err
 	}
 	message.ReadResponse(conn)
