@@ -157,22 +157,25 @@ handles the OAuth install, holds each workspace's token, receives all
 agent-session webhooks, and routes events to each user's local h2 daemon over an
 outbound long-poll connection (so users need no inbound port or tunnel).
 
-Requires a 'linear.relay' block in ~/.h2/config.yaml with the OAuth app
-client_id/client_secret, the webhook signing secret, and the public base_url.`,
+Config comes from environment variables (for container deploys) or, if those
+are unset, the 'linear.relay' block in ~/.h2/config.yaml:
+
+  H2_RELAY_BASE_URL        public base URL (for the OAuth redirect)   [required]
+  H2_RELAY_CLIENT_ID       Linear OAuth app client id                 [required]
+  H2_RELAY_CLIENT_SECRET   Linear OAuth app client secret             [required]
+  H2_RELAY_WEBHOOK_SECRET  Linear webhook signing secret
+  H2_RELAY_ADDR            listen address (default :8080)
+  H2_RELAY_STATE_PATH      path to persist installs across restarts`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load()
+			rc, err := loadRelayConfig()
 			if err != nil {
-				return fmt.Errorf("load config: %w", err)
+				return err
 			}
-			if cfg.Linear == nil || cfg.Linear.Relay == nil {
-				return fmt.Errorf("no 'linear.relay' block in ~/.h2/config.yaml")
-			}
-			rc := cfg.Linear.Relay
 			if rc.ClientID == "" || rc.ClientSecret == "" {
-				return fmt.Errorf("linear.relay.client_id and client_secret are required")
+				return fmt.Errorf("relay client_id and client_secret are required (env H2_RELAY_CLIENT_ID/SECRET or linear.relay.*)")
 			}
 			if rc.BaseURL == "" {
-				return fmt.Errorf("linear.relay.base_url is required (public URL for the OAuth redirect)")
+				return fmt.Errorf("relay base_url is required (env H2_RELAY_BASE_URL or linear.relay.base_url)")
 			}
 			if addr == "" {
 				addr = rc.Address
@@ -186,6 +189,7 @@ client_id/client_secret, the webhook signing secret, and the public base_url.`,
 				ClientID:      rc.ClientID,
 				ClientSecret:  rc.ClientSecret,
 				WebhookSecret: rc.WebhookSecret,
+				StatePath:     rc.StatePath,
 			}, nil, nil)
 
 			ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -205,8 +209,32 @@ client_id/client_secret, the webhook signing secret, and the public base_url.`,
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&addr, "addr", "", "Listen address (default :8080 or linear.relay.address)")
+	cmd.Flags().StringVar(&addr, "addr", "", "Listen address (default :8080, H2_RELAY_ADDR, or linear.relay.address)")
 	return cmd
+}
+
+// loadRelayConfig resolves relay config from environment variables first (for
+// container deploys, where no h2 directory exists), falling back to the
+// linear.relay block in the h2 config file.
+func loadRelayConfig() (config.LinearRelayConfig, error) {
+	if v := os.Getenv("H2_RELAY_CLIENT_ID"); v != "" {
+		return config.LinearRelayConfig{
+			Address:       os.Getenv("H2_RELAY_ADDR"),
+			BaseURL:       os.Getenv("H2_RELAY_BASE_URL"),
+			ClientID:      v,
+			ClientSecret:  os.Getenv("H2_RELAY_CLIENT_SECRET"),
+			WebhookSecret: os.Getenv("H2_RELAY_WEBHOOK_SECRET"),
+			StatePath:     os.Getenv("H2_RELAY_STATE_PATH"),
+		}, nil
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return config.LinearRelayConfig{}, fmt.Errorf("no H2_RELAY_* env vars set and could not load config: %w", err)
+	}
+	if cfg.Linear == nil || cfg.Linear.Relay == nil {
+		return config.LinearRelayConfig{}, fmt.Errorf("no relay config: set H2_RELAY_* env vars or a linear.relay block in config")
+	}
+	return *cfg.Linear.Relay, nil
 }
 
 // cmdAgentRunner is the real AgentRunner: it spawns an h2 agent for a delegated

@@ -43,14 +43,16 @@ type Config struct {
 	ClientID      string // Linear OAuth app client id
 	ClientSecret  string // Linear OAuth app client secret
 	WebhookSecret string // Linear webhook signing secret
+	StatePath     string // optional path to persist tokens/pairings across restarts
 }
 
 // Server is the hosted relay.
 type Server struct {
-	cfg      Config
-	auth     LinearAuth
-	poster   ActivityPoster
-	newToken func() string
+	cfg       Config
+	auth      LinearAuth
+	poster    ActivityPoster
+	newToken  func() string
+	statePath string
 
 	mu       sync.Mutex
 	tokens   map[string]string                             // orgID -> oauth token
@@ -59,7 +61,8 @@ type Server struct {
 }
 
 // New builds a relay Server. auth and poster default to live Linear
-// implementations when nil.
+// implementations when nil. If cfg.StatePath is set, previously-installed
+// workspaces are loaded from it and persisted on each new install.
 func New(cfg Config, auth LinearAuth, poster ActivityPoster) *Server {
 	if auth == nil {
 		auth = &liveAuth{clientID: cfg.ClientID, clientSecret: cfg.ClientSecret}
@@ -67,15 +70,18 @@ func New(cfg Config, auth LinearAuth, poster ActivityPoster) *Server {
 	if poster == nil {
 		poster = livePoster{}
 	}
-	return &Server{
-		cfg:      cfg,
-		auth:     auth,
-		poster:   poster,
-		newToken: randomToken,
-		tokens:   map[string]string{},
-		pairings: map[string]string{},
-		hubs:     map[string]chan linearagent.AgentSessionEvent{},
+	s := &Server{
+		cfg:       cfg,
+		auth:      auth,
+		poster:    poster,
+		newToken:  randomToken,
+		statePath: cfg.StatePath,
+		tokens:    map[string]string{},
+		pairings:  map[string]string{},
+		hubs:      map[string]chan linearagent.AgentSessionEvent{},
 	}
+	s.loadState()
+	return s
 }
 
 // Handler returns the relay's HTTP routes.
@@ -127,6 +133,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.tokens[org] = token
 	s.pairings[pairing] = org
+	s.persistLocked()
 	s.mu.Unlock()
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
