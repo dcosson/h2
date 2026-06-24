@@ -131,7 +131,7 @@ to route to an existing agent without spawning a new session.`,
 			if err != nil {
 				return fmt.Errorf("concierge role not found; create one with: h2 role create concierge --template concierge")
 			}
-			return setupAndForkAgent(conciergeSessionName, role, false, "", 0, nil)
+			return setupAndForkAgent(conciergeSessionName, role, false, "", 0, nil, "")
 		},
 	}
 

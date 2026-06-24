@@ -78,6 +78,45 @@ users:
 	}
 }
 
+func TestLoadFrom_Linear(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	yaml := `linear:
+  api_token: "lin_api_abc123"
+`
+	if err := os.WriteFile(path, []byte(yaml), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	if cfg.Linear == nil {
+		t.Fatal("expected linear config")
+	}
+	if cfg.Linear.APIToken != "lin_api_abc123" {
+		t.Errorf("api_token = %q, want lin_api_abc123", cfg.Linear.APIToken)
+	}
+}
+
+func TestLoadFrom_NoLinear(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	if err := os.WriteFile(path, []byte("users:\n  dcosson: {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	if cfg.Linear != nil {
+		t.Errorf("expected nil Linear, got %v", cfg.Linear)
+	}
+}
+
 func TestLoadFrom_MissingFile(t *testing.T) {
 	cfg, err := LoadFrom("/nonexistent/path/config.yaml")
 	if err != nil {

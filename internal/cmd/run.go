@@ -29,6 +29,7 @@ func newRunCmd() *cobra.Command {
 	var pod string
 	var overrides []string
 	var varFlags []string
+	var linearIssue string
 
 	cmd := &cobra.Command{
 		Use:   "run [name] [flags]",
@@ -71,10 +72,16 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 				return fmt.Errorf("--role, --agent-type, --command, and --resume are mutually exclusive")
 			}
 
+			// --linear links a single agent to a Linear issue. Pods launch
+			// multiple agents, so the link would be ambiguous; reject it for v1.
+			if cmd.Flags().Changed("linear") && pod != "" {
+				return fmt.Errorf("--linear cannot be used with --pod")
+			}
+
 			// Handle --resume mode — it's a separate path from normal run.
 			if resume {
 				// Reject flags that don't apply to resume.
-				for _, flag := range []string{"var", "override", "pod"} {
+				for _, flag := range []string{"var", "override", "pod", "linear"} {
 					if cmd.Flags().Changed(flag) {
 						return fmt.Errorf("--%s cannot be used with --resume", flag)
 					}
@@ -189,7 +196,7 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 					printDryRun(rc)
 					return nil
 				}
-				return setupAndForkAgent(name, role, detach, pod, 0, overrides)
+				return setupAndForkAgent(name, role, detach, pod, 0, overrides, linearIssue)
 			}
 
 			// Agent-type or command mode: --dry-run requires a role.
@@ -231,6 +238,7 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 				Args:                    cmdArgs,
 				CWD:                     func() string { cwd, _ := os.Getwd(); return cwd }(),
 				Pod:                     pod,
+				LinearIssue:             linearIssue,
 				StartedAt:               time.Now().UTC().Format(time.RFC3339),
 			}
 			if err := config.WriteRuntimeConfig(sessionDir, rc); err != nil {
@@ -269,6 +277,7 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 	cmd.Flags().StringVar(&pod, "pod", "", "Pod name for the agent (sets H2_POD env var)")
 	cmd.Flags().StringArrayVar(&overrides, "override", nil, "Override role field (key=value, e.g. worktree_enabled=true)")
 	cmd.Flags().StringArrayVar(&varFlags, "var", nil, "Set template variable (key=value, repeatable)")
+	cmd.Flags().StringVar(&linearIssue, "linear", "", "Link this agent to a Linear issue (e.g. LIN-123) and surface its status as an attachment")
 
 	return cmd
 }

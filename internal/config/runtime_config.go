@@ -63,6 +63,12 @@ type RuntimeConfig struct {
 	Triggers  []TriggerYAMLSpec  `json:"triggers,omitempty"`
 	Schedules []ScheduleYAMLSpec `json:"schedules,omitempty"`
 
+	// LinearIssue is the Linear issue identifier (e.g. "LIN-123") this agent is
+	// linked to. When set and a Linear API token is configured, the daemon
+	// surfaces the agent's status as an attachment on that issue. Empty => the
+	// Linear integration is inert for this session.
+	LinearIssue string `json:"linear_issue,omitempty"`
+
 	// Overrides (recorded for display/debugging).
 	Overrides map[string]string `json:"overrides,omitempty"`
 

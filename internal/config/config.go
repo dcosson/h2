@@ -18,6 +18,7 @@ const markerFile = ".h2-dir.txt"
 type Config struct {
 	Bridges map[string]*BridgesConfig `yaml:"bridges"` // named bridge configs
 	Users   map[string]*UserConfig    `yaml:"users"`
+	Linear  *LinearConfig             `yaml:"linear,omitempty"` // optional Linear attachment integration
 }
 
 type UserConfig struct {
@@ -39,6 +40,71 @@ type TelegramConfig struct {
 
 type MacOSNotifyConfig struct {
 	Enabled bool `yaml:"enabled"`
+}
+
+// LinearConfig holds credentials and settings for the Linear agent
+// integration. When absent the integration is inert and h2 makes no Linear
+// calls.
+//
+// h2 registers as a Linear agent (an OAuth app authorized with actor=app).
+// Users delegate or @mention issues to it; Linear delivers AgentSession events
+// to h2 (currently via an inbound webhook), and h2 reports progress back as
+// agent-session activities.
+type LinearConfig struct {
+	// OAuthToken is the actor=app access token used for all agent-session
+	// GraphQL calls (posting activities, queries).
+	OAuthToken string `yaml:"oauth_token,omitempty"`
+	// AppID is the agent's identity in the workspace (viewer.id under the app
+	// token). Recorded so h2 can recognize its own activities/mentions.
+	AppID string `yaml:"app_id,omitempty"`
+
+	// Inbound configures how Linear AgentSession events reach h2.
+	Inbound *LinearInboundConfig `yaml:"inbound,omitempty"`
+
+	// Agent configures how delegated issues are turned into h2 agents.
+	Agent *LinearAgentConfig `yaml:"agent,omitempty"`
+
+	// Relay configures the hosted relay server (only set on the machine that
+	// runs `h2 linear relay`; end users do not set this).
+	Relay *LinearRelayConfig `yaml:"relay,omitempty"`
+
+	// APIToken is a personal API key retained as a fallback for non-agent
+	// GraphQL calls. Optional.
+	APIToken string `yaml:"api_token,omitempty"`
+}
+
+// LinearInboundConfig configures the inbound event transport.
+//
+//   - mode "relay" (recommended): the local daemon dials out to a hosted relay
+//     (relay_url) and authenticates with pairing_token. No inbound port, no
+//     tunnel, no OAuth token on the user's machine. This is the plug-and-play
+//     path — the user only sets relay_url (defaulted) and pairing_token.
+//   - mode "webhook": runs a local HTTP receiver (for dev / self-hosting),
+//     requires a public URL and the OAuth token in LinearConfig.OAuthToken.
+type LinearInboundConfig struct {
+	Mode    string `yaml:"mode"`              // "relay" | "webhook"
+	Address string `yaml:"address,omitempty"` // webhook listen address, e.g. ":4747"
+	Path    string `yaml:"path,omitempty"`    // webhook path, e.g. "/linear/webhook"
+	Secret  string `yaml:"secret,omitempty"`  // webhook signing secret for verification
+
+	RelayURL     string `yaml:"relay_url,omitempty"`     // relay base URL, e.g. https://relay.h2.dev
+	PairingToken string `yaml:"pairing_token,omitempty"` // links this daemon to a workspace install
+}
+
+// LinearAgentConfig controls how a delegated issue is turned into an h2 agent.
+type LinearAgentConfig struct {
+	Role string `yaml:"role,omitempty"` // h2 role used to spawn agents for delegated issues
+}
+
+// LinearRelayConfig is the configuration for running the hosted relay server.
+// Only the operator of the relay sets this.
+type LinearRelayConfig struct {
+	Address       string `yaml:"address,omitempty"`        // listen address, e.g. ":8080"
+	BaseURL       string `yaml:"base_url,omitempty"`       // public base URL (for the OAuth redirect)
+	ClientID      string `yaml:"client_id"`                // Linear OAuth app client id
+	ClientSecret  string `yaml:"client_secret"`            // Linear OAuth app client secret
+	WebhookSecret string `yaml:"webhook_secret,omitempty"` // Linear webhook signing secret
+	StatePath     string `yaml:"state_path,omitempty"`     // optional path to persist tokens/pairings
 }
 
 // IsH2Dir checks if dir contains a valid .h2-dir.txt marker file.

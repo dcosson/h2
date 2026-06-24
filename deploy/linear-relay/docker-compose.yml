@@ -1,0 +1,21 @@
+# Run the h2 Linear relay. Fill in .env (see .env.example), then:
+#   docker compose -f deploy/linear-relay/docker-compose.yml up -d --build
+services:
+  relay:
+    build:
+      context: ../..
+      dockerfile: deploy/linear-relay/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      H2_RELAY_BASE_URL: ${H2_RELAY_BASE_URL}
+      H2_RELAY_CLIENT_ID: ${H2_RELAY_CLIENT_ID}
+      H2_RELAY_CLIENT_SECRET: ${H2_RELAY_CLIENT_SECRET}
+      H2_RELAY_WEBHOOK_SECRET: ${H2_RELAY_WEBHOOK_SECRET}
+      H2_RELAY_STATE_PATH: /data/relay-state.json
+    volumes:
+      - relay-data:/data
+    restart: unless-stopped
+
+volumes:
+  relay-data:
