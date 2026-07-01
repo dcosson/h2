@@ -31,6 +31,7 @@ const (
 	ModeMenu
 	ModeScroll
 	ModePassthroughScroll
+	ModeAgentNav
 )
 
 // InputAction is a local input-bar action that affects Enter handling without
@@ -82,6 +83,18 @@ type Client struct {
 	OnInterrupt         func()                                                                                         // called when Ctrl+C is written to the PTY
 	OnSubmit            func(text string, priority message.Priority)                                                   // called for non-normal input
 	OnDetach            func()                                                                                         // called when user selects detach from menu
+	OnForkSession       func()                                                                                         // called when user selects fork from menu (async; result via FlashStatus/OnSwitchAgent)
+	OnSwitchAgent       func(name string)                                                                              // tells the attach client to reattach to another agent
+	OnRequestAgentList  func()                                                                                         // requests an async agent list refresh (result via SetAgentNavEntries)
+
+	// Agent navigator state (ModeAgentNav).
+	NavEntries  []AgentNavEntry
+	NavSelected int
+	NavLoading  bool
+
+	// Transient status-bar message (set via FlashStatus).
+	FlashText  string
+	FlashTimer *time.Timer
 
 	// Child process lifecycle callbacks (set by Session).
 	OnRelaunch func() // called when user presses Enter after child exits
@@ -148,6 +161,8 @@ func (c *Client) ReadInput() {
 					i = c.HandlePassthroughBytes(buf, i, n)
 				case ModeMenu:
 					i = c.HandleMenuBytes(buf, i, n)
+				case ModeAgentNav:
+					i = c.HandleAgentNavBytes(buf, i, n)
 				case ModeScroll, ModePassthroughScroll:
 					i = c.HandleScrollBytes(buf, i, n)
 				default:

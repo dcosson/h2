@@ -24,6 +24,7 @@ func newSessionCmd() *cobra.Command {
 	cmd.AddCommand(newSessionCleanupCmd())
 	cmd.AddCommand(newSessionRestartCmd())
 	cmd.AddCommand(newRotateCmd())
+	cmd.AddCommand(newForkCmd())
 	return cmd
 }
 

@@ -66,6 +66,11 @@ func (c *Client) ResetModeOnExit() {
 		c.setMode(ModeNormal)
 	case ModeMenu:
 		c.setMode(ModeNormal)
+	case ModeAgentNav:
+		c.CancelPendingEsc()
+		c.NavEntries = nil
+		c.NavLoading = false
+		c.setMode(ModeNormal)
 	}
 }
 
@@ -122,6 +127,8 @@ func (c *Client) StartPendingEsc() {
 			c.writePTYOrHang([]byte{0x1B})
 		case ModeScroll, ModePassthroughScroll:
 			c.ExitScrollMode()
+		case ModeAgentNav:
+			c.ExitAgentNav()
 		}
 	})
 }
@@ -271,6 +278,19 @@ func (c *Client) HandleMenuBytes(buf []byte, start, n int) int {
 			c.RenderScreen()
 			c.setMode(ModeNormal)
 			c.RenderBar()
+		case 'f', 'F': // fork session
+			if c.OnForkSession != nil {
+				c.setMode(ModeNormal)
+				c.RenderBar()
+				c.FlashStatus("Forking session...")
+				c.OnForkSession()
+				return n
+			}
+		case 'a', 'A': // agent navigator
+			if c.OnRequestAgentList != nil {
+				c.EnterAgentNav()
+				return n
+			}
 		case 'd', 'D': // detach
 			if c.OnDetach != nil {
 				c.setMode(ModeNormal)
@@ -532,6 +552,14 @@ func (c *Client) HandleCSI(remaining []byte) (consumed int, handled bool) {
 	case 'A', 'B':
 		if c.Mode == ModePassthrough {
 			c.writePTYOrHang(append([]byte{0x1B, '['}, remaining[:i+1]...))
+			break
+		}
+		if c.Mode == ModeAgentNav {
+			if final == 'A' {
+				c.NavMove(-1)
+			} else {
+				c.NavMove(1)
+			}
 			break
 		}
 		if c.IsScrollMode() {
@@ -931,6 +959,10 @@ func (c *Client) HandleSGRMouse(params []byte, press bool) {
 			c.ShowSelectHint()
 		}
 	case 64: // scroll up
+		if c.Mode == ModeAgentNav {
+			c.NavMove(-1)
+			return
+		}
 		if c.VT != nil && c.VT.AltScrollEnabled {
 			for i := 0; i < scrollStep; i++ {
 				if !c.writePTYOrHang([]byte("\033[A")) {
@@ -944,6 +976,10 @@ func (c *Client) HandleSGRMouse(params []byte, press bool) {
 			c.ScrollUp(scrollStep)
 		}
 	case 65: // scroll down
+		if c.Mode == ModeAgentNav {
+			c.NavMove(1)
+			return
+		}
 		if c.VT != nil && c.VT.AltScrollEnabled {
 			for i := 0; i < scrollStep; i++ {
 				if !c.writePTYOrHang([]byte("\033[B")) {

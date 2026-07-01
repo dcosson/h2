@@ -295,6 +295,44 @@ func (s *Session) NewClient() *client.Client {
 	cl.OnSubmit = func(text string, pri message.Priority) {
 		s.SubmitInput(text, pri)
 	}
+	cl.OnForkSession = func() {
+		// Snapshot the config now (VT.Mu is held by the input handler) so the
+		// background fork doesn't race concurrent RuntimeConfig updates.
+		rcCopy := *s.RC
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Fprintf(os.Stderr, "panic recovered in OnForkSession: %v\n%s\n", r, debug.Stack())
+				}
+			}()
+			newName, err := ForkAndLaunch(&rcCopy, TerminalHints{})
+			s.VT.Mu.Lock()
+			if err != nil {
+				cl.FlashStatus("Fork failed: " + err.Error())
+				s.VT.Mu.Unlock()
+				return
+			}
+			cl.FlashStatus("Forked to " + newName)
+			switchFn := cl.OnSwitchAgent
+			s.VT.Mu.Unlock()
+			if switchFn != nil {
+				switchFn(newName)
+			}
+		}()
+	}
+	cl.OnRequestAgentList = func() {
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Fprintf(os.Stderr, "panic recovered in OnRequestAgentList: %v\n%s\n", r, debug.Stack())
+				}
+			}()
+			entries := s.gatherAgentNavEntries()
+			s.VT.Mu.Lock()
+			defer s.VT.Mu.Unlock()
+			cl.SetAgentNavEntries(entries)
+		}()
+	}
 	return cl
 }
 
@@ -340,7 +378,7 @@ func (s *Session) pipeOutputCallback() func() {
 		// HandleOutput for the session (only need to call once).
 		s.HandleOutput()
 		s.ForEachClient(func(cl *client.Client) {
-			if !cl.IsScrollMode() {
+			if !cl.IsScrollMode() && cl.Mode != client.ModeAgentNav {
 				cl.RenderScreen()
 			}
 		})

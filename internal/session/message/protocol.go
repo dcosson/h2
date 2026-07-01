@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 )
 
 // Request is the JSON request sent over the Unix socket.
@@ -198,6 +199,34 @@ type ResizeControl struct {
 	Type string `json:"type"` // "resize"
 	Cols int    `json:"cols"`
 	Rows int    `json:"rows"`
+}
+
+// SwitchControl is the JSON payload for a switch control frame, sent from the
+// daemon to an attach client to tell it to reattach to a different agent
+// (e.g. after a session fork or an agent-navigator selection).
+type SwitchControl struct {
+	Type string `json:"type"` // "switch"
+	Name string `json:"name"` // target agent name
+}
+
+// QueryAgentInfo dials an agent socket and returns its status info, or nil
+// if the agent is unreachable or unresponsive within the timeout.
+func QueryAgentInfo(sockPath string, timeout time.Duration) *AgentInfo {
+	conn, err := net.DialTimeout("unix", sockPath, timeout)
+	if err != nil {
+		return nil
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(timeout))
+
+	if err := SendRequest(conn, &Request{Type: "status"}); err != nil {
+		return nil
+	}
+	resp, err := ReadResponse(conn)
+	if err != nil || !resp.OK {
+		return nil
+	}
+	return resp.Agent
 }
 
 // SendRequest sends a JSON-encoded request over a connection.

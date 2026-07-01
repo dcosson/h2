@@ -6,7 +6,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -87,48 +86,23 @@ func doAttachBySessionID(harnessSessionID string) error {
 	return doAttach(rc.AgentName)
 }
 
-// doAttach connects to a running daemon and proxies terminal I/O.
+// doAttach connects to a running daemon and proxies terminal I/O. When the
+// daemon sends a switch control frame (session fork, agent navigator), the
+// connection is dropped and this loop reattaches to the requested agent.
 func doAttach(name string) error {
-	sockPath, findErr := socketdir.Find(name)
-	if findErr != nil {
-		return agentConnError(name, findErr)
-	}
-	conn, err := net.Dial("unix", sockPath)
-	if err != nil {
-		return agentConnError(name, err)
-	}
-	defer conn.Close()
-
 	fd := int(os.Stdin.Fd())
-	cols, rows, err := term.GetSize(fd)
-	if err != nil {
-		return fmt.Errorf("get terminal size: %w", err)
-	}
-	colorHints := detectTerminalHints()
 
-	// Send attach handshake.
-	if err := message.SendRequest(conn, &message.Request{
-		Type:      "attach",
-		Cols:      cols,
-		Rows:      rows,
-		OscFg:     colorHints.OscFg,
-		OscBg:     colorHints.OscBg,
-		ColorFGBG: colorHints.ColorFGBG,
-	}); err != nil {
-		return fmt.Errorf("send attach request: %w", err)
-	}
-
-	resp, err := message.ReadResponse(conn)
+	// Dial the first agent before touching terminal state so connection
+	// errors print normally.
+	conn, err := dialAndAttach(name, fd)
 	if err != nil {
-		return fmt.Errorf("read attach response: %w", err)
-	}
-	if !resp.OK {
-		return fmt.Errorf("attach failed: %s", resp.Error)
+		return err
 	}
 
 	// Put terminal into raw mode.
 	oldState, err := term.MakeRaw(fd)
 	if err != nil {
+		conn.Close()
 		return fmt.Errorf("set raw mode: %w", err)
 	}
 	defer func() {
@@ -143,11 +117,123 @@ func doAttach(name string) error {
 	// crashing the attach client.
 	signal.Ignore(syscall.SIGQUIT, syscall.SIGINT)
 
-	// Handle SIGWINCH for resizing.
+	// SIGWINCH notifications, consumed by the per-connection proxy loop.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGWINCH)
+
+	// Persistent stdin pump. It outlives individual connections so no
+	// keystrokes are lost across a switch; the active proxy loop consumes it.
+	stdinCh := make(chan []byte, 16)
 	go func() {
-		for range sigCh {
+		defer close(stdinCh)
+		buf := make([]byte, 4096)
+		for {
+			n, err := os.Stdin.Read(buf)
+			if n > 0 {
+				chunk := make([]byte, n)
+				copy(chunk, buf[:n])
+				stdinCh <- chunk
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	for {
+		switchTo := proxyAttachConn(conn, fd, stdinCh, sigCh)
+		conn.Close()
+		if switchTo == "" {
+			return nil
+		}
+		conn, err = dialAndAttach(switchTo, fd)
+		if err != nil {
+			return err
+		}
+	}
+}
+
+// dialAndAttach dials an agent's socket and completes the attach handshake.
+func dialAndAttach(name string, fd int) (net.Conn, error) {
+	sockPath, findErr := socketdir.Find(name)
+	if findErr != nil {
+		return nil, agentConnError(name, findErr)
+	}
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		return nil, agentConnError(name, err)
+	}
+
+	cols, rows, err := term.GetSize(fd)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("get terminal size: %w", err)
+	}
+	colorHints := detectTerminalHints()
+
+	if err := message.SendRequest(conn, &message.Request{
+		Type:      "attach",
+		Cols:      cols,
+		Rows:      rows,
+		OscFg:     colorHints.OscFg,
+		OscBg:     colorHints.OscBg,
+		ColorFGBG: colorHints.ColorFGBG,
+	}); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("send attach request: %w", err)
+	}
+
+	resp, err := message.ReadResponse(conn)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("read attach response: %w", err)
+	}
+	if !resp.OK {
+		conn.Close()
+		return nil, fmt.Errorf("attach failed: %s", resp.Error)
+	}
+	return conn, nil
+}
+
+// proxyAttachConn proxies terminal I/O over one attach connection until it
+// ends. Returns the agent name to switch to if the daemon sent a switch
+// control frame, or "" for a normal detach/disconnect.
+func proxyAttachConn(conn net.Conn, fd int, stdinCh <-chan []byte, sigCh <-chan os.Signal) (switchTo string) {
+	done := make(chan struct{})
+	var switchName string
+
+	// Goroutine: read frames from daemon → write to stdout.
+	go func() {
+		defer close(done)
+		for {
+			frameType, payload, err := message.ReadFrame(conn)
+			if err != nil {
+				return
+			}
+			switch frameType {
+			case message.FrameTypeData:
+				os.Stdout.Write(payload)
+			case message.FrameTypeControl:
+				if name := parseSwitchControl(payload); name != "" {
+					switchName = name
+					return
+				}
+			}
+		}
+	}()
+
+	// Main loop: stdin and resize events → frames to daemon.
+	for {
+		select {
+		case chunk, ok := <-stdinCh:
+			if !ok {
+				return ""
+			}
+			if err := message.WriteFrame(conn, message.FrameTypeData, chunk); err != nil {
+				<-done
+				return switchName
+			}
+		case <-sigCh:
 			cols, rows, err := term.GetSize(fd)
 			if err != nil || rows < 3 || cols < 1 {
 				continue
@@ -158,44 +244,21 @@ func doAttach(name string) error {
 				Rows: rows,
 			})
 			message.WriteFrame(conn, message.FrameTypeControl, ctrl)
+		case <-done:
+			return switchName
 		}
-	}()
+	}
+}
 
-	done := make(chan struct{})
-	var closeOnce sync.Once
-	closeDone := func() { closeOnce.Do(func() { close(done) }) }
-
-	// Goroutine: stdin → data frames to session.
-	go func() {
-		defer closeDone()
-		buf := make([]byte, 4096)
-		for {
-			n, err := os.Stdin.Read(buf)
-			if n > 0 {
-				if err := message.WriteFrame(conn, message.FrameTypeData, buf[:n]); err != nil {
-					return
-				}
-			}
-			if err != nil {
-				return
-			}
-		}
-	}()
-
-	// Goroutine: read frames from daemon → write to stdout.
-	go func() {
-		defer closeDone()
-		for {
-			frameType, payload, err := message.ReadFrame(conn)
-			if err != nil {
-				return
-			}
-			if frameType == message.FrameTypeData {
-				os.Stdout.Write(payload)
-			}
-		}
-	}()
-
-	<-done
-	return nil
+// parseSwitchControl extracts the target agent name from a switch control
+// frame payload, or returns "" if the payload is not a switch directive.
+func parseSwitchControl(payload []byte) string {
+	var ctrl message.SwitchControl
+	if err := json.Unmarshal(payload, &ctrl); err != nil {
+		return ""
+	}
+	if ctrl.Type != "switch" {
+		return ""
+	}
+	return ctrl.Name
 }

@@ -82,6 +82,20 @@ func (d *Daemon) handleAttach(conn net.Conn, req *message.Request) {
 		// Set detach callback to close the client connection.
 		cl.OnDetach = func() { conn.Close() }
 
+		// Set switch callback: tell the attach client to reattach to another
+		// agent, then close this connection. The control frame write takes
+		// OutputMu so it can't interleave with a data frame from a render.
+		cl.OnSwitchAgent = func(name string) {
+			payload, err := json.Marshal(message.SwitchControl{Type: "switch", Name: name})
+			if err != nil {
+				return
+			}
+			cl.OutputMu.Lock()
+			message.WriteFrame(conn, message.FrameTypeControl, payload)
+			cl.OutputMu.Unlock()
+			conn.Close()
+		}
+
 		// Enable mouse reporting and render the current screen.
 		// RenderScreen clears each line individually (\033[2K), so a full
 		// screen clear (\033[2J) is unnecessary and would cause a visible flash.
@@ -102,6 +116,7 @@ func (d *Daemon) handleAttach(conn net.Conn, req *message.Request) {
 		vt.Mu.Lock()
 		defer vt.Mu.Unlock()
 		cl.OnDetach = nil
+		cl.OnSwitchAgent = nil
 		cl.Output.Write([]byte("\033[?1000l\033[?1003l\033[?1006l"))
 
 		// Release passthrough ownership if this client held it.
@@ -169,6 +184,8 @@ func (d *Daemon) readClientInput(conn net.Conn, cl *client.Client) {
 						i = cl.HandlePassthroughBytes(payload, i, len(payload))
 					case client.ModeMenu:
 						i = cl.HandleMenuBytes(payload, i, len(payload))
+					case client.ModeAgentNav:
+						i = cl.HandleAgentNavBytes(payload, i, len(payload))
 					case client.ModeScroll, client.ModePassthroughScroll:
 						i = cl.HandleScrollBytes(payload, i, len(payload))
 					default:

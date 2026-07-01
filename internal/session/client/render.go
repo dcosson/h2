@@ -30,7 +30,9 @@ func (c *Client) RenderScreen() {
 	var buf bytes.Buffer
 	buf.WriteString("\033[?2026h") // begin synchronized update
 	buf.WriteString("\0337")       // DECSC: save cursor position
-	if c.IsScrollMode() {
+	if c.Mode == ModeAgentNav {
+		c.renderAgentNavView(&buf)
+	} else if c.IsScrollMode() {
 		c.renderScrollView(&buf)
 	} else {
 		c.renderLiveView(&buf)
@@ -107,6 +109,122 @@ func (c *Client) renderScrollView(buf *bytes.Buffer) {
 		buf.WriteString("\033[0m\033[K")
 	}
 	c.renderScrollIndicator(buf)
+}
+
+// renderAgentNavView renders the agent navigator: a full-screen list of
+// running agents with the current selection highlighted. Long lists scroll
+// to keep the selection visible.
+func (c *Client) renderAgentNavView(buf *bytes.Buffer) {
+	rows := c.VT.ChildRows
+	if rows < 1 {
+		return
+	}
+	title := " Agents — Up/Down move · Enter switch · r refresh · Esc back "
+	if len(title) > c.VT.Cols && c.VT.Cols > 0 {
+		title = title[:c.VT.Cols]
+	}
+	fmt.Fprintf(buf, "\033[1;1H\033[1m%s\033[0m\033[K", title)
+
+	listRows := rows - 1
+	line := 2
+	writeLine := func(s string) {
+		if line > rows {
+			return
+		}
+		fmt.Fprintf(buf, "\033[%d;1H%s\033[0m\033[K", line, s)
+		line++
+	}
+
+	switch {
+	case c.NavLoading:
+		writeLine("  Loading agents...")
+	case len(c.NavEntries) == 0:
+		writeLine("  No running agents.")
+	default:
+		// Window the list so the selection stays visible.
+		first := 0
+		if listRows > 0 && c.NavSelected >= listRows {
+			first = c.NavSelected - listRows + 1
+		}
+		nameWidth := 0
+		for _, e := range c.NavEntries {
+			if len(e.Name) > nameWidth {
+				nameWidth = len(e.Name)
+			}
+		}
+		if nameWidth > 32 {
+			nameWidth = 32
+		}
+		for idx := first; idx < len(c.NavEntries) && line <= rows; idx++ {
+			writeLine(c.formatNavRow(c.NavEntries[idx], idx == c.NavSelected, nameWidth))
+		}
+	}
+	// Blank out any remaining rows so stale terminal content doesn't show.
+	for line <= rows {
+		writeLine("")
+	}
+}
+
+// formatNavRow formats one agent navigator row, truncated to the terminal width.
+func (c *Client) formatNavRow(e AgentNavEntry, selected bool, nameWidth int) string {
+	name := e.Name
+	if len(name) > nameWidth {
+		name = name[:nameWidth]
+	}
+
+	state := e.StateDisplay
+	if e.StateDuration != "" {
+		state += " " + e.StateDuration
+	}
+
+	var extras strings.Builder
+	if e.IsSelf {
+		extras.WriteString(" (this)")
+	}
+	if e.Role != "" {
+		fmt.Fprintf(&extras, " (%s)", e.Role)
+	}
+	if e.Pod != "" {
+		fmt.Fprintf(&extras, " [pod: %s]", e.Pod)
+	}
+	if e.Command != "" {
+		extras.WriteString(" " + e.Command)
+	}
+
+	marker := "  "
+	if selected {
+		marker = "> "
+	}
+	text := fmt.Sprintf("%s%-*s  %-18s%s", marker, nameWidth, name, state, extras.String())
+	if len(text) > c.VT.Cols && c.VT.Cols > 0 {
+		text = text[:c.VT.Cols]
+	}
+	if selected {
+		return "\033[7m" + text
+	}
+
+	// Color the state dot-equivalent by coloring the state text.
+	stateColor := ""
+	switch e.State {
+	case "active":
+		stateColor = "\033[32m"
+	case "idle":
+		stateColor = "\033[33m"
+	case "exited":
+		stateColor = "\033[31m"
+	}
+	if stateColor == "" || state == "" {
+		return text
+	}
+	// Re-render with the state segment colored (positions match the plain
+	// version because escape codes add no visible width, but truncation above
+	// must happen on the plain text first — so splice the color in afterwards.
+	idx := strings.Index(text, state)
+	if idx < 0 {
+		return text
+	}
+	end := idx + len(state)
+	return text[:idx] + stateColor + text[idx:end] + "\033[0m" + text[end:]
 }
 
 // renderScrollViewHistory renders using ScrollHistory (scrolled-off lines from
@@ -479,6 +597,9 @@ func (c *Client) fitStatusBarSections() (label, right string) {
 	var status, wd, tokens string
 	if c.Mode != ModeMenu {
 		status = c.StatusLabel()
+		if c.FlashText != "" {
+			status = c.FlashText
+		}
 		if c.WorkingDir != nil {
 			if w := strings.TrimSpace(c.WorkingDir()); w != "" {
 				wd = c.formatWorkingDirForBar(w)
@@ -639,6 +760,8 @@ func (c *Client) ModeLabel() string {
 		return "Passthrough"
 	case ModeMenu:
 		return c.MenuLabel()
+	case ModeAgentNav:
+		return "Agents"
 	case ModeScroll:
 		return "Scroll"
 	case ModePassthroughScroll:
@@ -666,7 +789,7 @@ func (c *Client) ModeBarStyle() string {
 	switch c.Mode {
 	case ModePassthrough, ModePassthroughScroll:
 		return "\033[7m\033[33m"
-	case ModeMenu:
+	case ModeMenu, ModeAgentNav:
 		return "\033[7m\033[34m"
 	case ModeScroll:
 		return "\033[7m\033[36m"
@@ -682,6 +805,8 @@ func (c *Client) HelpLabel() string {
 		return c.keybindingHelp().PassthroughMode
 	case ModeMenu:
 		return `Ctrl+\ back | Up/Down history`
+	case ModeAgentNav:
+		return "Up/Down move | Enter switch | Esc back"
 	case ModeScroll, ModePassthroughScroll:
 		return "Scroll/Up/Down navigate | Esc exit scroll"
 	default:
@@ -781,6 +906,12 @@ func (c *Client) MenuLabel() string {
 		items = "Menu | p:LOCKED | t:take over | c:clear | r:redraw"
 	} else {
 		items = "Menu | p:passthrough | c:clear | r:redraw"
+	}
+	if c.OnForkSession != nil {
+		items += " | f:fork"
+	}
+	if c.OnRequestAgentList != nil {
+		items += " | a:agents"
 	}
 	if c.OnDetach != nil {
 		items += " | d:detach"
