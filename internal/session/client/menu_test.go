@@ -233,10 +233,102 @@ func TestAgentNav_RenderShowsEntriesAndSelection(t *testing.T) {
 	c.SetAgentNavEntries(entries)
 
 	got := out.String()
-	for _, want := range []string{"Agents", "alpha-agent", "beta-agent", "[pod: my-pod]", "(coder)", "> alpha-agent"} {
+	for _, want := range []string{"Agents", "alpha-agent", "beta-agent", "pod: my-pod", "no pod", "(coder)", "> alpha-agent"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("nav render missing %q", want)
 		}
+	}
+}
+
+func TestAgentNav_RenderStoppedSectionAndPodLabel(t *testing.T) {
+	c := newTestClient(10, 80)
+	c.OnRequestAgentList = func() {}
+	c.EnterAgentNav()
+	entries := navEntries("live-agent", "old-agent")
+	entries[1].Stopped = true
+	entries[1].State = "stopped"
+	entries[1].StateDisplay = "Stopped"
+	entries[1].Pod = "old-pod"
+	c.SetAgentNavEntries(entries)
+
+	var out bytes.Buffer
+	c.Output = &out
+	c.RenderScreen()
+
+	got := out.String()
+	for _, want := range []string{"Stopped", "old-agent", "[pod: old-pod]"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("nav render missing %q", want)
+		}
+	}
+	if strings.Contains(got, "no pod") {
+		t.Error("flat live section should not get a 'no pod' header when no live pods exist")
+	}
+}
+
+func TestBuildNavRows_FlatListHasNoHeaders(t *testing.T) {
+	c := newTestClient(10, 80)
+	c.NavEntries = navEntries("one", "two")
+	for _, r := range c.buildNavRows() {
+		if r.entryIdx == -1 {
+			t.Fatalf("unexpected header row %q in flat list", r.header)
+		}
+	}
+}
+
+func TestBuildNavRows_GroupsPodsAndStopped(t *testing.T) {
+	c := newTestClient(10, 80)
+	entries := navEntries("pod-a-1", "pod-a-2", "pod-b-1", "loner", "old")
+	entries[0].Pod = "pod-a"
+	entries[1].Pod = "pod-a"
+	entries[2].Pod = "pod-b"
+	entries[4].Stopped = true
+	c.NavEntries = entries
+
+	var headers []string
+	entryCount := 0
+	for _, r := range c.buildNavRows() {
+		if r.entryIdx == -1 {
+			headers = append(headers, r.header)
+		} else {
+			entryCount++
+		}
+	}
+	want := []string{"pod: pod-a", "pod: pod-b", "no pod", "Stopped"}
+	if len(headers) != len(want) {
+		t.Fatalf("headers = %v, want %v", headers, want)
+	}
+	for i := range want {
+		if headers[i] != want[i] {
+			t.Errorf("headers[%d] = %q, want %q", i, headers[i], want[i])
+		}
+	}
+	if entryCount != 5 {
+		t.Errorf("entry rows = %d, want 5", entryCount)
+	}
+}
+
+func TestAgentNav_EnterOnStoppedResumesInsteadOfSwitching(t *testing.T) {
+	c := newTestClient(10, 80)
+	c.OnRequestAgentList = func() {}
+	var switched, resumed string
+	c.OnSwitchAgent = func(name string) { switched = name }
+	c.OnResumeAgent = func(name string) { resumed = name }
+	c.EnterAgentNav()
+	entries := navEntries("live-one", "stopped-one")
+	entries[1].Stopped = true
+	c.SetAgentNavEntries(entries)
+
+	c.HandleAgentNavBytes([]byte("j\r"), 0, 2)
+
+	if resumed != "stopped-one" {
+		t.Errorf("resumed = %q, want stopped-one", resumed)
+	}
+	if switched != "" {
+		t.Errorf("switched = %q, want no direct switch for a stopped agent", switched)
+	}
+	if c.FlashTimer != nil {
+		c.FlashTimer.Stop()
 	}
 }
 

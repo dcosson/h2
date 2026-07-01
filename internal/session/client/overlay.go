@@ -85,6 +85,7 @@ type Client struct {
 	OnDetach            func()                                                                                         // called when user selects detach from menu
 	OnForkSession       func()                                                                                         // called when user selects fork from menu (async; result via FlashStatus/OnSwitchAgent)
 	OnSwitchAgent       func(name string)                                                                              // tells the attach client to reattach to another agent
+	OnResumeAgent       func(name string)                                                                              // resumes a stopped agent, then switches to it (async)
 	OnRequestAgentList  func()                                                                                         // requests an async agent list refresh (result via SetAgentNavEntries)
 
 	// Agent navigator state (ModeAgentNav).

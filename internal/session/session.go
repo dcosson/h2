@@ -320,6 +320,28 @@ func (s *Session) NewClient() *client.Client {
 			}
 		}()
 	}
+	cl.OnResumeAgent = func(name string) {
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Fprintf(os.Stderr, "panic recovered in OnResumeAgent: %v\n%s\n", r, debug.Stack())
+				}
+			}()
+			err := ResumeSession(name, TerminalHints{}, nil)
+			s.VT.Mu.Lock()
+			if err != nil {
+				cl.FlashStatus("Resume failed: " + err.Error())
+				s.VT.Mu.Unlock()
+				return
+			}
+			cl.FlashStatus("Resumed " + name)
+			switchFn := cl.OnSwitchAgent
+			s.VT.Mu.Unlock()
+			if switchFn != nil {
+				switchFn(name)
+			}
+		}()
+	}
 	cl.OnRequestAgentList = func() {
 		go func() {
 			defer func() {

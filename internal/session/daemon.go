@@ -351,6 +351,11 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 	}
 	if !activity.LastActivityAt.IsZero() {
 		info.LastActivity = virtualterminal.FormatIdleDuration(time.Since(activity.LastActivityAt))
+		info.LastActivityAt = activity.LastActivityAt.Format(time.RFC3339)
+	} else {
+		// No activity recorded yet — treat daemon start as last activity so
+		// recency sorts (e.g. the agent navigator) have a stable timestamp.
+		info.LastActivityAt = d.StartTime.Format(time.RFC3339)
 	}
 
 	// Pull from OTEL collector if active.

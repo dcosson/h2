@@ -312,10 +312,10 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 }
 
 // runResume handles the resume flow for an already-resolved agent name (from
-// either `--resume <name>` or `--resume-from-session-id <id>`). It reads the
-// RuntimeConfig from a previous run, checks the agent isn't still alive,
-// resolves the harness (to verify resume support), and forks a new daemon
-// that passes --resume <session-id> to Claude Code instead of starting fresh.
+// either `--resume <name>` or `--resume-from-session-id <id>`). The heavy
+// lifting (validation, metadata update, daemon fork) lives in
+// session.ResumeSession so the agent navigator can resume stopped agents
+// through the same path.
 func runResume(cmd *cobra.Command, name string, detach bool, dryRun bool) error {
 	// Read RuntimeConfig from the previous run.
 	sessionDir := config.SessionDir(name)
@@ -332,26 +332,18 @@ func runResume(cmd *cobra.Command, name string, detach bool, dryRun bool) error 
 		return fmt.Errorf("agent %q is still running; use 'h2 attach %s' instead", name, name)
 	}
 
-	// Resolve harness to check resume support.
-	h, err := harness.Resolve(rc, nil)
-	if err != nil {
-		return fmt.Errorf("resolve harness for resume: %w", err)
-	}
-	if !h.SupportsResume() {
-		return fmt.Errorf("agent %q uses harness %q which does not support --resume", name, rc.HarnessType)
-	}
-
-	// Ensure the harness config dir exists for the selected harness.
-	if err := h.EnsureConfigDir(config.ConfigDir()); err != nil {
-		return fmt.Errorf("ensure config dir: %w", err)
-	}
-
-	if rc.HarnessSessionID == "" {
-		return fmt.Errorf("session config for agent %q has no harness_session_id; cannot resume", name)
-	}
-
 	if dryRun {
-		// Build the command args that the harness will use.
+		// Resolve harness to validate and preview the resume command args.
+		h, err := harness.Resolve(rc, nil)
+		if err != nil {
+			return fmt.Errorf("resolve harness for resume: %w", err)
+		}
+		if !h.SupportsResume() {
+			return fmt.Errorf("agent %q uses harness %q which does not support --resume", name, rc.HarnessType)
+		}
+		if rc.HarnessSessionID == "" {
+			return fmt.Errorf("session config for agent %q has no harness_session_id; cannot resume", name)
+		}
 		// Set ResumeSessionID on rc so BuildCommandArgs picks it up.
 		rc.ResumeSessionID = rc.HarnessSessionID
 		resumeH, _ := harness.Resolve(rc, nil)
@@ -377,27 +369,14 @@ func runResume(cmd *cobra.Command, name string, detach bool, dryRun bool) error 
 		return nil
 	}
 
-	// Update started_at for the new daemon instance.
-	origStartedAt := rc.StartedAt
-	rc.StartedAt = time.Now().UTC().Format(time.RFC3339)
-
-	if err := config.WriteRuntimeConfig(sessionDir, rc); err != nil {
-		return fmt.Errorf("write runtime config for resume: %w", err)
-	}
-
 	colorHints := detectTerminalHints()
-
-	// Fork daemon with --resume flag. If fork fails, restore the original
-	// started_at so the metadata isn't left in a corrupted state.
-	if err := forkDaemonFunc(sessionDir, session.TerminalHints{
+	if err := session.ResumeSession(name, session.TerminalHints{
 		OscFg:     colorHints.OscFg,
 		OscBg:     colorHints.OscBg,
 		ColorFGBG: colorHints.ColorFGBG,
 		Term:      colorHints.Term,
 		ColorTerm: colorHints.ColorTerm,
-	}, true); err != nil {
-		rc.StartedAt = origStartedAt
-		_ = config.WriteRuntimeConfig(sessionDir, rc) // best-effort restore
+	}, session.ForkDaemonFunc(forkDaemonFunc)); err != nil {
 		return err
 	}
 

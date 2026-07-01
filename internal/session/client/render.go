@@ -111,15 +111,64 @@ func (c *Client) renderScrollView(buf *bytes.Buffer) {
 	c.renderScrollIndicator(buf)
 }
 
+// navRow is one display row of the agent navigator: either a section header
+// or a selectable entry (an index into NavEntries).
+type navRow struct {
+	header   string
+	entryIdx int // -1 for header rows
+}
+
+// buildNavRows converts NavEntries into display rows, inserting section
+// headers mirroring `h2 list`: one per pod, one for podless live agents, and
+// one for stopped sessions. Flat lists (no pods, nothing stopped) get no
+// headers at all.
+func (c *Client) buildNavRows() []navRow {
+	hasPods := false
+	hasStopped := false
+	for _, e := range c.NavEntries {
+		if e.Pod != "" && !e.Stopped {
+			hasPods = true
+		}
+		if e.Stopped {
+			hasStopped = true
+		}
+	}
+
+	var rows []navRow
+	prevHeader := ""
+	for i, e := range c.NavEntries {
+		var header string
+		switch {
+		case e.Stopped:
+			if hasStopped {
+				header = "Stopped"
+			}
+		case e.Pod != "":
+			header = "pod: " + e.Pod
+		default:
+			if hasPods {
+				header = "no pod"
+			}
+		}
+		if header != "" && header != prevHeader {
+			rows = append(rows, navRow{header: header, entryIdx: -1})
+		}
+		prevHeader = header
+		rows = append(rows, navRow{entryIdx: i})
+	}
+	return rows
+}
+
 // renderAgentNavView renders the agent navigator: a full-screen list of
-// running agents with the current selection highlighted. Long lists scroll
-// to keep the selection visible.
+// agents (live first, grouped by pod; stopped sessions last) with the
+// current selection highlighted. Long lists scroll to keep the selection
+// visible.
 func (c *Client) renderAgentNavView(buf *bytes.Buffer) {
 	rows := c.VT.ChildRows
 	if rows < 1 {
 		return
 	}
-	title := " Agents — Up/Down move · Enter switch · r refresh · Esc back "
+	title := " Agents — Up/Down move · Enter switch/resume · r refresh · Esc back "
 	if len(title) > c.VT.Cols && c.VT.Cols > 0 {
 		title = title[:c.VT.Cols]
 	}
@@ -139,13 +188,23 @@ func (c *Client) renderAgentNavView(buf *bytes.Buffer) {
 	case c.NavLoading:
 		writeLine("  Loading agents...")
 	case len(c.NavEntries) == 0:
-		writeLine("  No running agents.")
+		writeLine("  No agents found.")
 	default:
-		// Window the list so the selection stays visible.
-		first := 0
-		if listRows > 0 && c.NavSelected >= listRows {
-			first = c.NavSelected - listRows + 1
+		navRows := c.buildNavRows()
+
+		// Window the display rows so the selected entry stays visible.
+		selRow := 0
+		for i, r := range navRows {
+			if r.entryIdx == c.NavSelected {
+				selRow = i
+				break
+			}
 		}
+		first := 0
+		if listRows > 0 && selRow >= listRows {
+			first = selRow - listRows + 1
+		}
+
 		nameWidth := 0
 		for _, e := range c.NavEntries {
 			if len(e.Name) > nameWidth {
@@ -155,8 +214,13 @@ func (c *Client) renderAgentNavView(buf *bytes.Buffer) {
 		if nameWidth > 32 {
 			nameWidth = 32
 		}
-		for idx := first; idx < len(c.NavEntries) && line <= rows; idx++ {
-			writeLine(c.formatNavRow(c.NavEntries[idx], idx == c.NavSelected, nameWidth))
+		for i := first; i < len(navRows) && line <= rows; i++ {
+			r := navRows[i]
+			if r.entryIdx == -1 {
+				writeLine("\033[1m" + r.header)
+				continue
+			}
+			writeLine(c.formatNavRow(c.NavEntries[r.entryIdx], r.entryIdx == c.NavSelected, nameWidth))
 		}
 	}
 	// Blank out any remaining rows so stale terminal content doesn't show.
@@ -184,7 +248,9 @@ func (c *Client) formatNavRow(e AgentNavEntry, selected bool, nameWidth int) str
 	if e.Role != "" {
 		fmt.Fprintf(&extras, " (%s)", e.Role)
 	}
-	if e.Pod != "" {
+	// Live entries with a pod sit under a pod header; only stopped entries
+	// need the pod spelled out on the row.
+	if e.Pod != "" && e.Stopped {
 		fmt.Fprintf(&extras, " [pod: %s]", e.Pod)
 	}
 	if e.Command != "" {
@@ -212,6 +278,8 @@ func (c *Client) formatNavRow(e AgentNavEntry, selected bool, nameWidth int) str
 		stateColor = "\033[33m"
 	case "exited":
 		stateColor = "\033[31m"
+	case "stopped":
+		stateColor = "\033[90m"
 	}
 	if stateColor == "" || state == "" {
 		return text

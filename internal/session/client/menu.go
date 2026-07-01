@@ -10,13 +10,14 @@ import (
 // AgentNavEntry is one row in the agent navigator (menu -> a).
 type AgentNavEntry struct {
 	Name          string
-	State         string // "active", "idle", "exited", "" (unknown)
-	StateDisplay  string // human label, e.g. "Active (Bash)" or "not responding"
+	State         string // "active", "idle", "exited", "stopped", "" (unknown)
+	StateDisplay  string // human label, e.g. "Active (Bash)" or "Stopped"
 	StateDuration string
 	Role          string
 	Pod           string
 	Command       string
 	IsSelf        bool // true for the agent this client is attached to
+	Stopped       bool // true for stopped sessions (Enter resumes instead of switching)
 }
 
 // EnterAgentNav switches to the agent navigator and requests a fresh agent
@@ -80,15 +81,26 @@ func (c *Client) NavMove(delta int) {
 	c.RenderScreen()
 }
 
-// NavSelect acts on the highlighted agent: switching to it via OnSwitchAgent,
-// or just closing the navigator when the selection is this agent itself.
+// NavSelect acts on the highlighted agent: switching to it via OnSwitchAgent
+// (live), resuming it via OnResumeAgent (stopped), or just closing the
+// navigator when the selection is this agent itself.
 func (c *Client) NavSelect() {
 	if c.NavLoading || len(c.NavEntries) == 0 {
 		return
 	}
 	entry := c.NavEntries[c.NavSelected]
 	c.ExitAgentNav()
-	if entry.IsSelf || c.OnSwitchAgent == nil {
+	if entry.IsSelf {
+		return
+	}
+	if entry.Stopped {
+		if c.OnResumeAgent != nil {
+			c.FlashStatus("Resuming " + entry.Name + "...")
+			c.OnResumeAgent(entry.Name)
+		}
+		return
+	}
+	if c.OnSwitchAgent == nil {
 		return
 	}
 	c.FlashStatus("Switching to " + entry.Name + "...")

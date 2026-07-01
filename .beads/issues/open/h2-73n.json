@@ -14,8 +14,14 @@
       "author": "fond-birch",
       "text": "Initial implementation done: session fork (menu f + h2 session fork CLI), agent navigator (menu a), daemon-\u003eclient switch control frame with reconnect loop in doAttach. Unit tests in internal/session/fork_test.go, internal/cmd/fork_test.go, internal/session/client/menu_test.go. make check + full test suite pass. Awaiting review / user QA of live switching flow.",
       "created_at": "2026-07-01T15:11:46.79237-07:00"
+    },
+    {
+      "id": 2,
+      "author": "fond-birch",
+      "text": "Follow-up per user feedback: navigator now lists stopped sessions (from session dirs) as 'Stopped' at the end instead of 'not responding'; Enter on a stopped session resumes it via shared session.ResumeSession (extracted from runResume) then switches; live list grouped by pod like h2 list (pods first, PodIndex order) with lone agents sorted by recent activity; attach client falls back to previous agent if a switch target is unreachable.",
+      "created_at": "2026-07-01T15:25:41.587435-07:00"
     }
   ],
   "created_at": "2026-07-01T15:00:57.137625-07:00",
-  "updated_at": "2026-07-01T15:11:46.792729-07:00"
+  "updated_at": "2026-07-01T15:25:41.587755-07:00"
 }

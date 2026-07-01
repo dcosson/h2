@@ -146,10 +146,20 @@ func doAttach(name string) error {
 		if switchTo == "" {
 			return nil
 		}
-		conn, err = dialAndAttach(switchTo, fd)
-		if err != nil {
-			return err
+		next, dialErr := dialAndAttach(switchTo, fd)
+		if dialErr != nil {
+			// Switch target unreachable (e.g. it stopped between listing and
+			// selecting) — reattach to the agent we came from instead of
+			// dropping the user out of the session.
+			next, err = dialAndAttach(name, fd)
+			if err != nil {
+				return dialErr
+			}
+			conn = next
+			continue
 		}
+		name = switchTo
+		conn = next
 	}
 }
 
