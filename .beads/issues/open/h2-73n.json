@@ -20,8 +20,14 @@
       "author": "fond-birch",
       "text": "Follow-up per user feedback: navigator now lists stopped sessions (from session dirs) as 'Stopped' at the end instead of 'not responding'; Enter on a stopped session resumes it via shared session.ResumeSession (extracted from runResume) then switches; live list grouped by pod like h2 list (pods first, PodIndex order) with lone agents sorted by recent activity; attach client falls back to previous agent if a switch target is unreachable.",
       "created_at": "2026-07-01T15:25:41.587435-07:00"
+    },
+    {
+      "id": 3,
+      "author": "fond-birch",
+      "text": "User confirmed: no age cutoff for the navigator's stopped section — it intentionally shows all stopped sessions (more inclusive than h2 list's default), with h2 session cleanup as the pruning mechanism. Feature complete on branch feature/fork-session-and-agent-nav; pending live QA of fork/switch/resume flows before merge.",
+      "created_at": "2026-07-01T15:29:22.394801-07:00"
     }
   ],
   "created_at": "2026-07-01T15:00:57.137625-07:00",
-  "updated_at": "2026-07-01T15:25:41.587755-07:00"
+  "updated_at": "2026-07-01T15:29:22.394896-07:00"
 }
