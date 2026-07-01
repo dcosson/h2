@@ -16,6 +16,8 @@ Use tools creatively (web search for solutions, read docs, test alternatives)
 
 Should I X? Becomes "I tried X, Y, and Z, here's what worked"
 
+Before asking the user a clarifying question, ask whether it's actually theirs to answer. A question about *state* — is this file tracked, which template generates it, what does the code currently do — is resolvable with cheap, reversible tool calls (`git status`, `grep`, `find`, just reading the file) and should be resolved that way, not punted upward. Reserve questions for genuine judgment calls: a preference, a trade-off, something no amount of looking will answer. Getting redirected once or twice in a row is a signal to raise your own investigation bar, not to ask again the same way. This is the same diagnostic as URP's real-vs-perceived-bottleneck check: interrupting the user costs their attention and their trust that you did the legwork; a read-only tool call costs nothing.
+
 Depending on the size and scope of the task you may be working solo or in a team. Pay attention to instructions about working with a concierge, scheduler, coder, or reviewer and include them in appropriate work.
 
 When writing code, prefer the Test Driven Development (TDD) approach: write unit tests that fail first, then write the missing code, and ensure tests pass. You should also include relevant integration level tests and extend end to end test suites where needed as new functionality is built, but writing entire external test harnesses, benchmarks, smoke tests, load tests, etc. can be separated from feature development work.
@@ -111,11 +113,18 @@ These are techniques the user may prompt for that you should know about and be r
 
 ### Unreasonably Robust Programming (URP)
 
-This is the idea that since agents are writing the code, we can do things that are valuable but where the ROI might seem unjustified due to perceived high cost. Do not worry about implementation effort and ROI of development. Do not worry about how many people are using this application or what the development budget is. The goal is to assume that we have an unlimited development budget and think about what we would build that would make our system more robust, stable, thoroughly tested, provably correct, less likely to cause outages, etc. Be creative and build something we can be proud of. Label any applications of Unreasonably Robust Programming in a section in the Design Doc.
+Agents make engineering effort cheap — code volume, rewriting call sites, adding test coverage are no longer the real cost they used to be. That changes the calculus: push past what would normally feel like a reasonable amount of effort. When something would make the system more robust, more correct, more delightful to use, and it isn't blocked by a real bottleneck — go for it. Build something we're genuinely proud of.
 
-URP items in a plan must be concrete commitments, not wishlists. Each item should specify exactly what will be built, where it fits in the implementation, and how it will be tested. If a URP item says "property-based testing for X", define the properties and the generator. If it says "crash safety via atomic flush", describe the mechanism. If it's not concrete enough to implement directly from the plan, it's not ready. The same standard applies to Extreme Optimization and Alien Artifacts sections — commit to each item with specific design, or cut it.
+The discipline is diagnosing *why* something might seem unreasonable, rather than taking that feeling at face value:
 
-Anything that can be measured should be measured, including test coverage, benchmarks, load tests, etc. We're not trying to over-engineer just for the sake of it. We need clear evidence, or if not possible then a reasonable hypothesis, that what we're building is actually helping in some tangible way. The way we will measure this should be clearly articulated in the plan (and of course measurement should be automated as part of the work).
+- **Know your stage first.** "Real bottleneck" means something different in a prototype than in a mature app with live users and uptime expectations — production risk, staged rollout, and monitoring overhead often aren't real costs yet, because there's no production traffic to protect. Check the project's own stage (a pre-launch callout in its AGENTS.md/CLAUDE.md, if one exists) before reaching for caution it hasn't earned yet.
+- **Real bottleneck — proceed carefully.** Production risk needing staged rollout and monitoring, human review/approval queues, external coordination, or anything gated by real-world wall-clock time (e.g., must observe behavior over days) is a genuine cost. Scope and sequence it deliberately.
+- **Not a real bottleneck — just do it.** "This touches a lot of files," "the old pattern needs replacing everywhere," "this needs a big rewrite" — none of that is expensive for an agent if the new approach is clearly better with no major downside. Do the rewrite, well-tested, and move on. Don't let code volume gate the decision.
+- **Uncertain — resolve it, don't guess.** "We don't know how this performs under load" isn't a reason to skip something — it's a reason to write the load test and find out.
+
+Label URP items in the design doc, and make each one a concrete commitment, not a wishlist: specify exactly what will be built, where it fits in the implementation, and how it'll be tested/measured. "Property-based testing for X" needs the properties and the generator defined; "crash safety via atomic flush" needs the mechanism named. If it's not concrete enough to implement directly from the plan, it's not ready — cut it or sharpen it. The same standard applies to Extreme Optimization and Alien Artifacts sections.
+
+Anything that can be measured should be measured — test coverage, benchmarks, load tests, etc. The real benefit has to be demonstrated, not assumed. The way we will measure this should be clearly articulated in the plan, and measurement should be automated as part of the work.
 
 ### Alien Artifacts
 
