@@ -305,19 +305,17 @@ func (s *Session) NewClient() *client.Client {
 					fmt.Fprintf(os.Stderr, "panic recovered in OnForkSession: %v\n%s\n", r, debug.Stack())
 				}
 			}()
-			newName, err := ForkAndLaunch(&rcCopy, TerminalHints{})
+			// The fork is started in the background; the user stays on this
+			// session and can reach the fork via the agent navigator or
+			// h2 attach. Only the status-bar flash reports the outcome.
+			newName, err := ForkAndLaunch(&rcCopy, "", TerminalHints{})
 			s.VT.Mu.Lock()
+			defer s.VT.Mu.Unlock()
 			if err != nil {
 				cl.FlashStatus("Fork failed: " + err.Error())
-				s.VT.Mu.Unlock()
 				return
 			}
 			cl.FlashStatus("Forked to " + newName)
-			switchFn := cl.OnSwitchAgent
-			s.VT.Mu.Unlock()
-			if switchFn != nil {
-				switchFn(newName)
-			}
 		}()
 	}
 	cl.OnResumeAgent = func(name string) {

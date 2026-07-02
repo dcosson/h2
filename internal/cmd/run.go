@@ -24,6 +24,7 @@ func newRunCmd() *cobra.Command {
 	var dryRun bool
 	var resume bool
 	var resumeFromSessionID string
+	var forkFrom string
 	var roleName string
 	var agentType string
 	var command string
@@ -48,7 +49,11 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
   h2 run coder-1 --resume       Resume a previous agent session
   h2 run --resume-from-session-id <id>
                                 Resume the h2 session with the given underlying
-                                claude/codex session id (no agent name needed)`,
+                                claude/codex session id (no agent name needed)
+  h2 run --fork-from coder-1    Fork coder-1's conversation into a new agent
+                                (auto-named like coder-1-fork1)
+  h2 run my-fork --fork-from coder-1
+                                Fork coder-1's conversation into agent my-fork`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Auto-detach when stdin is not a terminal (e.g. running
 			// through a bridge, pipe, or inside a Claude Code session).
@@ -74,8 +79,32 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 			if resumeFromSessionID != "" {
 				modeFlags++
 			}
+			if forkFrom != "" {
+				modeFlags++
+			}
 			if modeFlags > 1 {
-				return fmt.Errorf("--role, --agent-type, --command, --resume, and --resume-from-session-id are mutually exclusive")
+				return fmt.Errorf("--role, --agent-type, --command, --resume, --resume-from-session-id, and --fork-from are mutually exclusive")
+			}
+
+			// Handle fork mode — clone another agent's session into a new
+			// agent. The optional positional name names the fork.
+			if forkFrom != "" {
+				for _, flag := range []string{"var", "override", "pod"} {
+					if cmd.Flags().Changed(flag) {
+						return fmt.Errorf("--%s cannot be used with --fork-from", flag)
+					}
+				}
+				if dryRun {
+					return fmt.Errorf("--dry-run is not supported with --fork-from")
+				}
+				if len(args) > 1 {
+					return fmt.Errorf("--fork-from accepts at most one positional name for the fork, got %d", len(args))
+				}
+				var forkName string
+				if len(args) == 1 {
+					forkName = args[0]
+				}
+				return runFork(cmd.OutOrStderr(), forkFrom, forkName, detach)
 			}
 
 			// Handle resume modes — a separate path from normal run. The session
@@ -301,6 +330,7 @@ By default, uses the "default" role from ~/.h2/roles/default.yaml.
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show resolved config without launching")
 	cmd.Flags().BoolVar(&resume, "resume", false, "Resume a previous agent session")
 	cmd.Flags().StringVar(&resumeFromSessionID, "resume-from-session-id", "", "Resume the h2 session with this underlying claude/codex session id (no name needed)")
+	cmd.Flags().StringVar(&forkFrom, "fork-from", "", "Fork this agent's conversation into a new agent (positional name optional)")
 	cmd.Flags().StringVar(&roleName, "role", "", "Role to use (defaults to 'default')")
 	cmd.Flags().StringVar(&agentType, "agent-type", "", "Agent type to run without a role (e.g. claude)")
 	cmd.Flags().StringVar(&command, "command", "", "Explicit command to run without a role")

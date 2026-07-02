@@ -112,6 +112,83 @@ func TestFork_UnsupportedHarness(t *testing.T) {
 	}
 }
 
+func TestRunForkFrom_AutoName(t *testing.T) {
+	h2Dir := setupRotateTestH2Dir(t)
+	writeForkTestSession(t, h2Dir, "run-fork-parent")
+
+	var forkedSessionDir string
+	origFork := forkDaemonFunc
+	forkDaemonFunc = func(sd string, hints session.TerminalHints, resume bool) error {
+		forkedSessionDir = sd
+		return nil
+	}
+	defer func() { forkDaemonFunc = origFork }()
+
+	cmd := newRunCmd()
+	cmd.SetArgs([]string{"--fork-from", "run-fork-parent", "--detach"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("run --fork-from: %v", err)
+	}
+	if forkedSessionDir != config.SessionDir("run-fork-parent-fork1") {
+		t.Errorf("session dir = %q, want run-fork-parent-fork1's", forkedSessionDir)
+	}
+}
+
+func TestRunForkFrom_ExplicitName(t *testing.T) {
+	h2Dir := setupRotateTestH2Dir(t)
+	writeForkTestSession(t, h2Dir, "run-fork-parent2")
+
+	var forkedSessionDir string
+	origFork := forkDaemonFunc
+	forkDaemonFunc = func(sd string, hints session.TerminalHints, resume bool) error {
+		forkedSessionDir = sd
+		return nil
+	}
+	defer func() { forkDaemonFunc = origFork }()
+
+	cmd := newRunCmd()
+	cmd.SetArgs([]string{"named-fork", "--fork-from", "run-fork-parent2", "--detach"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("run --fork-from with name: %v", err)
+	}
+	if forkedSessionDir != config.SessionDir("named-fork") {
+		t.Errorf("session dir = %q, want named-fork's", forkedSessionDir)
+	}
+	forked, err := config.ReadRuntimeConfig(forkedSessionDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if forked.AgentName != "named-fork" {
+		t.Errorf("AgentName = %q, want named-fork", forked.AgentName)
+	}
+}
+
+func TestRunForkFrom_FlagConflicts(t *testing.T) {
+	setupRotateTestH2Dir(t)
+
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"with resume", []string{"--fork-from", "x", "--resume"}, "mutually exclusive"},
+		{"with role", []string{"--fork-from", "x", "--role", "coder"}, "mutually exclusive"},
+		{"with pod", []string{"--fork-from", "x", "--pod", "p"}, "cannot be used with --fork-from"},
+		{"with dry-run", []string{"--fork-from", "x", "--dry-run"}, "not supported with --fork-from"},
+		{"two positional args", []string{"a", "b", "--fork-from", "x"}, "at most one positional name"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := newRunCmd()
+			cmd.SetArgs(tt.args)
+			err := cmd.Execute()
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("err = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseSwitchControl(t *testing.T) {
 	tests := []struct {
 		name    string

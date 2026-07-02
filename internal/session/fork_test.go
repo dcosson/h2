@@ -101,7 +101,7 @@ func TestForkSessionFiles_Success(t *testing.T) {
 	h2Dir := setupForkTestH2Dir(t)
 	parent := writeForkParentSession(t, h2Dir, "fond-birch")
 
-	forked, forkedDir, err := ForkSessionFiles(parent)
+	forked, forkedDir, err := ForkSessionFiles(parent, "")
 	if err != nil {
 		t.Fatalf("ForkSessionFiles: %v", err)
 	}
@@ -165,11 +165,11 @@ func TestForkSessionFiles_SecondForkIncrementsName(t *testing.T) {
 	h2Dir := setupForkTestH2Dir(t)
 	parent := writeForkParentSession(t, h2Dir, "fond-birch")
 
-	first, _, err := ForkSessionFiles(parent)
+	first, _, err := ForkSessionFiles(parent, "")
 	if err != nil {
 		t.Fatalf("first fork: %v", err)
 	}
-	second, _, err := ForkSessionFiles(parent)
+	second, _, err := ForkSessionFiles(parent, "")
 	if err != nil {
 		t.Fatalf("second fork: %v", err)
 	}
@@ -182,16 +182,43 @@ func TestForkSessionFiles_ForkOfForkSharesBaseName(t *testing.T) {
 	h2Dir := setupForkTestH2Dir(t)
 	parent := writeForkParentSession(t, h2Dir, "fond-birch")
 
-	first, _, err := ForkSessionFiles(parent)
+	first, _, err := ForkSessionFiles(parent, "")
 	if err != nil {
 		t.Fatalf("first fork: %v", err)
 	}
-	grandchild, _, err := ForkSessionFiles(first)
+	grandchild, _, err := ForkSessionFiles(first, "")
 	if err != nil {
 		t.Fatalf("fork of fork: %v", err)
 	}
 	if grandchild.AgentName != "fond-birch-fork2" {
 		t.Errorf("fork of fork name = %q, want fond-birch-fork2", grandchild.AgentName)
+	}
+}
+
+func TestForkSessionFiles_ExplicitName(t *testing.T) {
+	h2Dir := setupForkTestH2Dir(t)
+	parent := writeForkParentSession(t, h2Dir, "fond-birch")
+
+	forked, forkedDir, err := ForkSessionFiles(parent, "my-custom-fork")
+	if err != nil {
+		t.Fatalf("ForkSessionFiles: %v", err)
+	}
+	if forked.AgentName != "my-custom-fork" {
+		t.Errorf("AgentName = %q, want my-custom-fork", forked.AgentName)
+	}
+	if forkedDir != config.SessionDir("my-custom-fork") {
+		t.Errorf("forkedDir = %q, want %q", forkedDir, config.SessionDir("my-custom-fork"))
+	}
+}
+
+func TestForkSessionFiles_ExplicitNameTaken(t *testing.T) {
+	h2Dir := setupForkTestH2Dir(t)
+	parent := writeForkParentSession(t, h2Dir, "fond-birch")
+	writeForkParentSession(t, h2Dir, "already-here")
+
+	_, _, err := ForkSessionFiles(parent, "already-here")
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("err = %v, want 'already exists'", err)
 	}
 }
 
@@ -202,7 +229,7 @@ func TestForkSessionFiles_MissingNativeLogComputesSuffix(t *testing.T) {
 	parent := writeForkParentSession(t, h2Dir, "fond-birch")
 	parent.NativeLogPathSuffix = ""
 
-	forked, _, err := ForkSessionFiles(parent)
+	forked, _, err := ForkSessionFiles(parent, "")
 	if err != nil {
 		t.Fatalf("ForkSessionFiles: %v", err)
 	}
@@ -217,7 +244,7 @@ func TestForkSessionFiles_Errors(t *testing.T) {
 	t.Run("unsupported harness", func(t *testing.T) {
 		parent := writeForkParentSession(t, h2Dir, "codex-agent")
 		parent.HarnessType = "codex"
-		if _, _, err := ForkSessionFiles(parent); err == nil || !strings.Contains(err.Error(), "not supported") {
+		if _, _, err := ForkSessionFiles(parent, ""); err == nil || !strings.Contains(err.Error(), "not supported") {
 			t.Errorf("err = %v, want 'not supported'", err)
 		}
 	})
@@ -225,7 +252,7 @@ func TestForkSessionFiles_Errors(t *testing.T) {
 	t.Run("no harness session id", func(t *testing.T) {
 		parent := writeForkParentSession(t, h2Dir, "no-hsid-agent")
 		parent.HarnessSessionID = ""
-		if _, _, err := ForkSessionFiles(parent); err == nil || !strings.Contains(err.Error(), "harness_session_id") {
+		if _, _, err := ForkSessionFiles(parent, ""); err == nil || !strings.Contains(err.Error(), "harness_session_id") {
 			t.Errorf("err = %v, want 'harness_session_id'", err)
 		}
 	})
@@ -235,7 +262,7 @@ func TestForkSessionFiles_Errors(t *testing.T) {
 		if err := os.Remove(parent.NativeSessionLogPath()); err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := ForkSessionFiles(parent); err == nil || !strings.Contains(err.Error(), "session log") {
+		if _, _, err := ForkSessionFiles(parent, ""); err == nil || !strings.Contains(err.Error(), "session log") {
 			t.Errorf("err = %v, want 'session log'", err)
 		}
 	})

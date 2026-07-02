@@ -156,6 +156,7 @@ func (c *Client) ReadInput() {
 				c.AppendDebugBytes(buf[:n])
 				c.RenderInputBar()
 			}
+			c.MaybeClearFlash(buf[:n])
 			for i := 0; i < n; {
 				switch c.Mode {
 				case ModePassthrough:

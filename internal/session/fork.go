@@ -51,17 +51,22 @@ func forkNameTaken(name string) bool {
 // (with ids rewritten), and a new RuntimeConfig is written to a fresh session
 // directory. The parent session is not modified and may be running.
 //
-// The forked session gets a new agent name derived from the parent
-// (e.g. fond-birch -> fond-birch-fork1) and does NOT inherit the parent's pod
-// membership. The returned RuntimeConfig has HarnessSessionID set to the new
-// id, so launching its daemon with resume=true continues the copied
-// conversation.
-func ForkSessionFiles(parent *config.RuntimeConfig) (*config.RuntimeConfig, string, error) {
+// newName names the forked agent; pass "" to derive one from the parent
+// (e.g. fond-birch -> fond-birch-fork1). The fork does NOT inherit the
+// parent's pod membership. The returned RuntimeConfig has HarnessSessionID
+// set to the new id, so launching its daemon with resume=true continues the
+// copied conversation.
+func ForkSessionFiles(parent *config.RuntimeConfig, newName string) (*config.RuntimeConfig, string, error) {
 	if parent.HarnessType != "claude_code" {
 		return nil, "", fmt.Errorf("fork is not supported for harness %q (only claude_code)", parent.HarnessType)
 	}
 	if parent.HarnessSessionID == "" {
 		return nil, "", fmt.Errorf("session for agent %q has no harness_session_id; cannot fork", parent.AgentName)
+	}
+	if newName == "" {
+		newName = GenerateForkName(parent.AgentName, forkNameTaken)
+	} else if forkNameTaken(newName) {
+		return nil, "", fmt.Errorf("agent %q already exists", newName)
 	}
 
 	// Locate the parent's native session log. Older sessions may not have
@@ -80,7 +85,6 @@ func ForkSessionFiles(parent *config.RuntimeConfig) (*config.RuntimeConfig, stri
 		return nil, "", fmt.Errorf("read session log %s: %w", oldLogPath, err)
 	}
 
-	newName := GenerateForkName(parent.AgentName, forkNameTaken)
 	newID := uuid.New().String()
 
 	// Clone the config under the new identity. Pod membership is deliberately
@@ -125,8 +129,8 @@ func ForkSessionFiles(parent *config.RuntimeConfig) (*config.RuntimeConfig, stri
 
 // ForkAndLaunch forks a session's files and starts a new daemon that resumes
 // the copied conversation. Returns the new agent name.
-func ForkAndLaunch(parent *config.RuntimeConfig, hints TerminalHints) (string, error) {
-	rc, sessionDir, err := ForkSessionFiles(parent)
+func ForkAndLaunch(parent *config.RuntimeConfig, newName string, hints TerminalHints) (string, error) {
+	rc, sessionDir, err := ForkSessionFiles(parent, newName)
 	if err != nil {
 		return "", err
 	}

@@ -178,6 +178,7 @@ func (d *Daemon) readClientInput(conn net.Conn, cl *client.Client) {
 					cl.AppendDebugBytes(payload)
 					cl.RenderInputBar()
 				}
+				cl.MaybeClearFlash(payload)
 				for i := 0; i < len(payload); {
 					switch cl.Mode {
 					case client.ModePassthrough:

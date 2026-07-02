@@ -373,3 +373,40 @@ func TestFlashStatus_ShowsInStatusBarThenClears(t *testing.T) {
 		t.Errorf("label = %q, want flash text", label)
 	}
 }
+
+func TestMaybeClearFlash_KeystrokeClears(t *testing.T) {
+	c := newTestClient(10, 80)
+	c.FlashStatus("Forked to fond-birch-fork1")
+	defer func() {
+		if c.FlashTimer != nil {
+			c.FlashTimer.Stop()
+		}
+	}()
+
+	c.MaybeClearFlash([]byte("x"))
+
+	if c.FlashText != "" {
+		t.Errorf("FlashText = %q, want cleared on keystroke", c.FlashText)
+	}
+}
+
+func TestMaybeClearFlash_EscapeSequencesDoNotClear(t *testing.T) {
+	c := newTestClient(10, 80)
+	c.FlashStatus("Forked to fond-birch-fork1")
+	defer c.FlashTimer.Stop()
+
+	// Mouse motion / arrow keys arrive as ESC-prefixed chunks.
+	c.MaybeClearFlash([]byte{0x1B, '[', '<', '3', '5', ';', '1', ';', '1', 'm'})
+
+	if c.FlashText == "" {
+		t.Error("escape-sequence input should not clear the flash")
+	}
+}
+
+func TestMaybeClearFlash_NoFlashIsNoop(t *testing.T) {
+	c := newTestClient(10, 80)
+	c.MaybeClearFlash([]byte("x")) // must not panic or render
+	if c.FlashText != "" {
+		t.Errorf("FlashText = %q, want empty", c.FlashText)
+	}
+}

@@ -162,14 +162,18 @@ func (c *Client) HandleAgentNavBytes(buf []byte, start, n int) int {
 	return n
 }
 
-// FlashStatus shows a transient message in the status bar for a few seconds.
+// flashDuration is how long a FlashStatus message stays in the status bar
+// before clearing itself (a keystroke clears it sooner — see MaybeClearFlash).
+const flashDuration = 5 * time.Second
+
+// FlashStatus shows a transient message in the status bar.
 func (c *Client) FlashStatus(text string) {
 	c.FlashText = text
 	if c.FlashTimer != nil {
 		c.FlashTimer.Stop()
 	}
 	c.RenderStatusBar()
-	c.FlashTimer = time.AfterFunc(4*time.Second, func() {
+	c.FlashTimer = time.AfterFunc(flashDuration, func() {
 		defer func() {
 			if r := recover(); r != nil {
 				fmt.Fprintf(os.Stderr, "panic recovered in FlashTimer: %v\n%s\n", r, debug.Stack())
@@ -180,4 +184,22 @@ func (c *Client) FlashStatus(text string) {
 		c.FlashText = ""
 		c.RenderStatusBar()
 	})
+}
+
+// MaybeClearFlash clears a transient flash message in response to fresh user
+// input, restoring the regular status bar. Input chunks that start an escape
+// sequence (arrow keys, mouse events) are ignored so incidental mouse motion
+// doesn't wipe the message; the flash timer catches those cases instead.
+func (c *Client) MaybeClearFlash(input []byte) {
+	if c.FlashText == "" || len(input) == 0 {
+		return
+	}
+	if input[0] == 0x1B || c.PendingEsc || len(c.PassthroughEsc) > 0 {
+		return
+	}
+	c.FlashText = ""
+	if c.FlashTimer != nil {
+		c.FlashTimer.Stop()
+	}
+	c.RenderStatusBar()
 }
