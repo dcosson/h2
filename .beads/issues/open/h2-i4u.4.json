@@ -1,7 +1,7 @@
 {
   "id": "h2-i4u.4",
   "title": "Prove H2 Fleet parity and delete superseded H2 runtime",
-  "description": "Own the cross-repository V8 feature matrix and deletion proof. Add the H2-side pinned Burrito contract fixture under tests/fleetparity/ and a make test-fleet-parity target included in CI. Record both repository SHAs, run H2 make check/test/test-external/test-fleet-parity and Burrito make test-fleet-h2-contract, then delete superseded H2 daemon, PTY transport, session registry, and independent search/index machinery from internal/session/ and callers. A Burrito-only green build cannot close this gate.",
+  "description": "Own the cross-repository V8 feature matrix and deletion proof. Add the H2-side pinned Burrito contract fixture under tests/fleetparity/ and a make test-fleet-parity target included in CI. Record both repository SHAs, run H2 make check/test/test-external/test-fleet-parity and Burrito make test-fleet-h2-contract and make test-fleet-h2-parity, then delete superseded H2 daemon, PTY transport, session registry, and independent search/index machinery from internal/session/ and callers. A Burrito-only green build cannot close this gate.",
   "status": "open",
   "priority": 1,
   "type": "gate",
@@ -28,5 +28,5 @@
     "slice=V8"
   ],
   "created_at": "2026-07-28T21:16:49.594667-07:00",
-  "updated_at": "2026-07-28T21:16:49.594667-07:00"
+  "updated_at": "2026-07-28T21:32:49.412192-07:00"
 }
