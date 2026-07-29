@@ -1,0 +1,34 @@
+{
+  "id": "h2-i4u.1",
+  "title": "Adopt Burrito Fleet client and profile configuration in H2",
+  "description": "Replace H2 session lifecycle/configuration entry points with the generated Burrito fleet/client and generic profile/plugin configuration seams. Exact homes: internal/config/, internal/cmd/, cmd/h2/, and tests/external/. Add unit/integration tests to make test and CLI contract tests to make test-external. Prerequisite: Burrito public API/client and profile seams are published at the pinned Burrito SHA.",
+  "status": "open",
+  "priority": 1,
+  "type": "task",
+  "parent": "h2-i4u",
+  "dependencies": [
+    {
+      "id": "h2-i4u",
+      "type": "parent-child"
+    }
+  ],
+  "dependents": [
+    {
+      "id": "h2-i4u.2",
+      "type": "blocks"
+    },
+    {
+      "id": "h2-i4u.3",
+      "type": "blocks"
+    }
+  ],
+  "created_by": "hale-star",
+  "owner": "danny@zocomputer.com",
+  "labels": [
+    "project=h2",
+    "project=burrito-fleet",
+    "slice=V8"
+  ],
+  "created_at": "2026-07-28T21:16:49.499662-07:00",
+  "updated_at": "2026-07-28T21:16:49.499662-07:00"
+}

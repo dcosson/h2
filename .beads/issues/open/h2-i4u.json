@@ -1,0 +1,34 @@
+{
+  "id": "h2-i4u",
+  "title": "Migrate H2 runtime onto Burrito Fleet contracts",
+  "description": "Cross-repository V8 owner for replacing H2-owned session, daemon, messaging, attach, and search runtime with Burrito Fleet public clients and generic profile/plugin seams. Canonical architecture: Burrito docs/fleet-plan.md §H2 relationship and V8; executable contract: Burrito docs/fleet-test-harness.md §H2 cross-repository parity. Completion requires recorded Burrito and H2 SHAs, both repositories' CI gates, feature-matrix parity, and deletion of superseded H2 runtime code.",
+  "status": "open",
+  "priority": 1,
+  "type": "epic",
+  "dependents": [
+    {
+      "id": "h2-i4u.1",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-i4u.2",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-i4u.3",
+      "type": "parent-child"
+    },
+    {
+      "id": "h2-i4u.4",
+      "type": "parent-child"
+    }
+  ],
+  "created_by": "hale-star",
+  "owner": "danny@zocomputer.com",
+  "labels": [
+    "project=h2",
+    "project=burrito-fleet"
+  ],
+  "created_at": "2026-07-28T21:16:49.483231-07:00",
+  "updated_at": "2026-07-28T21:16:49.483231-07:00"
+}
