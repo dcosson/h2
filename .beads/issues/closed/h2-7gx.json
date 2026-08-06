@@ -1,0 +1,23 @@
+{
+  "id": "h2-7gx",
+  "title": "Show role and profile in attach status bar",
+  "description": "Add a role/profile section between working directory and token/cost in the attach bottom status bar, formatted as '\u003crole\u003e [\u003cprofile\u003e]'. Preserve visual ordering while changing narrow-screen retention priority to: working directory, role/profile, agent status, mode, then all remaining sections. Add width-boundary regression coverage.",
+  "status": "closed",
+  "priority": 2,
+  "type": "feature",
+  "created_by": "fond-frost",
+  "owner": "danny@zocomputer.com",
+  "assignee": "fond-frost",
+  "comments": [
+    {
+      "id": 1,
+      "author": "fond-frost",
+      "text": "Implemented and self-reviewed: the status bar now renders '\u003crole\u003e [\u003cprofile\u003e]' between working directory and token/cost; the callback reads RuntimeConfig dynamically so rotations update attached clients. Narrow-screen drop order is tokens, help, agent name, mode, status, role/profile, with working directory truncated only as the final fallback. Added exact boundary, full width-sweep, empty-section, and runtime wiring tests. go test ./internal/session/client ./internal/session and make check pass.",
+      "created_at": "2026-08-06T15:50:55.86568-07:00"
+    }
+  ],
+  "created_at": "2026-08-06T15:47:25.233893-07:00",
+  "updated_at": "2026-08-06T15:50:55.883394-07:00",
+  "closed_at": "2026-08-06T15:50:55.883394-07:00",
+  "close_reason": "Implemented and regression-tested"
+}

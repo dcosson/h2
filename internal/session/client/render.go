@@ -653,16 +653,18 @@ func (c *Client) RenderStatusBar() {
 
 // fitStatusBarSections assembles the left status-bar label and the
 // right-aligned agent name, dropping sections one at a time when the bar
-// is too narrow. Drop order: tokens, help, mode, agent name, working dir.
-// The activity status is kept until nothing else fits, then hard-truncated
-// as a last resort.
+// is too narrow. Visual order and retention priority are intentionally
+// independent. The visual order is mode, status, working dir, role/profile,
+// tokens, help. Drop order is tokens, help, agent name, mode, status,
+// role/profile; the working directory survives and is truncated only as the
+// final fallback.
 func (c *Client) fitStatusBarSections() (label, right string) {
 	if c.AgentName != "" {
 		right = c.AgentName + " "
 	}
 
 	mode := c.ModeStatusLabel()
-	var status, wd, tokens string
+	var status, wd, roleProfile, tokens string
 	if c.Mode != ModeMenu {
 		status = c.StatusLabel()
 		if c.FlashText != "" {
@@ -671,6 +673,19 @@ func (c *Client) fitStatusBarSections() (label, right string) {
 		if c.WorkingDir != nil {
 			if w := strings.TrimSpace(c.WorkingDir()); w != "" {
 				wd = c.formatWorkingDirForBar(w)
+			}
+		}
+		if c.RoleProfile != nil {
+			role, profile := c.RoleProfile()
+			role = strings.TrimSpace(role)
+			profile = strings.TrimSpace(profile)
+			switch {
+			case role != "" && profile != "":
+				roleProfile = role + " [" + profile + "]"
+			case role != "":
+				roleProfile = role
+			case profile != "":
+				roleProfile = "[" + profile + "]"
 			}
 		}
 		// OTEL metrics (tokens and cost)
@@ -687,7 +702,7 @@ func (c *Client) fitStatusBarSections() (label, right string) {
 
 	join := func() string {
 		var b strings.Builder
-		for _, part := range []string{mode, status, wd, tokens, help} {
+		for _, part := range []string{mode, status, wd, roleProfile, tokens, help} {
 			if part == "" {
 				continue
 			}
@@ -701,7 +716,7 @@ func (c *Client) fitStatusBarSections() (label, right string) {
 		return b.String()
 	}
 
-	drops := []*string{&tokens, &help, &mode, &right, &wd}
+	drops := []*string{&tokens, &help, &right, &mode, &status, &roleProfile}
 	if c.Mode == ModeMenu {
 		// The menu items are the whole bar — keep them and drop help,
 		// then the agent name.

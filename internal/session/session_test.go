@@ -286,6 +286,26 @@ func newTestSession() *Session {
 	return s
 }
 
+func TestNewClient_RoleProfileTracksRuntimeConfig(t *testing.T) {
+	s := newTestSession()
+	s.RC.RoleName = "coding"
+	s.RC.Profile = "alt1"
+	cl := s.NewClient()
+
+	role, profile := cl.RoleProfile()
+	if role != "coding" || profile != "alt1" {
+		t.Fatalf("RoleProfile() = (%q, %q), want (%q, %q)", role, profile, "coding", "alt1")
+	}
+
+	// Profile rotation updates the existing RuntimeConfig in place; attached
+	// clients must reflect the new value without being recreated.
+	s.RC.Profile = "alt2"
+	role, profile = cl.RoleProfile()
+	if role != "coding" || profile != "alt2" {
+		t.Fatalf("RoleProfile() after rotation = (%q, %q), want (%q, %q)", role, profile, "coding", "alt2")
+	}
+}
+
 func TestPassthrough_TryAcquiresLock(t *testing.T) {
 	s := newTestSession()
 	cl := s.NewClient()

@@ -286,6 +286,9 @@ func (s *Session) NewClient() *client.Client {
 		}
 		return cwd
 	}
+	cl.RoleProfile = func() (string, string) {
+		return s.RC.RoleName, s.RC.Profile
+	}
 	cl.HookState = func() string {
 		return s.ActivitySnapshot().LastToolName
 	}
