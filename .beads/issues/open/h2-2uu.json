@@ -1,0 +1,12 @@
+{
+  "id": "h2-2uu",
+  "title": "Deflake TestWaitForState_ContextCancelled",
+  "description": "internal/session.TestWaitForState_ContextCancelled intermittently reaches Idle before its 50ms cancellation despite 2ms output heartbeats. Observed one failure in make test and 3 failures across go test ./internal/session -run TestWaitForState_ContextCancelled -count=20 on 2026-08-06. Make the test deterministically prove context cancellation without scheduler/timer races; do not weaken Session.WaitForState coverage.",
+  "status": "open",
+  "priority": 2,
+  "type": "bug",
+  "created_by": "fond-frost",
+  "owner": "danny@zocomputer.com",
+  "created_at": "2026-08-06T15:54:35.208428-07:00",
+  "updated_at": "2026-08-06T15:54:35.208428-07:00"
+}
