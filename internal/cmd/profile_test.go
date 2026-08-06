@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -645,6 +646,33 @@ func TestProfileList_ShowsHarnesses(t *testing.T) {
 	}
 	if !strings.Contains(output, "staging (claude_code, codex)") {
 		t.Errorf("expected 'staging (claude_code, codex)' in output:\n%s", output)
+	}
+}
+
+func TestProfileList_DefaultFirstThenAlphabetical(t *testing.T) {
+	h2Dir := setupProfileTestH2Dir(t)
+	for _, name := range []string{"zeta", "default", "alpha", "middle"} {
+		if err := os.MkdirAll(filepath.Join(h2Dir, "claude-config", name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cmd := newProfileListCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	want := []string{
+		"default (claude_code)",
+		"alpha (claude_code)",
+		"middle (claude_code)",
+		"zeta (claude_code)",
+	}
+	if !reflect.DeepEqual(lines, want) {
+		t.Fatalf("profile list order = %v, want %v", lines, want)
 	}
 }
 

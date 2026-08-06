@@ -133,6 +133,17 @@ func newProfileListCmd() *cobra.Command {
 				fmt.Fprintln(cmd.OutOrStdout(), "No profiles found.")
 				return nil
 			}
+			// "default" is the built-in profile, so keep it at the top even
+			// when named profiles sort before it. All named profiles retain
+			// their alphabetical order from discoverProfilesWithHarness.
+			sort.SliceStable(profiles, func(i, j int) bool {
+				iDefault := profiles[i].Name == "default"
+				jDefault := profiles[j].Name == "default"
+				if iDefault != jDefault {
+					return iDefault
+				}
+				return profiles[i].Name < profiles[j].Name
+			})
 			for _, p := range profiles {
 				fmt.Fprintf(cmd.OutOrStdout(), "%s (%s)\n", p.Name, formatHarnessLabels(p))
 			}
