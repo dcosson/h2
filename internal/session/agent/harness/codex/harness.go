@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"h2/internal/activitylog"
 	"h2/internal/config"
@@ -45,6 +46,13 @@ type CodexHarness struct {
 	// discovery callback never blocks and the path survives if it fires before
 	// Start()'s tailer goroutine is waiting.
 	sessionLogPathCh chan string
+
+	// topLevelConversationID pins the first non-subagent conversation (or the
+	// requested resume ID). Codex sub-agents share the parent's OTEL exporter,
+	// and without this guard their conversation-start events can replace the
+	// session identity used by h2 rotate/resume.
+	conversationMu         sync.Mutex
+	topLevelConversationID string
 }
 
 // New creates a CodexHarness.
@@ -152,20 +160,49 @@ func (h *CodexHarness) PrepareForLaunch(dryRun bool) (harness.LaunchConfig, erro
 	// conversation ID arrives. Codex log files are at:
 	//   $CODEX_HOME/sessions/YYYY/MM/DD/rollout-<timestamp>-<convID>.jsonl
 	// We glob for the file by conversation ID suffix.
-	h.eventHandler.SetOnConversationStarted(func(convID string) {
+	h.eventHandler.SetOnConversationStarted(func(convID string) bool {
+		if convID == "" {
+			return false
+		}
+
+		h.conversationMu.Lock()
+		defer h.conversationMu.Unlock()
+
+		// A resumed h2 session already knows its top-level Codex conversation.
+		// Reject every other ID even if a child happens to report first.
+		if h.rc.ResumeSessionID != "" && convID != h.rc.ResumeSessionID {
+			return false
+		}
+		if h.topLevelConversationID != "" && convID != h.topLevelConversationID {
+			return false
+		}
+
 		configDir := h.rc.HarnessConfigDir()
-		if configDir == "" || convID == "" {
-			return
+		if configDir == "" {
+			h.topLevelConversationID = convID
+			return true
 		}
 		pattern := filepath.Join(configDir, "sessions", "*", "*", "*", "*-"+convID+".jsonl")
 		matches, err := filepath.Glob(pattern)
-		if err != nil || len(matches) == 0 {
-			return
+		if err != nil {
+			return false
 		}
+		if len(matches) > 0 && codexSessionThreadSource(matches[0]) == "subagent" {
+			return false
+		}
+
+		// For a fresh launch, the first explicitly non-subagent conversation is
+		// the top-level TUI session. If the rollout file is briefly unavailable,
+		// pin the first event and retry path discovery on a duplicate event.
+		h.topLevelConversationID = convID
+		if len(matches) == 0 {
+			return true
+		}
+
 		// Use the first match. Compute suffix relative to configDir.
 		rel, err := filepath.Rel(configDir, matches[0])
 		if err != nil {
-			return
+			return true
 		}
 		h.rc.NativeLogPathSuffix = rel
 		// Hand the full rollout path to the tailer (non-blocking; first wins).
@@ -173,6 +210,7 @@ func (h *CodexHarness) PrepareForLaunch(dryRun bool) (harness.LaunchConfig, erro
 		case h.sessionLogPathCh <- matches[0]:
 		default:
 		}
+		return true
 	})
 
 	s, err := otelserver.New(otelserver.Callbacks{
@@ -190,6 +228,29 @@ func (h *CodexHarness) PrepareForLaunch(dryRun bool) (harness.LaunchConfig, erro
 			"-c", fmt.Sprintf(`otel.exporter={otlp-http={endpoint="%s",protocol="json"}}`, endpoint),
 		},
 	}, nil
+}
+
+// codexSessionThreadSource reads the rollout's session_meta record. Current
+// Codex versions write "user" for the top-level TUI and "subagent" for a
+// spawned child. Empty is intentionally treated as unknown/top-level because
+// older Codex rollouts did not include thread_source.
+func codexSessionThreadSource(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	var meta struct {
+		Type    string `json:"type"`
+		Payload struct {
+			ThreadSource string `json:"thread_source"`
+		} `json:"payload"`
+	}
+	if err := json.NewDecoder(f).Decode(&meta); err != nil || meta.Type != "session_meta" {
+		return ""
+	}
+	return meta.Payload.ThreadSource
 }
 
 // --- Runtime (called after child process starts) ---

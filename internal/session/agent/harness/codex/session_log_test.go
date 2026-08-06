@@ -278,6 +278,68 @@ func TestHarness_TailsSessionLogAfterConversationStarts(t *testing.T) {
 	}
 }
 
+// A Codex sub-agent inherits the top-level process's OTEL exporter and emits
+// codex.conversation_starts to the same h2 collector. Those child events must
+// not replace the top-level conversation ID or rollout path used by resume and
+// profile rotation.
+func TestHarness_ConversationStartsIgnoresSubagent(t *testing.T) {
+	prefix := t.TempDir()
+	configDir := filepath.Join(prefix, "default")
+	logDir := filepath.Join(configDir, "sessions", "2026", "08", "06")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeSessionMeta := func(conversationID, threadSource string) string {
+		t.Helper()
+		path := filepath.Join(logDir, "rollout-2026-08-06T15-00-00-"+conversationID+".jsonl")
+		line := rolloutLine(t, "session_meta", map[string]any{
+			"session_id":    conversationID,
+			"thread_source": threadSource,
+		})
+		if err := os.WriteFile(path, append(line, '\n'), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+
+	rootID := "019fd93b-fc6d-72e0-af81-da72a747ddd5"
+	childID := "019fd93c-1111-7222-8333-da72a747ddd5"
+	rootPath := writeSessionMeta(rootID, "user")
+	writeSessionMeta(childID, "subagent")
+
+	h := New(&config.RuntimeConfig{
+		HarnessType:             "codex",
+		Command:                 "codex",
+		AgentName:               "test",
+		SessionID:               "h2-session",
+		HarnessConfigPathPrefix: prefix,
+		Profile:                 "default",
+	}, nil)
+	if _, err := h.PrepareForLaunch(false); err != nil {
+		t.Fatalf("PrepareForLaunch: %v", err)
+	}
+	defer h.Stop()
+
+	h.eventHandler.processEvent("codex.conversation_starts", []otelAttribute{
+		{Key: "conversation.id", Value: otelAttrValue{StringValue: rootID}},
+	}, time.Now())
+	h.eventHandler.processEvent("codex.conversation_starts", []otelAttribute{
+		{Key: "conversation.id", Value: otelAttrValue{StringValue: childID}},
+	}, time.Now())
+
+	wantSuffix, err := filepath.Rel(configDir, rootPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.rc.NativeLogPathSuffix != wantSuffix {
+		t.Errorf("NativeLogPathSuffix = %q, want top-level rollout %q", h.rc.NativeLogPathSuffix, wantSuffix)
+	}
+	if got := len(h.internalCh); got != 2 {
+		t.Errorf("emitted %d events, want only the top-level SessionStarted and Idle events", got)
+	}
+}
+
 func drainEventsTimeout(ch chan monitor.AgentEvent, n int, d time.Duration) []monitor.AgentEvent {
 	var events []monitor.AgentEvent
 	timeout := time.After(d)

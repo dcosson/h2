@@ -42,8 +42,11 @@ type EventHandler struct {
 	suppressActiveUntilTime time.Time
 
 	// onConversationStarted is called when conversation.id is discovered.
-	// The harness uses this to discover the native session log path.
-	onConversationStarted func(conversationID string)
+	// The harness uses this to discover the native session log path and returns
+	// whether the conversation is the top-level TUI conversation. Codex
+	// sub-agents inherit the OTEL exporter, so their events reach this handler
+	// too and must not be emitted as h2 session starts.
+	onConversationStarted func(conversationID string) bool
 }
 
 var codexIdleDebounceDelay = 200 * time.Millisecond
@@ -58,9 +61,10 @@ func NewEventHandler(events chan<- monitor.AgentEvent) *EventHandler {
 	}
 }
 
-// SetOnConversationStarted registers a callback invoked when the Codex
-// conversation.id is first discovered from OTEL events.
-func (p *EventHandler) SetOnConversationStarted(fn func(conversationID string)) {
+// SetOnConversationStarted registers a callback invoked when Codex reports a
+// conversation ID. The callback returns true only for the top-level TUI
+// conversation; false suppresses sub-agent session-start events.
+func (p *EventHandler) SetOnConversationStarted(fn func(conversationID string) bool) {
 	p.onConversationStarted = fn
 }
 
@@ -193,16 +197,17 @@ type spanProcessResult struct {
 func (p *EventHandler) processEvent(name string, attrs []otelAttribute, ts time.Time) spanProcessResult {
 	switch name {
 	case "codex.conversation_starts":
-		p.cancelPendingIdle()
-		p.resetTokenBaselines()
 		convID := getAttr(attrs, "conversation.id")
 		model := getAttr(attrs, "model")
 		// Call onConversationStarted BEFORE emitting the SessionStarted event
 		// so that NativeLogPathSuffix is set on the RC before the daemon's
 		// OnSessionStarted callback writes it to disk.
-		if p.onConversationStarted != nil && convID != "" {
-			p.onConversationStarted(convID)
+		if p.onConversationStarted != nil && convID != "" && !p.onConversationStarted(convID) {
+			p.debugf("span=codex.conversation_starts conversation.id=%q ignored_non_root=true", convID)
+			return spanProcessResult{recognized: true}
 		}
+		p.cancelPendingIdle()
+		p.resetTokenBaselines()
 		p.emit(monitor.AgentEvent{
 			Type:      monitor.EventSessionStarted,
 			Timestamp: ts,

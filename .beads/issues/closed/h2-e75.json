@@ -1,0 +1,23 @@
+{
+  "id": "h2-e75",
+  "title": "Keep Codex session rotate attached to top-level conversation",
+  "description": "Codex emits conversation-start OTEL events for spawned sub-agents through the parent h2 collector. h2 can overwrite RuntimeConfig.harness_session_id and native_log_path_suffix with a child conversation, causing h2 session rotate to resume the child in a degraded/unattachable state. Preserve the top-level Codex conversation identity and rollout log across sub-agent starts; add regression coverage.",
+  "status": "closed",
+  "priority": 1,
+  "type": "bug",
+  "created_by": "fond-frost",
+  "owner": "danny@zocomputer.com",
+  "assignee": "fond-frost",
+  "comments": [
+    {
+      "id": 1,
+      "author": "fond-frost",
+      "text": "Implemented and self-reviewed: CodexHarness now classifies rollout session_meta.thread_source, pins the top-level conversation (including resume ID), and suppresses subagent conversation-start events before they reach RuntimeConfig persistence. Added a regression test proving a later subagent cannot replace the top-level rollout path or emit a second SessionStarted event. go test ./internal/session/agent/harness/codex and make check pass.",
+      "created_at": "2026-08-06T15:47:09.947737-07:00"
+    }
+  ],
+  "created_at": "2026-08-06T15:42:30.533154-07:00",
+  "updated_at": "2026-08-06T15:47:09.992996-07:00",
+  "closed_at": "2026-08-06T15:47:09.992996-07:00",
+  "close_reason": "Fixed and regression-tested"
+}
