@@ -1,0 +1,23 @@
+{
+  "id": "h2-gf7",
+  "title": "Make interrupt message delivery send at most one Ctrl-C",
+  "description": "Interrupt-priority delivery currently sends Ctrl-C even when the agent is already idle and retries Ctrl-C up to three times. That can terminate an idle Codex/Claude session. Check current state immediately before delivery: send no Ctrl-C when idle, send exactly one Ctrl-C when non-idle (including blocked/user-prompt states), wait once for idle, then deliver. Add regression coverage for idle, non-idle, blocked, timeout, raw, and SignalInterrupt behavior.",
+  "status": "closed",
+  "priority": 1,
+  "type": "bug",
+  "created_by": "fond-frost",
+  "owner": "danny@zocomputer.com",
+  "assignee": "fond-frost",
+  "comments": [
+    {
+      "id": 1,
+      "author": "fond-frost",
+      "text": "Implemented and self-reviewed: message.deliver now rechecks DeliveryConfig.IsIdle immediately before ETX, skips Ctrl-C/SignalInterrupt/WaitForIdle when idle, and sends exactly one Ctrl-C plus one idle wait when non-idle (including blocked states). Removed the three-attempt retry loop. Added regression tests for already-idle delivery, active-to-idle transition between dequeue and delivery, blocked timeout, exact single ETX, raw delivery, and SignalInterrupt counts. go test -race ./internal/session/message, go test ./internal/session/message ./internal/session, make check, and make test pass.",
+      "created_at": "2026-08-07T16:18:49.80784-07:00"
+    }
+  ],
+  "created_at": "2026-08-07T16:15:56.88162-07:00",
+  "updated_at": "2026-08-07T16:18:49.83247-07:00",
+  "closed_at": "2026-08-07T16:18:49.83247-07:00",
+  "close_reason": "Fixed and regression-tested"
+}

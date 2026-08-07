@@ -31,7 +31,7 @@ type DeliveryConfig struct {
 	PtyWriter       io.Writer       // writes to the child PTY
 	IsIdle          IdleFunc        // checks if child is idle
 	IsBlocked       IsBlockedFunc   // checks if agent is blocked (nil = never blocked)
-	WaitForIdle     WaitForIdleFunc // blocks until idle (for interrupt retry)
+	WaitForIdle     WaitForIdleFunc // blocks until idle after a single interrupt
 	SignalInterrupt func()          // called when sending Ctrl+C for interrupt delivery
 	OnDeliver       func()          // called after each delivery (e.g. to render)
 	Stop            <-chan struct{}
@@ -127,35 +127,28 @@ func RunDelivery(cfg DeliveryConfig) {
 	}
 }
 
-const (
-	interruptRetries = 3
-	maxInlineBodyLen = 300
-)
+const maxInlineBodyLen = 300
 
-// interruptWaitTimeout is how long to wait for idle after each Ctrl+C.
+// interruptWaitTimeout is how long to wait for idle after Ctrl+C.
 // Var so tests can override it.
 var interruptWaitTimeout = 5 * time.Second
 
 func deliver(cfg DeliveryConfig, msg *Message) {
-	if msg.Priority == PriorityInterrupt && !msg.Raw {
-		// Send Ctrl+C, wait for idle, retry up to 3 times.
-		// If still not idle after retries, send anyway (like normal).
-		for attempt := 0; attempt < interruptRetries; attempt++ {
-			cfg.PtyWriter.Write([]byte{0x03})
-			if cfg.SignalInterrupt != nil {
-				cfg.SignalInterrupt()
-			}
-			if cfg.WaitForIdle != nil {
-				ctx, cancel := context.WithTimeout(context.Background(), interruptWaitTimeout)
-				idle := cfg.WaitForIdle(ctx)
-				cancel()
-				if idle {
-					break
-				}
-			} else {
-				time.Sleep(200 * time.Millisecond)
-				break
-			}
+	if msg.Priority == PriorityInterrupt && !msg.Raw && cfg.IsIdle != nil && !cfg.IsIdle() {
+		// Ctrl+C terminates some harnesses when they are already idle. Check the
+		// live state immediately before writing ETX, and never send more than one
+		// for a message. Blocked/user-prompt states are non-idle and intentionally
+		// take this path.
+		cfg.PtyWriter.Write([]byte{0x03})
+		if cfg.SignalInterrupt != nil {
+			cfg.SignalInterrupt()
+		}
+		if cfg.WaitForIdle != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), interruptWaitTimeout)
+			cfg.WaitForIdle(ctx)
+			cancel()
+		} else {
+			time.Sleep(200 * time.Millisecond)
 		}
 	}
 

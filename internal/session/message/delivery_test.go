@@ -213,12 +213,15 @@ func TestDeliver_InterAgentMessage_Interrupt(t *testing.T) {
 	close(stop)
 
 	out := buf.String()
+	if strings.Contains(out, "\x03") {
+		t.Fatal("idle agent received Ctrl+C")
+	}
 	if !strings.Contains(out, "[URGENT h2 message from: agent-a] urgent task") {
 		t.Fatalf("expected URGENT h2 message header in output, got %q", out)
 	}
 }
 
-func TestDeliver_InterruptRetry_IdleOnFirst(t *testing.T) {
+func TestDeliver_InterruptAlreadyIdleDoesNotSendCtrlC(t *testing.T) {
 	var buf threadSafeBuffer
 	q := NewMessageQueue()
 	stop := make(chan struct{})
@@ -234,6 +237,7 @@ func TestDeliver_InterruptRetry_IdleOnFirst(t *testing.T) {
 	q.Enqueue(msg)
 
 	waitCalls := 0
+	interruptCalls := 0
 	delivered := make(chan struct{}, 1)
 	go RunDelivery(DeliveryConfig{
 		Queue:     q,
@@ -242,6 +246,9 @@ func TestDeliver_InterruptRetry_IdleOnFirst(t *testing.T) {
 		WaitForIdle: func(ctx context.Context) bool {
 			waitCalls++
 			return true // idle immediately
+		},
+		SignalInterrupt: func() {
+			interruptCalls++
 		},
 		OnDeliver: func() {
 			select {
@@ -260,20 +267,62 @@ func TestDeliver_InterruptRetry_IdleOnFirst(t *testing.T) {
 	close(stop)
 
 	out := buf.String()
-	// Should have sent Ctrl+C.
-	if !strings.Contains(out, "\x03") {
-		t.Fatal("expected Ctrl+C in output")
+	if strings.Contains(out, "\x03") {
+		t.Fatal("idle agent received Ctrl+C")
 	}
 	// Should have sent the body.
 	if !strings.Contains(out, "urgent") {
 		t.Fatalf("expected body in output, got %q", out)
 	}
-	if waitCalls != 1 {
-		t.Fatalf("expected 1 WaitForIdle call (idle on first), got %d", waitCalls)
+	if waitCalls != 0 {
+		t.Fatalf("WaitForIdle called %d times for an already-idle agent, want 0", waitCalls)
+	}
+	if interruptCalls != 0 {
+		t.Fatalf("SignalInterrupt called %d times for an already-idle agent, want 0", interruptCalls)
 	}
 }
 
-func TestDeliver_InterruptRetry_TriesThreeTimes(t *testing.T) {
+func TestDeliver_InterruptRechecksIdleImmediatelyBeforeCtrlC(t *testing.T) {
+	var buf threadSafeBuffer
+	q := NewMessageQueue()
+	stop := make(chan struct{})
+	q.Enqueue(&Message{
+		ID:        "int-became-idle",
+		Priority:  PriorityInterrupt,
+		Body:      "urgent",
+		Status:    StatusQueued,
+		CreatedAt: time.Now(),
+	})
+
+	idleChecks := 0
+	delivered := make(chan struct{}, 1)
+	go RunDelivery(DeliveryConfig{
+		Queue:     q,
+		PtyWriter: &buf,
+		IsIdle: func() bool {
+			idleChecks++
+			return idleChecks >= 2 // active at dequeue, idle immediately before delivery
+		},
+		OnDeliver: func() { delivered <- struct{}{} },
+		Stop:      stop,
+	})
+
+	select {
+	case <-delivered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("delivery timed out")
+	}
+	close(stop)
+
+	if idleChecks < 2 {
+		t.Fatalf("IsIdle called %d times, want a fresh pre-interrupt check", idleChecks)
+	}
+	if out := buf.String(); strings.Contains(out, "\x03") {
+		t.Fatalf("agent that became idle before delivery received Ctrl+C: %q", out)
+	}
+}
+
+func TestDeliver_InterruptNonIdleSendsOneCtrlCEvenWhenWaitTimesOut(t *testing.T) {
 	old := interruptWaitTimeout
 	interruptWaitTimeout = 1 * time.Millisecond
 	t.Cleanup(func() { interruptWaitTimeout = old })
@@ -297,7 +346,8 @@ func TestDeliver_InterruptRetry_TriesThreeTimes(t *testing.T) {
 	go RunDelivery(DeliveryConfig{
 		Queue:     q,
 		PtyWriter: &buf,
-		IsIdle:    func() bool { return true },
+		IsIdle:    func() bool { return false },
+		IsBlocked: func() bool { return true },
 		WaitForIdle: func(ctx context.Context) bool {
 			waitCalls++
 			// Never go idle — context will time out.
@@ -320,19 +370,17 @@ func TestDeliver_InterruptRetry_TriesThreeTimes(t *testing.T) {
 	}
 	close(stop)
 
-	// Should have retried 3 times.
-	if waitCalls != 3 {
-		t.Fatalf("expected 3 WaitForIdle calls, got %d", waitCalls)
+	if waitCalls != 1 {
+		t.Fatalf("expected exactly 1 WaitForIdle call, got %d", waitCalls)
 	}
 	// Should still have delivered the message body.
 	out := buf.String()
 	if !strings.Contains(out, "urgent") {
-		t.Fatalf("expected body in output after retries, got %q", out)
+		t.Fatalf("expected body in output after interrupt wait timed out, got %q", out)
 	}
-	// Should have sent Ctrl+C 3 times.
 	ctrlCCount := strings.Count(out, "\x03")
-	if ctrlCCount != 3 {
-		t.Fatalf("expected 3 Ctrl+C, got %d", ctrlCCount)
+	if ctrlCCount != 1 {
+		t.Fatalf("expected exactly 1 Ctrl+C, got %d", ctrlCCount)
 	}
 }
 
@@ -356,7 +404,7 @@ func TestDeliver_InterruptCallsNoteInterrupt(t *testing.T) {
 	go RunDelivery(DeliveryConfig{
 		Queue:     q,
 		PtyWriter: &buf,
-		IsIdle:    func() bool { return true },
+		IsIdle:    func() bool { return false },
 		WaitForIdle: func(ctx context.Context) bool {
 			return true
 		},
