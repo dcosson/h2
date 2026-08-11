@@ -340,6 +340,203 @@ func TestHarness_ConversationStartsIgnoresSubagent(t *testing.T) {
 	}
 }
 
+// `codex resume <id>` does not reopen the old conversation — it forks a new one
+// with a new ID. h2 must adopt that fork as the session identity, or the next
+// crash resumes from the pre-crash fork point and everything since is lost.
+func TestHarness_ConversationStartsAdoptsResumeFork(t *testing.T) {
+	prefix := t.TempDir()
+	configDir := filepath.Join(prefix, "default")
+	forkPath := writeRollout(t, configDir, "fork-1", map[string]any{
+		"session_id":     "fork-1",
+		"forked_from_id": "root-1",
+		"thread_source":  "user",
+	})
+	writeRollout(t, configDir, "child-1", map[string]any{
+		"session_id":       "fork-1",
+		"parent_thread_id": "fork-1",
+		"thread_source":    "subagent",
+	})
+
+	h := newTestHarness(t, prefix, &config.RuntimeConfig{
+		SessionID:       "h2-session",
+		ResumeSessionID: "root-1",
+	})
+	if _, err := h.PrepareForLaunch(false); err != nil {
+		t.Fatalf("PrepareForLaunch: %v", err)
+	}
+	defer h.Stop()
+
+	// The resumed conversation reports its own new ID.
+	h.eventHandler.processEvent("codex.conversation_starts", []otelAttribute{
+		{Key: "conversation.id", Value: otelAttrValue{StringValue: "fork-1"}},
+	}, time.Now())
+	// A sub-agent spawned inside it must still be ignored.
+	h.eventHandler.processEvent("codex.conversation_starts", []otelAttribute{
+		{Key: "conversation.id", Value: otelAttrValue{StringValue: "child-1"}},
+	}, time.Now())
+
+	if h.topLevelConversationID != "fork-1" {
+		t.Errorf("topLevelConversationID = %q, want the resumed fork %q", h.topLevelConversationID, "fork-1")
+	}
+	wantSuffix, err := filepath.Rel(configDir, forkPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.rc.NativeLogPathSuffix != wantSuffix {
+		t.Errorf("NativeLogPathSuffix = %q, want the fork's rollout %q", h.rc.NativeLogPathSuffix, wantSuffix)
+	}
+	if got := len(h.internalCh); got != 2 {
+		t.Errorf("emitted %d events, want only the fork's SessionStarted and Idle events", got)
+	}
+}
+
+// A conversation with no rollout metadata to vouch for it must not take over an
+// established session identity — that is how a sub-agent used to win.
+func TestHarness_ConversationStartsIgnoresUnidentifiedChild(t *testing.T) {
+	noRolloutRetries(t)
+	prefix := t.TempDir()
+	configDir := filepath.Join(prefix, "default")
+	writeRollout(t, configDir, "root-1", map[string]any{"session_id": "root-1", "thread_source": "user"})
+
+	h := newTestHarness(t, prefix, &config.RuntimeConfig{SessionID: "h2-session"})
+	if _, err := h.PrepareForLaunch(false); err != nil {
+		t.Fatalf("PrepareForLaunch: %v", err)
+	}
+	defer h.Stop()
+
+	h.eventHandler.processEvent("codex.conversation_starts", []otelAttribute{
+		{Key: "conversation.id", Value: otelAttrValue{StringValue: "root-1"}},
+	}, time.Now())
+	h.eventHandler.processEvent("codex.conversation_starts", []otelAttribute{
+		{Key: "conversation.id", Value: otelAttrValue{StringValue: "no-rollout-1"}},
+	}, time.Now())
+
+	if h.topLevelConversationID != "root-1" {
+		t.Errorf("topLevelConversationID = %q, want %q", h.topLevelConversationID, "root-1")
+	}
+}
+
+// After a relaunch the tailer must follow the resumed conversation's new
+// rollout file, not keep reading the pre-crash one.
+func TestHarness_TailerFollowsRolloutAcrossRelaunch(t *testing.T) {
+	prefix := t.TempDir()
+	configDir := filepath.Join(prefix, "default")
+	firstPath := writeRollout(t, configDir, "root-1", map[string]any{"session_id": "root-1", "thread_source": "user"})
+	secondPath := writeRollout(t, configDir, "fork-1", map[string]any{
+		"session_id":     "fork-1",
+		"forked_from_id": "root-1",
+		"thread_source":  "user",
+	})
+
+	h := newTestHarness(t, prefix, &config.RuntimeConfig{SessionID: "h2-session"})
+	if _, err := h.PrepareForLaunch(false); err != nil {
+		t.Fatalf("PrepareForLaunch: %v", err)
+	}
+	defer h.Stop()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events := make(chan monitor.AgentEvent, 64)
+	go h.Start(ctx, events)
+	time.Sleep(20 * time.Millisecond)
+
+	h.eventHandler.processEvent("codex.conversation_starts", []otelAttribute{
+		{Key: "conversation.id", Value: otelAttrValue{StringValue: "root-1"}},
+	}, time.Now())
+	appendRolloutMessage(t, firstPath, "First conversation reply.")
+	waitForAgentMessage(t, events, "First conversation reply.")
+
+	// Relaunch: Codex forks a new conversation with its own rollout file.
+	h.eventHandler.processEvent("codex.conversation_starts", []otelAttribute{
+		{Key: "conversation.id", Value: otelAttrValue{StringValue: "fork-1"}},
+	}, time.Now())
+	time.Sleep(150 * time.Millisecond) // let the new tailer attach
+
+	// The pre-crash rollout must no longer be tailed; the new one must be.
+	appendRolloutMessage(t, firstPath, "Stale conversation reply.")
+	appendRolloutMessage(t, secondPath, "Reply after relaunch.")
+	waitForAgentMessage(t, events, "Reply after relaunch.", "Stale conversation reply.")
+}
+
+// If the rollout file is still missing when the conversation is adopted, a
+// later event for the same conversation must retry discovery — otherwise the
+// session runs without a tailer for its whole life.
+func TestHarness_ConversationStartsRetriesRolloutDiscovery(t *testing.T) {
+	noRolloutRetries(t)
+	prefix := t.TempDir()
+	configDir := filepath.Join(prefix, "default")
+
+	h := newTestHarness(t, prefix, &config.RuntimeConfig{SessionID: "h2-session"})
+	if _, err := h.PrepareForLaunch(false); err != nil {
+		t.Fatalf("PrepareForLaunch: %v", err)
+	}
+	defer h.Stop()
+
+	h.eventHandler.processEvent("codex.conversation_starts", []otelAttribute{
+		{Key: "conversation.id", Value: otelAttrValue{StringValue: "root-1"}},
+	}, time.Now())
+	if h.topLevelConversationID != "root-1" {
+		t.Fatalf("topLevelConversationID = %q, want the first conversation adopted", h.topLevelConversationID)
+	}
+	if h.rc.NativeLogPathSuffix != "" {
+		t.Fatalf("NativeLogPathSuffix = %q, want empty while the rollout is missing", h.rc.NativeLogPathSuffix)
+	}
+
+	path := writeRollout(t, configDir, "root-1", map[string]any{"session_id": "root-1", "thread_source": "user"})
+	h.eventHandler.processEvent("codex.conversation_starts", []otelAttribute{
+		{Key: "conversation.id", Value: otelAttrValue{StringValue: "root-1"}},
+	}, time.Now())
+
+	wantSuffix, err := filepath.Rel(configDir, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.rc.NativeLogPathSuffix != wantSuffix {
+		t.Errorf("NativeLogPathSuffix = %q, want %q after the rollout appeared", h.rc.NativeLogPathSuffix, wantSuffix)
+	}
+}
+
+func appendRolloutMessage(t *testing.T, path, message string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	line := rolloutLine(t, "event_msg", map[string]any{
+		"type": "agent_message", "message": message, "phase": "final_answer",
+	})
+	if _, err := f.Write(append(line, '\n')); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// waitForAgentMessage waits for an agent message with the wanted content,
+// failing if any of the forbidden messages arrives first.
+func waitForAgentMessage(t *testing.T, events chan monitor.AgentEvent, want string, forbidden ...string) {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case ev := <-events:
+			if ev.Type != monitor.EventAgentMessage {
+				continue
+			}
+			c := ev.Data.(monitor.AgentMessageData).Content
+			if c == want {
+				return
+			}
+			for _, bad := range forbidden {
+				if c == bad {
+					t.Fatalf("got agent message %q from a rollout that should no longer be tailed", c)
+				}
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for agent message %q", want)
+		}
+	}
+}
+
 func drainEventsTimeout(ch chan monitor.AgentEvent, n int, d time.Duration) []monitor.AgentEvent {
 	var events []monitor.AgentEvent
 	timeout := time.After(d)
