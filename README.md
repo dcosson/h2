@@ -44,13 +44,13 @@ In Passthrough mode, your cursor is active in the regular agent input prompt, so
 
 There are also Scroll and ScrollPassthrough modes where you can access the scroll-back history using your mouse scroll wheel from either normal or passthrough mode. One small gotcha here is that to select & copy text, you have to hold Shift first, similar to some tmux scroll mode settings. There’s a popup that will let you know about it.
 
-`h2 list` shows each agent's real-time state — active, idle, thinking, in tool use, waiting on permission, compacting — along with usage stats (tokens, cost) tracked automatically for every agent:
+`h2 list` shows each agent's real-time state — active, idle, thinking, in tool use, waiting on permission, compacting — along with usage stats (tokens, cost) tracked automatically for every agent, and the agent's working directory. Agents are listed grouped by pod, then sorted by working directory and name:
 
 ```
 Agents
-  ● coder-1 (coding) claude — Active (tool use: Bash) 30s, up 2h, 45k $3.20
-  ● coder-2 (coding) claude — Active (thinking) 5s, up 1h, 30k $2.10
-  ○ reviewer (reviewer) claude — Idle 10m, up 3h, 20k $1.50
+  ● coder-1 (coding) claude — Active (tool use: Bash) 30s, up 2h, 45k $3.20  ~/projects/api
+  ● coder-2 (coding) claude — Active (thinking) 5s, up 1h, 30k $2.10  ~/projects/api
+  ○ reviewer (reviewer) claude — Idle 10m, up 3h, 20k $1.50  ~/projects/web
 ```
 
 `h2 peek` shows you a short summary of recent messages & tool uses to quick view of what an agent has been doing without attaching to the session.

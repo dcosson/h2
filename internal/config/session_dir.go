@@ -10,7 +10,14 @@ import (
 
 // SessionsDir returns the directory where agent session dirs are created (~/.h2/sessions/).
 func SessionsDir() string {
-	return filepath.Join(ConfigDir(), "sessions")
+	return SessionsDirIn(ConfigDir())
+}
+
+// SessionsDirIn returns the sessions directory inside a specific h2 dir. Use
+// this when inspecting an h2 dir other than the resolved one (e.g. cross-dir
+// listing via the routes registry).
+func SessionsDirIn(h2Dir string) string {
+	return filepath.Join(h2Dir, "sessions")
 }
 
 // SessionDir returns the session directory for a given agent name.

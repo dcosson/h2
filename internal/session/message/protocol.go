@@ -129,6 +129,7 @@ type MessageInfo struct {
 type AgentInfo struct {
 	Name             string `json:"name"`
 	Command          string `json:"command"`
+	CWD              string `json:"cwd,omitempty"` // agent working directory
 	SessionID        string `json:"session_id,omitempty"`
 	Profile          string `json:"profile,omitempty"`
 	RoleName         string `json:"role,omitempty"`

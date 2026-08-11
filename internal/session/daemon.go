@@ -337,6 +337,7 @@ func (d *Daemon) AgentInfo() *message.AgentInfo {
 	info := &message.AgentInfo{
 		Name:             s.Name(),
 		Command:          s.RC.Command,
+		CWD:              s.RC.CWD,
 		SessionID:        s.RC.SessionID,
 		Profile:          s.RC.Profile,
 		RoleName:         s.RC.RoleName,

@@ -75,6 +75,7 @@ func newLsCmd() *cobra.Command {
 
 			agentInfos = filterAgentInfos(agentInfos, filter)
 			bridgeInfos = filterBridgeInfos(bridgeInfos, filter)
+			backfillAgentCWDs(config.SessionsDir(), agentInfos)
 
 			if len(entries) == 0 && !includeStoppedFlag {
 				fmt.Println("No running agents.")
@@ -202,6 +203,23 @@ func filterBridgeInfos(infos []*message.BridgeInfo, filter listAgeFilter) []*mes
 	return out
 }
 
+// backfillAgentCWDs fills in working directories from the on-disk session
+// metadata for any agent whose daemon did not report one in its status
+// response. sessionsDir is the sessions directory of the h2 dir the agents
+// belong to; infos must still carry their unprefixed agent names.
+func backfillAgentCWDs(sessionsDir string, infos []*message.AgentInfo) {
+	for _, info := range infos {
+		if info.CWD != "" {
+			continue
+		}
+		rc, err := config.ReadRuntimeConfig(filepath.Join(sessionsDir, info.Name))
+		if err != nil {
+			continue
+		}
+		info.CWD = rc.CWD
+	}
+}
+
 // podGroup represents a group of agents and bridges with the same pod name.
 type podGroup struct {
 	Pod     string // empty string means "no pod"
@@ -241,10 +259,20 @@ func groupByPod(agents []*message.AgentInfo, bridges []*message.BridgeInfo, podF
 		ensureBucket(b.Pod).bridges = append(ensureBucket(b.Pod).bridges, b)
 	}
 
-	// Sort agents within each pod bucket by PodIndex to preserve YAML ordering.
-	for _, b := range podMap {
+	// Sort agents within each bucket. Podded agents keep their YAML ordering
+	// (PodIndex); everything else — and any PodIndex ties — sorts by working
+	// directory, then agent name.
+	for pod, b := range podMap {
+		byPodIndex := pod != ""
 		sort.Slice(b.agents, func(i, j int) bool {
-			return b.agents[i].PodIndex < b.agents[j].PodIndex
+			ai, aj := b.agents[i], b.agents[j]
+			if byPodIndex && ai.PodIndex != aj.PodIndex {
+				return ai.PodIndex < aj.PodIndex
+			}
+			if ai.CWD != aj.CWD {
+				return ai.CWD < aj.CWD
+			}
+			return ai.Name < aj.Name
 		})
 	}
 
@@ -389,6 +417,11 @@ func printOutsidePodSummary(agents []*message.AgentInfo, bridges []*message.Brid
 }
 
 func printAgentLine(info *message.AgentInfo) {
+	fmt.Println(formatAgentLine(info))
+}
+
+// formatAgentLine renders a single agent row (without a trailing newline).
+func formatAgentLine(info *message.AgentInfo) string {
 	// Pick symbol and color function based on state.
 	var symbol string
 	var colorFn func(string) string
@@ -474,13 +507,18 @@ func printAgentLine(info *message.AgentInfo) {
 		profile = " " + s.Dim(fmt.Sprintf("[%s]", info.Profile))
 	}
 
-	if info.State != "" {
-		fmt.Printf("  %s %s%s %s%s — %s, up %s%s%s%s%s%s\n",
-			symbol, info.Name, role, s.Dim(info.Command), profile, stateLabel, info.Uptime, metrics, queued, tool, authErr, serverErr)
-	} else {
-		fmt.Printf("  %s %s%s %s%s — %s%s%s%s%s%s\n",
-			symbol, info.Name, role, s.Dim(info.Command), profile, stateLabel, metrics, queued, tool, authErr, serverErr)
+	// Working directory — the primary sort key, shown at the end of the row.
+	cwd := ""
+	if info.CWD != "" {
+		cwd = "  " + s.Dim(shortenHome(info.CWD))
 	}
+
+	if info.State != "" {
+		return fmt.Sprintf("  %s %s%s %s%s — %s, up %s%s%s%s%s%s%s",
+			symbol, info.Name, role, s.Dim(info.Command), profile, stateLabel, info.Uptime, metrics, queued, tool, authErr, serverErr, cwd)
+	}
+	return fmt.Sprintf("  %s %s%s %s%s — %s%s%s%s%s%s%s",
+		symbol, info.Name, role, s.Dim(info.Command), profile, stateLabel, metrics, queued, tool, authErr, serverErr, cwd)
 }
 
 // printStoppedAgents lists agents that have session dirs but no active socket.
@@ -510,15 +548,22 @@ func printStoppedAgents(runningNames map[string]bool, podFilter string, filter l
 		return
 	}
 
-	// Sort by name.
-	sort.Slice(stopped, func(i, j int) bool {
-		return stopped[i].AgentName < stopped[j].AgentName
-	})
+	sortStoppedConfigs(stopped)
 
 	fmt.Printf("\n%s\n", s.Bold("Stopped"))
 	for _, rc := range stopped {
 		printStoppedAgentLine(rc)
 	}
+}
+
+// sortStoppedConfigs orders stopped agents by working directory, then name.
+func sortStoppedConfigs(stopped []*config.RuntimeConfig) {
+	sort.Slice(stopped, func(i, j int) bool {
+		if stopped[i].CWD != stopped[j].CWD {
+			return stopped[i].CWD < stopped[j].CWD
+		}
+		return stopped[i].AgentName < stopped[j].AgentName
+	})
 }
 
 func printStoppedAgentLine(rc *config.RuntimeConfig) {
@@ -557,8 +602,13 @@ func printStoppedAgentLine(rc *config.RuntimeConfig) {
 		info = " " + s.Dim(lastActivity)
 	}
 
-	fmt.Printf("  %s %s%s %s —%s%s\n",
-		s.GrayDot(), rc.AgentName, role, s.Dim(rc.Command), info, pod)
+	cwd := ""
+	if rc.CWD != "" {
+		cwd = "  " + s.Dim(shortenHome(rc.CWD))
+	}
+
+	fmt.Printf("  %s %s%s %s —%s%s%s\n",
+		s.GrayDot(), rc.AgentName, role, s.Dim(rc.Command), info, pod, cwd)
 }
 
 // formatAge returns a human-readable short duration string for display.
@@ -719,10 +769,6 @@ func listDirAgents(h2Dir string, agentPrefix string, filter listAgeFilter) {
 		case socketdir.TypeAgent:
 			info := queryAgent(e.Path)
 			if info != nil {
-				// Prefix agent name for non-current dirs.
-				if agentPrefix != "" {
-					info.Name = agentPrefix + info.Name
-				}
 				agentInfos = append(agentInfos, info)
 			} else {
 				unresponsive = append(unresponsive, agentPrefix+e.Name)
@@ -732,6 +778,17 @@ func listDirAgents(h2Dir string, agentPrefix string, filter listAgeFilter) {
 
 	agentInfos = filterAgentInfos(agentInfos, filter)
 	bridgeInfos = filterBridgeInfos(bridgeInfos, filter)
+
+	// Backfill working dirs before names are prefixed — the lookup is by the
+	// agent's own name within its h2 dir.
+	backfillAgentCWDs(config.SessionsDirIn(h2Dir), agentInfos)
+
+	// Prefix agent names for non-current dirs.
+	if agentPrefix != "" {
+		for _, info := range agentInfos {
+			info.Name = agentPrefix + info.Name
+		}
+	}
 
 	groups := groupByPod(agentInfos, bridgeInfos, "*")
 	if len(groups) > 0 || len(unresponsive) > 0 {

@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -385,4 +388,166 @@ func TestFilterBridgeInfos_PrefersLastActivity(t *testing.T) {
 	if len(got) != 1 || got[0].Name != "active" {
 		t.Fatalf("unexpected filtered bridges: %#v", got)
 	}
+}
+
+// --- working directory display and ordering ---
+
+func makeAgentInDir(name, pod, cwd string) *message.AgentInfo {
+	info := makeAgent(name, pod)
+	info.CWD = cwd
+	return info
+}
+
+func agentNames(agents []*message.AgentInfo) []string {
+	names := make([]string, len(agents))
+	for i, a := range agents {
+		names[i] = a.Name
+	}
+	return names
+}
+
+func TestGroupByPod_NoPodSortedByWorkingDirThenName(t *testing.T) {
+	agents := []*message.AgentInfo{
+		makeAgentInDir("zeta", "", "/work/alpha"),
+		makeAgentInDir("beta", "", "/work/zulu"),
+		makeAgentInDir("alpha", "", "/work/alpha"),
+		makeAgentInDir("nodir", "", ""),
+	}
+	groups := groupByPod(agents, nil, "")
+	if len(groups) != 1 {
+		t.Fatalf("expected 1 group, got %d", len(groups))
+	}
+	got := agentNames(groups[0].Agents)
+	want := []string{"nodir", "alpha", "zeta", "beta"}
+	if !equalStrings(got, want) {
+		t.Errorf("agent order = %v, want %v", got, want)
+	}
+}
+
+func TestGroupByPod_PodAgentsKeepPodIndexOrder(t *testing.T) {
+	// Within a pod, YAML ordering (PodIndex) wins over working dir.
+	a := makeAgentInDir("second", "backend", "/work/aaa")
+	a.PodIndex = 1
+	b := makeAgentInDir("first", "backend", "/work/zzz")
+	b.PodIndex = 0
+	groups := groupByPod([]*message.AgentInfo{a, b}, nil, "")
+	if len(groups) != 1 {
+		t.Fatalf("expected 1 group, got %d", len(groups))
+	}
+	got := agentNames(groups[0].Agents)
+	want := []string{"first", "second"}
+	if !equalStrings(got, want) {
+		t.Errorf("agent order = %v, want %v", got, want)
+	}
+}
+
+func TestGroupByPod_PodAgentsTieBreakByWorkingDirThenName(t *testing.T) {
+	// Same PodIndex (e.g. agents joined a pod outside a YAML launch) falls
+	// back to working dir, then name.
+	agents := []*message.AgentInfo{
+		makeAgentInDir("zeta", "backend", "/work/aaa"),
+		makeAgentInDir("beta", "backend", "/work/zzz"),
+		makeAgentInDir("alpha", "backend", "/work/aaa"),
+	}
+	groups := groupByPod(agents, nil, "")
+	got := agentNames(groups[0].Agents)
+	want := []string{"alpha", "zeta", "beta"}
+	if !equalStrings(got, want) {
+		t.Errorf("agent order = %v, want %v", got, want)
+	}
+}
+
+func TestSortStoppedConfigs_ByWorkingDirThenName(t *testing.T) {
+	stopped := []*config.RuntimeConfig{
+		{AgentName: "zeta", CWD: "/work/alpha"},
+		{AgentName: "beta", CWD: "/work/zulu"},
+		{AgentName: "alpha", CWD: "/work/alpha"},
+	}
+	sortStoppedConfigs(stopped)
+	got := []string{stopped[0].AgentName, stopped[1].AgentName, stopped[2].AgentName}
+	want := []string{"alpha", "zeta", "beta"}
+	if !equalStrings(got, want) {
+		t.Errorf("stopped order = %v, want %v", got, want)
+	}
+}
+
+func TestBackfillAgentCWDs_FromSessionMetadata(t *testing.T) {
+	sessionsDir := t.TempDir()
+	writeSessionMetadata(t, sessionsDir, "from-disk", "/work/on-disk")
+
+	infos := []*message.AgentInfo{
+		makeAgentInDir("reported", "", "/work/reported"),
+		makeAgent("from-disk", ""),
+		makeAgent("no-session-dir", ""),
+	}
+	backfillAgentCWDs(sessionsDir, infos)
+
+	if infos[0].CWD != "/work/reported" {
+		t.Errorf("reported CWD = %q, want %q (should not be overwritten)", infos[0].CWD, "/work/reported")
+	}
+	if infos[1].CWD != "/work/on-disk" {
+		t.Errorf("backfilled CWD = %q, want %q", infos[1].CWD, "/work/on-disk")
+	}
+	if infos[2].CWD != "" {
+		t.Errorf("missing session dir should leave CWD empty, got %q", infos[2].CWD)
+	}
+}
+
+func writeSessionMetadata(t *testing.T, sessionsDir, agentName, cwd string) {
+	t.Helper()
+	dir := filepath.Join(sessionsDir, agentName)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	rc := config.RuntimeConfig{
+		AgentName:   agentName,
+		SessionID:   "session-" + agentName,
+		HarnessType: "claude",
+		Command:     "claude",
+		CWD:         cwd,
+		StartedAt:   time.Now().Format(time.RFC3339),
+	}
+	data, err := json.Marshal(rc)
+	if err != nil {
+		t.Fatalf("marshal runtime config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "session.metadata.json"), data, 0o644); err != nil {
+		t.Fatalf("write session metadata: %v", err)
+	}
+}
+
+func TestFormatAgentLine_IncludesWorkingDir(t *testing.T) {
+	info := makeAgentInDir("live-rain", "", "/work/projects/h2")
+	info.StateDisplayText = "Idle"
+	info.StateDuration = "2m"
+	info.Uptime = "1h"
+	got := formatAgentLine(info)
+	want := "  ○ live-rain claude — Idle 2m, up 1h  /work/projects/h2"
+	if got != want {
+		t.Errorf("formatAgentLine() = %q, want %q", got, want)
+	}
+}
+
+func TestFormatAgentLine_OmitsEmptyWorkingDir(t *testing.T) {
+	info := makeAgent("live-rain", "")
+	info.StateDisplayText = "Idle"
+	info.StateDuration = "2m"
+	info.Uptime = "1h"
+	got := formatAgentLine(info)
+	want := "  ○ live-rain claude — Idle 2m, up 1h"
+	if got != want {
+		t.Errorf("formatAgentLine() = %q, want %q", got, want)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
