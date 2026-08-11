@@ -521,8 +521,9 @@ func TestFormatAgentLine_IncludesWorkingDir(t *testing.T) {
 	info.StateDisplayText = "Idle"
 	info.StateDuration = "2m"
 	info.Uptime = "1h"
+	info.RoleName = "reviewer"
 	got := formatAgentLine(info)
-	want := "  ○ live-rain claude — Idle 2m, up 1h  /work/projects/h2"
+	want := "  ○ live-rain /work/projects/h2 (reviewer) claude — Idle 2m, up 1h"
 	if got != want {
 		t.Errorf("formatAgentLine() = %q, want %q", got, want)
 	}

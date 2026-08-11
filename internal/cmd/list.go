@@ -507,18 +507,18 @@ func formatAgentLine(info *message.AgentInfo) string {
 		profile = " " + s.Dim(fmt.Sprintf("[%s]", info.Profile))
 	}
 
-	// Working directory — the primary sort key, shown at the end of the row.
+	// Working directory — the primary sort key, shown right after the name.
 	cwd := ""
 	if info.CWD != "" {
-		cwd = "  " + s.Dim(shortenHome(info.CWD))
+		cwd = " " + s.Dim(shortenHome(info.CWD))
 	}
 
 	if info.State != "" {
-		return fmt.Sprintf("  %s %s%s %s%s — %s, up %s%s%s%s%s%s%s",
-			symbol, info.Name, role, s.Dim(info.Command), profile, stateLabel, info.Uptime, metrics, queued, tool, authErr, serverErr, cwd)
+		return fmt.Sprintf("  %s %s%s%s %s%s — %s, up %s%s%s%s%s%s",
+			symbol, info.Name, cwd, role, s.Dim(info.Command), profile, stateLabel, info.Uptime, metrics, queued, tool, authErr, serverErr)
 	}
-	return fmt.Sprintf("  %s %s%s %s%s — %s%s%s%s%s%s%s",
-		symbol, info.Name, role, s.Dim(info.Command), profile, stateLabel, metrics, queued, tool, authErr, serverErr, cwd)
+	return fmt.Sprintf("  %s %s%s%s %s%s — %s%s%s%s%s%s",
+		symbol, info.Name, cwd, role, s.Dim(info.Command), profile, stateLabel, metrics, queued, tool, authErr, serverErr)
 }
 
 // printStoppedAgents lists agents that have session dirs but no active socket.
@@ -604,11 +604,11 @@ func printStoppedAgentLine(rc *config.RuntimeConfig) {
 
 	cwd := ""
 	if rc.CWD != "" {
-		cwd = "  " + s.Dim(shortenHome(rc.CWD))
+		cwd = " " + s.Dim(shortenHome(rc.CWD))
 	}
 
-	fmt.Printf("  %s %s%s %s —%s%s%s\n",
-		s.GrayDot(), rc.AgentName, role, s.Dim(rc.Command), info, pod, cwd)
+	fmt.Printf("  %s %s%s%s %s —%s%s\n",
+		s.GrayDot(), rc.AgentName, cwd, role, s.Dim(rc.Command), info, pod)
 }
 
 // formatAge returns a human-readable short duration string for display.
