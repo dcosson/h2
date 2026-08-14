@@ -57,6 +57,18 @@ Each 5-minute wakeup, do **every** step in order. Do not skip steps. Even when a
 gh pr view <pr-number> --json mergeable,mergeStateStatus
 ```
 
+**Never report a PR as "mergeable" from the `mergeable` field alone.** That
+field only answers whether GitHub can construct a merge commit; it is not a
+readiness verdict. Treat the PR as ready to merge only when both fields have
+settled affirmatively: `mergeable` is `MERGEABLE` **and** `mergeStateStatus` is
+`CLEAN`. In particular, `mergeable: MERGEABLE` together with
+`mergeStateStatus: UNSTABLE` means checks are not settled and must be reported
+as **in progress / not ready to merge**, never as mergeable. Likewise,
+`BLOCKED`, `BEHIND`, `DIRTY`, `DRAFT`, `HAS_HOOKS`, or `UNKNOWN` are not ready
+states. In user-facing status, prefer “no merge conflicts” for the narrow
+`mergeable: MERGEABLE` fact and reserve “ready to merge” for the fully settled
+PR.
+
 - `"mergeable": "MERGEABLE"` → continue to 2b.
 - `"mergeable": "CONFLICTING"` → the branch has fallen behind main. Fetch main, merge it into the PR branch, resolve conflicts, and push. For sops-encrypted files or other binary/generated files where both sides re-encrypted, take main's version (`git checkout --theirs <file>`) and note that re-encryption may be needed. For code conflicts, resolve normally. End turn after pushing the merge — let the next wakeup verify.
 - `"mergeable": "UNKNOWN"` → GitHub is still computing. Skip and check again next wakeup.
@@ -156,8 +168,8 @@ Output a structured summary for this tick. For each step (2a–2f), one line: wh
 
 The PR is "clean" when:
 
-- `mergeStateStatus` is NOT `BLOCKED`. Check with `gh pr view <pr> --json mergeStateStatus`. If it's `BLOCKED`, diagnose why: check for required reviews (`gh pr view <pr> --json reviewDecision`), unresolved conversations, or failing required checks. Report the specific blocker in your summary. If the blocker is something only a human can fix (e.g. required approval), say so explicitly on the first tick you detect it and keep polling. Do not repeat the same "waiting on approval" message every tick — after the first report, just confirm "still blocked on human approval" in one line.
-- The PR is mergeable (no merge conflicts with the base branch).
+- `mergeStateStatus` is exactly `CLEAN`. Check with `gh pr view <pr> --json mergeStateStatus`. Any other value remains in progress. If it's `BLOCKED`, diagnose why: check for required reviews (`gh pr view <pr> --json reviewDecision`), unresolved conversations, or failing required checks. Report the specific blocker in your summary. If the blocker is something only a human can fix (e.g. required approval), say so explicitly on the first tick you detect it and keep polling. Do not repeat the same "waiting on approval" message every tick — after the first report, just confirm "still blocked on human approval" in one line.
+- `mergeable` is `MERGEABLE` (no merge conflicts with the base branch). Report this intermediate fact only as “no merge conflicts,” not “mergeable.”
 - All CI checks pass (use `gh run list`, not `gh pr checks`).
 - No outstanding bot comments are unresolved (either you resolved a false positive, or you pushed a fix AND the bot re-reviewed and found no new issues).
 - No outstanding human comments are unaddressed (you replied to mechanicals after pushing, or you flagged architecturals for user discussion).
