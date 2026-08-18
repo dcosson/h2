@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### New Features
+
+- **HTML / MarkdownV2 message formatting**: Added `--format HTML|MarkdownV2`
+  flag to `h2 send`. When the target is a bridge that implements the new
+  `FormattedSender` capability interface (currently Telegram, via parse_mode),
+  the body is delivered as rich text. Bridges that do not implement
+  `FormattedSender` and agent targets reject the flag with a clear error
+  (no silent fallback). The agent-tag prefix (`[from-agent] `) is kept as
+  plain text outside the formatted body. Callers are responsible for
+  escaping HTML or MarkdownV2 reserved characters inside the body.
+
 ## v0.3.2
 
 ### New Features
