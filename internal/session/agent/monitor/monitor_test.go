@@ -879,3 +879,152 @@ func TestProcessEvent_ServerError_NotClearedByZeroTokenTurn(t *testing.T) {
 		t.Fatalf("ServerErrorMessage should not be cleared by zero-token turn, got %q", m.ServerErrorMessage())
 	}
 }
+
+func TestProcessEvent_UsageLimit_ClearedBySuccessfulTurn(t *testing.T) {
+	m := New()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cleared := make(chan struct{}, 4)
+	m.SetOnUsageLimitCleared(func() {
+		cleared <- struct{}{}
+	})
+
+	limited := make(chan UsageLimitData, 1)
+	m.SetOnUsageLimit(func(data UsageLimitData) {
+		limited <- data
+	})
+
+	go m.Run(ctx)
+
+	// A fresh monitor may be inheriting a stale ratelimit.json from a
+	// previous daemon run, so the first successful turn always signals a
+	// clear.
+	m.Events() <- AgentEvent{
+		Type:      EventTurnCompleted,
+		Timestamp: time.Now(),
+		Data:      TurnCompletedData{InputTokens: 10, OutputTokens: 5},
+	}
+	select {
+	case <-cleared:
+	case <-time.After(time.Second):
+		t.Fatal("OnUsageLimitCleared not called on the first successful turn")
+	}
+
+	// Further successful turns must not re-signal; nothing has changed.
+	m.Events() <- AgentEvent{
+		Type:      EventTurnCompleted,
+		Timestamp: time.Now(),
+		Data:      TurnCompletedData{InputTokens: 10, OutputTokens: 5},
+	}
+	time.Sleep(30 * time.Millisecond)
+	if len(cleared) != 0 {
+		t.Fatalf("OnUsageLimitCleared signalled %d extra times with no intervening usage limit", len(cleared))
+	}
+
+	// Hit a usage limit.
+	m.Events() <- AgentEvent{
+		Type:      EventStateChange,
+		Timestamp: time.Now(),
+		Data:      StateChangeData{State: StateIdle, SubState: SubStateUsageLimit},
+	}
+	m.Events() <- AgentEvent{
+		Type:      EventUsageLimitInfo,
+		Timestamp: time.Now(),
+		Data:      UsageLimitData{ResetsAt: time.Now().Add(time.Hour), Message: "usage limit reached"},
+	}
+	select {
+	case <-limited:
+	case <-time.After(time.Second):
+		t.Fatal("OnUsageLimit callback not called")
+	}
+
+	// A successful turn after the limit clears it again.
+	m.Events() <- AgentEvent{
+		Type:      EventTurnCompleted,
+		Timestamp: time.Now(),
+		Data:      TurnCompletedData{InputTokens: 100, OutputTokens: 50},
+	}
+	select {
+	case <-cleared:
+	case <-time.After(time.Second):
+		t.Fatal("OnUsageLimitCleared not called after a successful turn following a usage limit")
+	}
+}
+
+func TestProcessEvent_UsageLimit_NotClearedByZeroTokenTurn(t *testing.T) {
+	m := New()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cleared := make(chan struct{}, 4)
+	m.SetOnUsageLimitCleared(func() {
+		cleared <- struct{}{}
+	})
+
+	go m.Run(ctx)
+
+	// Drain the initial startup clear triggered by the first real turn by
+	// never sending one: only zero-token turns are sent below.
+	m.Events() <- AgentEvent{
+		Type:      EventUsageLimitInfo,
+		Timestamp: time.Now(),
+		Data:      UsageLimitData{ResetsAt: time.Now().Add(time.Hour), Message: "usage limit reached"},
+	}
+	m.Events() <- AgentEvent{
+		Type:      EventTurnCompleted,
+		Timestamp: time.Now(),
+		Data:      TurnCompletedData{},
+	}
+
+	time.Sleep(30 * time.Millisecond)
+
+	if len(cleared) != 0 {
+		t.Fatalf("OnUsageLimitCleared signalled %d times for a zero-token turn", len(cleared))
+	}
+	if m.UsageLimitMessage() != "usage limit reached" {
+		t.Fatalf("UsageLimitMessage = %q, want it retained after a zero-token turn", m.UsageLimitMessage())
+	}
+}
+
+func TestProcessEvent_UsageLimit_SuccessfulTurnClearsInMemoryState(t *testing.T) {
+	m := New()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go m.Run(ctx)
+
+	m.Events() <- AgentEvent{
+		Type:      EventStateChange,
+		Timestamp: time.Now(),
+		Data:      StateChangeData{State: StateIdle, SubState: SubStateUsageLimit},
+	}
+	m.Events() <- AgentEvent{
+		Type:      EventUsageLimitInfo,
+		Timestamp: time.Now(),
+		Data:      UsageLimitData{ResetsAt: time.Now().Add(time.Hour), Message: "usage limit reached"},
+	}
+
+	time.Sleep(20 * time.Millisecond)
+	if m.UsageLimitMessage() == "" {
+		t.Fatal("UsageLimitMessage should be set after a usage limit event")
+	}
+
+	m.Events() <- AgentEvent{
+		Type:      EventTurnCompleted,
+		Timestamp: time.Now(),
+		Data:      TurnCompletedData{InputTokens: 100, OutputTokens: 50},
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	state, subState := m.State()
+	if subState == SubStateUsageLimit {
+		t.Fatalf("subState should not be UsageLimit after a successful turn, got (%v,%v)", state, subState)
+	}
+	if m.UsageLimitMessage() != "" {
+		t.Fatalf("UsageLimitMessage should be cleared, got %q", m.UsageLimitMessage())
+	}
+	if m.UsageLimitResetsAt() != nil {
+		t.Fatalf("UsageLimitResetsAt should be cleared, got %v", m.UsageLimitResetsAt())
+	}
+}

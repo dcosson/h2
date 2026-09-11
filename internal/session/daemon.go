@@ -115,6 +115,22 @@ func RunDaemon(sessionDir string, rc *config.RuntimeConfig, resume bool) error {
 		}
 	})
 
+	// Wire OnUsageLimitCleared callback to remove ratelimit.json once the
+	// profile completes a turn with real token usage. A usage limit recorded
+	// without a reset time never expires on its own, and a limit that was
+	// lifted out of band (a plan reset, new credits) leaves a stale marker
+	// that keeps rotation and `h2 profile list` treating the profile as
+	// blocked. A successful turn is proof the profile is serving again.
+	s.monitor.SetOnUsageLimitCleared(func() {
+		profileDir := rc.HarnessConfigDir()
+		if profileDir == "" {
+			return
+		}
+		if err := config.ClearRateLimit(profileDir); err != nil {
+			log.Printf("warning: clear rate limit info: %v", err)
+		}
+	})
+
 	// Wire OnAuthError callback to persist auth error info to the profile's
 	// autherror.json so other tools (e.g. rotate, auth) can check it.
 	s.monitor.SetOnAuthError(func(data monitor.AuthErrorData) {

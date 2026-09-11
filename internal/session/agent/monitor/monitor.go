@@ -24,6 +24,7 @@ type AgentMonitor struct {
 	sessionID            string
 	onSessionStarted     func(SessionStartedData)
 	onUsageLimit         func(UsageLimitData)
+	onUsageLimitCleared  func()
 	onAuthError          func(AuthErrorData)
 	onAuthErrorCleared   func()
 	onServerError        func(ServerErrorData)
@@ -51,6 +52,15 @@ type AgentMonitor struct {
 	serverErrorMessage string
 	serverErrorCode    string
 
+	// usageLimitClearPending is true while a successful turn would still be
+	// news to whoever persists rate limit state. It starts true because a
+	// ratelimit.json written by an earlier daemon run (or by another agent
+	// sharing the profile) may be sitting on disk, and a usage limit with no
+	// reset time never expires on its own. It is set again every time a new
+	// usage limit is reported, and cleared once the clear callback fires so
+	// that a long run of healthy turns does not re-signal on every turn.
+	usageLimitClearPending bool
+
 	// subscribers receive a copy of every event processed by the monitor.
 	// Protected by subscribersMu (separate from mu to avoid contention).
 	subscribersMu sync.Mutex
@@ -72,11 +82,12 @@ func WithEventWriter(fn func(AgentEvent) error) Option {
 // New creates an AgentMonitor.
 func New(opts ...Option) *AgentMonitor {
 	m := &AgentMonitor{
-		events:         make(chan AgentEvent, 256),
-		state:          StateInitialized,
-		stateChangedAt: time.Now(),
-		stateCh:        make(chan struct{}),
-		toolCounts:     make(map[string]int64),
+		events:                 make(chan AgentEvent, 256),
+		state:                  StateInitialized,
+		stateChangedAt:         time.Now(),
+		stateCh:                make(chan struct{}),
+		toolCounts:             make(map[string]int64),
+		usageLimitClearPending: true,
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -128,6 +139,7 @@ func (m *AgentMonitor) processEvent(ev AgentEvent) {
 	var sessionStartedData SessionStartedData
 	var usageLimitCb func(UsageLimitData)
 	var usageLimitData UsageLimitData
+	var usageLimitClearCb func()
 	var authErrorCb func(AuthErrorData)
 	var authErrorData AuthErrorData
 	var authErrorClearCb func()
@@ -170,13 +182,28 @@ func (m *AgentMonitor) processEvent(ev AgentEvent) {
 			m.outputTokens += data.OutputTokens
 			m.cachedTokens += data.CachedTokens
 			m.totalCostUSD += data.CostUSD
+			succeeded := data.InputTokens > 0 || data.OutputTokens > 0
 			// A successful turn with tokens means the API responded — clear server error.
-			if (data.InputTokens > 0 || data.OutputTokens > 0) && m.serverErrorMessage != "" {
+			if succeeded && m.serverErrorMessage != "" {
 				m.serverErrorMessage = ""
 				m.serverErrorCode = ""
 				serverErrorClearCb = m.onServerErrorCleared
 				// Also transition out of server_error sub-state if still in it.
 				if m.subState == SubStateServerError {
+					m.setStateLocked(StateActive, SubStateThinking)
+				}
+			}
+			// The same proof applies to usage limits: the profile just served
+			// a request, so any recorded rate limit is stale. This is not
+			// gated on in-memory usage limit state because the limit may have
+			// been recorded by an earlier daemon run or by another agent on
+			// the same profile.
+			if succeeded && m.usageLimitClearPending {
+				m.usageLimitClearPending = false
+				m.usageLimitResetsAt = nil
+				m.usageLimitMessage = ""
+				usageLimitClearCb = m.onUsageLimitCleared
+				if m.subState == SubStateUsageLimit {
 					m.setStateLocked(StateActive, SubStateThinking)
 				}
 			}
@@ -241,6 +268,7 @@ func (m *AgentMonitor) processEvent(ev AgentEvent) {
 		if data, ok := ev.Data.(UsageLimitData); ok {
 			m.usageLimitResetsAt = &data.ResetsAt
 			m.usageLimitMessage = data.Message
+			m.usageLimitClearPending = true
 			usageLimitCb = m.onUsageLimit
 			usageLimitData = data
 		}
@@ -273,6 +301,9 @@ func (m *AgentMonitor) processEvent(ev AgentEvent) {
 	}
 	if usageLimitCb != nil {
 		usageLimitCb(usageLimitData)
+	}
+	if usageLimitClearCb != nil {
+		usageLimitClearCb()
 	}
 	if authErrorCb != nil {
 		authErrorCb(authErrorData)
@@ -363,6 +394,15 @@ func (m *AgentMonitor) SetOnSessionStarted(fn func(SessionStartedData)) {
 // Must be called before Run.
 func (m *AgentMonitor) SetOnUsageLimit(fn func(UsageLimitData)) {
 	m.onUsageLimit = fn
+}
+
+// SetOnUsageLimitCleared sets a callback invoked when a turn completes with
+// real token usage, which proves the profile is serving requests again. The
+// daemon uses this to remove the ratelimit.json file. It fires on the first
+// successful turn after startup and after every subsequent usage limit, not
+// once per turn. Must be called before Run.
+func (m *AgentMonitor) SetOnUsageLimitCleared(fn func()) {
+	m.onUsageLimitCleared = fn
 }
 
 // SetOnAuthError sets a callback invoked when EventAuthErrorInfo is
