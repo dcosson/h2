@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -18,6 +19,8 @@ import (
 )
 
 func newRotateCmd() *cobra.Command {
+	var force bool
+
 	cmd := &cobra.Command{
 		Use:   "rotate <agent-name> [profiles...]",
 		Short: "Rotate an agent to a different profile",
@@ -27,10 +30,10 @@ its session log to the new profile's Claude config directory.
 If the agent is running, it is stopped, rotated, and resumed automatically.
 
 Profile selection:
-  h2 rotate agent                     Auto-select next from all profiles
-  h2 rotate agent staging             Rotate to specific profile
-  h2 rotate agent prof-1 prof-2       Next from these candidates (in given order)
-  h2 rotate agent "staging-*"         Next from profiles matching glob pattern
+  h2 session rotate agent                  Auto-select next from all profiles
+  h2 session rotate agent staging          Rotate to specific profile
+  h2 session rotate agent prof-1 prof-2    Next from these candidates (in given order)
+  h2 session rotate agent "staging-*"      Next from profiles matching glob pattern
 
 When multiple candidates are given, they are checked in the order provided.
 If the current profile is in the list, the next one is selected (wrapping
@@ -39,7 +42,17 @@ is selected.
 
 Glob patterns (containing * or ?) are expanded against discovered profiles
 and the matches are sorted alphabetically. Literal names preserve their
-argument order.`,
+argument order.
+
+Profiles that are rate limited or have a recorded auth error are normally
+skipped. Pass --force to consider them anyway:
+
+  h2 session rotate agent --force          Next profile even if unavailable
+  h2 session rotate agent staging --force  Rotate to staging even if unavailable
+
+--force does not clear the rate limit or auth error markers, and it does not
+let you rotate to a profile that does not exist or to the profile the agent
+is already using.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agentName := args[0]
@@ -74,23 +87,30 @@ argument order.`,
 				return fmt.Errorf("no profiles found")
 			}
 
-			candidates, skipped := filterRateLimited(candidates, rc.HarnessConfigPathPrefix)
-			for _, s := range skipped {
-				if s.resetsAt.IsZero() {
-					fmt.Fprintf(cmd.OutOrStderr(), "Skipping profile %q (rate limited)\n", s.name)
-				} else {
-					fmt.Fprintf(cmd.OutOrStderr(), "Skipping profile %q (rate limited until %s)\n",
-						s.name, s.resetsAt.Local().Format("Jan 2 3:04 PM"))
+			// Rate-limited and auth-errored profiles are skipped unless --force
+			// was given, in which case every candidate stays in the running and
+			// the unavailability of the winner is reported below instead.
+			if !force {
+				var skipped []skippedProfile
+				candidates, skipped = filterRateLimited(candidates, rc.HarnessConfigPathPrefix)
+				for _, s := range skipped {
+					if s.resetsAt.IsZero() {
+						fmt.Fprintf(cmd.OutOrStderr(), "Skipping profile %q (rate limited)\n", s.name)
+					} else {
+						fmt.Fprintf(cmd.OutOrStderr(), "Skipping profile %q (rate limited until %s)\n",
+							s.name, s.resetsAt.Local().Format("Jan 2 3:04 PM"))
+					}
 				}
-			}
 
-			candidates, authSkipped := filterAuthErrored(candidates, rc.HarnessConfigPathPrefix)
-			for _, name := range authSkipped {
-				fmt.Fprintf(cmd.OutOrStderr(), "Skipping profile %q (auth error: run /login)\n", name)
-			}
+				var authSkipped []string
+				candidates, authSkipped = filterAuthErrored(candidates, rc.HarnessConfigPathPrefix)
+				for _, name := range authSkipped {
+					fmt.Fprintf(cmd.OutOrStderr(), "Skipping profile %q (auth error: run /login)\n", name)
+				}
 
-			if len(candidates) == 0 {
-				return fmt.Errorf("all candidate profiles are rate limited or have auth errors")
+				if len(candidates) == 0 {
+					return fmt.Errorf("all candidate profiles are rate limited or have auth errors; use --force to rotate anyway")
+				}
 			}
 
 			// Select the next profile.
@@ -111,6 +131,12 @@ argument order.`,
 			}
 			if !info.IsDir() {
 				return fmt.Errorf("profile path is not a directory: %s", newProfileDir)
+			}
+
+			// Under --force the selected profile may be unavailable. Say so
+			// plainly; the markers themselves are left untouched.
+			if force {
+				reportForcedProfileState(cmd.OutOrStderr(), newProfile, newProfileDir)
 			}
 
 			running := isAgentRunning(agentName)
@@ -142,7 +168,27 @@ argument order.`,
 		},
 	}
 
+	cmd.Flags().BoolVarP(&force, "force", "f", false,
+		"Rotate even if the target profile is rate limited or has an auth error")
+
 	return cmd
+}
+
+// reportForcedProfileState prints why a force-selected profile was considered
+// unavailable. It is purely informational — the underlying ratelimit.json and
+// autherror.json markers are left in place.
+func reportForcedProfileState(w io.Writer, name, profileDir string) {
+	if rl := config.IsProfileRateLimited(profileDir); rl != nil {
+		if rl.ResetsAt.IsZero() {
+			fmt.Fprintf(w, "Forcing rotation to profile %q (rate limited)\n", name)
+		} else {
+			fmt.Fprintf(w, "Forcing rotation to profile %q (rate limited until %s)\n",
+				name, rl.ResetsAt.Local().Format("Jan 2 3:04 PM"))
+		}
+	}
+	if config.IsProfileAuthError(profileDir) != nil {
+		fmt.Fprintf(w, "Forcing rotation to profile %q (auth error: run /login)\n", name)
+	}
 }
 
 // resolveRotateCandidates builds the ordered list of candidate profiles from

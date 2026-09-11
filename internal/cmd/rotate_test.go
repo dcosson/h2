@@ -980,6 +980,254 @@ func TestRotate_AllCandidatesRateLimited(t *testing.T) {
 	}
 }
 
+// setupForceRotateAgent creates three profile dirs (default, prod, staging)
+// under a temp harness config prefix and writes a RuntimeConfig for a
+// claude_code agent currently on "default". Returns the config prefix and the
+// agent's session dir.
+func setupForceRotateAgent(t *testing.T, name string) (configPrefix, sessionDir string) {
+	t.Helper()
+	configPrefix = t.TempDir()
+	for _, p := range []string{"default", "prod", "staging"} {
+		if err := os.MkdirAll(filepath.Join(configPrefix, p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sessionDir = writeTestRuntimeConfig(t, name, &config.RuntimeConfig{
+		AgentName:               name,
+		SessionID:               "sid-1",
+		HarnessSessionID:        "sid-1",
+		HarnessType:             "claude_code",
+		HarnessConfigPathPrefix: configPrefix,
+		Profile:                 "default",
+		Command:                 "claude",
+		CWD:                     configPrefix,
+		StartedAt:               "2024-01-01T00:00:00Z",
+	})
+	return configPrefix, sessionDir
+}
+
+// rateLimitProfile marks a profile dir as rate limited for one hour.
+func rateLimitProfile(t *testing.T, profileDir string) {
+	t.Helper()
+	err := config.WriteRateLimit(profileDir, &config.RateLimitInfo{
+		ResetsAt:   time.Now().Add(1 * time.Hour),
+		RecordedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// authErrorProfile marks a profile dir as having an auth error.
+func authErrorProfile(t *testing.T, profileDir string) {
+	t.Helper()
+	err := config.WriteAuthError(profileDir, &config.AuthErrorInfo{
+		Message:    "invalid api key",
+		RecordedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRotate_ForceExplicitRateLimitedProfile(t *testing.T) {
+	setupRotateTestH2Dir(t)
+	name := "rotate-test-force-explicit-rl"
+	configPrefix, sessionDir := setupForceRotateAgent(t, name)
+	rateLimitProfile(t, filepath.Join(configPrefix, "staging"))
+
+	var out strings.Builder
+	cmd := newRotateCmd()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{name, "staging", "--force"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	rc, err := config.ReadRuntimeConfig(sessionDir)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if rc.Profile != "staging" {
+		t.Errorf("Profile = %q, want %q", rc.Profile, "staging")
+	}
+	if !strings.Contains(out.String(), "rate limited") {
+		t.Errorf("output = %q, want a rate-limit warning", out.String())
+	}
+	if strings.Contains(out.String(), "Skipping profile") {
+		t.Errorf("output = %q, should not skip profiles under --force", out.String())
+	}
+}
+
+func TestRotate_ForceExplicitAuthErroredProfile(t *testing.T) {
+	setupRotateTestH2Dir(t)
+	name := "rotate-test-force-explicit-auth"
+	configPrefix, sessionDir := setupForceRotateAgent(t, name)
+	authErrorProfile(t, filepath.Join(configPrefix, "staging"))
+
+	var out strings.Builder
+	cmd := newRotateCmd()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{name, "staging", "--force"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	rc, err := config.ReadRuntimeConfig(sessionDir)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if rc.Profile != "staging" {
+		t.Errorf("Profile = %q, want %q", rc.Profile, "staging")
+	}
+	if !strings.Contains(out.String(), "auth error") {
+		t.Errorf("output = %q, want an auth-error warning", out.String())
+	}
+}
+
+func TestRotate_ForceShorthandFlag(t *testing.T) {
+	setupRotateTestH2Dir(t)
+	name := "rotate-test-force-shorthand"
+	configPrefix, sessionDir := setupForceRotateAgent(t, name)
+	rateLimitProfile(t, filepath.Join(configPrefix, "staging"))
+
+	cmd := newRotateCmd()
+	cmd.SetArgs([]string{name, "staging", "-f"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	rc, err := config.ReadRuntimeConfig(sessionDir)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if rc.Profile != "staging" {
+		t.Errorf("Profile = %q, want %q", rc.Profile, "staging")
+	}
+}
+
+func TestRotate_ForceAutoSelectIgnoresUnavailable(t *testing.T) {
+	setupRotateTestH2Dir(t)
+	name := "rotate-test-force-auto"
+	configPrefix, sessionDir := setupForceRotateAgent(t, name)
+	// Both non-current profiles are unavailable. Sorted order is
+	// default, prod, staging — so the next one after "default" is "prod".
+	rateLimitProfile(t, filepath.Join(configPrefix, "prod"))
+	authErrorProfile(t, filepath.Join(configPrefix, "staging"))
+
+	cmd := newRotateCmd()
+	cmd.SetArgs([]string{name, "--force"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	rc, err := config.ReadRuntimeConfig(sessionDir)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if rc.Profile != "prod" {
+		t.Errorf("Profile = %q, want %q (force must not skip unavailable profiles)", rc.Profile, "prod")
+	}
+}
+
+func TestRotate_ForceGlobIgnoresUnavailable(t *testing.T) {
+	setupRotateTestH2Dir(t)
+	name := "rotate-test-force-glob"
+	configPrefix, sessionDir := setupForceRotateAgent(t, name)
+	rateLimitProfile(t, filepath.Join(configPrefix, "prod"))
+	rateLimitProfile(t, filepath.Join(configPrefix, "staging"))
+
+	// Glob matches prod and staging (sorted); current is default, so the
+	// first candidate wins.
+	cmd := newRotateCmd()
+	cmd.SetArgs([]string{name, "p*", "s*", "--force"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	rc, err := config.ReadRuntimeConfig(sessionDir)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if rc.Profile != "prod" {
+		t.Errorf("Profile = %q, want %q", rc.Profile, "prod")
+	}
+}
+
+func TestRotate_ForceDoesNotClearUnavailabilityMarkers(t *testing.T) {
+	setupRotateTestH2Dir(t)
+	name := "rotate-test-force-markers"
+	configPrefix, _ := setupForceRotateAgent(t, name)
+	stagingDir := filepath.Join(configPrefix, "staging")
+	rateLimitProfile(t, stagingDir)
+	authErrorProfile(t, stagingDir)
+
+	cmd := newRotateCmd()
+	cmd.SetArgs([]string{name, "staging", "--force"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if config.IsProfileRateLimited(stagingDir) == nil {
+		t.Error("rate limit marker was cleared; --force must not alter profile state")
+	}
+	if config.IsProfileAuthError(stagingDir) == nil {
+		t.Error("auth error marker was cleared; --force must not alter profile state")
+	}
+}
+
+func TestRotate_ForceStillRequiresProfileDir(t *testing.T) {
+	setupRotateTestH2Dir(t)
+	name := "rotate-test-force-missing-dir"
+	setupForceRotateAgent(t, name)
+
+	cmd := newRotateCmd()
+	cmd.SetArgs([]string{name, "nonexistent-profile", "--force"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing profile dir even with --force")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error = %q, want containing 'not found'", err.Error())
+	}
+}
+
+func TestRotate_ForceStillRejectsCurrentProfile(t *testing.T) {
+	setupRotateTestH2Dir(t)
+	name := "rotate-test-force-same"
+	setupForceRotateAgent(t, name)
+
+	cmd := newRotateCmd()
+	cmd.SetArgs([]string{name, "default", "--force"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error rotating to the current profile even with --force")
+	}
+	if !strings.Contains(err.Error(), "already using profile") {
+		t.Errorf("error = %q, want containing 'already using profile'", err.Error())
+	}
+}
+
+func TestRotate_AllCandidatesUnavailable_SuggestsForce(t *testing.T) {
+	setupRotateTestH2Dir(t)
+	name := "rotate-test-suggest-force"
+	configPrefix, _ := setupForceRotateAgent(t, name)
+	rateLimitProfile(t, filepath.Join(configPrefix, "prod"))
+	authErrorProfile(t, filepath.Join(configPrefix, "staging"))
+
+	cmd := newRotateCmd()
+	cmd.SetArgs([]string{name, "prod", "staging"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when every candidate is unavailable")
+	}
+	if !strings.Contains(err.Error(), "--force") {
+		t.Errorf("error = %q, want it to mention --force", err.Error())
+	}
+}
+
 func TestRotate_VariadicCandidates(t *testing.T) {
 	setupRotateTestH2Dir(t)
 	name := "rotate-test-variadic"
