@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,6 +36,9 @@ type Telegram struct {
 	Token           string
 	ChatID          int64
 	AllowedCommands []string
+
+	// AttachmentDir stores received images privately; empty disables downloads.
+	AttachmentDir string
 
 	// BaseURL overrides the Telegram API base for testing.
 	// If empty, defaults to "https://api.telegram.org".
@@ -76,10 +80,15 @@ func (t *Telegram) Send(ctx context.Context, text string) error {
 }
 
 func (t *Telegram) sendChunk(ctx context.Context, text string) error {
-	resp, err := t.client.PostForm(t.apiURL("sendMessage"), url.Values{
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.apiURL("sendMessage"), strings.NewReader(url.Values{
 		"chat_id": {strconv.FormatInt(t.ChatID, 10)},
 		"text":    {text},
-	})
+	}.Encode()))
+	if err != nil {
+		return fmt.Errorf("telegram send: invalid endpoint")
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := t.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("telegram send: %w", err)
 	}
@@ -157,19 +166,7 @@ func (t *Telegram) poll(ctx context.Context, handler bridge.InboundHandler) {
 			if u.Message == nil || u.Message.Chat.ID != t.ChatID {
 				continue
 			}
-			// Check for slash commands before agent routing.
-			cmd, args := bridge.ParseSlashCommand(u.Message.Text, t.AllowedCommands)
-			if cmd != "" {
-				log.Printf("bridge: telegram: executing command /%s %s", cmd, args)
-				go t.execAndReply(ctx, cmd, args)
-				continue
-			}
-			agent, body := bridge.ParseAgentPrefix(u.Message.Text)
-			// If no explicit prefix, check reply-to message for agent tag.
-			if agent == "" && u.Message.ReplyToMessage != nil {
-				agent = bridge.ParseAgentTag(u.Message.ReplyToMessage.Text)
-			}
-			handler(agent, body)
+			t.handleMessage(ctx, u.Message, handler)
 		}
 	}
 }
@@ -250,11 +247,61 @@ type update struct {
 }
 
 type message struct {
-	Text           string   `json:"text"`
-	Chat           chat     `json:"chat"`
-	ReplyToMessage *message `json:"reply_to_message,omitempty"`
+	Text           string      `json:"text"`
+	Caption        string      `json:"caption,omitempty"`
+	Photo          []photoSize `json:"photo,omitempty"`
+	Document       *document   `json:"document,omitempty"`
+	Chat           chat        `json:"chat"`
+	ReplyToMessage *message    `json:"reply_to_message,omitempty"`
 }
 
 type chat struct {
 	ID int64 `json:"id"`
+}
+
+// handleMessage preserves text routing for image captions without executing
+// captions as slash commands. Only messages from the configured chat reach it.
+func (t *Telegram) handleMessage(ctx context.Context, m *message, handler bridge.InboundHandler) {
+	if m.Chat.ID != t.ChatID {
+		return
+	}
+	fileID, size := m.imageFile()
+	text := m.Text
+	if fileID != "" {
+		text = m.Caption
+	}
+	if fileID == "" {
+		cmd, args := bridge.ParseSlashCommand(text, t.AllowedCommands)
+		if cmd != "" {
+			log.Printf("bridge: telegram: executing command /%s %s", cmd, args)
+			go t.execAndReply(ctx, cmd, args)
+			return
+		}
+	}
+	agent, body := bridge.ParseAgentPrefix(text)
+	if agent == "" && m.ReplyToMessage != nil {
+		reply := m.ReplyToMessage.Text
+		if reply == "" {
+			reply = m.ReplyToMessage.Caption
+		}
+		agent = bridge.ParseAgentTag(reply)
+	}
+	if fileID != "" {
+		filename, err := t.receiveImage(ctx, fileID, size)
+		if err != nil {
+			// Explicit failure instead of silently delivering the caption alone.
+			log.Printf("bridge: telegram: receive image: %v", err)
+			notifyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+			if sendErr := t.Send(notifyCtx, "Unable to receive image: "+err.Error()); sendErr != nil {
+				log.Printf("bridge: telegram: image error notification failed")
+			}
+			return
+		}
+		body += fmt.Sprintf("\n\n[Image attachment: %s]\nOpen this local image with your image-viewing tool to inspect it.", filename)
+	}
+	if body == "" {
+		return
+	}
+	handler(agent, body)
 }

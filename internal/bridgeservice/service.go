@@ -162,8 +162,12 @@ func (s *Service) handleConn(conn net.Conn) {
 	}
 
 	switch req.Type {
-	case "send":
-		if err := s.sendOutbound(req.From, req.Body); err != nil {
+	case "send", "send-image":
+		if (req.Type == "send-image") != (req.ImagePath != "") {
+			message.SendResponse(conn, &message.Response{Error: "send-image requires an image path; send accepts text only"})
+			return
+		}
+		if err := s.sendOutboundImage(req.From, req.Body, req.ImagePath); err != nil {
 			message.SendResponse(conn, &message.Response{Error: err.Error()})
 		} else {
 			message.SendResponse(conn, &message.Response{OK: true})
@@ -184,7 +188,7 @@ func (s *Service) handleConn(conn net.Conn) {
 		s.cancel()
 	default:
 		message.SendResponse(conn, &message.Response{
-			Error: "bridge only handles 'send', 'status', 'stop', 'set-concierge', and 'remove-concierge' requests",
+			Error: "bridge only handles 'send', 'send-image', 'status', 'stop', 'set-concierge', and 'remove-concierge' requests",
 		})
 	}
 }
@@ -302,6 +306,10 @@ func (s *Service) handleRemoveConcierge() *message.Response {
 // replies can be routed back to the correct agent.
 // Returns an error if any bridge fails to deliver the message.
 func (s *Service) sendOutbound(from, body string) error {
+	return s.sendOutboundImage(from, body, "")
+}
+
+func (s *Service) sendOutboundImage(from, body, imagePath string) error {
 	s.mu.Lock()
 	s.lastSender = from
 	s.messagesSent++
@@ -317,13 +325,26 @@ func (s *Service) sendOutbound(from, body string) error {
 
 	ctx := context.Background()
 	var errs []string
+	sentImage := false
 	for _, b := range s.bridges {
+		if imagePath != "" {
+			if sender, ok := b.(bridge.ImageSender); ok {
+				sentImage = true
+				if err := sender.SendImage(ctx, imagePath, tagged); err != nil {
+					errs = append(errs, fmt.Sprintf("%s: %v", b.Name(), err))
+				}
+			}
+			continue
+		}
 		if sender, ok := b.(bridge.Sender); ok {
 			if err := sender.Send(ctx, tagged); err != nil {
 				log.Printf("bridge: send via %s: %v", b.Name(), err)
 				errs = append(errs, fmt.Sprintf("%s: %v", b.Name(), err))
 			}
 		}
+	}
+	if imagePath != "" && !sentImage {
+		return fmt.Errorf("bridge does not support images")
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("send failed: %s", strings.Join(errs, "; "))
