@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"h2/internal/config"
+	"h2/internal/socketdir"
 )
 
 func TestSendCmd_SelfSendBlocked(t *testing.T) {
@@ -157,6 +160,87 @@ func TestSend_ExpectsResponse_FailsOnSocket(t *testing.T) {
 	// Should be a connection error, not a validation error.
 	if !strings.Contains(err.Error(), "connect") && !strings.Contains(err.Error(), "socket") {
 		t.Fatalf("expected socket/connection error, got: %v", err)
+	}
+}
+
+func TestValidateFormat(t *testing.T) {
+	tests := []struct {
+		in      string
+		wantErr bool
+	}{
+		{"", false},
+		{"HTML", false},
+		{"MarkdownV2", false},
+		{"html", true},     // case-sensitive: Telegram only accepts the capitalized values
+		{"Markdown", true}, // legacy Telegram "Markdown" mode unsupported here
+		{"markdown_v2", true},
+	}
+	for _, tt := range tests {
+		err := validateFormat(tt.in)
+		gotErr := err != nil
+		if gotErr != tt.wantErr {
+			t.Errorf("validateFormat(%q) err=%v, wantErr=%v", tt.in, err, tt.wantErr)
+		}
+	}
+}
+
+func TestSend_FormatFlagRejectsInvalidBeforeDial(t *testing.T) {
+	tmpDir := t.TempDir()
+	os.MkdirAll(filepath.Join(tmpDir, ".h2", "sockets"), 0o700)
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("H2_ROOT_DIR", filepath.Join(tmpDir, ".h2"))
+	t.Setenv("H2_ACTOR", "sender")
+
+	cmd := newSendCmd()
+	cmd.SetArgs([]string{"telegram", "--format", "Markdown", "hi"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected validation error for invalid --format")
+	}
+	if !strings.Contains(err.Error(), "invalid --format") {
+		t.Fatalf("expected validation error, got: %v", err)
+	}
+}
+
+func TestSend_FormatFlagRejectsAgentTarget(t *testing.T) {
+	tmpDir := t.TempDir()
+	h2Dir := filepath.Join(tmpDir, ".h2")
+	os.MkdirAll(h2Dir, 0o700)
+	if err := config.WriteMarker(h2Dir); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("H2_DIR", h2Dir)
+	t.Setenv("H2_ROOT_DIR", h2Dir)
+	t.Setenv("H2_ACTOR", "sender")
+	config.ResetResolveCache()
+	socketdir.ResetDirCache()
+	t.Cleanup(func() {
+		config.ResetResolveCache()
+		socketdir.ResetDirCache()
+	})
+
+	sockDir := socketdir.Dir()
+	os.MkdirAll(sockDir, 0o700)
+
+	// Create a fake (non-listening) agent socket file so socketdir.Find succeeds.
+	agentSock := filepath.Join(sockDir, "agent.bob.sock")
+	if f, err := os.Create(agentSock); err != nil {
+		t.Fatalf("create fake socket: %v", err)
+	} else {
+		f.Close()
+	}
+
+	cmd := newSendCmd()
+	cmd.SetArgs([]string{"bob", "--format", "HTML", "hi"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when --format used with agent target")
+	}
+	if !strings.Contains(err.Error(), "only valid for bridge targets") {
+		t.Fatalf("expected bridge-target error, got: %v", err)
 	}
 }
 

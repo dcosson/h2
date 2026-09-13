@@ -33,6 +33,14 @@ type TypingIndicator interface {
 	SendTyping(ctx context.Context) error
 }
 
+// FormattedSender is the capability interface for bridges that support
+// rich-text formatting on outbound messages (e.g. HTML or MarkdownV2
+// parse modes on Telegram). Bridges that implement this receive a
+// parse-mode hint from `h2 send --format`.
+type FormattedSender interface {
+	SendFormatted(ctx context.Context, text, format string) error
+}
+
 var agentTagRe = regexp.MustCompile(`^\[([a-zA-Z0-9_-]+)\]\s*`)
 
 // ParseAgentTag extracts an "[agent-name]" tag from the start of text.

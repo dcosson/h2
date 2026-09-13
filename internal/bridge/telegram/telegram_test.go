@@ -44,6 +44,99 @@ func TestSend(t *testing.T) {
 	}
 }
 
+func TestSendFormatted(t *testing.T) {
+	var gotChatID, gotText, gotParseMode string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/botTOKEN/sendMessage" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		r.ParseForm()
+		gotChatID = r.FormValue("chat_id")
+		gotText = r.FormValue("text")
+		gotParseMode = r.FormValue("parse_mode")
+		json.NewEncoder(w).Encode(apiResponse{OK: true})
+	}))
+	defer srv.Close()
+
+	tg := &Telegram{
+		Token:   "TOKEN",
+		ChatID:  42,
+		BaseURL: srv.URL,
+	}
+
+	err := tg.SendFormatted(context.Background(), "<b>bold</b> text", "HTML")
+	if err != nil {
+		t.Fatalf("SendFormatted: %v", err)
+	}
+	if gotChatID != "42" {
+		t.Errorf("chat_id = %q, want %q", gotChatID, "42")
+	}
+	if gotText != "<b>bold</b> text" {
+		t.Errorf("text = %q, want %q", gotText, "<b>bold</b> text")
+	}
+	if gotParseMode != "HTML" {
+		t.Errorf("parse_mode = %q, want %q", gotParseMode, "HTML")
+	}
+}
+
+func TestSendFormatted_MarkdownV2(t *testing.T) {
+	var gotText, gotParseMode string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		gotText = r.FormValue("text")
+		gotParseMode = r.FormValue("parse_mode")
+		json.NewEncoder(w).Encode(apiResponse{OK: true})
+	}))
+	defer srv.Close()
+
+	tg := &Telegram{
+		Token:   "TOKEN",
+		ChatID:  42,
+		BaseURL: srv.URL,
+	}
+
+	// MarkdownV2 reserves many characters; the bridge must forward the body
+	// verbatim, leaving escaping responsibility to the caller.
+	body := "*bold* _italic_ \\(parens\\) \\.dot"
+	err := tg.SendFormatted(context.Background(), body, "MarkdownV2")
+	if err != nil {
+		t.Fatalf("SendFormatted: %v", err)
+	}
+	if gotText != body {
+		t.Errorf("text = %q, want %q", gotText, body)
+	}
+	if gotParseMode != "MarkdownV2" {
+		t.Errorf("parse_mode = %q, want %q", gotParseMode, "MarkdownV2")
+	}
+}
+
+func TestSend_NoParseMode(t *testing.T) {
+	var gotParseMode string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		gotParseMode = r.FormValue("parse_mode")
+		json.NewEncoder(w).Encode(apiResponse{OK: true})
+	}))
+	defer srv.Close()
+
+	tg := &Telegram{
+		Token:   "TOKEN",
+		ChatID:  42,
+		BaseURL: srv.URL,
+	}
+
+	err := tg.Send(context.Background(), "plain text")
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if gotParseMode != "" {
+		t.Errorf("parse_mode = %q, want empty (plain Send should not set parse_mode)", gotParseMode)
+	}
+}
+
 func TestSend_ChunksLongMessage(t *testing.T) {
 	var mu sync.Mutex
 	var sentTexts []string
