@@ -1,6 +1,11 @@
 # Codex profile configuration
 # Intentionally minimal placeholder; add values as needed.
 
+# Pin the model to cap the effective context window near ~258k tokens.
+# Codex has no standalone context/compaction override; the model IS the window
+# (gpt-5.6-sol ≈ 258k, gpt-6-astra ≈ 353k), so pinning the model is the lever.
+model = "gpt-5.6-sol"
+
 [notice]
 hide_rate_limit_model_nudge = true
 

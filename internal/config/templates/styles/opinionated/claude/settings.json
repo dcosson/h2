@@ -132,5 +132,7 @@
       "Bash(yarn *)",
       "Bash(make *)"
     ]
-  }
+  },
+  "autoCompactEnabled": true,
+  "autoCompactWindow": 0.26
 }
