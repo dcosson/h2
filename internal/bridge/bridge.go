@@ -101,3 +101,9 @@ func StripH2Envelope(text string) string {
 	}
 	return strings.TrimSpace(text[loc[1]:])
 }
+
+// ImageSender is an optional capability for bridges that can upload a local
+// image with a plain-text caption. Text-only bridges need not implement it.
+type ImageSender interface {
+	SendImage(ctx context.Context, path, caption string) error
+}

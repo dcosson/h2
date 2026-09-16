@@ -8,11 +8,14 @@ import (
 )
 
 // FromConfig instantiates bridge instances from a user's bridge configuration.
-func FromConfig(cfg *config.BridgesConfig) []bridge.Bridge {
+// attachmentDir is the private local directory for incoming images; an empty
+// path disables image downloads. It is created lazily on the first image.
+func FromConfig(cfg *config.BridgesConfig, attachmentDir string) []bridge.Bridge {
 	var bridges []bridge.Bridge
 	if cfg.Telegram != nil {
 		bridges = append(bridges, &telegram.Telegram{
 			Token:           cfg.Telegram.BotToken,
+			AttachmentDir:   attachmentDir,
 			ChatID:          cfg.Telegram.ChatID,
 			AllowedCommands: cfg.Telegram.AllowedCommands,
 		})

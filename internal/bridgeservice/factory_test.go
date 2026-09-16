@@ -19,7 +19,7 @@ func TestFromConfig_AllBridges(t *testing.T) {
 		},
 	}
 
-	bridges := FromConfig(cfg)
+	bridges := FromConfig(cfg, t.TempDir())
 	if len(bridges) != 2 {
 		t.Fatalf("expected 2 bridges, got %d", len(bridges))
 	}
@@ -52,7 +52,7 @@ func TestFromConfig_TelegramOnly(t *testing.T) {
 		},
 	}
 
-	bridges := FromConfig(cfg)
+	bridges := FromConfig(cfg, t.TempDir())
 	if len(bridges) != 1 {
 		t.Fatalf("expected 1 bridge, got %d", len(bridges))
 	}
@@ -68,7 +68,7 @@ func TestFromConfig_MacOSNotifyDisabled(t *testing.T) {
 		},
 	}
 
-	bridges := FromConfig(cfg)
+	bridges := FromConfig(cfg, t.TempDir())
 	if len(bridges) != 0 {
 		t.Fatalf("expected 0 bridges when disabled, got %d", len(bridges))
 	}
@@ -83,7 +83,7 @@ func TestFromConfig_AllowedCommandsPropagation(t *testing.T) {
 		},
 	}
 
-	bridges := FromConfig(cfg)
+	bridges := FromConfig(cfg, t.TempDir())
 	if len(bridges) != 1 {
 		t.Fatalf("expected 1 bridge, got %d", len(bridges))
 	}
@@ -100,7 +100,7 @@ func TestFromConfig_AllowedCommandsPropagation(t *testing.T) {
 func TestFromConfig_Empty(t *testing.T) {
 	cfg := &config.BridgesConfig{}
 
-	bridges := FromConfig(cfg)
+	bridges := FromConfig(cfg, t.TempDir())
 	if len(bridges) != 0 {
 		t.Fatalf("expected 0 bridges, got %d", len(bridges))
 	}

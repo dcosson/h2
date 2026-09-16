@@ -11,9 +11,10 @@ import (
 
 // Request is the JSON request sent over the Unix socket.
 type Request struct {
-	Type string `json:"type"` // "send", "attach", "show", "status", "hook_event", "stop", "relaunch", "trigger_add", "trigger_list", "trigger_remove", "schedule_add", "schedule_list", "schedule_remove"
+	Type string `json:"type"` // "send", "send-image", "attach", "show", "status", "hook_event", "stop", "relaunch", "trigger_add", "trigger_list", "trigger_remove", "schedule_add", "schedule_list", "schedule_remove"
 
 	// send fields
+	ImagePath       string `json:"image_path,omitempty"` // explicit local image for bridge send-image requests
 	Priority        string `json:"priority,omitempty"`
 	From            string `json:"from,omitempty"`
 	Body            string `json:"body,omitempty"`

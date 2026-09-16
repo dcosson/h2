@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -37,7 +38,7 @@ func newBridgeDaemonCmd() *cobra.Command {
 				return err
 			}
 
-			bridges := bridgeservice.FromConfig(bc)
+			bridges := bridgeservice.FromConfig(bc, filepath.Join(config.ConfigDir(), "attachments", bridgeName))
 			if len(bridges) == 0 {
 				return fmt.Errorf("no bridges configured for %q", bridgeName)
 			}

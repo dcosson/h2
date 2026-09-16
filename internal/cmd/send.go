@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -16,23 +17,35 @@ import (
 func newSendCmd() *cobra.Command {
 	var priority string
 	var file string
+	var imagePath string
 	var allowSelf bool
 	var raw bool
 	var expectsResponse bool
 	var respondsTo string
 
 	cmd := &cobra.Command{
-		Use:   "send [<name>] [--priority=normal] [--file=path] [--raw] [--expects-response] [--closes=<id>] [message...]",
+		Use:   "send [<name>] [--priority=normal] [--file=path] [--image=path] [--raw] [--expects-response] [--closes=<id>] [message...]",
 		Short: "Send a message to an agent",
 		Long: `Send a message to a running agent. The message body can be provided as arguments or read from a file.
+With --image, upload a local JPEG/PNG to a bridge; the optional body is its caption.
 With --raw, the body is sent directly to the agent's PTY without the header prefix.
 With --expects-response, a reminder trigger is registered on the recipient that fires at idle.
 With --closes <id>, the reminder trigger is removed from your own daemon (and optionally a response is sent).`,
 		Args: cobra.MinimumNArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if imagePath != "" {
+				if raw || expectsResponse {
+					return fmt.Errorf("--image cannot be combined with --raw or --expects-response")
+				}
+				var err error
+				imagePath, err = filepath.Abs(imagePath)
+				if err != nil {
+					return fmt.Errorf("resolve image path: %w", err)
+				}
+			}
 			// --closes mode: target and body are both optional.
 			if respondsTo != "" {
-				return handleCloses(respondsTo, args, file, priority, allowSelf)
+				return handleCloses(respondsTo, args, file, priority, allowSelf, imagePath)
 			}
 
 			// Normal send or --expects-response: target is required.
@@ -50,7 +63,7 @@ With --closes <id>, the reminder trigger is removed from your own daemon (and op
 				body = string(data)
 			} else if len(args) > 1 {
 				body = cleanLLMEscapes(strings.Join(args[1:], " "))
-			} else {
+			} else if imagePath == "" {
 				return fmt.Errorf("message body is required (provide as arguments or --file)")
 			}
 
@@ -84,6 +97,9 @@ With --closes <id>, the reminder trigger is removed from your own daemon (and op
 				removeTriggerBestEffort(name, triggerID)
 				return agentConnError(name, findErr)
 			}
+			if err := checkImageTarget(sockPath, imagePath); err != nil {
+				return err
+			}
 			conn, err := net.Dial("unix", sockPath)
 			if err != nil {
 				removeTriggerBestEffort(name, triggerID)
@@ -96,6 +112,10 @@ With --closes <id>, the reminder trigger is removed from your own daemon (and op
 				From:     from,
 				Body:     body,
 				Raw:      raw,
+			}
+			if imagePath != "" {
+				req.Type = "send-image"
+				req.ImagePath = imagePath
 			}
 			if expectsResponse {
 				req.ExpectsResponse = true
@@ -130,6 +150,7 @@ With --closes <id>, the reminder trigger is removed from your own daemon (and op
 	}
 
 	cmd.Flags().StringVar(&priority, "priority", "normal", "Message priority (interrupt|normal|idle-first|idle)")
+	cmd.Flags().StringVar(&imagePath, "image", "", "Upload a local JPEG/PNG to an image-capable bridge; body is the optional caption")
 	cmd.Flags().StringVar(&file, "file", "", "Read message body from file")
 	cmd.Flags().BoolVar(&allowSelf, "allow-self", false, "Allow sending a message to yourself")
 	cmd.Flags().BoolVar(&raw, "raw", false, "Send body directly to PTY without header prefix (useful for permission prompts)")
@@ -208,7 +229,7 @@ func removeTriggerBestEffort(agentName, triggerID string) {
 
 // handleCloses handles the --responds-to flow: optionally send a response,
 // then remove the trigger from own daemon.
-func handleCloses(triggerID string, args []string, file, priority string, allowSelf bool) error {
+func handleCloses(triggerID string, args []string, file, priority string, allowSelf bool, imagePath string) error {
 	var name, body string
 
 	if file != "" {
@@ -225,18 +246,21 @@ func handleCloses(triggerID string, args []string, file, priority string, allowS
 		name = args[0]
 		body = cleanLLMEscapes(strings.Join(args[1:], " "))
 	} else if len(args) == 1 {
+		if imagePath != "" {
+			name = args[0]
+		}
 		// Could be just a target name with no body — treat as close-only.
 		// The target is ignored for close-only, but we accept it.
 	}
 	// len(args) == 0: close-only, no target, no body.
 
 	// If body is present, target must be present.
-	if body != "" && name == "" {
+	if (body != "" || imagePath != "") && name == "" {
 		return fmt.Errorf("target agent name is required when sending a response body")
 	}
 
 	// Send the response message first (if body present).
-	if body != "" {
+	if body != "" || imagePath != "" {
 		if priority == "" {
 			priority = "normal"
 		}
@@ -252,17 +276,25 @@ func handleCloses(triggerID string, args []string, file, priority string, allowS
 		if findErr != nil {
 			return agentConnError(name, findErr)
 		}
+		if err := checkImageTarget(sockPath, imagePath); err != nil {
+			return err
+		}
 		conn, err := net.Dial("unix", sockPath)
 		if err != nil {
 			return agentConnError(name, err)
 		}
 		defer conn.Close()
 
+		requestType := "send"
+		if imagePath != "" {
+			requestType = "send-image"
+		}
 		if err := message.SendRequest(conn, &message.Request{
-			Type:     "send",
-			Priority: priority,
-			From:     from,
-			Body:     body,
+			Type:      requestType,
+			ImagePath: imagePath,
+			Priority:  priority,
+			From:      from,
+			Body:      body,
 		}); err != nil {
 			return fmt.Errorf("send request: %w", err)
 		}
@@ -352,4 +384,15 @@ func stripBackslashPunctuation(s string) string {
 		b.WriteByte(s[i])
 	}
 	return b.String()
+}
+
+func checkImageTarget(sockPath, imagePath string) error {
+	if imagePath == "" {
+		return nil
+	}
+	entry, ok := socketdir.Parse(filepath.Base(sockPath))
+	if !ok || entry.Type != socketdir.TypeBridge {
+		return fmt.Errorf("--image requires a bridge target")
+	}
+	return nil
 }
