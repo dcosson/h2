@@ -138,6 +138,26 @@ func (p *EventHandler) OnMetricsRaw(body []byte) {
 // content for peek.
 func (p *EventHandler) OnSessionLogLine(line []byte) {
 	if ev, ok := parseCodexSessionLine(line); ok {
+		if ev.Type == monitor.EventServerErrorInfo {
+			// A transient HTTP 429 may still be retried by Codex. Only its
+			// terminal task_complete error proves the agent has stopped.
+			p.cancelPendingIdle()
+			err := ev.Data.(monitor.ServerErrorData)
+			switch err.StatusCode {
+			case "429":
+				p.emitStateChange(ev.Timestamp, monitor.StateIdle, monitor.SubStateUsageLimit)
+				p.emit(monitor.AgentEvent{Type: monitor.EventUsageLimitInfo, Timestamp: ev.Timestamp,
+					Data: monitor.UsageLimitData{Message: err.Message}})
+				return
+			case "401":
+				p.emitStateChange(ev.Timestamp, monitor.StateIdle, monitor.SubStateAuthError)
+				p.emit(monitor.AgentEvent{Type: monitor.EventAuthErrorInfo, Timestamp: ev.Timestamp,
+					Data: monitor.AuthErrorData{Message: err.Message}})
+				return
+			default:
+				p.emitStateChange(ev.Timestamp, monitor.StateIdle, monitor.SubStateServerError)
+			}
+		}
 		p.emit(ev)
 	}
 }
@@ -639,9 +659,29 @@ func parseCodexSessionLine(line []byte) (monitor.AgentEvent, bool) {
 	if entry.Type != "event_msg" || len(entry.Payload) == 0 {
 		return monitor.AgentEvent{}, false
 	}
-	var pl codexAgentMessagePayload
+	var pl struct {
+		codexAgentMessagePayload
+		Error *struct {
+			Message string          `json:"message"`
+			Info    json.RawMessage `json:"codex_error_info"`
+		} `json:"error"`
+	}
 	if err := json.Unmarshal(entry.Payload, &pl); err != nil {
 		return monitor.AgentEvent{}, false
+	}
+	if pl.Type == "task_complete" && pl.Error != nil && pl.Error.Message != "" {
+		var info struct {
+			FailedAttempts struct {
+				StatusCode int `json:"http_status_code"`
+			} `json:"response_too_many_failed_attempts"`
+		}
+		_ = json.Unmarshal(pl.Error.Info, &info)
+		status := ""
+		if info.FailedAttempts.StatusCode != 0 {
+			status = strconv.Itoa(info.FailedAttempts.StatusCode)
+		}
+		return monitor.AgentEvent{Type: monitor.EventServerErrorInfo, Timestamp: time.Now(),
+			Data: monitor.ServerErrorData{StatusCode: status, Message: pl.Error.Message}}, true
 	}
 	if pl.Type != "agent_message" || pl.Message == "" {
 		return monitor.AgentEvent{}, false

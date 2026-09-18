@@ -550,3 +550,46 @@ func drainEventsTimeout(ch chan monitor.AgentEvent, n int, d time.Duration) []mo
 	}
 	return events
 }
+
+// Final failure is different from a retryable API 429: the TUI has returned
+// to its prompt, so h2 must not keep normal messages queued behind "thinking".
+func TestEventHandler_SessionLogTerminalFailure(t *testing.T) {
+	for _, code := range []int{429, 401, 503, 0} {
+		t.Run(fmt.Sprint(code), func(t *testing.T) {
+			events := make(chan monitor.AgentEvent, 16)
+			p := NewEventHandler(events)
+			p.OnLogs(makeLogsPayload("codex.user_prompt", nil))
+			drainEvents(events, 2)
+			p.OnSessionLogLine(rolloutLine(t, "event_msg", map[string]any{
+				"type": "task_complete", "error": map[string]any{
+					"message": "synthetic terminal failure", "codex_error_info": map[string]any{
+						"response_too_many_failed_attempts": map[string]any{"http_status_code": code},
+					},
+				},
+			}))
+			got := drainEvents(events, 2)
+			if len(got) != 2 {
+				t.Fatalf("got %d events, want 2", len(got))
+			}
+			state := got[0].Data.(monitor.StateChangeData)
+			sub, typ := monitor.SubStateServerError, monitor.EventServerErrorInfo
+			if code == 429 {
+				sub, typ = monitor.SubStateUsageLimit, monitor.EventUsageLimitInfo
+			}
+			if code == 401 {
+				sub, typ = monitor.SubStateAuthError, monitor.EventAuthErrorInfo
+			}
+			if state.State != monitor.StateIdle || state.SubState != sub || got[1].Type != typ {
+				t.Fatalf("unexpected terminal state/events: %+v %+v", state, got)
+			}
+			if code == 429 && !got[1].Data.(monitor.UsageLimitData).ResetsAt.IsZero() {
+				t.Fatal("invented reset time")
+			}
+			p.OnLogs(makeLogsPayload("codex.sse_event", []otelAttribute{{Key: "event.kind", Value: otelAttrValue{StringValue: "response.created"}}}))
+			recovered := drainEvents(events, 1)
+			if len(recovered) != 1 || recovered[0].Data.(monitor.StateChangeData).State != monitor.StateActive {
+				t.Fatal("not recovered on successful response")
+			}
+		})
+	}
+}
