@@ -117,12 +117,36 @@ func TestResolveResumeTarget_SubagentWithoutParentStartsFresh(t *testing.T) {
 	}
 }
 
-func TestResolveResumeTarget_UnknownRolloutUnchanged(t *testing.T) {
+// A conversation that never reached its first turn has no rollout, and
+// `codex resume <id>` exits immediately on it, so start fresh instead.
+func TestResolveResumeTarget_MissingRolloutStartsFresh(t *testing.T) {
 	noRolloutRetries(t)
 	configDir := t.TempDir()
 
-	if got := resolveResumeTarget(configDir, "gone-1"); got != "gone-1" {
-		t.Errorf("resolveResumeTarget = %q, want the ID unchanged", got)
+	if got := resolveResumeTarget(configDir, "gone-1"); got != "" {
+		t.Errorf("resolveResumeTarget = %q, want empty (start fresh)", got)
+	}
+}
+
+// Regression: an agent that hit a usage limit on launch was rotated and
+// relaunched with `codex resume` of a conversation that was never persisted,
+// crash-looping with "No saved session found".
+func TestBuildCommandArgs_MissingRolloutStartsFresh(t *testing.T) {
+	noRolloutRetries(t)
+	prefix := t.TempDir()
+
+	h := newTestHarness(t, prefix, &config.RuntimeConfig{
+		ResumeSessionID: "never-persisted-1",
+		Instructions:    "You are a test agent.",
+	})
+	args := h.BuildCommandArgs(nil, nil)
+
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "resume") {
+		t.Errorf("args = %v, want no resume for a conversation with no rollout", args)
+	}
+	if !strings.Contains(joined, "instructions=") {
+		t.Errorf("args = %v, want role instructions on the fresh session", args)
 	}
 }
 

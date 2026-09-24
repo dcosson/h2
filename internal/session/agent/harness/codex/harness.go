@@ -347,8 +347,9 @@ const maxResumeAncestorHops = 8
 // actually resume. h2 builds before sub-agent detection could record a
 // sub-agent's conversation as the agent's session identity; resuming that ID
 // drops the user into an uncontrollable child session. Walk up to the top-level
-// ancestor instead. Returns "" when no resumable ancestor exists, meaning the
-// caller should start a fresh session rather than resume a broken one.
+// ancestor instead. Returns "" when no resumable conversation exists on disk,
+// meaning the caller should start a fresh session rather than resume a broken
+// or missing one.
 func resolveResumeTarget(configDir, convID string) string {
 	if configDir == "" || convID == "" {
 		return convID
@@ -356,8 +357,12 @@ func resolveResumeTarget(configDir, convID string) string {
 	for hop := 0; hop <= maxResumeAncestorHops; hop++ {
 		_, meta, found := findCodexRollout(configDir, convID)
 		if !found {
-			// Nothing on disk to check against — resume as asked.
-			return convID
+			// Codex only writes a rollout once the conversation has a turn, so
+			// a session that died before its first turn (e.g. a usage limit on
+			// launch followed by a rotate) has nothing to resume, and
+			// `codex resume <id>` exits immediately with "No saved session".
+			stdlog.Printf("codex: no rollout on disk for stored session %s; starting a fresh session", convID)
+			return ""
 		}
 		if !meta.isSubagent() {
 			return convID
