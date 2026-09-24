@@ -685,6 +685,9 @@ func TestEventHandler_APIRequest_UsageLimitReached_IntStatusCode(t *testing.T) {
 	events := make(chan monitor.AgentEvent, 64)
 	p := NewEventHandler(events)
 
+	p.OnLogs(makeLogsPayload("codex.user_prompt", nil))
+	_ = drainEvents(events, 2)
+
 	// Codex sends http.response.status_code as intValue, not stringValue.
 	body := makeLogsPayload("codex.api_request", []otelAttribute{
 		{Key: "http.response.status_code", Value: otelAttrValue{IntValue: json.RawMessage(`"429"`)}},
@@ -704,6 +707,50 @@ func TestEventHandler_APIRequest_UsageLimitReached_IntStatusCode(t *testing.T) {
 	ulData := got[1].Data.(monitor.UsageLimitData)
 	if !ulData.ResetsAt.IsZero() {
 		t.Errorf("ResetsAt should be zero when resets_in_seconds missing, got %v", ulData.ResetsAt)
+	}
+}
+
+// Codex makes model requests of its own at startup (e.g. a websocket prewarm).
+// A usage limit rejecting one of those, before any user prompt, is not a
+// failed message and must not be reported: reporting it would auto-rotate an
+// agent off a profile the user deliberately force-rotated it onto.
+func TestEventHandler_UsageLimitBeforeUserPrompt_NoEmit(t *testing.T) {
+	tests := []struct {
+		name  string
+		event string
+		attrs []otelAttribute
+	}{
+		{"api_request 429", "codex.api_request", []otelAttribute{
+			{Key: "http.response.status_code", Value: otelAttrValue{StringValue: "429"}},
+			{Key: "error.message", Value: otelAttrValue{StringValue: `usage_limit_reached`}},
+		}},
+		{"sse_event error", "codex.sse_event", []otelAttribute{
+			{Key: "event.kind", Value: otelAttrValue{StringValue: "response.completed"}},
+			{Key: "error.message", Value: otelAttrValue{StringValue: "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 26th, 2026 9:45 AM."}},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			events := make(chan monitor.AgentEvent, 64)
+			p := NewEventHandler(events)
+
+			p.OnLogs(makeLogsPayload(tt.event, tt.attrs))
+
+			select {
+			case ev := <-events:
+				t.Fatalf("unexpected event for a usage limit before any user prompt: %+v", ev)
+			case <-time.After(50 * time.Millisecond):
+			}
+
+			// A prompt that then fails on the limit is reported.
+			p.OnLogs(makeLogsPayload("codex.user_prompt", nil))
+			_ = drainEvents(events, 2)
+			p.OnLogs(makeLogsPayload(tt.event, tt.attrs))
+			got := drainEvents(events, 2)
+			if len(got) != 2 || got[1].Type != monitor.EventUsageLimitInfo {
+				t.Fatalf("expected state change + EventUsageLimitInfo after a user prompt, got %+v", got)
+			}
+		})
 	}
 }
 

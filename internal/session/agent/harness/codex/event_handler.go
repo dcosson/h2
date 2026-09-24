@@ -33,6 +33,13 @@ type EventHandler struct {
 	stateMu         sync.Mutex
 	currentState    monitor.State
 	currentSubState monitor.SubState
+	// promptSubmitted records whether a user prompt has been sent since this
+	// launch. Codex makes model requests of its own at startup (e.g. a
+	// websocket prewarm), and a usage limit rejecting one of those is not a
+	// failed message: reporting it would auto-rotate an agent off a profile
+	// the user deliberately put it on (`h2 session rotate --force`) before
+	// the user ever tried to use it.
+	promptSubmitted bool
 
 	idleMu    sync.Mutex
 	idleTimer *time.Timer
@@ -222,6 +229,7 @@ func (p *EventHandler) processEvent(name string, attrs []otelAttribute, ts time.
 
 	case "codex.user_prompt":
 		p.cancelPendingIdle()
+		p.markPromptSubmitted()
 		p.emit(monitor.AgentEvent{
 			Type:      monitor.EventUserPrompt,
 			Timestamp: ts,
@@ -278,19 +286,12 @@ func (p *EventHandler) processEvent(name string, attrs []otelAttribute, ts time.
 		// the primary path for Codex websocket-based rate limit errors.
 		errMsg := getAttr(attrs, "error.message")
 		if errMsg != "" && isUsageLimitError(errMsg) {
-			p.cancelPendingIdle()
-			p.emitStateChange(ts, monitor.StateIdle, monitor.SubStateUsageLimit)
 			resetsAt := parseCodexResetsAtHuman(errMsg, ts)
 			if resetsAt.IsZero() {
 				resetsAt = parseCodexResetsAt(errMsg, ts)
 			}
-			p.emit(monitor.AgentEvent{
-				Type:      monitor.EventUsageLimitInfo,
-				Timestamp: ts,
-				Data:      monitor.UsageLimitData{ResetsAt: resetsAt, Message: errMsg},
-			})
 			p.debugf("span=codex.sse_event usage_limit error=%q resets_at=%v", errMsg, resetsAt)
-			return spanProcessResult{recognized: true, emitted: 2}
+			return p.reportUsageLimit(ts, resetsAt, errMsg)
 		}
 		p.debugf("span=codex.sse_event completed but zero tokens (ignored)")
 		return spanProcessResult{recognized: true}
@@ -327,15 +328,7 @@ func (p *EventHandler) processEvent(name string, attrs []otelAttribute, ts time.
 		errMsg := getAttr(attrs, "error.message")
 		p.debugf("span=codex.api_request status=%s error=%q", statusCode, errMsg)
 		if statusCode == "429" && strings.Contains(errMsg, "usage_limit_reached") {
-			p.cancelPendingIdle()
-			p.emitStateChange(ts, monitor.StateIdle, monitor.SubStateUsageLimit)
-			resetsAt := parseCodexResetsAt(errMsg, ts)
-			p.emit(monitor.AgentEvent{
-				Type:      monitor.EventUsageLimitInfo,
-				Timestamp: ts,
-				Data:      monitor.UsageLimitData{ResetsAt: resetsAt, Message: errMsg},
-			})
-			return spanProcessResult{recognized: true, emitted: 2}
+			return p.reportUsageLimit(ts, parseCodexResetsAt(errMsg, ts), errMsg)
 		}
 		if statusCode == "401" {
 			p.cancelPendingIdle()
@@ -479,6 +472,37 @@ func (p *EventHandler) setState(state monitor.State, subState monitor.SubState) 
 	defer p.stateMu.Unlock()
 	p.currentState = state
 	p.currentSubState = subState
+}
+
+// reportUsageLimit moves to Idle/UsageLimit and emits EventUsageLimitInfo,
+// which records the profile's rate limit and fires auto-rotation. It does
+// nothing until a user prompt has been submitted: only a message that failed
+// on the limit counts, never a request Codex made on its own at startup.
+func (p *EventHandler) reportUsageLimit(ts time.Time, resetsAt time.Time, errMsg string) spanProcessResult {
+	if !p.hasPromptSubmitted() {
+		p.debugf("usage_limit before any user prompt (ignored) error=%q", errMsg)
+		return spanProcessResult{recognized: true}
+	}
+	p.cancelPendingIdle()
+	p.emitStateChange(ts, monitor.StateIdle, monitor.SubStateUsageLimit)
+	p.emit(monitor.AgentEvent{
+		Type:      monitor.EventUsageLimitInfo,
+		Timestamp: ts,
+		Data:      monitor.UsageLimitData{ResetsAt: resetsAt, Message: errMsg},
+	})
+	return spanProcessResult{recognized: true, emitted: 2}
+}
+
+func (p *EventHandler) markPromptSubmitted() {
+	p.stateMu.Lock()
+	defer p.stateMu.Unlock()
+	p.promptSubmitted = true
+}
+
+func (p *EventHandler) hasPromptSubmitted() bool {
+	p.stateMu.Lock()
+	defer p.stateMu.Unlock()
+	return p.promptSubmitted
 }
 
 func (p *EventHandler) isUsageLimited() bool {
