@@ -33,7 +33,7 @@ agent_harness: "{{ .Var.agent_harness }}"
 
 {{ if eq .Var.agent_harness "codex" -}}
 # Codex model
-agent_model: "{{ if eq .Var.agent_model "<harness-default>" -}}gpt-5.4{{- else -}}{{ .Var.agent_model }}{{- end }}"
+agent_model: "{{ if eq .Var.agent_model "<harness-default>" -}}gpt-6-sol{{- else -}}{{ .Var.agent_model }}{{- end }}"
 
 # Codex sandbox mode
 # Valid: read-only, workspace-write, danger-full-access
@@ -48,7 +48,7 @@ profile: "{{ .Var.profile }}"
 
 {{- else if eq .Var.agent_harness "claude_code" -}}
 # Claude Code model
-agent_model: "{{ if eq .Var.agent_model "<harness-default>" -}}{{- else -}}{{ .Var.agent_model }}{{- end }}"
+agent_model: "{{ if eq .Var.agent_model "<harness-default>" -}}claude-opus-5-5{{- else -}}{{ .Var.agent_model }}{{- end }}"
 
 # Permission mode for Claude Code
 # Valid: default, acceptEdits, plan, dontAsk, bypassPermissions

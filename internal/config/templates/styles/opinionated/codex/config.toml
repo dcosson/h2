@@ -3,8 +3,8 @@
 
 # Pin the model to cap the effective context window near ~258k tokens.
 # Codex has no standalone context/compaction override; the model IS the window
-# (gpt-5.6-sol ≈ 258k, gpt-6-astra ≈ 353k), so pinning the model is the lever.
-model = "gpt-5.6-sol"
+# (gpt-6-sol ≈ 258k effective of a 272k window), so pinning the model is the lever.
+model = "gpt-6-sol"
 
 [notice]
 hide_rate_limit_model_nudge = true
