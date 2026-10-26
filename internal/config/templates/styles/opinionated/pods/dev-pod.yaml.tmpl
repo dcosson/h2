@@ -12,6 +12,12 @@ variables:
   profile:
     description: "Account profile to use. Must be configured via h2 profile commands."
     default: "default"
+  smart_coder_harness:
+    description: "Agent harness for the smart coder: claude_code or codex"
+    default: "claude_code"
+  smart_coder_model:
+    description: "Full model name for the smart coder (e.g. claude-fable-5-1, claude-opus-5-5, gpt-6-sol, gpt-6-astra; gpt-* models need smart_coder_harness=codex)"
+    default: "claude-fable-5-1"
 
 # Optional: bridges (reference named bridges from config.yaml)
 bridges:
@@ -22,7 +28,7 @@ bridges:
 #
 # Model roster:
 #   concierge   -> Claude Opus 5.5
-#   smart-coder -> Claude Fable 5.1
+#   smart-coder -> smart_coder_model on smart_coder_harness (default Claude Fable 5.1)
 #   coder-1     -> GPT-6 Sol (codex)
 #   coder-2     -> Claude Opus 5.5
 #   coder-3     -> GPT-6 Sol (codex)
@@ -39,8 +45,8 @@ agents:
     role: default
     vars:
       profile: {{ .Var.profile }}
-      agent_harness: claude_code
-      agent_model: claude-fable-5-1
+      agent_harness: "{{ .Var.smart_coder_harness }}"
+      agent_model: "{{ .Var.smart_coder_model }}"
 
   - name: "coder-{{ add 1 .Index }}-{{ .Var.codename }}"
     role: default
