@@ -690,6 +690,69 @@ func TestEventHandler_OnSessionLogLine_SessionLimitRealShape(t *testing.T) {
 	}
 }
 
+// TestEventHandler_OnSessionLogLine_WeeklyLimitRealShape feeds the verbatim
+// session JSONL line Claude Code writes when the seven-day limit is hit
+// (captured from a real session on 2026-10-30, trailing fields trimmed). The
+// wording is "weekly limit" and the reset carries a date, so the reset time
+// must come from the structured quotaLimits.resetsAt epoch.
+func TestEventHandler_OnSessionLogLine_WeeklyLimitRealShape(t *testing.T) {
+	events := make(chan monitor.AgentEvent, 64)
+	h := NewEventHandler(events, nil)
+
+	line := `{"parentUuid":"89624bd1-7de4-4d51-a361-1dd18a3d56e1","isSidechain":false,"type":"assistant","uuid":"c4d9a9e4-dc5a-45c2-9ff1-5bb465e357c8","timestamp":"2026-10-30T17:25:14.960Z","message":{"diagnostics":null,"id":"79e5c421-f7de-4168-a2f3-33337da2a564","container":null,"model":"<synthetic>","role":"assistant","stop_details":null,"stop_reason":"stop_sequence","stop_sequence":"","type":"message","usage":{"input_tokens":0,"output_tokens":0},"content":[{"type":"text","text":"You've hit your weekly limit · resets Nov 3 at 8pm (America/Los_Angeles)"}],"context_management":null},"requestId":"req_011CgYp3cfbtE8bcQcG92Seu","apiError":"usage_limit_reached","apiErrorParams":{"rate_limit_info":{"status":"rejected","resetsAt":1793764800,"rateLimitType":"seven_day","overageStatus":"rejected","overageDisabledReason":"out_of_credits","isUsingOverage":false}},"quotaLimits":{"status":"rejected","resetsAt":1793764800,"unifiedRateLimitFallbackAvailable":false,"rateLimitType":"seven_day","overageStatus":"rejected","overageDisabledReason":"out_of_credits","upgradePaths":["overage"],"isUsingOverage":false},"error":"rate_limit","isApiErrorMessage":true,"apiErrorStatus":429}`
+	h.OnSessionLogLine([]byte(line))
+
+	got := drainEvents(events, 3)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 events (state_change + usage_limit_info + agent_message), got %d", len(got))
+	}
+	state := got[0].Data.(monitor.StateChangeData)
+	if state.State != monitor.StateIdle || state.SubState != monitor.SubStateUsageLimit {
+		t.Fatalf("state = (%v,%v), want (Idle,UsageLimit)", state.State, state.SubState)
+	}
+	if got[1].Type != monitor.EventUsageLimitInfo {
+		t.Fatalf("event[1].Type = %v, want EventUsageLimitInfo", got[1].Type)
+	}
+	data := got[1].Data.(monitor.UsageLimitData)
+	if want := time.Unix(1793764800, 0); !data.ResetsAt.Equal(want) {
+		t.Fatalf("ResetsAt = %v, want %v", data.ResetsAt, want)
+	}
+}
+
+// TestEventHandler_OnSessionLogLine_StructuredUsageLimitUnknownWording verifies
+// that apiError=usage_limit_reached marks a usage limit even when the text is
+// a wording isUsageLimitMessage does not know.
+func TestEventHandler_OnSessionLogLine_StructuredUsageLimitUnknownWording(t *testing.T) {
+	events := make(chan monitor.AgentEvent, 64)
+	h := NewEventHandler(events, nil)
+
+	line, _ := json.Marshal(map[string]any{
+		"type": "assistant",
+		"message": map[string]any{
+			"role":    "assistant",
+			"model":   "<synthetic>",
+			"content": []map[string]string{{"type": "text", "text": "Out of quota for now"}},
+		},
+		"apiError":          "usage_limit_reached",
+		"error":             "rate_limit",
+		"isApiErrorMessage": true,
+		"apiErrorStatus":    429,
+	})
+	h.OnSessionLogLine(line)
+
+	got := drainEvents(events, 3)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 events, got %d", len(got))
+	}
+	state := got[0].Data.(monitor.StateChangeData)
+	if state.State != monitor.StateIdle || state.SubState != monitor.SubStateUsageLimit {
+		t.Fatalf("state = (%v,%v), want (Idle,UsageLimit)", state.State, state.SubState)
+	}
+	if got[1].Type != monitor.EventUsageLimitInfo {
+		t.Fatalf("event[1].Type = %v, want EventUsageLimitInfo", got[1].Type)
+	}
+}
+
 // TestEventHandler_OnSessionLogLine_SessionLimitNoResetTime covers the
 // "session limit" wording alone (no "resets ..." suffix for the regex to
 // match) — isUsageLimitMessage must recognize it directly.
@@ -734,6 +797,8 @@ func TestIsUsageLimitMessage(t *testing.T) {
 		{"You've hit your usage limit.", true},
 		{"You've hit your limit · resets 12pm (America/Los_Angeles)", true},
 		{"You've hit your org's monthly usage limit", true},
+		{"You've hit your weekly limit · resets Nov 3 at 8pm (America/Los_Angeles)", true},
+		{"You've hit your Opus limit", true},
 		{"usage_limit_reached", true},
 		{"Claude usage limit reached|1783720800", true},
 		{"API Error: Server is temporarily limiting requests (not your usage limit) · Rate limited", false},
@@ -858,6 +923,49 @@ func TestParseResetsAt(t *testing.T) {
 				if inTZ.Day() == refInTZ.Day() {
 					t.Errorf("expected tomorrow, but got same day: %v", inTZ)
 				}
+			}
+		})
+	}
+}
+
+// TestParseResetsAt_WithDate covers the dated reset form used by weekly
+// limits ("resets Nov 3 at 8pm (America/Los_Angeles)").
+func TestParseResetsAt_WithDate(t *testing.T) {
+	loc, _ := time.LoadLocation("America/Los_Angeles")
+
+	tests := []struct {
+		name    string
+		message string
+		ref     time.Time
+		want    time.Time
+	}{
+		{
+			name:    "later this year",
+			message: "You've hit your weekly limit · resets Nov 3 at 8pm (America/Los_Angeles)",
+			ref:     time.Date(2026, 10, 30, 10, 25, 0, 0, loc),
+			want:    time.Date(2026, 11, 3, 20, 0, 0, 0, loc),
+		},
+		{
+			name:    "with minutes",
+			message: "resets Nov 3 at 8:30am (America/Los_Angeles)",
+			ref:     time.Date(2026, 10, 30, 10, 25, 0, 0, loc),
+			want:    time.Date(2026, 11, 3, 8, 30, 0, 0, loc),
+		},
+		{
+			name:    "wraps into next year",
+			message: "resets Jan 2 at 9am (America/Los_Angeles)",
+			ref:     time.Date(2026, 12, 30, 10, 0, 0, 0, loc),
+			want:    time.Date(2027, 1, 2, 9, 0, 0, 0, loc),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := parseResetsAt(tt.message, tt.ref)
+			if !ok {
+				t.Fatalf("parseResetsAt(%q) ok = false, want true", tt.message)
+			}
+			if !got.Equal(tt.want) {
+				t.Fatalf("parseResetsAt(%q) = %v, want %v", tt.message, got, tt.want)
 			}
 		})
 	}

@@ -417,6 +417,14 @@ type sessionLogEntry struct {
 	Error             string          `json:"error,omitempty"`
 	IsApiErrorMessage bool            `json:"isApiErrorMessage,omitempty"`
 	ApiErrorStatus    int             `json:"apiErrorStatus,omitempty"`
+	ApiError          string          `json:"apiError,omitempty"`
+	QuotaLimits       *quotaLimits    `json:"quotaLimits,omitempty"`
+}
+
+// quotaLimits is the structured rate limit state Claude Code attaches to a
+// usage-limit synthetic message. ResetsAt is a Unix timestamp in seconds.
+type quotaLimits struct {
+	ResetsAt int64 `json:"resetsAt,omitempty"`
 }
 
 // sessionMessage handles Claude's message format where content can be
@@ -476,11 +484,13 @@ func isUsageLimitMessage(content string) bool {
 	return strings.Contains(lower, "usage_limit_reached") ||
 		strings.Contains(lower, "usage limit reached") ||
 		strings.Contains(lower, "session limit reached") ||
-		strings.Contains(lower, "you've hit your usage limit") ||
-		strings.Contains(lower, "you've hit your session limit") ||
-		strings.Contains(lower, "you've hit your org's monthly usage limit") ||
-		strings.Contains(lower, "you've hit your limit")
+		hitYourLimitPattern.MatchString(lower)
 }
+
+// hitYourLimitPattern matches Claude Code's "You've hit your <kind> limit"
+// wordings: "your limit", "your session limit", "your weekly limit",
+// "your org's monthly usage limit", "your Opus limit", etc.
+var hitYourLimitPattern = regexp.MustCompile(`you've hit your (?:[\w']+ ){0,3}limit`)
 
 // isNetworkErrorMessage returns true when the content indicates a
 // network/connection-level failure reaching the API — i.e. no HTTP response
@@ -498,11 +508,13 @@ func isNetworkErrorMessage(content string) bool {
 		strings.Contains(lower, "connection error")
 }
 
-// resetsPattern matches Claude Code's synthetic rate limit message format:
+// resetsPattern matches Claude Code's synthetic rate limit message format,
+// with an optional date for resets more than a day out:
 //
 //	"resets 12pm (America/Los_Angeles)"
 //	"resets 5:30am (UTC)"
-var resetsPattern = regexp.MustCompile(`resets\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm))\s+\(([^)]+)\)`)
+//	"resets Nov 3 at 8pm (America/Los_Angeles)"
+var resetsPattern = regexp.MustCompile(`resets\s+(?:([A-Z][a-z]{2})[a-z]*\s+(\d{1,2})\s+at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm))\s+\(([^)]+)\)`)
 
 // parseSessionLine parses one Claude session JSONL line into zero or more
 // AgentEvents. It returns up to two events: an agent message and/or a
@@ -531,7 +543,10 @@ func parseSessionLine(line []byte) ([]monitor.AgentEvent, bool) {
 	var events []monitor.AgentEvent
 
 	resetsAt, hasReset := parseResetsAt(content, now)
-	isUsageLimit := hasReset || isUsageLimitMessage(content)
+	if entry.QuotaLimits != nil && entry.QuotaLimits.ResetsAt > 0 {
+		resetsAt, hasReset = time.Unix(entry.QuotaLimits.ResetsAt, 0), true
+	}
+	isUsageLimit := entry.ApiError == "usage_limit_reached" || hasReset || isUsageLimitMessage(content)
 
 	// Check for account usage-cap synthetic messages. Claude Code stores these
 	// as synthetic assistant messages in the session JSONL, including the
@@ -611,8 +626,9 @@ func parseResetsAt(message string, reference time.Time) (time.Time, bool) {
 	if m == nil {
 		return time.Time{}, false
 	}
-	timeStr := strings.TrimSpace(m[1])
-	tzName := m[2]
+	monthStr, dayStr := m[1], m[2]
+	timeStr := strings.TrimSpace(m[3])
+	tzName := m[4]
 
 	loc, err := time.LoadLocation(tzName)
 	if err != nil {
@@ -644,6 +660,18 @@ func parseResetsAt(message string, reference time.Time) (time.Time, bool) {
 
 	// Build the candidate time in the target timezone.
 	refInTZ := reference.In(loc)
+	if monthStr != "" {
+		month, err := time.Parse("Jan", monthStr)
+		if err != nil {
+			return time.Time{}, false
+		}
+		candidate := time.Date(refInTZ.Year(), month.Month(), atoiSafe(dayStr), hour, min, 0, 0, loc)
+		// If the candidate is in the past, the date is next year.
+		if !candidate.After(reference) {
+			candidate = candidate.AddDate(1, 0, 0)
+		}
+		return candidate, true
+	}
 	candidate := time.Date(refInTZ.Year(), refInTZ.Month(), refInTZ.Day(), hour, min, 0, 0, loc)
 
 	// If the candidate is in the past, it must be tomorrow.
