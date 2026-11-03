@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +28,14 @@ const (
 	maxMessageLen = 4096
 	// maxPages is the maximum number of messages to send for a single response.
 	maxPages = 3
+
+	// pollTimeoutSeconds is the getUpdates long-poll duration requested from
+	// the Telegram API.
+	pollTimeoutSeconds = 30
+	// httpTimeout bounds every Telegram API call (including the long poll),
+	// so a gateway that accepts a connection but never answers cannot wedge
+	// the bridge.
+	httpTimeout = (pollTimeoutSeconds + 15) * time.Second
 )
 
 // Telegram implements bridge.Bridge, bridge.Sender, and bridge.Receiver
@@ -40,7 +49,6 @@ type Telegram struct {
 	// If empty, defaults to "https://api.telegram.org".
 	BaseURL string
 
-	client http.Client
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 	mu     sync.Mutex
@@ -51,6 +59,32 @@ func (t *Telegram) Name() string { return "telegram" }
 
 func (t *Telegram) Close() error {
 	t.Stop()
+	return nil
+}
+
+var httpClient = &http.Client{Timeout: httpTimeout}
+
+// postForm issues a context-aware form POST to a Telegram API method and
+// decodes the standard response envelope.
+func (t *Telegram) postForm(ctx context.Context, method string, form url.Values) error {
+	req, err := http.NewRequestWithContext(ctx, "POST", t.apiURL(method), strings.NewReader(form.Encode()))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	var result apiResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("decode response (HTTP %d): %w", resp.StatusCode, err)
+	}
+	if !result.OK {
+		return fmt.Errorf("API error: %s", result.Description)
+	}
 	return nil
 }
 
@@ -76,21 +110,11 @@ func (t *Telegram) Send(ctx context.Context, text string) error {
 }
 
 func (t *Telegram) sendChunk(ctx context.Context, text string) error {
-	resp, err := t.client.PostForm(t.apiURL("sendMessage"), url.Values{
+	if err := t.postForm(ctx, "sendMessage", url.Values{
 		"chat_id": {strconv.FormatInt(t.ChatID, 10)},
 		"text":    {text},
-	})
-	if err != nil {
+	}); err != nil {
 		return fmt.Errorf("telegram send: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var result apiResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fmt.Errorf("telegram send: decode response: %w", err)
-	}
-	if !result.OK {
-		return fmt.Errorf("telegram send: API error: %s", result.Description)
 	}
 	return nil
 }
@@ -185,7 +209,7 @@ func (t *Telegram) execAndReply(ctx context.Context, cmd, args string) {
 func (t *Telegram) getUpdates(ctx context.Context) ([]update, error) {
 	params := url.Values{
 		"offset":  {strconv.FormatInt(t.offset, 10)},
-		"timeout": {"30"},
+		"timeout": {strconv.Itoa(pollTimeoutSeconds)},
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", t.apiURL("getUpdates")+"?"+params.Encode(), nil)
@@ -193,7 +217,7 @@ func (t *Telegram) getUpdates(ctx context.Context) ([]update, error) {
 		return nil, err
 	}
 
-	resp, err := t.client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -212,21 +236,11 @@ func (t *Telegram) getUpdates(ctx context.Context) ([]update, error) {
 // SendTyping sends a "typing" chat action to the configured chat.
 // The indicator is shown for ~5 seconds by Telegram.
 func (t *Telegram) SendTyping(ctx context.Context) error {
-	resp, err := t.client.PostForm(t.apiURL("sendChatAction"), url.Values{
+	if err := t.postForm(ctx, "sendChatAction", url.Values{
 		"chat_id": {strconv.FormatInt(t.ChatID, 10)},
 		"action":  {"typing"},
-	})
-	if err != nil {
+	}); err != nil {
 		return fmt.Errorf("telegram sendChatAction: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var result apiResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fmt.Errorf("telegram sendChatAction: decode response: %w", err)
-	}
-	if !result.OK {
-		return fmt.Errorf("telegram sendChatAction: API error: %s", result.Description)
 	}
 	return nil
 }

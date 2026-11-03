@@ -1739,3 +1739,79 @@ func TestHandleInbound_ExpectsResponse_TriggerFailStillDelivers(t *testing.T) {
 		t.Errorf("send body = %q, want 'hello despite trigger fail'", sendReq.Body)
 	}
 }
+
+// shutdownBlockingSender blocks the "shutting down" status send until its
+// context is done, simulating a hung external API during shutdown.
+type shutdownBlockingSender struct {
+	mockSender
+	blocked chan struct{}
+}
+
+func (m *shutdownBlockingSender) Send(ctx context.Context, text string) error {
+	if strings.Contains(text, "shutting down") {
+		close(m.blocked)
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return m.mockSender.Send(ctx, text)
+}
+
+// After acknowledging a stop request the bridge must stop answering on its
+// socket immediately, even while slow shutdown work (status send) is still in
+// flight. Otherwise "h2 bridge stop" reports success while "h2 pod start"
+// still sees a running bridge.
+func TestStopRequest_SocketGoneBeforeSlowShutdownFinishes(t *testing.T) {
+	tmpDir := shortTempDir(t)
+	sender := &shutdownBlockingSender{mockSender: mockSender{name: "test"}, blocked: make(chan struct{})}
+	svc := New([]bridge.Bridge{sender}, "alice", "", "", tmpDir, nil)
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- svc.Run(context.Background()) }()
+
+	sockPath := filepath.Join(tmpDir, socketdir.Format(socketdir.TypeBridge, "alice"))
+	waitForSocket(t, sockPath)
+
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := message.SendRequest(conn, &message.Request{Type: "stop"}); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := message.ReadResponse(conn)
+	conn.Close()
+	if err != nil || !resp.OK {
+		t.Fatalf("stop: resp=%v err=%v", resp, err)
+	}
+
+	select {
+	case <-sender.blocked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("shutdown status send never started")
+	}
+
+	// Shutdown is now blocked in the status send; socket must already be gone.
+	if _, err := os.Stat(sockPath); err == nil {
+		t.Fatal("socket still present while shutdown is in progress")
+	}
+	if c, err := net.Dial("unix", sockPath); err == nil {
+		c.Close()
+		t.Fatal("bridge still accepting connections after stop was acknowledged")
+	}
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Errorf("Run: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run did not return after shutdown timeout")
+	}
+}
+
+func TestStatusIncludesPID(t *testing.T) {
+	svc := New(nil, "alice", "", "", t.TempDir(), nil)
+	if got := svc.buildBridgeInfo().PID; got != os.Getpid() {
+		t.Errorf("PID = %d, want %d", got, os.Getpid())
+	}
+}

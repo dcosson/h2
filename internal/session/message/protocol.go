@@ -106,6 +106,7 @@ type Response struct {
 // BridgeInfo is the public representation of bridge status.
 type BridgeInfo struct {
 	Name             string   `json:"name"`
+	PID              int      `json:"pid,omitempty"` // bridge daemon process ID
 	Pod              string   `json:"pod,omitempty"` // pod name if launched from a pod
 	Channels         []string `json:"channels"`
 	Uptime           string   `json:"uptime"`

@@ -836,3 +836,50 @@ func TestPoll_BackoffResetsOnSuccess(t *testing.T) {
 		t.Errorf("backoff did not reset after success: gap between call 4 and 5 was %v, expected ~1ms", gap)
 	}
 }
+
+// A hung Telegram API (e.g. a gateway that never answers) must not block
+// Send past its context deadline; otherwise bridge shutdown hangs forever.
+func TestSend_HonorsContextWhenAPIHangs(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+	}))
+	defer srv.Close()
+	defer close(release)
+
+	tg := &Telegram{Token: "TOKEN", ChatID: 42, BaseURL: srv.URL}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	err := tg.Send(ctx, "hello")
+	if err == nil {
+		t.Fatal("expected error from hung API")
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("Send blocked %v despite 200ms context deadline", elapsed)
+	}
+}
+
+func TestSendTyping_HonorsContextWhenAPIHangs(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+	}))
+	defer srv.Close()
+	defer close(release)
+
+	tg := &Telegram{Token: "TOKEN", ChatID: 42, BaseURL: srv.URL}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	if err := tg.SendTyping(ctx); err == nil {
+		t.Fatal("expected error from hung API")
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("SendTyping blocked %v despite 200ms context deadline", elapsed)
+	}
+}

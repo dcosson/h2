@@ -250,7 +250,7 @@ func podLaunchBridges(bridges []config.PodBridge, pod string) error {
 					if resp.Bridge.Pod != "" {
 						return fmt.Errorf("bridge %q is already owned by pod %q; stop it first or remove from this pod", pb.Bridge, resp.Bridge.Pod)
 					}
-					return fmt.Errorf("bridge %q is already running; stop it before launching pod %q", pb.Bridge, pod)
+					return fmt.Errorf("bridge %q is already running outside pod %q; stop it with \"h2 bridge stop %s\" and retry", pb.Bridge, pod, pb.Bridge)
 				} else {
 					conn.Close()
 				}
@@ -404,22 +404,12 @@ func newPodStopCmd() *cobra.Command {
 					continue
 				}
 
-				conn, err := net.Dial("unix", e.Path)
+				stopped, err := stopBridge(e.Name)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: cannot connect to bridge %q: %v\n", e.Name, err)
+					fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 					continue
 				}
-
-				if err := message.SendRequest(conn, &message.Request{Type: "stop"}); err != nil {
-					conn.Close()
-					fmt.Fprintf(os.Stderr, "Warning: cannot stop bridge %q: %v\n", e.Name, err)
-					continue
-				}
-
-				resp, err := message.ReadResponse(conn)
-				conn.Close()
-				if err != nil || !resp.OK {
-					fmt.Fprintf(os.Stderr, "Warning: stop failed for bridge %q\n", e.Name)
+				if !stopped {
 					continue
 				}
 

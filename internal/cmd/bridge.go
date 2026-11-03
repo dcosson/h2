@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -102,7 +104,7 @@ to route to an existing agent without spawning a new session.`,
 			}
 
 			// Fork the bridge service as a background daemon.
-			stopped, err := stopExistingBridgeIfRunning(bridgeName)
+			stopped, err := stopBridge(bridgeName)
 			if err != nil {
 				return err
 			}
@@ -143,42 +145,124 @@ to route to an existing agent without spawning a new session.`,
 	return cmd
 }
 
-// stopExistingBridgeIfRunning stops an already-running bridge daemon by name.
-func stopExistingBridgeIfRunning(bridgeName string) (bool, error) {
-	sockPath := socketdir.Path(socketdir.TypeBridge, bridgeName)
-	conn, err := net.DialTimeout("unix", sockPath, 500*time.Millisecond)
-	if err != nil {
+// Bridge stop timing. Vars so tests can shorten them.
+var (
+	// bridgeStopTimeout is how long to wait for a bridge to exit after it
+	// acknowledges a stop request before force-killing it.
+	bridgeStopTimeout = 10 * time.Second
+	// bridgeKillTimeout is how long to wait for a force-killed bridge to exit.
+	bridgeKillTimeout = 3 * time.Second
+	// bridgeRequestTimeout bounds each request/response with a bridge socket.
+	bridgeRequestTimeout = 5 * time.Second
+)
+
+// stopBridge stops the named bridge daemon and waits until it has actually
+// exited: its socket is gone and, when the bridge reports its PID, the
+// process is gone too. A bridge that acknowledges the stop but does not exit
+// within bridgeStopTimeout is killed with SIGKILL. A socket file with no
+// listener (left behind by a crashed bridge) is removed. Returns false when
+// no bridge was running.
+func stopBridge(name string) (bool, error) {
+	sockPath := socketdir.Path(socketdir.TypeBridge, name)
+	if _, err := os.Stat(sockPath); os.IsNotExist(err) {
 		return false, nil
 	}
-	defer conn.Close()
 
-	if err := message.SendRequest(conn, &message.Request{Type: "stop"}); err != nil {
-		return false, fmt.Errorf("stop existing bridge %q: send stop request: %w", bridgeName, err)
+	var pid int
+	if resp, err := bridgeSocketRequest(sockPath, &message.Request{Type: "status"}); err == nil && resp.OK && resp.Bridge != nil {
+		pid = resp.Bridge.PID
+	}
+
+	resp, err := bridgeSocketRequest(sockPath, &message.Request{Type: "stop"})
+	if err != nil {
+		var opErr *net.OpError
+		if errors.As(err, &opErr) && opErr.Op == "dial" {
+			// Nothing is listening: stale socket file from a dead bridge.
+			os.Remove(sockPath)
+			return false, nil
+		}
+		return false, fmt.Errorf("stop bridge %q: %w", name, err)
+	}
+	if !resp.OK {
+		return false, fmt.Errorf("stop bridge %q: %s", name, resp.Error)
+	}
+
+	exited := func() bool { return !fileExists(sockPath) && !processAlive(pid) }
+	if waitUntil(exited, bridgeStopTimeout) {
+		return true, nil
+	}
+	if pid == 0 {
+		return false, fmt.Errorf("bridge %q acknowledged stop but is still running after %v; kill it manually (pkill -f \"_bridge-service --bridge %s \") and retry", name, bridgeStopTimeout, name)
+	}
+
+	fmt.Fprintf(os.Stderr, "Bridge %q did not exit within %v; killing pid %d.\n", name, bridgeStopTimeout, pid)
+	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+		return false, fmt.Errorf("kill bridge %q (pid %d): %w", name, pid, err)
+	}
+	if !waitUntil(func() bool { return !processAlive(pid) }, bridgeKillTimeout) {
+		return false, fmt.Errorf("bridge %q (pid %d) still running after SIGKILL", name, pid)
+	}
+	// A killed bridge cannot clean up after itself.
+	os.Remove(sockPath)
+	return true, nil
+}
+
+// bridgeSocketRequest sends one request to a bridge socket and reads the
+// response, bounded by bridgeRequestTimeout.
+func bridgeSocketRequest(sockPath string, req *message.Request) (*message.Response, error) {
+	conn, err := net.DialTimeout("unix", sockPath, bridgeservice.ProbeTimeout)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(bridgeRequestTimeout))
+
+	if err := message.SendRequest(conn, req); err != nil {
+		return nil, fmt.Errorf("send %s request: %w", req.Type, err)
 	}
 	resp, err := message.ReadResponse(conn)
 	if err != nil {
-		return false, fmt.Errorf("stop existing bridge %q: read response: %w", bridgeName, err)
+		return nil, fmt.Errorf("read %s response: %w", req.Type, err)
 	}
-	if !resp.OK {
-		return false, fmt.Errorf("stop existing bridge %q: %s", bridgeName, resp.Error)
-	}
+	return resp, nil
+}
 
-	for i := 0; i < 50; i++ {
-		if _, err := os.Stat(sockPath); os.IsNotExist(err) {
-			return true, nil
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// processAlive reports whether pid refers to a live process. pid 0 means
+// unknown and is treated as not alive.
+func processAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
+func waitUntil(cond func() bool, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if cond() {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	return false, fmt.Errorf("stop existing bridge %q: bridge socket still present after stop", bridgeName)
 }
 
 func newBridgeStopCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop [name]",
 		Short: "Stop a running bridge",
-		Long: `Stop a running bridge service. If name is omitted and exactly one bridge
-is running, stops it. If multiple bridges are running, returns an error
-listing them.`,
+		Long: `Stop a running bridge service and wait for it to exit. If name is omitted
+and exactly one bridge is running, stops it. If multiple bridges are running,
+returns an error listing them. Stopping a bridge that is not running is a
+no-op.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var name string
@@ -186,33 +270,23 @@ listing them.`,
 				name = args[0]
 			}
 
-			sockPath, err := findBridgeSocket(name)
+			name, err := resolveBridgeName(name)
+			if errors.Is(err, errNoBridgesRunning) {
+				fmt.Println("No bridges are running; nothing to stop.")
+				return nil
+			}
 			if err != nil {
 				return err
 			}
 
-			conn, err := net.Dial("unix", sockPath)
+			stopped, err := stopBridge(name)
 			if err != nil {
-				return fmt.Errorf("cannot connect to bridge: %w", err)
+				return err
 			}
-			defer conn.Close()
-
-			if err := message.SendRequest(conn, &message.Request{Type: "stop"}); err != nil {
-				return fmt.Errorf("send stop request: %w", err)
-			}
-
-			resp, err := message.ReadResponse(conn)
-			if err != nil {
-				return fmt.Errorf("read response: %w", err)
-			}
-			if !resp.OK {
-				return fmt.Errorf("stop failed: %s", resp.Error)
-			}
-
-			if name != "" {
+			if stopped {
 				fmt.Printf("Stopped bridge %s.\n", name)
 			} else {
-				fmt.Println("Bridge stopped.")
+				fmt.Printf("Bridge %s is not running; nothing to stop.\n", name)
 			}
 			return nil
 		},
@@ -305,12 +379,14 @@ func bridgeRequest(bridgeName, reqType, body string) (*message.Response, error) 
 	return resp, nil
 }
 
-// findBridgeSocket locates the bridge socket. If name is non-empty, it uses
-// that directly. If empty and exactly one bridge is running, uses that.
-// Returns an error if no bridges or multiple bridges are found.
-func findBridgeSocket(name string) (string, error) {
+var errNoBridgesRunning = errors.New("no bridges are running")
+
+// resolveBridgeName returns name if non-empty. If empty and exactly one
+// bridge is running, returns that bridge's name. Returns errNoBridgesRunning
+// if none are running, or an error listing them if several are.
+func resolveBridgeName(name string) (string, error) {
 	if name != "" {
-		return socketdir.Path(socketdir.TypeBridge, name), nil
+		return name, nil
 	}
 
 	bridges, err := socketdir.ListByType(socketdir.TypeBridge)
@@ -318,7 +394,7 @@ func findBridgeSocket(name string) (string, error) {
 		return "", fmt.Errorf("list bridges: %w", err)
 	}
 	if len(bridges) == 0 {
-		return "", fmt.Errorf("no bridges are running")
+		return "", errNoBridgesRunning
 	}
 	if len(bridges) > 1 {
 		var names []string
@@ -327,5 +403,15 @@ func findBridgeSocket(name string) (string, error) {
 		}
 		return "", fmt.Errorf("multiple bridges are running: %s; specify which one", strings.Join(names, ", "))
 	}
-	return bridges[0].Path, nil
+	return bridges[0].Name, nil
+}
+
+// findBridgeSocket locates the bridge socket for name, resolving an empty
+// name as described in resolveBridgeName.
+func findBridgeSocket(name string) (string, error) {
+	name, err := resolveBridgeName(name)
+	if err != nil {
+		return "", err
+	}
+	return socketdir.Path(socketdir.TypeBridge, name), nil
 }

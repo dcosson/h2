@@ -107,10 +107,17 @@ func (s *Service) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("listen on bridge socket: %w", err)
 	}
-	defer func() {
-		ln.Close()
-		os.Remove(sockPath)
-	}()
+	// closeSocket stops accepting requests and removes the socket file, which
+	// is how every client (h2 list, h2 bridge stop, h2 pod start) decides the
+	// bridge is no longer running.
+	var closeSocketOnce sync.Once
+	closeSocket := func() {
+		closeSocketOnce.Do(func() {
+			ln.Close()
+			os.Remove(sockPath)
+		})
+	}
+	defer closeSocket()
 
 	go s.acceptLoop(ln)
 
@@ -122,6 +129,10 @@ func (s *Service) Run(ctx context.Context) error {
 
 	// Block until context is done.
 	<-ctx.Done()
+
+	// Release the socket before any slow shutdown work, so that once a stop
+	// is acknowledged the bridge is immediately seen as not running.
+	closeSocket()
 
 	// Send shutdown message before cleanup.
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -578,6 +589,7 @@ func (s *Service) buildBridgeInfo() *message.BridgeInfo {
 
 	return &message.BridgeInfo{
 		Name:             s.name,
+		PID:              os.Getpid(),
 		Pod:              s.pod,
 		Channels:         channels,
 		Uptime:           uptime,

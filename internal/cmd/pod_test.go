@@ -578,8 +578,51 @@ func TestPodLaunchBridges_FailsWhenBridgeAlreadyRunningStandalone(t *testing.T) 
 	if err == nil {
 		t.Fatal("expected error for standalone bridge already running")
 	}
-	if !strings.Contains(err.Error(), `bridge "personal" is already running`) {
+	if !strings.Contains(err.Error(), `bridge "personal" is already running`) ||
+		!strings.Contains(err.Error(), `h2 bridge stop personal`) {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// Regression: after "h2 bridge stop" reports success on a standalone bridge,
+// launching the pod must start the bridge rather than see it as running.
+func TestPodLaunchBridges_StartsAfterStandaloneBridgeStopped(t *testing.T) {
+	h2Root := setupPodTestEnv(t)
+	sockDir := filepath.Join(h2Root, "sockets")
+
+	configYAML := `bridges:
+  personal:
+    macos_notify:
+      enabled: true
+`
+	if err := os.WriteFile(filepath.Join(h2Root, "config.yaml"), []byte(configYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	startFakeBridge(t, sockDir, "personal", 0, true)
+
+	origForkBridge := forkBridgeFunc
+	var forked []string
+	forkBridgeFunc = func(bridgeName, concierge, pod string) error {
+		forked = append(forked, bridgeName+"/"+pod)
+		return nil
+	}
+	t.Cleanup(func() { forkBridgeFunc = origForkBridge })
+
+	if err := podLaunchBridges([]config.PodBridge{{Bridge: "personal"}}, "dev-pod"); err == nil {
+		t.Fatal("expected launch to refuse while standalone bridge runs")
+	}
+
+	stopped, err := stopBridge("personal")
+	if err != nil || !stopped {
+		t.Fatalf("stopBridge: stopped=%v err=%v", stopped, err)
+	}
+
+	if err := podLaunchBridges([]config.PodBridge{{Bridge: "personal"}}, "dev-pod"); err != nil {
+		t.Fatalf("podLaunchBridges after stop: %v", err)
+	}
+	if len(forked) != 1 || forked[0] != "personal/dev-pod" {
+		t.Fatalf("forked = %v, want [personal/dev-pod]", forked)
 	}
 }
 
