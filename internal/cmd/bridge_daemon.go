@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"log"
 	"os/signal"
 	"syscall"
 
@@ -26,6 +27,8 @@ func newBridgeDaemonCmd() *cobra.Command {
 			if bridgeName == "" {
 				return fmt.Errorf("--bridge is required")
 			}
+			// All bridge daemons append to one shared log; tag each line.
+			log.SetPrefix(fmt.Sprintf("[%s] ", bridgeName))
 
 			cfg, err := config.Load()
 			if err != nil {

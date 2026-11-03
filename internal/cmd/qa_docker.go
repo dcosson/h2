@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"os"
@@ -9,7 +10,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
+
+// dockerQueryTimeout bounds quick docker queries ("docker info", image
+// inspect), so a wedged Docker daemon produces an error instead of hanging
+// h2. Var so tests can shorten it.
+var dockerQueryTimeout = 10 * time.Second
 
 // projectHash returns the hex-encoded SHA256 hash prefix for a config file path.
 // Used by projectImageTag and authedImageTag for deterministic Docker image tagging.
@@ -36,10 +43,9 @@ func authedImageTag(configPath string) string {
 
 // imageExists checks whether a Docker image with the given tag exists locally.
 func imageExists(tag string) bool {
-	cmd := exec.Command("docker", "inspect", "--type=image", tag)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	return cmd.Run() == nil
+	ctx, cancel := context.WithTimeout(context.Background(), dockerQueryTimeout)
+	defer cancel()
+	return exec.CommandContext(ctx, "docker", "inspect", "--type=image", tag).Run() == nil
 }
 
 // dockerExec runs a docker command and returns stdout, stderr, and any error.
@@ -66,9 +72,16 @@ func dockerAvailable() error {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return fmt.Errorf("docker is not installed or not in PATH")
 	}
-	_, stderr, err := dockerExec("info")
-	if err != nil {
-		return fmt.Errorf("docker daemon is not running: %s", stderr)
+	ctx, cancel := context.WithTimeout(context.Background(), dockerQueryTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "docker", "info")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("docker daemon is not responding (docker info timed out after %v)", dockerQueryTimeout)
+		}
+		return fmt.Errorf("docker daemon is not running: %s", stderr.String())
 	}
 	return nil
 }

@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -74,7 +75,7 @@ func (t *Telegram) postForm(ctx context.Context, method string, form url.Values)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return err
+		return t.redact(err)
 	}
 	defer resp.Body.Close()
 
@@ -86,6 +87,15 @@ func (t *Telegram) postForm(ctx context.Context, method string, form url.Values)
 		return fmt.Errorf("API error: %s", result.Description)
 	}
 	return nil
+}
+
+// redact strips the bot token from err. net/http errors embed the request
+// URL, which contains the token, and these errors end up in the bridge log.
+func (t *Telegram) redact(err error) error {
+	if err == nil || t.Token == "" || !strings.Contains(err.Error(), t.Token) {
+		return err
+	}
+	return errors.New(strings.ReplaceAll(err.Error(), t.Token, "<redacted>"))
 }
 
 func (t *Telegram) apiURL(method string) string {
@@ -219,7 +229,7 @@ func (t *Telegram) getUpdates(ctx context.Context) ([]update, error) {
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, t.redact(err)
 	}
 	defer resp.Body.Close()
 

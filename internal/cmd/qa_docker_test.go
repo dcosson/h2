@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestProjectImageTag_Deterministic(t *testing.T) {
@@ -171,5 +172,49 @@ sandbox: {}
 	err := runQASetup(configPath)
 	if err == nil {
 		t.Fatal("expected error for empty Dockerfile")
+	}
+}
+
+// A wedged Docker daemon (docker CLI never returns) must yield an error
+// rather than hang.
+func TestDockerAvailable_TimesOutWhenDockerHangs(t *testing.T) {
+	binDir := t.TempDir()
+	script := "#!/bin/sh\nexec sleep 60\n"
+	if err := os.WriteFile(filepath.Join(binDir, "docker"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	old := dockerQueryTimeout
+	dockerQueryTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { dockerQueryTimeout = old })
+
+	start := time.Now()
+	err := dockerAvailable()
+	if err == nil || !strings.Contains(err.Error(), "not responding") {
+		t.Fatalf("err = %v, want 'not responding' error", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("dockerAvailable blocked %v", elapsed)
+	}
+}
+
+func TestImageExists_FalseWhenDockerHangs(t *testing.T) {
+	binDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(binDir, "docker"), []byte("#!/bin/sh\nexec sleep 60\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	old := dockerQueryTimeout
+	dockerQueryTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { dockerQueryTimeout = old })
+
+	start := time.Now()
+	if imageExists("h2-qa-test:base") {
+		t.Fatal("expected false when docker hangs")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("imageExists blocked %v", elapsed)
 	}
 }

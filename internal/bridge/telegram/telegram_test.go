@@ -883,3 +883,24 @@ func TestSendTyping_HonorsContextWhenAPIHangs(t *testing.T) {
 		t.Fatalf("SendTyping blocked %v despite 200ms context deadline", elapsed)
 	}
 }
+
+// Transport errors embed the request URL; the bot token must not leak into
+// error messages (and from there into the bridge log).
+func TestErrorsDoNotLeakToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	srv.Close() // connection refused
+
+	tg := &Telegram{Token: "SECRET-TOKEN-123", ChatID: 42, BaseURL: srv.URL}
+	errs := []error{tg.Send(context.Background(), "hi"), tg.SendTyping(context.Background())}
+	if _, err := tg.getUpdates(context.Background()); true {
+		errs = append(errs, err)
+	}
+	for i, err := range errs {
+		if err == nil {
+			t.Fatalf("call %d: expected error", i)
+		}
+		if strings.Contains(err.Error(), "SECRET-TOKEN-123") {
+			t.Errorf("call %d: error leaks token: %v", i, err)
+		}
+	}
+}
