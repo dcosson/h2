@@ -855,6 +855,7 @@ func TestInitCmd_Opinionated_PopulatesSharedSkills(t *testing.T) {
 	checks := []string{
 		filepath.Join(dir, "profiles-shared", "default", "skills", "shaping", "SKILL.md"),
 		filepath.Join(dir, "profiles-shared", "default", "skills", "stress-test", "SKILL.md"),
+		filepath.Join(dir, "profiles-shared", "default", "skills", "prose-cleanup", "SKILL.md"),
 	}
 	for _, p := range checks {
 		if _, err := os.Stat(p); err != nil {
