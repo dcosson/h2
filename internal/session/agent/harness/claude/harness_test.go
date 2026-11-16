@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -492,5 +493,68 @@ func TestNativeLogPathSuffix_FullPath(t *testing.T) {
 	want := "/home/user/.h2/claude-config/default/projects/-Users-dcosson-projects-h2/abc-123.jsonl"
 	if got != want {
 		t.Errorf("NativeSessionLogPath() = %q, want %q", got, want)
+	}
+}
+
+// --- Resume tests ---
+
+func resumeTestRC(prefix, resumeID string) *config.RuntimeConfig {
+	return &config.RuntimeConfig{
+		HarnessType:             "claude_code",
+		Command:                 "claude",
+		AgentName:               "test",
+		CWD:                     "/tmp/proj",
+		StartedAt:               "2024-01-01T00:00:00Z",
+		SessionID:               resumeID,
+		HarnessSessionID:        resumeID,
+		ResumeSessionID:         resumeID,
+		HarnessConfigPathPrefix: prefix,
+		Profile:                 "alt1",
+		Instructions:            "You are a test agent.",
+		Model:                   "claude-test",
+	}
+}
+
+func TestBuildCommandArgs_ResumesPersistedSession(t *testing.T) {
+	prefix := t.TempDir()
+	logDir := filepath.Join(prefix, "alt1", "projects", "-tmp-proj")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(logDir, "sess-1.jsonl"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	args := New(resumeTestRC(prefix, "sess-1"), nil).BuildCommandArgs(nil, nil)
+	want := []string{"--resume", "sess-1"}
+	if len(args) != len(want) || args[0] != want[0] || args[1] != want[1] {
+		t.Fatalf("args = %v, want %v", args, want)
+	}
+}
+
+// Regression: an agent killed during startup never wrote a session log, and
+// relaunching it ran `claude --resume <id>`, which exits with "No conversation
+// found with session ID", so the agent could not be restarted.
+func TestBuildCommandArgs_MissingSessionLogStartsFresh(t *testing.T) {
+	prefix := t.TempDir()
+
+	args := New(resumeTestRC(prefix, "never-persisted-1"), nil).BuildCommandArgs(nil, nil)
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "--resume") {
+		t.Fatalf("args = %v, want no --resume for a session with no log", args)
+	}
+	if !strings.Contains(joined, "--session-id never-persisted-1") {
+		t.Errorf("args = %v, want --session-id for the fresh session", args)
+	}
+	if !strings.Contains(joined, "--append-system-prompt You are a test agent.") {
+		t.Errorf("args = %v, want role instructions on the fresh session", args)
+	}
+}
+
+func TestBuildCommandArgs_ResumeWithoutConfigDirResumesAsAsked(t *testing.T) {
+	rc := resumeTestRC("", "sess-2")
+	args := New(rc, nil).BuildCommandArgs(nil, nil)
+	if strings.Join(args, " ") != "--resume sess-2" {
+		t.Fatalf("args = %v, want --resume sess-2", args)
 	}
 }

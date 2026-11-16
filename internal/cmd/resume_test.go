@@ -88,7 +88,10 @@ func TestRunResume_DryRun(t *testing.T) {
 	name := "resume-test-dry-run"
 	tmpDir := t.TempDir()
 	claudeConfigDir := filepath.Join(tmpDir, "claude-config")
-	os.MkdirAll(claudeConfigDir, 0o755)
+	// Claude only resumes a session whose log exists on disk.
+	logDir := filepath.Join(claudeConfigDir, "projects", "-tmp-proj")
+	os.MkdirAll(logDir, 0o755)
+	os.WriteFile(filepath.Join(logDir, "dry-run-session-uuid.jsonl"), []byte("{}\n"), 0o644)
 
 	writeTestRuntimeConfig(t, name, &config.RuntimeConfig{
 		AgentName:               name,

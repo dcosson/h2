@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	stdlog "log"
 	"path/filepath"
 	"strings"
 
@@ -78,9 +79,9 @@ func (h *ClaudeCodeHarness) SupportsResume() bool { return true }
 func (h *ClaudeCodeHarness) BuildCommandArgs(prependArgs, extraArgs []string) []string {
 	var roleArgs []string
 	rc := h.rc
-	if rc.ResumeSessionID != "" {
+	if resumeID := h.resumeTarget(); resumeID != "" {
 		// Resume mode: only pass --resume, no other flags.
-		roleArgs = append(roleArgs, "--resume", rc.ResumeSessionID)
+		roleArgs = append(roleArgs, "--resume", resumeID)
 		return harness.CombineArgs(prependArgs, extraArgs, roleArgs)
 	}
 	if rc.SessionID != "" {
@@ -102,6 +103,30 @@ func (h *ClaudeCodeHarness) BuildCommandArgs(prependArgs, extraArgs []string) []
 		roleArgs = append(roleArgs, "--add-dir", dir)
 	}
 	return harness.CombineArgs(prependArgs, extraArgs, roleArgs)
+}
+
+// resumeTarget returns the session ID Claude Code should resume, or "" to
+// start a fresh session. Claude Code only writes a session log once the
+// conversation has a message, so a session that died during startup (e.g.
+// killed before its first prompt) has nothing to resume, and
+// `claude --resume <id>` exits immediately with "No conversation found".
+// When the config dir is unknown there is nothing to check against, so the
+// stored ID is resumed as asked.
+func (h *ClaudeCodeHarness) resumeTarget() string {
+	id := h.rc.ResumeSessionID
+	if id == "" {
+		return ""
+	}
+	configDir := h.rc.HarnessConfigDir()
+	if configDir == "" {
+		return id
+	}
+	matches, _ := filepath.Glob(filepath.Join(configDir, "projects", "*", id+".jsonl"))
+	if len(matches) == 0 {
+		stdlog.Printf("claude: no session log on disk for stored session %s; starting a fresh session", id)
+		return ""
+	}
+	return id
 }
 
 // BuildCommandEnvVars returns env vars for Claude Code (CLAUDE_CONFIG_DIR).
@@ -180,7 +205,7 @@ func (h *ClaudeCodeHarness) Start(ctx context.Context, events chan<- monitor.Age
 	// Start session log tailer if configured. On resume (relaunch/rotate),
 	// skip existing content to avoid replaying old events like rate limits.
 	if h.sessionLogPath != "" {
-		if h.rc.ResumeSessionID != "" {
+		if h.resumeTarget() != "" {
 			go sessionlogcollector.NewTailOnly(h.sessionLogPath, h.eventHandler.OnSessionLogLine).Run(ctx)
 		} else {
 			go sessionlogcollector.New(h.sessionLogPath, h.eventHandler.OnSessionLogLine).Run(ctx)
