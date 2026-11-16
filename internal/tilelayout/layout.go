@@ -88,10 +88,13 @@ func ComputeTabLayout(agents []string, screen ScreenSize, tabIdx int, cfg Layout
 	batch := agents[:n]
 	remaining := agents[n:]
 
-	// Determine grid dimensions: fill columns (horizontal) first,
-	// then add rows. This keeps panes wider on wide monitors.
-	cols := min(len(batch), maxCols)
-	rows := (len(batch) + cols - 1) / cols
+	// Determine grid dimensions: use the fewest rows that fit the batch
+	// across the available columns, then the fewest columns that hold the
+	// batch at that row count. Panes fill column-major, so without the second
+	// step a wide screen leaves trailing columns empty (6 agents with room
+	// for 5 columns would be 5x2, filling only the first 3 columns).
+	rows := (len(batch) + maxCols - 1) / maxCols
+	cols := (len(batch) + rows - 1) / rows
 
 	// Compute pane dimensions. Last column/row absorbs remainder
 	// so the total adds up to the screen size exactly.

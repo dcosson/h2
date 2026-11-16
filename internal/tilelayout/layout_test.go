@@ -145,6 +145,55 @@ func TestComputeLayout_SevenAgents(t *testing.T) {
 	}
 }
 
+// Regression: 6 agents on a screen with room for 5 columns used to produce a
+// 5x2 grid filled column-major, leaving the last 2 columns empty.
+func TestComputeLayout_NoEmptyTrailingColumns(t *testing.T) {
+	agents := []string{"a1", "a2", "a3", "a4", "a5", "a6"}
+	// 400/79=5 max cols, 60/19=3 max rows.
+	layout := ComputeLayout(agents, ScreenSize{400, 60}, ScreenSize{}, testConfig())
+	tab := layout.Tabs[0]
+	if tab.Cols != 3 || tab.Rows != 2 {
+		t.Fatalf("expected 3x2, got %dx%d", tab.Cols, tab.Rows)
+	}
+	for _, p := range tab.Panes {
+		if p.Width != 133 && p.Width != 134 {
+			t.Errorf("pane %s width %d, want ~400/3", p.AgentName, p.Width)
+		}
+	}
+}
+
+// Every column a tab declares must hold at least one pane: the Ghostty driver
+// splits right once per column, so an empty column is an empty split.
+func TestComputeTabLayout_EveryColumnPopulated(t *testing.T) {
+	cfg := testConfig()
+	for screenCols := 60; screenCols <= 600; screenCols += 37 {
+		for screenRows := 15; screenRows <= 120; screenRows += 13 {
+			for n := 1; n <= 30; n++ {
+				agents := make([]string, n)
+				for i := range agents {
+					agents[i] = fmt.Sprintf("a%d", i)
+				}
+				tab, remaining := ComputeTabLayout(agents, ScreenSize{screenCols, screenRows}, 0, cfg)
+				maxCols := max(1, screenCols/cfg.MinPaneWidth)
+				maxRows := max(1, screenRows/cfg.MinPaneHeight)
+				if tab.Cols > maxCols || tab.Rows > maxRows {
+					t.Fatalf("screen %dx%d n=%d: grid %dx%d exceeds max %dx%d",
+						screenCols, screenRows, n, tab.Cols, tab.Rows, maxCols, maxRows)
+				}
+				if len(tab.Panes)+len(remaining) != n {
+					t.Fatalf("screen %dx%d n=%d: lost agents", screenCols, screenRows, n)
+				}
+				for c := 0; c < tab.Cols; c++ {
+					if tab.RowsInCol(c) == 0 {
+						t.Fatalf("screen %dx%d n=%d: grid %dx%d has empty column %d",
+							screenCols, screenRows, n, tab.Cols, tab.Rows, c)
+					}
+				}
+			}
+		}
+	}
+}
+
 func TestComputeLayout_Overflow(t *testing.T) {
 	agents := make([]string, 12)
 	for i := range agents {
