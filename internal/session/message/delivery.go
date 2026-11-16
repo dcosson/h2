@@ -30,6 +30,7 @@ type DeliveryConfig struct {
 	AgentName       string
 	PtyWriter       io.Writer       // writes to the child PTY
 	IsIdle          IdleFunc        // checks if child is idle
+	IsMidTurn       IdleFunc        // checks if child is mid-turn (has work a Ctrl+C would interrupt)
 	IsBlocked       IsBlockedFunc   // checks if agent is blocked (nil = never blocked)
 	WaitForIdle     WaitForIdleFunc // blocks until idle after a single interrupt
 	SignalInterrupt func()          // called when sending Ctrl+C for interrupt delivery
@@ -134,11 +135,13 @@ const maxInlineBodyLen = 300
 var interruptWaitTimeout = 5 * time.Second
 
 func deliver(cfg DeliveryConfig, msg *Message) {
-	if msg.Priority == PriorityInterrupt && !msg.Raw && cfg.IsIdle != nil && !cfg.IsIdle() {
-		// Ctrl+C terminates some harnesses when they are already idle. Check the
-		// live state immediately before writing ETX, and never send more than one
-		// for a message. Blocked/user-prompt states are non-idle and intentionally
-		// take this path.
+	if msg.Priority == PriorityInterrupt && !msg.Raw && cfg.IsMidTurn != nil && cfg.IsMidTurn() {
+		// Only interrupt a turn that is actually running. Ctrl+C terminates some
+		// harnesses when they are already idle, and a harness that is still
+		// starting up has not put its PTY in raw mode yet, so the line discipline
+		// turns ETX into SIGINT and kills it. Check the live state immediately
+		// before writing ETX, and never send more than one for a message.
+		// Blocked/user-prompt states are mid-turn and intentionally take this path.
 		cfg.PtyWriter.Write([]byte{0x03})
 		if cfg.SignalInterrupt != nil {
 			cfg.SignalInterrupt()

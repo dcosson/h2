@@ -887,6 +887,10 @@ func (s *Session) StartServices() {
 			st, _ := s.State()
 			return st == monitor.StateIdle
 		},
+		IsMidTurn: func() bool {
+			st, _ := s.State()
+			return st == monitor.StateActive
+		},
 		IsBlocked: func() bool {
 			st, sub := s.State()
 			return st == monitor.StateActive && (sub == monitor.SubStatePermissionReview || sub == monitor.SubStateBlockedOnPermission)

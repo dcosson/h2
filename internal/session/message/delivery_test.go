@@ -294,15 +294,17 @@ func TestDeliver_InterruptRechecksIdleImmediatelyBeforeCtrlC(t *testing.T) {
 		CreatedAt: time.Now(),
 	})
 
-	idleChecks := 0
+	midTurn := true
 	delivered := make(chan struct{}, 1)
 	go RunDelivery(DeliveryConfig{
 		Queue:     q,
 		PtyWriter: &buf,
 		IsIdle: func() bool {
-			idleChecks++
-			return idleChecks >= 2 // active at dequeue, idle immediately before delivery
+			// Active at dequeue; the turn finishes before the pre-interrupt check.
+			midTurn = false
+			return false
 		},
+		IsMidTurn: func() bool { return midTurn },
 		OnDeliver: func() { delivered <- struct{}{} },
 		Stop:      stop,
 	})
@@ -314,11 +316,56 @@ func TestDeliver_InterruptRechecksIdleImmediatelyBeforeCtrlC(t *testing.T) {
 	}
 	close(stop)
 
-	if idleChecks < 2 {
-		t.Fatalf("IsIdle called %d times, want a fresh pre-interrupt check", idleChecks)
-	}
 	if out := buf.String(); strings.Contains(out, "\x03") {
 		t.Fatalf("agent that became idle before delivery received Ctrl+C: %q", out)
+	}
+}
+
+// Regression: an interrupt-priority schedule firing while Claude Code was still
+// starting wrote Ctrl+C before Claude put its PTY in raw mode, so the line
+// discipline delivered SIGINT and killed it. A starting agent is neither idle
+// nor mid-turn, and must get the message without Ctrl+C.
+func TestDeliver_InterruptStartingAgentDoesNotSendCtrlC(t *testing.T) {
+	var buf threadSafeBuffer
+	q := NewMessageQueue()
+	stop := make(chan struct{})
+	q.Enqueue(&Message{
+		ID:        "int-starting",
+		Priority:  PriorityInterrupt,
+		Body:      "scheduled",
+		Status:    StatusQueued,
+		CreatedAt: time.Now(),
+	})
+
+	interruptCalls := 0
+	delivered := make(chan struct{}, 1)
+	go RunDelivery(DeliveryConfig{
+		Queue:           q,
+		PtyWriter:       &buf,
+		IsIdle:          func() bool { return false },
+		IsMidTurn:       func() bool { return false },
+		WaitForIdle:     func(ctx context.Context) bool { return true },
+		SignalInterrupt: func() { interruptCalls++ },
+		OnDeliver:       func() { delivered <- struct{}{} },
+		Stop:            stop,
+	})
+
+	select {
+	case <-delivered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("delivery timed out")
+	}
+	close(stop)
+
+	out := buf.String()
+	if strings.Contains(out, "\x03") {
+		t.Fatalf("starting agent received Ctrl+C: %q", out)
+	}
+	if interruptCalls != 0 {
+		t.Fatalf("SignalInterrupt called %d times for a starting agent, want 0", interruptCalls)
+	}
+	if !strings.Contains(out, "scheduled") {
+		t.Fatalf("expected body in output, got %q", out)
 	}
 }
 
@@ -347,6 +394,7 @@ func TestDeliver_InterruptNonIdleSendsOneCtrlCEvenWhenWaitTimesOut(t *testing.T)
 		Queue:     q,
 		PtyWriter: &buf,
 		IsIdle:    func() bool { return false },
+		IsMidTurn: func() bool { return true },
 		IsBlocked: func() bool { return true },
 		WaitForIdle: func(ctx context.Context) bool {
 			waitCalls++
@@ -405,6 +453,7 @@ func TestDeliver_InterruptCallsNoteInterrupt(t *testing.T) {
 		Queue:     q,
 		PtyWriter: &buf,
 		IsIdle:    func() bool { return false },
+		IsMidTurn: func() bool { return true },
 		WaitForIdle: func(ctx context.Context) bool {
 			return true
 		},
